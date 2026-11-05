@@ -81,6 +81,14 @@ This only fills in the board's form. The on-chain values are what count, and any
 
 The sum of `questions` times `padding.questionBytes`, plus 1024 bytes for the paper's JSON, must fit in `padding.paperBytes`, so a paper that passes Lock always fits. `criteriaHash` is the hash of the `criteria` message. The board app and the TEE reject criteria that break these rules, or whose re-encoded bytes differ, so one set of criteria has one encoding. The paper's `selected` count is the sum of `questions`.
 
+## Invites
+
+The board creates one invite per person, so nobody can register under a name they merely know. An invite holds a random 32-byte `inviteSecret`, the `role` and the `owner`, and is sent privately as a link. All of it sits in the URL fragment, so it never reaches a server. Setter invites have no `owner`, because a setter's `owner` is its `setterOwner` hash.
+
+The registrant's app computes `inviteTag = HMAC-SHA-256(inviteSecret, passkeyPublicKey)`, signs it inside the `registration` message and sends it to the TEE. The TEE stores the tag and returns it from `GET /v1/registrations`. It never sees the secret, so it can't check the tag.
+
+The board's app keeps its invites in the browser and recomputes each tag. A registration joins the list only if its tag matches an invite and its `owner` matches that invite. A tag copied from someone else fails, because it binds a different passkey. If two passkeys match one invite, the board app refuses both until the board reissues that invite. Names of setters stay in the board's browser and are never published.
+
 ## Approved List
 
 `postApprovedList` takes the encoded list as `entries`. `ExamRegistry` stores its hash and emits the full bytes in `ApprovedListPosted`.
@@ -113,7 +121,7 @@ Every client reads `entries` and `criteria` this way. `getExam` returns `created
 
 | Message | Signed by | Fields, in hash order |
 | --- | --- | --- |
-| `registration` | Passkey | `bytes derivedPublicKey`, `bytes holderId`, `bytes challenge` |
+| `registration` | Passkey | `bytes derivedPublicKey`, `bytes holderId`, `bytes challenge`, `bytes32 inviteTag` |
 | `instanceKey` | TEE | `bytes32 examId`, `bytes encryptionPublicKey` |
 | `setterOwner` | None, a public hash | `bytes passkeyPublicKey` |
 | `criteria` | None, a public hash | `bytes criteria` |
@@ -235,8 +243,8 @@ All bodies are JSON. Every route allows any origin, without credentials. Bytes f
 | `GET /v1/attestation` | None | `{token, instancePublicKey, encryptionPublicKey, instanceKeySignature}` |
 | `GET /v1/status` | None | `{stage, questionCount, approvedList?: {examId, entries, hash, teeSignature}, release: {released: hex[], required}}` |
 | `POST /v1/register/challenge` | `{}` | `{challenge}` |
-| `POST /v1/register` | `{owner, challenge, passkeyPublicKey, derivedPublicKey, attestationObject, clientDataJSON, signature, authenticatorData}` | `{}` |
-| `GET /v1/registrations` | None | `{registrations: [{owner, passkeyPublicKey, derivedPublicKey}]}` |
+| `POST /v1/register` | `{owner, inviteTag, challenge, passkeyPublicKey, derivedPublicKey, attestationObject, clientDataJSON, signature, authenticatorData}` | `{}` |
+| `GET /v1/registrations` | None | `{registrations: [{owner, passkeyPublicKey, derivedPublicKey, inviteTag}]}` |
 | `POST /v1/questions/challenge` | `{}` | `{challenge}` |
 | `POST /v1/questions` | `{passkeyPublicKey, ciphertext, challenge, signature, authenticatorData, clientDataJSON}` | `{questionHash, teeSignature}` |
 | `GET /v1/outbox` | None | `{messages: [{kind: "build", examId, fields, teeSignature, instancePublicKey}]}` |
