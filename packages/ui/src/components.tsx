@@ -1,12 +1,16 @@
 import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
 
 import { isChromium, type BrandedNavigator } from './browser';
+import { Logo, Wordmark } from './Logo';
 
 export function AppShell(props: { name: string; nav: ReactNode; children: ReactNode }) {
   return (
     <div className="ps-shell">
       <header className="ps-header">
-        <span className="ps-brand">Paper Seal {props.name}</span>
+        <span className="ps-brand">
+          <Logo decorative />
+          Paper Seal {props.name}
+        </span>
         <nav className="ps-nav" aria-label="Main">
           {props.nav}
         </nav>
@@ -163,6 +167,9 @@ export function ChromiumGate(props: { children: ReactNode; nav?: BrandedNavigato
   if (isChromium(nav)) return <>{props.children}</>;
   return (
     <div className="ps-shell">
+      <header className="ps-role">
+        <Wordmark />
+      </header>
       <Screen title="Chromium required" lede="Paper Seal needs a Chromium browser.">
         <Panel>
           <p>Open this page in Chrome, Edge or another Chromium browser to use your security key.</p>

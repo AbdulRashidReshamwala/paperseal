@@ -1,0 +1,109 @@
+/* Only for this page: the frames around specimens. Nothing here ships to an app. */
+.pv {
+  max-width: 980px;
+  padding: var(--ps-space-5) var(--ps-space-4) var(--ps-space-8);
+  margin: 0 auto;
+}
+
+.pv-themes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-2);
+  margin-bottom: var(--ps-space-6);
+}
+
+.pv-section {
+  padding-top: var(--ps-space-4);
+  margin-bottom: var(--ps-space-7);
+  border-top: 1px solid var(--ps-ink);
+}
+
+.pv-section > h2 {
+  margin: 0 0 var(--ps-space-1);
+  font-size: var(--ps-text-title);
+}
+
+.pv-section > p {
+  max-width: 40em;
+  margin: 0 0 var(--ps-space-5);
+  color: var(--ps-ink-soft);
+}
+
+.pv-specimens {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  gap: var(--ps-space-6);
+  align-items: start;
+}
+
+.pv-specimen > h3 {
+  margin: 0 0 var(--ps-space-3);
+  font-family: var(--ps-sans);
+  font-size: var(--ps-text-small);
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  color: var(--ps-ink-soft);
+}
+
+.pv-screen {
+  padding: var(--ps-space-4);
+  margin-bottom: var(--ps-space-5);
+  border: 1px dashed var(--ps-rule-strong);
+}
+
+.pv-screen .ps-role {
+  margin-bottom: var(--ps-space-5);
+}
+
+.pv-swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--ps-space-3);
+}
+
+.pv-swatch {
+  font-size: var(--ps-text-small);
+}
+
+.pv-swatch span {
+  display: block;
+  height: 52px;
+  margin-bottom: var(--ps-space-1);
+  border: 1px solid var(--ps-rule-strong);
+}
+
+.pv-swatch code {
+  font-family: var(--ps-code);
+  font-size: 0.75rem;
+}
+
+.pv-type > * {
+  margin: 0 0 var(--ps-space-3);
+}
+
+.pv-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-2);
+  margin-top: var(--ps-space-3);
+}
+
+.pv-logos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-5);
+  align-items: flex-end;
+}
+
+.pv-logos img {
+  display: block;
+}
+
+.pv-tile {
+  display: flex;
+  gap: var(--ps-space-4);
+  align-items: center;
+  padding: var(--ps-space-4);
+  color: #ece5d6;
+  background: #12141b;
+}

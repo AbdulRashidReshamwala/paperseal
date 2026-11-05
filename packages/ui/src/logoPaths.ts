@@ -1,0 +1,12 @@
+/*
+ * The Paper Seal mark, on a 32-unit grid. Every horizontal and vertical edge sits on an even
+ * unit, so it lands on a whole pixel at 16px and 32px. The fold is an exact 45 degrees, offset by
+ * one unit so that it steps cleanly at 16px instead of going grey along pixel corners.
+ * favicon.svg in each app's public folder repeats these paths, and src/logo.test.tsx keeps them identical.
+ */
+
+/** The sheet, with its corner folded to the true reflected point, under the seal. Evenodd. */
+export const LOGO_SHEET = 'M4 2H15L28 15V30H4ZM6 4V28H26V16H23.47A8.7 8.7 0 0 0 14 9.36V4Z';
+
+/** The wax, the one organic line in the mark. It clears the flap by about one pixel at 16px. */
+export const LOGO_WAX = 'M22.16 18C22.19 18.55 21.99 19.15 21.8 19.68C21.62 20.21 21.36 20.73 21.05 21.17C20.73 21.62 20.28 21.94 19.92 22.36C19.56 22.77 19.32 23.33 18.9 23.64C18.47 23.96 17.87 24.04 17.36 24.22C16.85 24.41 16.35 24.62 15.82 24.74C15.28 24.87 14.69 25.03 14.15 24.96C13.62 24.9 13.09 24.58 12.6 24.34C12.11 24.09 11.63 23.82 11.21 23.49C10.8 23.15 10.51 22.71 10.1 22.34C9.69 21.97 9.05 21.73 8.76 21.27C8.47 20.82 8.42 20.18 8.37 19.63C8.32 19.09 8.44 18.54 8.45 18C8.47 17.46 8.38 16.92 8.45 16.39C8.52 15.85 8.66 15.3 8.86 14.78C9.06 14.26 9.26 13.65 9.64 13.25C10.01 12.85 10.64 12.68 11.13 12.39C11.61 12.1 12.03 11.68 12.54 11.5C13.05 11.33 13.65 11.3 14.19 11.31C14.73 11.33 15.25 11.52 15.78 11.59C16.31 11.67 16.85 11.63 17.36 11.77C17.87 11.91 18.38 12.15 18.85 12.42C19.32 12.69 19.88 12.97 20.2 13.4C20.51 13.82 20.53 14.48 20.77 14.97C21 15.47 21.38 15.87 21.61 16.37C21.84 16.88 22.13 17.45 22.16 18Z';
