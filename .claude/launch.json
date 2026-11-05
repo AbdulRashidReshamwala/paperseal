@@ -4,14 +4,32 @@
     {
       "name": "web",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@paperseal/web", "dev"],
+      "runtimeArgs": [
+        "--filter",
+        "@paperseal/web",
+        "dev"
+      ],
       "port": 5171
     },
     {
       "name": "verifier",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["--filter", "@paperseal/verifier", "dev"],
+      "runtimeArgs": [
+        "--filter",
+        "@paperseal/verifier",
+        "dev"
+      ],
       "port": 5172
+    },
+    {
+      "name": "ui",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "--filter",
+        "@paperseal/ui",
+        "preview"
+      ],
+      "port": 5179
     }
   ]
 }
