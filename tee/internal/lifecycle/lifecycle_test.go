@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -545,10 +546,10 @@ func TestRegistrationChecks(t *testing.T) {
 	// A challenge works once.
 	var ch api.ChallengeResponse
 	c.mustOK("POST", "/v1/register/challenge", map[string]any{}, &ch)
-	msg, _ := hashing.Registration(w.holders[2].derivedKey(), []byte(w.holders[2].owner), ch.Challenge)
+	msg, _ := hashing.Registration(w.holders[2].derivedKey(), []byte(w.holders[2].owner), ch.Challenge, w.holders[2].inviteTag)
 	a := w.holders[2].passkey.Sign(t, msg)
 	req := api.RegisterRequest{
-		Owner: w.holders[2].owner, Challenge: ch.Challenge, PasskeyPublicKey: w.holders[2].passkey.PublicKey(),
+		Owner: w.holders[2].owner, InviteTag: w.holders[2].inviteTag[:], Challenge: ch.Challenge, PasskeyPublicKey: w.holders[2].passkey.PublicKey(),
 		DerivedPublicKey: w.holders[2].derivedKey(), ClientDataJSON: a.ClientDataJSON, Signature: a.Signature, AuthenticatorData: a.AuthenticatorData,
 	}
 	if code, _ := c.do("POST", "/v1/register", req, nil); code != http.StatusOK {
@@ -557,6 +558,102 @@ func TestRegistrationChecks(t *testing.T) {
 	req.PasskeyPublicKey = w.holders[3].passkey.PublicKey()
 	if code, _ := c.do("POST", "/v1/register", req, nil); code != http.StatusBadRequest {
 		t.Fatal("a spent challenge was accepted again")
+	}
+}
+
+// The passkey signs the tag, so nobody can swap it in transit.
+func TestRegisterChangedInviteTagFailsTheSignature(t *testing.T) {
+	w := newWorld(t)
+	_, _, h := w.machine()
+	c := client{t, h}
+	code, why := c.register(w.holders[0], func(r *api.RegisterRequest) {
+		r.InviteTag = append(api.Hex(nil), r.InviteTag...)
+		r.InviteTag[31] ^= 1
+	})
+	if code != http.StatusBadRequest || why != "invalid_signature" {
+		t.Fatalf("changed tag: %d %s", code, why)
+	}
+	var regs api.RegistrationsResponse
+	c.mustOK("GET", "/v1/registrations", nil, &regs)
+	if len(regs.Registrations) != 0 {
+		t.Fatalf("a changed tag was stored: %+v", regs)
+	}
+}
+
+func TestRegisterRejectsABadInviteTag(t *testing.T) {
+	w := newWorld(t)
+	_, _, h := w.machine()
+	c := client{t, h}
+	p := w.holders[0]
+	good := strings.Repeat("ab", 32)
+	// Each tag is a raw JSON value, and an empty one leaves the field out.
+	cases := map[string]struct{ tag, want string }{
+		"missing":      {``, "invalid_invite_tag"},
+		"empty bytes":  {`"0x"`, "invalid_invite_tag"},
+		"31 bytes":     {`"0x` + good[2:] + `"`, "invalid_invite_tag"},
+		"33 bytes":     {`"0x` + good + `ab"`, "invalid_invite_tag"},
+		"empty string": {`""`, "invalid_request"},
+		"no prefix":    {`"` + good + `"`, "invalid_request"},
+		"prefix case":  {`"0X` + good + `"`, "invalid_request"},
+		"uppercase":    {`"0x` + strings.ToUpper(good) + `"`, "invalid_request"},
+		"odd length":   {`"0x` + good[1:] + `"`, "invalid_request"},
+		"not hex":      {`"0x` + good[2:] + `zz"`, "invalid_request"},
+		"not a string": {`5`, "invalid_request"},
+		"null":         {`null`, "invalid_request"},
+	}
+	for name, tc := range cases {
+		// Everything else in the request is valid.
+		raw, err := json.Marshal(c.registerRequest(p))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatal(err)
+		}
+		delete(body, "inviteTag")
+		if tc.tag != "" {
+			body["inviteTag"] = json.RawMessage(tc.tag)
+		}
+		if code, why := c.do("POST", "/v1/register", body, nil); code != http.StatusBadRequest || why != tc.want {
+			t.Errorf("%s: %d %s, want %s", name, code, why, tc.want)
+		}
+	}
+	var regs api.RegistrationsResponse
+	c.mustOK("GET", "/v1/registrations", nil, &regs)
+	if len(regs.Registrations) != 0 {
+		t.Fatalf("a bad tag was stored: %+v", regs)
+	}
+}
+
+// The list returns each tag as it was signed. Telling two people's tags apart is
+// the board's job, so a repeated tag isn't refused here.
+func TestRegistrationsReturnInviteTags(t *testing.T) {
+	w := newWorld(t)
+	_, _, h := w.machine()
+	c := client{t, h}
+	a, b, setter := w.holders[0], w.holders[1], w.setters[0]
+	b.inviteTag = a.inviteTag
+	for _, p := range []*person{a, b, setter} {
+		if code, why := c.register(p, nil); code != http.StatusOK {
+			t.Fatalf("register %s: %d %s", p.owner, code, why)
+		}
+	}
+	var listed struct {
+		Registrations []struct {
+			Owner     string `json:"owner"`
+			InviteTag string `json:"inviteTag"`
+		} `json:"registrations"`
+	}
+	c.mustOK("GET", "/v1/registrations", nil, &listed)
+	if len(listed.Registrations) != 3 {
+		t.Fatalf("registrations: %+v", listed)
+	}
+	for i, p := range []*person{a, b, setter} {
+		got := listed.Registrations[i]
+		if want := "0x" + hex.EncodeToString(p.inviteTag[:]); got.Owner != p.owner || got.InviteTag != want {
+			t.Errorf("entry %d: %+v, want tag %s", i, got, want)
+		}
 	}
 }
 

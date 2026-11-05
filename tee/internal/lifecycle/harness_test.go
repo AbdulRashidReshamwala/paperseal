@@ -108,15 +108,17 @@ func examSettings(t *testing.T, criteriaHash [32]byte) settings.Exam {
 // person is a registered setter, key holder or centre, with a software passkey
 // and the derived key a hardware key would give.
 type person struct {
-	owner   string
-	role    approvedlist.Role
-	passkey *webauthntest.Passkey
-	derived *encryption.PrivateKey
+	owner     string
+	role      approvedlist.Role
+	passkey   *webauthntest.Passkey
+	derived   *encryption.PrivateKey
+	inviteTag [32]byte
 }
 
 func newPerson(t *testing.T, owner string, role approvedlist.Role) *person {
 	t.Helper()
 	p := &person{owner: owner, role: role, passkey: webauthntest.New(t)}
+	rand.Read(p.inviteTag[:])
 	if role == approvedlist.RoleSetter {
 		// A setter's owner is the setterOwner hash of its own passkey.
 		m, err := hashing.SetterOwner(p.passkey.PublicKey())
@@ -264,19 +266,25 @@ func (c client) status() api.StatusResponse {
 	return s
 }
 
-func (c client) register(p *person, mutate func(*api.RegisterRequest)) (int, string) {
+// registerRequest fetches a challenge and signs a valid registration for p.
+func (c client) registerRequest(p *person) api.RegisterRequest {
 	c.t.Helper()
 	var ch api.ChallengeResponse
 	c.mustOK("POST", "/v1/register/challenge", map[string]any{}, &ch)
-	msg, err := hashing.Registration(p.derivedKey(), []byte(p.owner), ch.Challenge)
+	msg, err := hashing.Registration(p.derivedKey(), []byte(p.owner), ch.Challenge, p.inviteTag)
 	if err != nil {
 		c.t.Fatal(err)
 	}
 	a := p.passkey.Sign(c.t, msg)
-	req := api.RegisterRequest{
-		Owner: p.owner, Challenge: ch.Challenge, PasskeyPublicKey: p.passkey.PublicKey(), DerivedPublicKey: p.derivedKey(),
+	return api.RegisterRequest{
+		Owner: p.owner, InviteTag: p.inviteTag[:], Challenge: ch.Challenge, PasskeyPublicKey: p.passkey.PublicKey(), DerivedPublicKey: p.derivedKey(),
 		AttestationObject: []byte{0xa0}, ClientDataJSON: a.ClientDataJSON, Signature: a.Signature, AuthenticatorData: a.AuthenticatorData,
 	}
+}
+
+func (c client) register(p *person, mutate func(*api.RegisterRequest)) (int, string) {
+	c.t.Helper()
+	req := c.registerRequest(p)
 	if mutate != nil {
 		mutate(&req)
 	}

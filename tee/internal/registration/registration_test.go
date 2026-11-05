@@ -7,7 +7,7 @@ import (
 
 func TestAddVerifiedAndDuplicates(t *testing.T) {
 	var s Store
-	r := Record{Owner: "centre-1", PasskeyPublicKey: []byte{1}, DerivedPublicKey: []byte{2}}
+	r := Record{Owner: "centre-1", PasskeyPublicKey: []byte{1}, DerivedPublicKey: []byte{2}, InviteTag: [32]byte{3}}
 	if err := s.Add(r); err != nil {
 		t.Fatal(err)
 	}
@@ -43,6 +43,9 @@ func TestAddVerifiedAndDuplicates(t *testing.T) {
 	l := s.List()
 	if len(l) != 3 || l[0].Owner != "centre-1" || l[2].Owner != "s2" {
 		t.Errorf("list %+v", l)
+	}
+	if l[0].InviteTag != r.InviteTag {
+		t.Errorf("invite tag %x", l[0].InviteTag)
 	}
 	l[0].PasskeyPublicKey[0] = 99
 	if s.List()[0].PasskeyPublicKey[0] != 1 {

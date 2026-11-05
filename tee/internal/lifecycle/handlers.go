@@ -112,6 +112,8 @@ func (m *Machine) RegisterChallenge(context.Context) (api.ChallengeResponse, err
 // Register implements api.Backend. The passkey signature covers the
 // registration message. The attestation chain check is skipped while
 // webauthn.requireHardwareAttestation is false, and refuses when it is true.
+// inviteTag is only checked for shape. The TEE never sees the invite secret, so
+// the board's app is what matches a tag to an invite.
 func (m *Machine) Register(_ context.Context, req api.RegisterRequest) error {
 	if s := m.Stage(); s != StageOnboard {
 		return wrongStage(StageOnboard, s)
@@ -122,7 +124,11 @@ func (m *Machine) Register(_ context.Context, req api.RegisterRequest) error {
 	if err := hashing.CheckPublicKey(req.PasskeyPublicKey); err != nil {
 		return badRequest("invalid_key", "passkeyPublicKey: "+err.Error())
 	}
-	msg, err := hashing.Registration(req.DerivedPublicKey, []byte(req.Owner), req.Challenge)
+	if len(req.InviteTag) != 32 {
+		return badRequest("invalid_invite_tag", "inviteTag must be 32 bytes")
+	}
+	inviteTag := [32]byte(req.InviteTag)
+	msg, err := hashing.Registration(req.DerivedPublicKey, []byte(req.Owner), req.Challenge, inviteTag)
 	if err != nil {
 		return badRequest("invalid_key", "derivedPublicKey: "+err.Error())
 	}
@@ -144,7 +150,7 @@ func (m *Machine) Register(_ context.Context, req api.RegisterRequest) error {
 		return err
 	}
 	err = m.registrations.Add(registration.Record{
-		Owner: req.Owner, PasskeyPublicKey: req.PasskeyPublicKey, DerivedPublicKey: req.DerivedPublicKey,
+		Owner: req.Owner, PasskeyPublicKey: req.PasskeyPublicKey, DerivedPublicKey: req.DerivedPublicKey, InviteTag: inviteTag,
 	})
 	switch {
 	case errors.Is(err, registration.ErrDuplicate):
@@ -163,7 +169,7 @@ func (m *Machine) Registrations(context.Context) (api.RegistrationsResponse, err
 	out := api.RegistrationsResponse{Registrations: []api.Registration{}}
 	for _, r := range m.registrations.List() {
 		out.Registrations = append(out.Registrations, api.Registration{
-			Owner: r.Owner, PasskeyPublicKey: r.PasskeyPublicKey, DerivedPublicKey: r.DerivedPublicKey,
+			Owner: r.Owner, PasskeyPublicKey: r.PasskeyPublicKey, DerivedPublicKey: r.DerivedPublicKey, InviteTag: r.InviteTag[:],
 		})
 	}
 	return out, nil

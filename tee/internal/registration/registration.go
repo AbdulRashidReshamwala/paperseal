@@ -16,10 +16,13 @@ var (
 )
 
 // Record is one verified registration. DerivedPublicKey is empty for a setter.
+// The passkey signed InviteTag, but the TEE can't check it, because it never
+// sees the invite secret. Only the board can, from the list.
 type Record struct {
 	Owner            string
 	PasskeyPublicKey []byte
 	DerivedPublicKey []byte
+	InviteTag        [32]byte
 }
 
 // Store keeps verified registrations in memory.
@@ -48,6 +51,7 @@ func (s *Store) Add(r Record) error {
 		Owner:            r.Owner,
 		PasskeyPublicKey: bytes.Clone(r.PasskeyPublicKey),
 		DerivedPublicKey: bytes.Clone(r.DerivedPublicKey),
+		InviteTag:        r.InviteTag,
 	})
 	return nil
 }
@@ -87,7 +91,7 @@ func (s *Store) List() []Record {
 	defer s.mu.Unlock()
 	out := make([]Record, len(s.records))
 	for i, r := range s.records {
-		out[i] = Record{r.Owner, bytes.Clone(r.PasskeyPublicKey), bytes.Clone(r.DerivedPublicKey)}
+		out[i] = Record{r.Owner, bytes.Clone(r.PasskeyPublicKey), bytes.Clone(r.DerivedPublicKey), r.InviteTag}
 	}
 	return out
 }

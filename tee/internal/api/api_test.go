@@ -131,12 +131,12 @@ func TestEveryRouteWorks(t *testing.T) {
 func TestRequestBodies(t *testing.T) {
 	s := &stub{}
 	h := NewHandler(s)
-	w := do(h, http.MethodPost, "/v1/register", `{"owner":"o","challenge":"0x01","passkeyPublicKey":"0x04",
+	w := do(h, http.MethodPost, "/v1/register", `{"owner":"o","inviteTag":"0xee","challenge":"0x01","passkeyPublicKey":"0x04",
 		"derivedPublicKey":"0x","attestationObject":"0xaa","clientDataJSON":"0xbb","signature":"0xcc","authenticatorData":"0xdd"}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
-	if s.register.Owner != "o" || len(s.register.DerivedPublicKey) != 0 || s.register.Signature[0] != 0xcc {
+	if s.register.Owner != "o" || s.register.InviteTag[0] != 0xee || len(s.register.DerivedPublicKey) != 0 || s.register.Signature[0] != 0xcc {
 		t.Fatalf("decoded %+v", s.register)
 	}
 	bad := map[string]string{

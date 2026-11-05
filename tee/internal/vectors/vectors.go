@@ -363,7 +363,7 @@ func Build() (File, error) {
 	}
 	add(hashing.InstanceKey(examID, pubKey(2)))
 	add(sampleSetterOwner())
-	add(hashing.Registration(pubKey(1), []byte("centre-01"), challenge[:]))
+	add(hashing.Registration(pubKey(1), []byte("centre-01"), challenge[:], fill(0x77)))
 	add(criteriaMessage, nil)
 	add(list, nil)
 	add(hashing.QuestionSubmission(examID, challenge[:], first))

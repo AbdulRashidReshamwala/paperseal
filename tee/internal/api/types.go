@@ -79,9 +79,11 @@ type ChallengeResponse struct {
 
 // RegisterRequest is POST /v1/register. The passkey signature covers the
 // registration message. AttestationObject comes from the create ceremony, and
-// the other three from the get that signed the message.
+// the other three from the get that signed the message. The backend requires
+// InviteTag to be 32 bytes.
 type RegisterRequest struct {
 	Owner             string `json:"owner"`
+	InviteTag         Hex    `json:"inviteTag"`
 	Challenge         Hex    `json:"challenge"`
 	PasskeyPublicKey  Hex    `json:"passkeyPublicKey"`
 	DerivedPublicKey  Hex    `json:"derivedPublicKey"`
@@ -145,6 +147,7 @@ type Registration struct {
 	Owner            string `json:"owner"`
 	PasskeyPublicKey Hex    `json:"passkeyPublicKey"`
 	DerivedPublicKey Hex    `json:"derivedPublicKey"`
+	InviteTag        Hex    `json:"inviteTag"`
 }
 
 // RegistrationsResponse is GET /v1/registrations.

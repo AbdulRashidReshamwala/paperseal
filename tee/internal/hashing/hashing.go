@@ -137,8 +137,9 @@ func SetterOwner(passkeyPublicKey []byte) (Message, error) {
 
 // Registration is the message a passkey signs at registration. A setter
 // registers a passkey only, so derivedPublicKey is empty for setters and a
-// valid public key for everyone else.
-func Registration(derivedPublicKey, holderID, challenge []byte) (Message, error) {
+// valid public key for everyone else. inviteTag is opaque here: only the board
+// can recompute it, as in "Invites" in spec/api.md.
+func Registration(derivedPublicKey, holderID, challenge []byte, inviteTag [32]byte) (Message, error) {
 	if len(derivedPublicKey) != 0 {
 		if err := checkKeys("registration", derivedPublicKey); err != nil {
 			return Message{}, err
@@ -147,7 +148,8 @@ func Registration(derivedPublicKey, holderID, challenge []byte) (Message, error)
 	return New("registration", spec.C.DomainTags.Registration,
 		Bytes("derivedPublicKey", derivedPublicKey),
 		Bytes("holderId", holderID),
-		Bytes("challenge", challenge))
+		Bytes("challenge", challenge),
+		Bytes32("inviteTag", inviteTag))
 }
 
 // Criteria commits to the encoded selection criteria. Its Sum is criteriaHash.

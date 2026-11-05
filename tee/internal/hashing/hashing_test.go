@@ -91,11 +91,11 @@ func TestShareHashBytes(t *testing.T) {
 // Dynamic fields must stop bytes shifting between adjacent fields.
 func TestVariableFieldsDoNotShift(t *testing.T) {
 	k := key(t, 1)
-	a, err := Registration(k, []byte("ab"), []byte("c"))
+	a, err := Registration(k, []byte("ab"), []byte("c"), fill(1))
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := Registration(k, []byte("a"), []byte("bc"))
+	b, err := Registration(k, []byte("a"), []byte("bc"), fill(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestCheckPublicKey(t *testing.T) {
 	if _, err := AttestationNonce(compressed, fill(1)); err == nil {
 		t.Error("AttestationNonce accepted a compressed key")
 	}
-	if _, err := Registration(compressed, nil, nil); err == nil {
+	if _, err := Registration(compressed, nil, nil, fill(1)); err == nil {
 		t.Error("Registration accepted a compressed key")
 	}
 	if _, err := QuestionReceipt(fill(1), compressed, fill(2)); err == nil {
@@ -179,10 +179,10 @@ func TestSignedMessageLayouts(t *testing.T) {
 	}{
 		{"attestationNonce", msg(AttestationNonce(k, fill(1))),
 			[]value{text("paperseal/v1/attestation-nonce"), dyn(k), b32(1)}},
-		{"registration", msg(Registration(k, []byte{0xaa}, []byte{0xbb, 0xcc})),
-			[]value{text("paperseal/v1/registration"), dyn(k), dyn([]byte{0xaa}), dyn([]byte{0xbb, 0xcc})}},
-		{"setter registration", msg(Registration(nil, []byte{0xaa}, []byte{0xbb})),
-			[]value{text("paperseal/v1/registration"), dyn([]byte{}), dyn([]byte{0xaa}), dyn([]byte{0xbb})}},
+		{"registration", msg(Registration(k, []byte{0xaa}, []byte{0xbb, 0xcc}, fill(0xdd))),
+			[]value{text("paperseal/v1/registration"), dyn(k), dyn([]byte{0xaa}), dyn([]byte{0xbb, 0xcc}), b32(0xdd)}},
+		{"setter registration", msg(Registration(nil, []byte{0xaa}, []byte{0xbb}, fill(0xdd))),
+			[]value{text("paperseal/v1/registration"), dyn([]byte{}), dyn([]byte{0xaa}), dyn([]byte{0xbb}), b32(0xdd)}},
 		{"setterOwner", msg(SetterOwner(k)),
 			[]value{text("paperseal/v1/setter-owner"), dyn(k)}},
 		{"criteria", msg(Criteria([]byte{0xaa})),
