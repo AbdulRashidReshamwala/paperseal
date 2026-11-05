@@ -1,0 +1,156 @@
+/* What only the public verifier needs. Layout comes from @paperseal/ui, and every value is a token. */
+
+.vf-page {
+  overflow-wrap: anywhere;
+}
+
+/* The loudest thing on the page. Not wax: a seal is good news, and this is not. */
+.vf-alarm {
+  padding-block: var(--ps-space-3);
+  margin-bottom: var(--ps-space-5);
+  color: var(--ps-fail);
+  border-block: 3px double var(--ps-fail);
+}
+
+.vf-alarm h2 {
+  margin: 0 0 var(--ps-space-2);
+  font-size: var(--ps-text-title);
+  line-height: 1.2;
+}
+
+.vf-alarm ul {
+  display: grid;
+  gap: var(--ps-space-2);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.vf-demo {
+  margin-top: var(--ps-space-2) !important;
+  font-weight: 600;
+  color: var(--ps-pending);
+}
+
+.vf-zone,
+.vf-fresh {
+  margin: var(--ps-space-2) 0 0;
+  font-size: var(--ps-text-small);
+  color: var(--ps-ink-soft);
+}
+
+.vf-fresh {
+  margin-bottom: var(--ps-space-6);
+}
+
+.vf-gap {
+  margin: 0 0 var(--ps-space-4);
+}
+
+/* The place on the envelope where the wax will go. */
+.vf-no-seal {
+  display: grid;
+  gap: var(--ps-space-2);
+  place-items: center;
+  width: 112px;
+  margin: 0;
+  font-size: var(--ps-text-small);
+  color: var(--ps-ink-soft);
+  text-align: center;
+}
+
+.vf-no-seal-ring {
+  width: 84px;
+  height: 84px;
+  margin-block: 14px;
+  border: 2px dashed var(--ps-rule-strong);
+  border-radius: 50%;
+}
+
+/* On a phone the headline comes first in the eye, so the empty place stays small. */
+@media (max-width: 719px) {
+  .vf-no-seal {
+    grid-template-columns: auto 1fr;
+    width: auto;
+    text-align: start;
+  }
+
+  .vf-no-seal-ring {
+    width: 32px;
+    height: 32px;
+    margin-block: 0;
+  }
+}
+
+.vf-when {
+  display: grid;
+  gap: 0 var(--ps-space-3);
+}
+
+.vf-step-failures {
+  display: grid;
+  gap: var(--ps-space-1);
+  font-weight: 600;
+}
+
+/* A result beside its hash: they sit apart, and wrap apart on a phone. */
+.vf-page .ps-rows li > span:last-child {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-1) var(--ps-space-3);
+  align-items: baseline;
+}
+
+.vf-evidence-heading {
+  margin: var(--ps-space-4) 0 var(--ps-space-1);
+  font-size: var(--ps-text-body);
+  line-height: 1.3;
+}
+
+.vf-evidence-heading:first-child {
+  margin-top: 0;
+}
+
+.vf-evidence-text {
+  max-width: 44em;
+  margin: var(--ps-space-2) 0;
+}
+
+.vf-code {
+  padding: var(--ps-space-2) var(--ps-space-3);
+  margin: var(--ps-space-2) 0;
+  font-family: var(--ps-code);
+  font-size: var(--ps-text-code);
+  white-space: pre-wrap;
+  background: var(--ps-paper-deep);
+}
+
+.vf-picker,
+.vf-connection form {
+  display: grid;
+  gap: var(--ps-space-3);
+  max-width: 34em;
+}
+
+.vf-picker .ps-button {
+  justify-self: start;
+}
+
+.vf-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-2);
+}
+
+.vf-connection summary {
+  width: fit-content;
+  min-height: 24px;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--ps-rule-strong);
+  text-underline-offset: 3px;
+}
+
+.vf-connection form {
+  margin-top: var(--ps-space-3);
+}

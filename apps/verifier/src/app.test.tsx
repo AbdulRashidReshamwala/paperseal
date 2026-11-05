@@ -6,8 +6,9 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { criteriaHash, encodeApprovedList, approvedListHash, encodeCriteria, fromHex, toHex, type Hex } from '@paperseal/protocol';
-import { App, routes } from './App';
+import { App } from './App';
 import { chainChecks } from './checks';
+import { examLink } from './link';
 import {
   clearSettings,
   connect,
@@ -46,46 +47,55 @@ const render = (path: string, initial = defaultSettings) =>
     </SettingsProvider>,
   );
 
-describe('routes', () => {
-  it.each([
-    ['/', 'Chain checks: not connected'],
-    ['/attestation', 'Fresh token: optional'],
-    ['/commitments', 'Storage manifest: not connected'],
-    ['/unlock', 'Live TEE release: optional'],
-    ['/proof', 'Proof: not connected'],
-    ['/settings', 'Sepolia RPC URL'],
-  ])('%s shows %s with no sign-in', (path, text) => {
-    const html = render(path);
-    expect(html).toContain(text);
-    expect(html).not.toMatch(/sign in/i);
-  });
+describe('the page', () => {
+  it.each([['/'], ['/attestation'], ['/commitments'], ['/unlock'], ['/proof'], ['/settings']])(
+    'an old link to %s still reaches the one page, with no sign-in',
+    (path) => {
+      const html = render(path);
+      expect(html).toContain('Chain of custody');
+      expect(html).toContain('Check against your own RPC');
+      expect(html).not.toMatch(/sign in/i);
+    },
+  );
 
-  it('Overview with no TEE URL shows no failure and only neutral TEE wording', () => {
+  it('with no TEE URL shows no failure and only neutral TEE wording', () => {
     const html = render('/', { ...defaultSettings, teeUrl: '' });
-    expect(html).toContain('Live TEE status: optional');
+    expect(html).toContain('Live from the sealed machine, optional');
     expect(html).toContain('Needs a TEE URL');
-    expect(html).toContain('Set the RPC URL, ExamRegistry address and exam ID');
-    expect(html).not.toMatch(/TEE: not connected|unavailable|\bFail\b|data-tone="bad"/);
+    expect(html).not.toMatch(/\bFail\b|data-status="fail"|data-tone="bad"|role="alert"/);
   });
 
-  it('Unlock and Attestation say they need a TEE URL without implying a fault', () => {
-    for (const path of ['/unlock', '/attestation']) {
-      const html = render(path, { ...defaultSettings, teeUrl: '' });
-      expect(html).toContain('Needs a TEE URL');
-      expect(html).not.toMatch(/unavailable|\bFail\b|data-tone="bad"/);
-    }
-  });
-
-  it('Connection labels the TEE URL optional', () => {
-    const html = render('/settings');
+  it('labels the TEE URL optional', () => {
+    const html = render('/');
     expect(html).toContain('TEE URL (optional)');
     expect(html).toContain('fresh attestation and live release progress');
     expect(html).toContain('Storage URL');
   });
+});
 
-  it('lists every route in the navigation', () => {
-    const html = render('/');
-    for (const { label } of routes) expect(html).toContain(label);
+describe('exam links', () => {
+  const id = `0x${'ab'.repeat(32)}`;
+  const url = (over: Partial<Parameters<typeof examLink>[0]>) => examLink({ search: '', routePath: '/', routeSearch: '', ...over });
+
+  it.each([
+    ['a hash route', { routePath: `/exam/${id}` }],
+    ['a bare hash route', { routePath: `/${id}` }],
+    ['a query inside the hash', { routeSearch: `?exam=${id}` }],
+    ['the page query', { search: `?exam=${id}` }],
+    ['capital letters', { search: `?exam=${id.toUpperCase().replace('0X', '0x')}` }],
+  ])('reads %s', (_, over) => {
+    expect(url(over)).toEqual({ kind: 'exam', id });
+  });
+
+  it('prefers the hash, which a picked exam sets, over the page query', () => {
+    expect(url({ search: `?exam=0x${'11'.repeat(32)}`, routePath: `/exam/${id}` })).toEqual({ kind: 'exam', id });
+  });
+
+  it('has no exam without a link, and an invalid one stays invalid', () => {
+    expect(url({})).toEqual({ kind: 'none' });
+    expect(url({ routePath: '/attestation' })).toEqual({ kind: 'none' });
+    expect(url({ search: '?exam=' })).toEqual({ kind: 'invalid' });
+    expect(url({ routePath: '/exam/0x1234' })).toEqual({ kind: 'invalid' });
   });
 });
 

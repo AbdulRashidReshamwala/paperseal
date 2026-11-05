@@ -31,6 +31,9 @@ export const defaultSettings: Settings = {
 
 export type SettingsErrors = Partial<Record<keyof Settings, string>>;
 
+/** A 32-byte exam ID in the one form the verifier uses: lowercase hex. */
+export const isExamId = (value: string) => /^0x[0-9a-f]{64}$/.test(value);
+
 function isHttpUrl(value: string): boolean {
   try {
     return ['http:', 'https:'].includes(new URL(value).protocol);
@@ -48,7 +51,7 @@ export function validateSettings(settings: Settings): SettingsErrors {
   if (settings.registryAddress && !/^0x[0-9a-fA-F]{40}$/.test(settings.registryAddress)) {
     errors.registryAddress = 'Enter a 20-byte address starting with 0x.';
   }
-  if (settings.examId && !/^0x[0-9a-f]{64}$/.test(settings.examId)) {
+  if (settings.examId && !isExamId(settings.examId)) {
     errors.examId = 'Enter a 32-byte lowercase hex ID starting with 0x.';
   }
   return errors;

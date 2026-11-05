@@ -1,6 +1,5 @@
 import type { ChainClient } from '@paperseal/crypto';
 import { roundTimeSeconds } from '@paperseal/protocol';
-import { Badge, Mono, Row } from '@paperseal/ui';
 import { useEffect, useState } from 'react';
 
 const nowSeconds = () => Math.floor(Date.now() / 1000);
@@ -50,15 +49,6 @@ export function useLatestRound(client: ChainClient, everyMs = 3000): LatestRound
   return state;
 }
 
-export function duration(totalSeconds: number): string {
-  const s = Math.max(0, Math.floor(totalSeconds));
-  const days = Math.floor(s / 86400);
-  const clock = [Math.floor((s % 86400) / 3600), Math.floor((s % 3600) / 60), s % 60]
-    .map((part) => String(part).padStart(2, '0'))
-    .join(':');
-  return days > 0 ? `${String(days)}d ${clock}` : clock;
-}
-
 /**
  * Time left until a round is published. drand's own latest round decides when it is published.
  * The countdown runs on this device's clock, and says so if drand has not answered.
@@ -66,30 +56,4 @@ export function duration(totalSeconds: number): string {
 export function roundStatus(round: number, latest: number | null, now: number) {
   if (latest !== null && latest >= round) return { published: true as const };
   return { published: false as const, remaining: roundTimeSeconds(round) - now, drandKnown: latest !== null };
-}
-
-export function RoundRow(props: {
-  label: string;
-  round: bigint | number;
-  latest: LatestRound;
-  now: number;
-  /** The round's clock time, to show beside the countdown. */
-  at?: string;
-}) {
-  const round = Number(props.round);
-  const status = roundStatus(round, props.latest.round, props.now);
-  return (
-    <Row label={`${props.label}, round ${String(round)}`}>
-      {props.at ? `${props.at} ` : ''}
-      {status.published ? (
-        <Badge tone="ok">Published</Badge>
-      ) : (
-        <>
-          <Mono>{duration(status.remaining)}</Mono>{' '}
-          <Badge tone="neutral">{status.remaining > 0 ? 'Not yet' : 'Due, waiting for drand'}</Badge>
-          {status.drandKnown ? '' : ' (this device’s clock, drand not reached)'}
-        </>
-      )}
-    </Row>
-  );
 }
