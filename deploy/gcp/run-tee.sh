@@ -47,7 +47,7 @@ cmd="${cmd%,}]"
 
 image="${IMAGE_REPO}@$(val image-digest)"
 # "^~^" makes "~" the separator between metadata keys, because tee-cmd has commas.
-metadata="^~^tee-image-reference=${image}~tee-cmd=${cmd}~tee-env-STORAGE_BUCKET=${BUCKET}~tee-container-log-redirect=cloud_logging"
+metadata="^~^tee-image-reference=${image}~tee-cmd=${cmd}~tee-env-STORAGE_BUCKET=${BUCKET}"
 
 if exists gcloud compute instances describe "$VM_NAME" --zone="$ZONE" --project="$PROJECT_ID"; then
   if [ "$replace" = 1 ]; then

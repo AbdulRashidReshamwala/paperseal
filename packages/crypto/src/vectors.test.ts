@@ -28,6 +28,8 @@ interface HpkeVector {
   recipientPublicKey: string;
   plaintext: string;
   sealed: string;
+  /** The setter's passkey public key, for `question`, whose aad is `examId || passkeyPublicKey`. */
+  passkeyPublicKey?: string;
 }
 interface Vectors {
   hpke: HpkeVector[];
@@ -37,6 +39,15 @@ interface Vectors {
 
 const path = resolve(import.meta.dirname, '../../../tee/testdata/vectors.json');
 const vectors = JSON.parse(readFileSync(path, 'utf8')) as Vectors;
+
+/** The question vector must carry the passkey public key its aad needs, or it is out of date. */
+function contextOf(v: HpkeVector, examId: Uint8Array) {
+  if (v.purpose !== 'question') return hpkeContext(v.purpose, examId);
+  if (v.passkeyPublicKey === undefined) {
+    throw new Error('tee/testdata/vectors.json question vector has no passkeyPublicKey: it predates examId || passkeyPublicKey aad');
+  }
+  return hpkeContext('question', examId, fromHex(v.passkeyPublicKey));
+}
 
 function hpkeVector(purpose: HpkePurpose): HpkeVector {
   const found = vectors.hpke.find((x) => x.purpose === purpose);
@@ -54,10 +65,10 @@ describe('tee/ vectors: HPKE sealed in Go', () => {
     const sealed = fromHex(v.sealed);
 
     it('uses the spec info string and the examId as aad', () => {
-      const context = hpkeContext(v.purpose, examId);
+      const context = contextOf(v, examId);
       expect(context.info).toEqual(utf8ToBytes(v.info));
       expect(context.info).toEqual(utf8ToBytes(specCrypto.hpke.info[v.purpose]));
-      expect(context.aad).toEqual(examId);
+      expect(context.aad).toEqual(v.purpose === 'question' ? new Uint8Array([...examId, ...fromHex(v.passkeyPublicKey ?? '0x')]) : examId);
     });
 
     it('derives the recipient public key from the ikm', async () => {
@@ -67,18 +78,18 @@ describe('tee/ vectors: HPKE sealed in Go', () => {
 
     it('opens with hpkeOpen', async () => {
       const keyPair = await hpkeDeriveKeyPair(fromHex(v.recipientIkm));
-      const plaintext = await hpkeOpen(keyPair, sealed, hpkeContext(v.purpose, examId));
+      const plaintext = await hpkeOpen(keyPair, sealed, contextOf(v, examId));
       expect(plaintext).toEqual(fromHex(v.plaintext));
     });
 
     it('does not open under another examId, purpose or a flipped byte', async () => {
       const keyPair = await hpkeDeriveKeyPair(fromHex(v.recipientIkm));
-      await expect(hpkeOpen(keyPair, sealed, hpkeContext(v.purpose, new Uint8Array(32).fill(0x99)))).rejects.toThrow();
-      const other: HpkePurpose = v.purpose === 'question' ? 'share' : 'question';
-      await expect(hpkeOpen(keyPair, sealed, hpkeContext(other, examId))).rejects.toThrow();
+      await expect(hpkeOpen(keyPair, sealed, contextOf(v, new Uint8Array(32).fill(0x99)))).rejects.toThrow();
+      const other: HpkePurpose = v.purpose === 'share' ? 'release' : 'share';
+      await expect(hpkeOpen(keyPair, sealed, { ...hpkeContext('share', examId), info: utf8ToBytes(specCrypto.hpke.info[other]) })).rejects.toThrow();
       const tampered = sealed.slice();
       tampered[tampered.length - 1] = (tampered[tampered.length - 1] ?? 0) ^ 1;
-      await expect(hpkeOpen(keyPair, tampered, hpkeContext(v.purpose, examId))).rejects.toThrow();
+      await expect(hpkeOpen(keyPair, tampered, contextOf(v, examId))).rejects.toThrow();
     });
   });
 

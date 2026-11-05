@@ -41,8 +41,8 @@ export interface ExpectedClaims {
   settings: ExamSettings;
   /** The `ExamRegistry` address this app is using, not one read from the token. */
   registry: Hex;
-  cmdOverride: readonly string[];
-  env: Readonly<Record<string, string>>;
+  /** The bucket the operator set as `STORAGE_BUCKET`. `env_override` must hold exactly that. */
+  storageBucket: string;
 }
 
 export interface CheckOptions {
@@ -69,7 +69,7 @@ export const claimNames = [
   'image_digest',
   'args',
   'cmd_override',
-  'env',
+  'env_override',
   'eat_nonce',
 ] as const;
 export type ClaimName = (typeof claimNames)[number];
@@ -85,13 +85,16 @@ export interface ClaimCheck {
 
 const DEFAULT_SKEW_SECONDS = 60;
 
+/** The image's entrypoint. The launcher's `args` is this followed by `cmd_override`. See "Attestation Token" in spec/api.md. */
+const CONTAINER_ENTRYPOINT = '/tee';
+
 function record(value: unknown): Readonly<Record<string, unknown>> {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
 }
 
 function argsCheck(actual: unknown, expected: ExpectedClaims): ClaimCheck {
   const mismatch = settingsBindingError(expected.settings, expected.registry);
-  const args = startupArgs(expected.settings);
+  const args = [CONTAINER_ENTRYPOINT, ...startupArgs(expected.settings)];
   const wanted = JSON.stringify(args);
   if (mismatch) return { claim: 'args', ok: false, expected: wanted, actual, note: mismatch };
   return { claim: 'args', ok: sameStrings(actual, args), expected: wanted, actual };
@@ -139,6 +142,8 @@ export function checkClaims(
   const digest = `sha256:${expected.imageDigest.slice(2)}`;
   // Validates the expected bytes too, so a bad on-chain value can't match by accident.
   fromHex(expected.imageDigest);
+  const cmdOverride = startupArgs(expected.settings);
+  const envOverride = { STORAGE_BUCKET: expected.storageBucket };
   const nonce = attestationNonce(expected.instancePublicKey, expected.examId);
 
   const check = (claim: ClaimName, actual: unknown, ok: boolean, wanted: string): ClaimCheck => ({
@@ -186,10 +191,15 @@ export function checkClaims(
     check(
       'cmd_override',
       container.cmd_override,
-      sameStrings(container.cmd_override, expected.cmdOverride),
-      JSON.stringify(expected.cmdOverride),
+      sameStrings(container.cmd_override, cmdOverride),
+      JSON.stringify(cmdOverride),
     ),
-    check('env', container.env, sameEnv(container.env, expected.env), JSON.stringify(expected.env)),
+    check(
+      'env_override',
+      container.env_override,
+      sameEnv(container.env_override, envOverride),
+      JSON.stringify(envOverride),
+    ),
     equal('eat_nonce', singleNonce(claims.eat_nonce), nonce),
   ];
 }

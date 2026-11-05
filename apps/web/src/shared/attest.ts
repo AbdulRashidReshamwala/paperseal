@@ -1,9 +1,9 @@
 import { checkClaims, checkToken, decodeToken, verifyPkiToken, type ExpectedClaims, type TokenVerdict } from '@paperseal/attestation';
 import type { ExamRegistry } from '@paperseal/chain';
-import { chain, fromHex, startupArgs, type ExamSettings, type Hex } from '@paperseal/protocol';
+import { attestation as attestationSpec, chain, fromHex, type ExamSettings, type Hex } from '@paperseal/protocol';
 import type { AttestationResponse, TeeClient } from '@paperseal/tee-client';
 
-import { approvedHwModels, expectedTeeEnv } from './config';
+import { teeStorageBucket } from './config';
 
 /*
  * The README's claim table, checked by `checkToken` against the exam on-chain. Nothing is sent to
@@ -14,8 +14,8 @@ import { approvedHwModels, expectedTeeEnv } from './config';
 export interface AttestationEnvironment {
   registry: Pick<ExamRegistry, 'getExam' | 'address'>;
   examId: Hex;
-  approvedHwModels?: readonly string[];
-  env?: Record<string, string>;
+  /** Overrides `VITE_TEE_STORAGE_BUCKET`. */
+  storageBucket?: string;
   /** Unix seconds. */
   now?: () => number;
 }
@@ -78,12 +78,10 @@ export function attestationChecker(environment: AttestationEnvironment) {
       instanceKeySignature: fromHex(attestation.instanceKeySignature),
       examId: fromHex(environment.examId),
       imageDigest,
-      approvedHwModels: environment.approvedHwModels ?? approvedHwModels,
+      approvedHwModels: attestationSpec.hwModels,
       settings,
       registry: environment.registry.address,
-      // The attested startup arguments are passed with `tee-cmd`, so the token shows them as the override.
-      cmdOverride: startupArgs(settings),
-      env: environment.env ?? expectedTeeEnv(),
+      storageBucket: environment.storageBucket ?? teeStorageBucket,
     };
     return checkToken(attestation.token, expected, {
       mode: 'live',
@@ -115,11 +113,10 @@ export function publishedTokenChecker(environment: AttestationEnvironment) {
         instanceKeySignature: new Uint8Array(),
         examId: fromHex(environment.examId),
         imageDigest,
-        approvedHwModels: environment.approvedHwModels ?? approvedHwModels,
+        approvedHwModels: attestationSpec.hwModels,
         settings,
         registry: environment.registry.address,
-        cmdOverride: startupArgs(settings),
-        env: environment.env ?? expectedTeeEnv(),
+        storageBucket: environment.storageBucket ?? teeStorageBucket,
       };
       const failures: string[] = [];
       const signature = await verifyPkiToken(token);

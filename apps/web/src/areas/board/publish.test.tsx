@@ -19,7 +19,7 @@ const name = 'Physics 2027';
 const examId = examIdFromName(name);
 const commit = 'a'.repeat(40);
 const digest = 'b'.repeat(64);
-const run = 'https://github.com/example/paperseal/actions/runs/1';
+const run = 'https://github.com/AbdulRashidReshamwala/paperseal/actions/runs/1';
 
 const releaseItem = (tag: string, published: string, commitHex = commit) => ({
   tag_name: tag,
@@ -345,6 +345,34 @@ describe('board screens', () => {
     });
     return screen.getByText('Confirm and publish') as HTMLButtonElement;
   }
+
+  it('leaves the exam pointer alone when the read-back differs', async () => {
+    const { env } = environment({ tamper: () => ({ rpcHost: 'evil.example.org' }) });
+    const confirm = await readyToPublish(env);
+    await selectVersion('v1.0.0');
+    await waitFor(() => {
+      expect(confirm.disabled).toBe(false);
+    });
+    expect(getCurrentExamId()).toBeNull();
+    fireEvent.click(confirm);
+    await waitFor(() => {
+      expect(screen.getByText('Published, but the read-back differs')).toBeTruthy();
+    });
+    expect(getCurrentExamId()).toBeNull();
+    expect(screen.getByText(/this exam was not selected/)).toBeTruthy();
+  });
+
+  it('does not link a build run that is not an Actions run of the releases repository', async () => {
+    const foreign = 'https://evil.example/AbdulRashidReshamwala/paperseal/actions/runs/1';
+    const item = releaseItem('v1.0.0', '2027-01-01T00:00:00Z');
+    stubGithub({ releases: [{ ...item, body: item.body.replace(run, foreign) }] });
+    const { env } = environment();
+    await readyToPublish(env);
+    await selectVersion('v1.0.0');
+    expect(await screen.findByText(foreign)).toBeTruthy();
+    expect(screen.getByText(foreign).closest('a')).toBeNull();
+    expect(screen.getByText(/Not a workflow run of/)).toBeTruthy();
+  });
 
   it('lists versions newest first, and keeps publishing blocked until a verified one is selected', async () => {
     stubGithub({

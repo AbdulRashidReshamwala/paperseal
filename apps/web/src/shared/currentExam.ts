@@ -3,13 +3,13 @@ import { useMemo, useSyncExternalStore } from 'react';
 
 import type { ExamRegistry } from '@paperseal/chain';
 
-import { examId as envExamId, registry } from './registry';
+import { envExamId, registry } from './registry';
 
 /*
- * The exam the board area shows. It starts as VITE_EXAM_ID, and publishing an
- * exam replaces it, so a new exam shows without a rebuild. The choice is only
- * a pointer, kept in this browser's localStorage. All exam data is read from
- * ExamRegistry.
+ * The one exam every area uses: Register, the key holder, centre and setter screens, release and
+ * the board. It starts as VITE_EXAM_ID, and publishing an exam replaces it, so a new exam shows
+ * without a rebuild. The choice is only a pointer, kept in this browser's localStorage. All exam
+ * data is read from ExamRegistry.
  */
 
 const storageKey = 'paperseal.examId';

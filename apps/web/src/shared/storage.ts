@@ -46,7 +46,8 @@ async function sha256(bytes: Uint8Array): Promise<Uint8Array> {
 /** What the Build commits to about storage. */
 export interface BuildCommitment {
   storageManifestHash: Hex;
-  paperHash?: Hex;
+  /** Required, so no caller can fetch `paper.bin` without checking it against the Build. */
+  paperHash: Hex;
 }
 
 export interface VerifiedManifest {
@@ -57,7 +58,7 @@ export interface VerifiedManifest {
 /** Fetches `manifest.json` and checks its hash against the Build's `storageManifestHash`. */
 export async function fetchManifest(
   fetchFile: FetchFile,
-  build: BuildCommitment,
+  build: Pick<BuildCommitment, 'storageManifestHash'>,
   examId: Hex,
 ): Promise<VerifiedManifest> {
   const bytes = await fetchFile(storageNames.manifest);
@@ -80,7 +81,7 @@ export async function fetchManifest(
 export async function fetchListedFile(
   fetchFile: FetchFile,
   verified: VerifiedManifest,
-  build: BuildCommitment,
+  build: Pick<BuildCommitment, 'paperHash'>,
   name: string,
 ): Promise<Uint8Array> {
   const entry = verified.manifest.files.find((file) => file.name === name);
@@ -89,10 +90,8 @@ export async function fetchListedFile(
   if (!equalBytes(await sha256(bytes), fromHex(entry.sha256))) {
     throw new StorageVerificationError(`${name} does not match its hash in the manifest.`);
   }
-  if (name === storageNames.paper && build.paperHash !== undefined) {
-    if (!equalBytes(encryptedPaperHash(bytes), fromHex(build.paperHash))) {
-      throw new StorageVerificationError('paper.bin does not match the paper hash in the Build.');
-    }
+  if (name === storageNames.paper && !equalBytes(encryptedPaperHash(bytes), fromHex(build.paperHash))) {
+    throw new StorageVerificationError('paper.bin does not match the paper hash in the Build.');
   }
   return bytes;
 }

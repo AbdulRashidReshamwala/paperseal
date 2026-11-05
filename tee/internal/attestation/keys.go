@@ -64,6 +64,12 @@ func (k *Keys) Open(p encryption.Purpose, framed []byte) ([]byte, error) {
 	return k.enc.Open(p, k.examID, framed)
 }
 
+// OpenQuestion decrypts a question sent by the setter with this passkey. Its
+// aad is examId || passkeyPublicKey.
+func (k *Keys) OpenQuestion(passkeyPublicKey, framed []byte) ([]byte, error) {
+	return k.enc.OpenQuestion(k.examID, passkeyPublicKey, framed)
+}
+
 // Sign signs the message hash as 64-byte r || s with low s.
 func (k *Keys) Sign(m hashing.Message) ([64]byte, error) {
 	digest := m.Sum()

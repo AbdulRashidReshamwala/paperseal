@@ -6,9 +6,9 @@ package approvedlist
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -38,7 +38,7 @@ var (
 	ErrPasskey            = errors.New("approvedlist: bad passkey public key")
 	ErrDerivedKey         = errors.New("approvedlist: bad derived public key for the role")
 	ErrOwner              = errors.New("approvedlist: owner must be non-blank UTF-8")
-	ErrSetterOwner        = errors.New("approvedlist: a setter's owner must be 0x and 64 lowercase hex digits")
+	ErrSetterOwner        = errors.New("approvedlist: a setter's owner must be the 0x hex of the setterOwner hash of its own passkey")
 	ErrRepeatedPasskey    = errors.New("approvedlist: repeated passkey")
 	ErrRepeatedDerivedKey = errors.New("approvedlist: repeated derived key")
 	ErrHolderCount        = errors.New("approvedlist: wrong number of key holders")
@@ -85,17 +85,20 @@ func (e Entry) check() error {
 	if strings.TrimSpace(e.Owner) == "" || !utf8.ValidString(e.Owner) {
 		return ErrOwner
 	}
-	// The TEE never sees the name, so it can't check the hash. It checks the
-	// format only. Anyone can recompute the commitment once the board
-	// publishes the name and salt.
-	if e.Role == RoleSetter && !commitmentFormat.MatchString(e.Owner) {
-		return fmt.Errorf("%w: %q", ErrSetterOwner, e.Owner)
+	// A setter's name is never published. Its owner is the setterOwner hash of
+	// its own passkey, which every reader recomputes.
+	if e.Role == RoleSetter {
+		m, err := hashing.SetterOwner(e.PasskeyPublicKey)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrPasskey, err)
+		}
+		sum := m.Sum()
+		if e.Owner != "0x"+hex.EncodeToString(sum[:]) {
+			return fmt.Errorf("%w: %q is not the setterOwner hash of its own passkey", ErrSetterOwner, e.Owner)
+		}
 	}
 	return nil
 }
-
-// commitmentFormat is the owner of a setter: lowercase 0x hex of a SHA-256.
-var commitmentFormat = regexp.MustCompile(`^0x[0-9a-f]{64}$`)
 
 // Encode writes entries in the given order, because the hash covers the posted
 // bytes and order is free. It checks each entry but not the list rules, so it

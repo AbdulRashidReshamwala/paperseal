@@ -128,7 +128,23 @@ func TestSealedVectorsOpenFromTheFile(t *testing.T) {
 		}
 		var exam [32]byte
 		copy(exam[:], unhex0x(t, v.ExamID))
-		got, err := key.Open(purposes[v.Purpose], exam, unhex0x(t, v.Sealed))
+		var got []byte
+		if v.Purpose == "question" {
+			// The aad is examId || the setter's passkey public key.
+			passkey := unhex0x(t, v.PasskeyPublicKey)
+			if !bytes.Equal(unhex0x(t, v.AAD), append(exam[:], passkey...)) {
+				t.Errorf("question: aad is not examId || passkeyPublicKey")
+			}
+			got, err = key.OpenQuestion(exam, passkey, unhex0x(t, v.Sealed))
+			if _, bad := key.OpenQuestion(exam, pubKey(2), unhex0x(t, v.Sealed)); bad == nil {
+				t.Errorf("question: opened for another setter")
+			}
+		} else {
+			if !bytes.Equal(unhex0x(t, v.AAD), exam[:]) {
+				t.Errorf("%s: aad is not examId", v.Purpose)
+			}
+			got, err = key.Open(purposes[v.Purpose], exam, unhex0x(t, v.Sealed))
+		}
 		if err != nil || !bytes.Equal(got, unhex0x(t, v.Plaintext)) {
 			t.Errorf("%s: did not open: %v", v.Purpose, err)
 		}

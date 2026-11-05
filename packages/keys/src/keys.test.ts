@@ -1,5 +1,5 @@
 import { hpkeContext, hpkeSeal } from '@paperseal/crypto';
-import { fromHex, hashMessage, utf8ToBytes, webauthn } from '@paperseal/protocol';
+import { fromHex, hashMessage, setterOwner, utf8ToBytes, webauthn } from '@paperseal/protocol';
 import { describe, expect, it, vi } from 'vitest';
 
 import { assertDeviceBound, createWebAuthnKeys, KeyError, readBackupFlags } from './index';
@@ -231,13 +231,16 @@ describe('register', () => {
   it('registers a setter with no PRF key and an empty derived key', async () => {
     const credentials = authenticator({ prfEnabled: false, prf: null });
     const keys = keysFor(credentials);
-    const { request } = await keys.register({ owner: 'setter-1', role: 'setter', challenge });
+    const { request, owner } = await keys.register({ role: 'setter', challenge });
     const [create] = credentials.create.mock.calls[0] as unknown as [{ publicKey: PublicKeyCredentialCreationOptions }];
     expect(create.publicKey.extensions).toBeUndefined();
     expect(request.derivedPublicKey).toBe('0x');
+    // No name goes anywhere: the owner is the hash of the new passkey's public key.
+    expect(owner).toBe(setterOwner(fromHex(request.passkeyPublicKey)));
+    expect(request.owner).toBe(owner);
     const expected = hashMessage('registration', {
       derivedPublicKey: new Uint8Array(),
-      holderId: utf8ToBytes('setter-1'),
+      holderId: utf8ToBytes(owner),
       challenge,
     });
     expect(challengeOf(credentials.get.mock.calls[0])).toEqual(expected);
@@ -248,7 +251,7 @@ describe('register', () => {
 
   it('refuses a holder whose authenticator has no PRF, and any synced passkey', async () => {
     expect(await codeOf(keysFor(authenticator({ prfEnabled: false })).register({ owner: 'n', role: 'holder', challenge }))).toBe('prf_unavailable');
-    expect(await codeOf(keysFor(authenticator({ flags: UP | BE | BS })).register({ owner: 's', role: 'setter', challenge }))).toBe('synced_passkey');
+    expect(await codeOf(keysFor(authenticator({ flags: UP | BE | BS })).register({ role: 'setter', challenge }))).toBe('synced_passkey');
   });
 });
 

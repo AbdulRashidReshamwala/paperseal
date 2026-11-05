@@ -26,10 +26,11 @@ export interface Participant {
   credentialId?: Hex;
   passkeyPublicKey?: Hex;
   derivedPublicKey?: Hex;
-  /** What the TEE and the list call this participant. For a setter it is the commitment. */
+  /**
+   * What the TEE and the list call this participant. For a setter it is `setterOwner(passkeyPublicKey)`,
+   * known only once its passkey exists. No setter has a name on the list.
+   */
   owner?: string;
-  /** Setters only: the board's secret salt for the commitment. */
-  salt?: Hex;
 }
 
 export interface Lab {

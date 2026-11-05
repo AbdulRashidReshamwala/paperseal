@@ -15,6 +15,13 @@ import { verifyTeeSignature } from '@paperseal/crypto';
 import { attestation, chain, encodeMessage, fromHex, type ExamSettings, type Hex } from '@paperseal/protocol';
 import type { TeeClient } from '@paperseal/tee-client';
 
+/**
+ * The bucket the TEE was started with, which `env_override` must name. Build-time, like the other
+ * defaults. Unset, it is empty and the claim fails against any real token.
+ */
+export const teeStorageBucket: string =
+  (import.meta.env as Record<string, string | undefined>).VITE_TEE_STORAGE_BUCKET ?? '';
+
 export type Exam = NonNullable<Awaited<ReturnType<ExamRegistry['getExam']>>>;
 export type Build = NonNullable<Awaited<ReturnType<ExamRegistry['getBuild']>>>;
 
@@ -42,8 +49,8 @@ interface KeyMaterial {
 }
 
 /**
- * What a token has to say. `cmdOverride` and `env` are empty because spec/ does not say yet where
- * the startup arguments and environment appear in a real token. Each claim row shows what the
+ * What a token has to say. The startup arguments come from the on-chain settings, and
+ * `storageBucket` is the one environment value the operator sets. Each claim row shows what the
  * token held, so a viewer can see the difference.
  */
 export function expectedClaims(
@@ -62,8 +69,7 @@ export function expectedClaims(
     approvedHwModels: attestation.hwModels,
     settings: examSettings(exam, registry),
     registry,
-    cmdOverride: [],
-    env: {},
+    storageBucket: teeStorageBucket,
   };
 }
 

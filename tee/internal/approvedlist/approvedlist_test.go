@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"paperseal/tee/internal/hashing"
 )
 
 // key returns scalar times the P-256 base point.
@@ -24,8 +26,20 @@ func key(t *testing.T, scalar byte) []byte {
 	return priv.PublicKey().Bytes()
 }
 
-// commit is a well-formed setter owner: 0x and 64 lowercase hex digits.
-func commit(name string) string {
+// ownerOf is a setter's owner: the lowercase 0x hex of the setterOwner hash of
+// its own passkey public key.
+func ownerOf(t *testing.T, passkey []byte) string {
+	t.Helper()
+	m, err := hashing.SetterOwner(passkey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := m.Sum()
+	return "0x" + hex.EncodeToString(sum[:])
+}
+
+// wellFormed is a well-formed owner that is not the hash of any passkey here.
+func wellFormed(name string) string {
 	sum := sha256.Sum256([]byte(name))
 	return "0x" + hex.EncodeToString(sum[:])
 }
@@ -40,10 +54,11 @@ func fullList(t *testing.T) []Entry {
 		e := Entry{Role: role, PasskeyPublicKey: key(t, 2*n+1), DerivedPublicKey: key(t, 2*n+2), Owner: name}
 		if role == RoleSetter {
 			e.DerivedPublicKey = nil
+			e.Owner = ownerOf(t, e.PasskeyPublicKey)
 		}
 		list = append(list, e)
 	}
-	add(RoleSetter, commit("setter"))
+	add(RoleSetter, "")
 	for i := range 3 {
 		add(RoleNeutral, fmt.Sprintf("neutral-%d", i))
 	}
@@ -139,10 +154,10 @@ func raw(role byte, passkey, derived []byte, owner string) []byte {
 func TestLayout(t *testing.T) {
 	a, b, c := key(t, 1), key(t, 2), key(t, 3)
 	got := encode(t, []Entry{
-		{RoleSetter, a, nil, commit("s")},
+		{RoleSetter, a, nil, ownerOf(t, a)},
 		{RoleCentre, b, c, "cé"},
 	})
-	want := handList(tuple(1, a, nil, commit("s")), tuple(4, b, c, "cé"))
+	want := handList(tuple(1, a, nil, ownerOf(t, a)), tuple(4, b, c, "cé"))
 	if !bytes.Equal(got, want) {
 		t.Fatalf("got  %x\nwant %x", got, want)
 	}
@@ -290,7 +305,7 @@ func TestRejectsBadEntries(t *testing.T) {
 
 func TestSetterOwnerIsACommitment(t *testing.T) {
 	a := key(t, 1)
-	good := commit("x")
+	good := ownerOf(t, a)
 	upper := "0x" + strings.ToUpper(good[2:])
 	for name, owner := range map[string]string{
 		"a name":            "setter-01",
@@ -314,7 +329,26 @@ func TestSetterOwnerIsACommitment(t *testing.T) {
 	}
 	list := append(fullList(t)[1:], Entry{RoleSetter, a, nil, good})
 	if _, err := Decode(encode(t, list)); err != nil {
-		t.Fatalf("well-formed commitment: %v", err)
+		t.Fatalf("setterOwner of its own passkey: %v", err)
+	}
+}
+
+// A setter's owner must be the hash of its own passkey, not just well-formed
+// and not the hash of another setter's passkey.
+func TestSetterOwnerMustBeHashOfOwnPasskey(t *testing.T) {
+	a, other := key(t, 1), key(t, 3)
+	for name, owner := range map[string]string{
+		"well-formed but unrelated": wellFormed("setter-01"),
+		"another passkey's hash":    ownerOf(t, other),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Decode(raw(1, a, nil, owner)); !errors.Is(err, ErrSetterOwner) {
+				t.Fatalf("Decode: got %v, want ErrSetterOwner", err)
+			}
+			if _, err := Encode([]Entry{{RoleSetter, a, nil, owner}}); !errors.Is(err, ErrSetterOwner) {
+				t.Fatalf("Encode: got %v, want ErrSetterOwner", err)
+			}
+		})
 	}
 }
 
@@ -373,7 +407,7 @@ func TestRejectsRepeatedDerivedKey(t *testing.T) {
 
 // Setters have no derived key, so their empty keys are not repeats.
 func TestManySettersAreNotRepeatedDerivedKeys(t *testing.T) {
-	list := append(fullList(t), Entry{RoleSetter, key(t, 205), nil, commit("second setter")})
+	list := append(fullList(t), Entry{RoleSetter, key(t, 205), nil, ownerOf(t, key(t, 205))})
 	if _, err := Decode(encode(t, list)); err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +467,7 @@ func TestRejectsWrongHolderCounts(t *testing.T) {
 // A list can have any number of setters and of centres without a share.
 func TestOtherRolesAreNotCounted(t *testing.T) {
 	list := fullList(t)
-	list = append(list, Entry{RoleSetter, key(t, 201), nil, commit("another setter")})
+	list = append(list, Entry{RoleSetter, key(t, 201), nil, ownerOf(t, key(t, 201))})
 	list = append(list, Entry{RoleCentre, key(t, 203), key(t, 204), "another centre"})
 	if _, err := Decode(encode(t, list)); err != nil {
 		t.Fatal(err)

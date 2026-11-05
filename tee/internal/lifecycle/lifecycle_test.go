@@ -7,10 +7,15 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"paperseal/tee/internal/api"
 	"paperseal/tee/internal/attestation"
+	"paperseal/tee/internal/attestation/attestationtest"
 	"paperseal/tee/internal/build"
 	"paperseal/tee/internal/encryption"
 	"paperseal/tee/internal/hashing"
@@ -188,6 +193,7 @@ func TestFullLifecycle(t *testing.T) {
 		t.Fatalf("early release: %d %s", code, why)
 	}
 	w.beacon.Set(unlockRound)
+	w.advance(2 * time.Second)
 
 	// Seven shares release nothing.
 	for _, p := range w.holders[:7] {
@@ -541,7 +547,7 @@ func TestQuestionChecks(t *testing.T) {
 	good := questionText(0, "algebra", 0)
 	// A signature over another ciphertext.
 	padded, _ := encryption.Pad(good, spec.C.Padding.QuestionBytes)
-	ct, _ := encryption.Seal(encryption.PurposeQuestion, enc, w.exam.ExamID, padded)
+	ct, _ := encryption.SealQuestion(enc, w.exam.ExamID, setter.passkey.PublicKey(), padded)
 	var ch api.ChallengeResponse
 	c.mustOK("POST", "/v1/questions/challenge", map[string]any{}, &ch)
 	other := sha256.Sum256([]byte("other"))
@@ -558,12 +564,16 @@ func TestQuestionChecks(t *testing.T) {
 			b, _ := encryption.Seal(encryption.PurposeShare, enc, w.exam.ExamID, padded)
 			return b
 		},
+		"another setter's passkey in the aad": func() []byte {
+			b, _ := encryption.SealQuestion(enc, w.exam.ExamID, w.setters[1].passkey.PublicKey(), padded)
+			return b
+		},
 		"wrong exam": func() []byte {
-			b, _ := encryption.Seal(encryption.PurposeQuestion, enc, [32]byte{1}, padded)
+			b, _ := encryption.SealQuestion(enc, [32]byte{1}, setter.passkey.PublicKey(), padded)
 			return b
 		},
 		"unpadded": func() []byte {
-			b, _ := encryption.Seal(encryption.PurposeQuestion, enc, w.exam.ExamID, good)
+			b, _ := encryption.SealQuestion(enc, w.exam.ExamID, setter.passkey.PublicKey(), good)
 			return b
 		},
 	} {
@@ -580,5 +590,226 @@ func TestQuestionChecks(t *testing.T) {
 	}
 	if c.status().QuestionCount != 0 {
 		t.Fatal("a bad question was counted")
+	}
+}
+
+// GET /v1/attestation always asks the launcher for a PKI token.
+func TestAttestationRequestsPKI(t *testing.T) {
+	w := newWorld(t)
+	src := &attestationtest.Source{PKI: w.pki, T: t, Exam: w.exam, ImageDigest: w.chain.imageDigest}
+	_, _, h := w.machine(func(cfg *lifecycle.Config) { cfg.Tokens = src })
+	a := (client{t, h}).attestation()
+	if !a.Attested || a.Token == "" {
+		t.Fatalf("attestation %+v", a)
+	}
+	got := src.Requested()
+	if len(got) != 1 || got[0] != attestation.TokenPKI {
+		t.Fatalf("requested token types %v, want [PKI]", got)
+	}
+}
+
+func filesIn(t *testing.T, w *world) int {
+	t.Helper()
+	n := 0
+	filepath.WalkDir(w.store.Root, func(_ string, d os.DirEntry, _ error) error {
+		if d != nil && !d.IsDir() {
+			n++
+		}
+		return nil
+	})
+	return n
+}
+
+// Build must not ship a time seal that is already open.
+func TestBuildFailsWhenTheUnlockRoundIsAlreadyPublished(t *testing.T) {
+	w := newWorld(t)
+	m, keys, h := w.machine()
+	c := client{t, h}
+	onboardAndSubmit(t, w, m, c, keys)
+	w.beacon.Set(unlockRound) // The lock round and the unlock round both passed.
+	for i := 0; i < 6 && m.Stage() != lifecycle.StageFailed; i++ {
+		m.Step(context.Background())
+	}
+	if m.Stage() != lifecycle.StageFailed || m.Failure() == nil || !strings.Contains(m.Failure().Error(), "already published") {
+		t.Fatalf("stage %s, failure %v", m.Stage(), m.Failure())
+	}
+	var ob api.OutboxResponse
+	c.mustOK("GET", "/v1/outbox", nil, &ob)
+	if len(ob.Messages) != 0 || filesIn(t, w) != 0 {
+		t.Fatalf("a Build or files exist for an open seal: %d messages, %d files", len(ob.Messages), filesIn(t, w))
+	}
+}
+
+func TestBuildFailsWhenTheUnlockRoundPassesWhileSealing(t *testing.T) {
+	w := newWorld(t)
+	m, keys, h := w.machine(func(cfg *lifecycle.Config) {
+		cfg.Sealer = hookSealer{cfg.Sealer, func() { w.beacon.Set(unlockRound) }}
+	})
+	c := client{t, h}
+	onboardAndSubmit(t, w, m, c, keys)
+	w.beacon.Set(lockRound)
+	for i := 0; i < 6 && m.Stage() != lifecycle.StageFailed; i++ {
+		m.Step(context.Background())
+	}
+	if m.Stage() != lifecycle.StageFailed {
+		t.Fatalf("stage %s", m.Stage())
+	}
+	if filesIn(t, w) != 0 {
+		t.Fatal("files were written for an open seal")
+	}
+}
+
+func TestDistributeFailsWhenTheUnlockRoundPassesBeforeTheBuildIsQueued(t *testing.T) {
+	w := newWorld(t)
+	m, keys, h := w.machine(func(cfg *lifecycle.Config) {
+		cfg.Store = &hookStore{Store: cfg.Store, before: func(name string) {
+			if strings.HasSuffix(name, "manifest.json") {
+				w.beacon.Set(unlockRound)
+			}
+		}}
+	})
+	c := client{t, h}
+	onboardAndSubmit(t, w, m, c, keys)
+	w.beacon.Set(lockRound)
+	for i := 0; i < 8 && m.Stage() != lifecycle.StageFailed; i++ {
+		m.Step(context.Background())
+	}
+	if m.Stage() != lifecycle.StageFailed {
+		t.Fatalf("stage %s", m.Stage())
+	}
+	var ob api.OutboxResponse
+	c.mustOK("GET", "/v1/outbox", nil, &ob)
+	if len(ob.Messages) != 0 {
+		t.Fatal("a Build was queued for an open seal")
+	}
+}
+
+// The plaintext bank doesn't outlive Build, so the questions that weren't
+// selected stay secret.
+func TestBankIsWipedAfterBuild(t *testing.T) {
+	w := newWorld(t)
+	m, keys, h := w.machine()
+	c := client{t, h}
+	onboardAndSubmit(t, w, m, c, keys)
+	if m.BankCount() != 20 {
+		t.Fatalf("bank holds %d before Lock", m.BankCount())
+	}
+	lockAndBuild(t, w, m)
+	if m.BankCount() != 0 || m.HeldQuestions() != 0 {
+		t.Fatalf("after Build the bank holds %d and the machine %d questions", m.BankCount(), m.HeldQuestions())
+	}
+	if c.status().QuestionCount != 20 {
+		t.Fatal("the count the status reports changed")
+	}
+}
+
+func TestFailedExamKeepsNoQuestions(t *testing.T) {
+	w := newWorld(t)
+	m, keys, h := w.machine(func(cfg *lifecycle.Config) { cfg.Tokens = &unattested{} })
+	c := client{t, h}
+	onboardAndSubmit(t, w, m, c, keys)
+	w.beacon.Set(lockRound)
+	for i := 0; i < 6 && m.Stage() != lifecycle.StageFailed; i++ {
+		m.Step(context.Background())
+	}
+	if m.Stage() != lifecycle.StageFailed || m.BankCount() != 0 || m.HeldQuestions() != 0 {
+		t.Fatalf("stage %s, %d and %d questions held", m.Stage(), m.BankCount(), m.HeldQuestions())
+	}
+}
+
+// Questions are checked against the same setter only, so one setter can't tell
+// whether another already sent a question.
+func TestSameQuestionFromTwoSettersIsAccepted(t *testing.T) {
+	w := newWorld(t)
+	m, keys, h := w.machine()
+	c := client{t, h}
+	onboardAndSubmit(t, w, m, c, keys)
+	enc := c.attestation().EncryptionPublicKey
+	same := []byte(`{"topic":"algebra","text":"the same words"}`)
+	for i := 0; i < 2; i++ {
+		if code, why, _ := c.submit(w.setters[i], same, enc, w.exam.ExamID); code != http.StatusOK {
+			t.Fatalf("setter %d: %d %s", i, code, why)
+		}
+	}
+	if code, why, _ := c.submit(w.setters[0], same, enc, w.exam.ExamID); code != http.StatusConflict || why != "duplicate_question" {
+		t.Fatalf("same setter again: %d %s", code, why)
+	}
+}
+
+// A slow delivery must not stop Status.
+func TestStatusDoesNotWaitForADelivery(t *testing.T) {
+	w := newWorld(t)
+	hs := &hookStore{gate: make(chan struct{}), enter: make(chan struct{}, 1)}
+	m, keys, h := w.machine(func(cfg *lifecycle.Config) { hs.Store = cfg.Store; cfg.Store = hs })
+	c := client{t, h}
+	// Writes before the delivery pass: the gate holds only key-priv files.
+	onboardAndSubmit(t, w, m, c, keys)
+	lockAndBuild(t, w, m)
+	enc := c.attestation().EncryptionPublicKey
+	w.beacon.Set(unlockRound)
+	w.advance(2 * time.Second)
+	for _, p := range w.holders[:7] {
+		if code, why := c.releaseShare(w, p, enc); code != http.StatusOK {
+			t.Fatalf("%d %s", code, why)
+		}
+	}
+	eighth := make(chan struct{})
+	go func() {
+		c.releaseShare(w, w.holders[7], enc)
+		close(eighth)
+	}()
+	<-hs.enter // The delivery is now in a storage write.
+	done := make(chan api.StatusResponse, 1)
+	go func() { done <- c.status() }()
+	select {
+	case st := <-done:
+		if len(st.Release.Released) != 8 {
+			t.Fatalf("status shows %d released", len(st.Release.Released))
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Status waited for the delivery")
+	}
+	close(hs.gate)
+	<-eighth
+}
+
+// After the instance fails for good, it takes no more releases, serves no log,
+// writes nothing, and holds no K_priv.
+func TestFailedUnlockServesNothing(t *testing.T) {
+	w := newWorld(t)
+	var tokens *flipTokens
+	m, keys, h := w.machine(func(cfg *lifecycle.Config) {
+		tokens = &flipTokens{TokenSource: cfg.Tokens}
+		cfg.Tokens = tokens
+	})
+	c := client{t, h}
+	onboardAndSubmit(t, w, m, c, keys)
+	lockAndBuild(t, w, m)
+	enc := c.attestation().EncryptionPublicKey
+	w.beacon.Set(unlockRound)
+	w.advance(2 * time.Second)
+	before := filesIn(t, w)
+	tokens.off.Store(true) // The launcher goes away before the delivery.
+	for _, p := range w.holders[:8] {
+		if code, why := c.releaseShare(w, p, enc); code != http.StatusOK {
+			t.Fatalf("%d %s", code, why)
+		}
+	}
+	for i := 0; i < 3 && m.Stage() != lifecycle.StageFailed; i++ {
+		m.Step(context.Background())
+	}
+	if m.Stage() != lifecycle.StageFailed || !errors.Is(m.Failure(), attestation.ErrUnattested) {
+		t.Fatalf("stage %s, failure %v", m.Stage(), m.Failure())
+	}
+	if filesIn(t, w) != before {
+		t.Fatal("key-priv files were written before the token")
+	}
+	for _, path := range []string{"/v1/release/challenge", "/v1/release/share"} {
+		if code, why := c.do("POST", path, map[string]any{}, nil); code != http.StatusConflict || why != "wrong_stage" {
+			t.Errorf("%s after failing: %d %s", path, code, why)
+		}
+	}
+	if code, why := c.do("GET", "/v1/release/log", nil, nil); code != http.StatusConflict || why != "wrong_stage" {
+		t.Errorf("log after failing: %d %s", code, why)
 	}
 }

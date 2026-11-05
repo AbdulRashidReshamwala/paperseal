@@ -56,15 +56,23 @@ func run(args []string) error {
 	defer stop()
 	go machine.Run(ctx, stepEvery)
 
+	// HTTPS with a throwaway self-signed certificate, so Cloudflare's Full mode
+	// never falls back to plain HTTP. The certificate has no trust role: apps
+	// trust the attestation token and HPKE, not this transport.
+	tlsConfig, err := selfSignedConfig()
+	if err != nil {
+		return err
+	}
 	srv := &http.Server{
 		Addr:              listenAddr,
+		TLSConfig:         tlsConfig,
 		Handler:           api.NewHandler(machine),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
 	}
 	failed := make(chan error, 1)
-	go func() { failed <- srv.ListenAndServe() }()
+	go func() { failed <- srv.ListenAndServeTLS("", "") }()
 	slog.Info("listening", "addr", listenAddr, "examId", "0x"+hex.EncodeToString(exam.ExamID[:]))
 
 	select {
@@ -108,6 +116,7 @@ func newMachine(exam settings.Exam, roots *x509.CertPool, bucket, dir string) (*
 		Beacon:   timelock.NewHTTPBeacon(quicknet, timelock.DefaultRelays, httpClient(roots)),
 		Sealer:   timelock.NewSealer(quicknet),
 		Store:    store,
+		Bucket:   bucket,
 	}), nil
 }
 

@@ -1,6 +1,7 @@
 package attestation
 
 import (
+	"bytes"
 	"crypto/elliptic"
 	"crypto/sha1"
 	"crypto/sha256"
@@ -93,15 +94,37 @@ func TestKeysOpenOnlyForTheirExam(t *testing.T) {
 	var exam, other [32]byte
 	exam[0], other[0] = 1, 2
 	k, _ := NewKeys(exam)
-	framed, err := encryption.Seal(encryption.PurposeQuestion, k.EncryptionPublicKey(), exam, []byte("q"))
+	framed, err := encryption.Seal(encryption.PurposeRelease, k.EncryptionPublicKey(), exam, []byte("q"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := k.Open(encryption.PurposeQuestion, framed); err != nil || string(got) != "q" {
+	if got, err := k.Open(encryption.PurposeRelease, framed); err != nil || string(got) != "q" {
 		t.Fatalf("open: %v", err)
 	}
-	framed, _ = encryption.Seal(encryption.PurposeQuestion, k.EncryptionPublicKey(), other, []byte("q"))
-	if _, err := k.Open(encryption.PurposeQuestion, framed); err == nil {
+	framed, _ = encryption.Seal(encryption.PurposeRelease, k.EncryptionPublicKey(), other, []byte("q"))
+	if _, err := k.Open(encryption.PurposeRelease, framed); err == nil {
 		t.Fatal("opened a message for another exam")
+	}
+}
+
+func TestKeysOpenQuestionOnlyForItsSetter(t *testing.T) {
+	var exam, other [32]byte
+	exam[0], other[0] = 1, 2
+	k, _ := NewKeys(exam)
+	asha, _ := encryption.DeriveKey(bytes.Repeat([]byte{1}, 32))
+	ben, _ := encryption.DeriveKey(bytes.Repeat([]byte{2}, 32))
+	framed, err := encryption.SealQuestion(k.EncryptionPublicKey(), exam, asha.PublicKey(), []byte("q"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := k.OpenQuestion(asha.PublicKey(), framed); err != nil || string(got) != "q" {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := k.OpenQuestion(ben.PublicKey(), framed); err == nil {
+		t.Fatal("opened a question under another setter's passkey")
+	}
+	framed, _ = encryption.SealQuestion(k.EncryptionPublicKey(), other, asha.PublicKey(), []byte("q"))
+	if _, err := k.OpenQuestion(asha.PublicKey(), framed); err == nil {
+		t.Fatal("opened a question for another exam")
 	}
 }

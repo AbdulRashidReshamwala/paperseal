@@ -1,4 +1,4 @@
-import { chain as specChain, type Hex } from '@paperseal/protocol';
+import { approvedListHash, chain as specChain, criteriaHash, fromHex, toHex, type Hex } from '@paperseal/protocol';
 import {
   createPublicClient,
   getAbiItem,
@@ -47,6 +47,23 @@ export class NoWalletError extends Error {
   constructor() {
     super('ExamRegistry writes need the board wallet');
     this.name = 'NoWalletError';
+  }
+}
+
+/**
+ * A record exists on chain but its bytes can't be trusted or found. `missing`: the RPC returned no
+ * event for the record's block. `mismatch`: the event's bytes don't hash to the stored hash.
+ * Callers must not fall back to the raw event.
+ */
+export class OnChainBytesError extends Error {
+  readonly what: 'approvedList' | 'criteria';
+  readonly kind: 'missing' | 'mismatch';
+
+  constructor(what: 'approvedList' | 'criteria', kind: 'missing' | 'mismatch', message: string) {
+    super(message);
+    this.name = 'OnChainBytesError';
+    this.what = what;
+    this.kind = kind;
   }
 }
 
@@ -118,7 +135,9 @@ export function createExamRegistry(options: ExamRegistryOptions) {
     /**
      * The full `abi.encode(Approved List)` bytes from the ApprovedListPosted event, or null before
      * it is posted. Reads the record first and queries only its `postedBlock`, because public RPCs
-     * reject wide `eth_getLogs` ranges.
+     * reject wide `eth_getLogs` ranges. The bytes are hashed here and must equal the record's
+     * `listHash`, so no caller trusts a raw event. A record whose bytes are missing or differ throws
+     * `OnChainBytesError`.
      */
     getApprovedListEntries: async (examId: ExamId): Promise<Hex | null> => {
       const list = await client.readContract({
@@ -136,9 +155,28 @@ export function createExamRegistry(options: ExamRegistryOptions) {
         toBlock: list.postedBlock,
       });
       // The contract allows one post per exam.
-      return logs[0]?.args.entries ?? null;
+      const entries = logs[0]?.args.entries;
+      if (entries === undefined) {
+        throw new OnChainBytesError(
+          'approvedList',
+          'missing',
+          `The approved list is on chain, but the RPC returned no ApprovedListPosted event in block ${list.postedBlock.toString()}.`,
+        );
+      }
+      if (toHex(approvedListHash(fromHex(examId), fromHex(entries))) !== list.listHash.toLowerCase()) {
+        throw new OnChainBytesError(
+          'approvedList',
+          'mismatch',
+          'The ApprovedListPosted bytes do not hash to the on-chain listHash.',
+        );
+      }
+      return entries;
     },
-    /** The full `abi.encode(Criteria)` bytes from ExamCreated, read from the record's `createdBlock` only. */
+    /**
+     * The full `abi.encode(Criteria)` bytes from ExamCreated, read from the record's `createdBlock`
+     * only, and checked against `settings.criteriaHash` here. Null before the exam exists; a record
+     * whose bytes are missing or differ throws `OnChainBytesError`.
+     */
     getCriteria: async (examId: ExamId): Promise<Hex | null> => {
       const exam = await client.readContract({
         address,
@@ -154,7 +192,22 @@ export function createExamRegistry(options: ExamRegistryOptions) {
         fromBlock: exam.createdBlock,
         toBlock: exam.createdBlock,
       });
-      return logs[0]?.args.criteria ?? null;
+      const criteria = logs[0]?.args.criteria;
+      if (criteria === undefined) {
+        throw new OnChainBytesError(
+          'criteria',
+          'missing',
+          `The exam is on chain, but the RPC returned no ExamCreated event in block ${exam.createdBlock.toString()}.`,
+        );
+      }
+      if (toHex(criteriaHash(fromHex(criteria))) !== exam.settings.criteriaHash.toLowerCase()) {
+        throw new OnChainBytesError(
+          'criteria',
+          'mismatch',
+          'The ExamCreated criteria do not hash to the on-chain criteriaHash.',
+        );
+      }
+      return criteria;
     },
     quicknetGenesisTime: () =>
       client.readContract({

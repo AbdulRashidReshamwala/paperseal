@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { fromHex, setterOwner } from '@paperseal/protocol';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -20,7 +21,7 @@ function mount(world: World, path = '/setter') {
 
 beforeEach(() => {
   localStorage.clear();
-  saveCredential(examId, { owner: 'Ada', role: 'setter', credentialId, passkeyPublicKey });
+  saveCredential(examId, { owner: setterOwner(fromHex(passkeyPublicKey)), role: 'setter', credentialId, passkeyPublicKey });
 });
 afterEach(cleanup);
 

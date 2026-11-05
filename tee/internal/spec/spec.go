@@ -78,7 +78,7 @@ type Constants struct {
 	DomainTags struct {
 		AttestationNonce   string `json:"attestationNonce"`
 		InstanceKey        string `json:"instanceKey"`
-		SetterCommitment   string `json:"setterCommitment"`
+		SetterOwner        string `json:"setterOwner"`
 		Registration       string `json:"registration"`
 		Criteria           string `json:"criteria"`
 		ApprovedList       string `json:"approvedList"`

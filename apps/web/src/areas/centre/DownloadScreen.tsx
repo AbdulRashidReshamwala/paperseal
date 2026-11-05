@@ -1,19 +1,24 @@
+import type { ExamRegistry } from '@paperseal/chain';
+import type { Hex } from '@paperseal/protocol';
 import { Badge, Button, Connected, EmptyState, Mono, Panel, Row, Rows, Screen } from '@paperseal/ui';
 import { useState } from 'react';
 
 import { storageUrl } from '../../shared/config';
-import { examId, fromExam, notConnectedToChain, registry } from '../../shared/registry';
+import { useCurrentExamId, useExamLoader } from '../../shared/currentExam';
+import { notConnectedToChain, registry } from '../../shared/registry';
 import { storageFetcher } from '../../shared/storage';
 import { useCentreState } from './CentreState';
 import { downloadPaperFiles } from './download';
 import { chainReaders } from './readers';
 
-const loadBuild = fromExam((client, id) => client.getBuild(id));
+const readBuild = (client: ExamRegistry, id: Hex) => client.getBuild(id);
 
 type Progress = { state: 'idle' } | { state: 'running' } | { state: 'failed'; message: string };
 
 export function Download() {
   const { downloaded, setDownloaded } = useCentreState();
+  const examId = useCurrentExamId();
+  const loadBuild = useExamLoader(readBuild);
   const [progress, setProgress] = useState<Progress>({ state: 'idle' });
   const ready = registry !== null && examId !== null && storageUrl !== null;
 

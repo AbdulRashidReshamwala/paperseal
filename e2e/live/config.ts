@@ -20,7 +20,7 @@ export const logPath = resolve(stateDir, 'run.log');
 const env = process.env;
 
 export const deployed = {
-  registry: (env.LIVE_REGISTRY ?? '0x5c1f81Da91c745df5c79F87DEdfb62D1dC906527') as Hex,
+  registry: (env.LIVE_REGISTRY ?? '0x6a9f017F374630EcB84e8E3816B1eE9F8Fa2dBE8') as Hex,
   rpcUrl: env.LIVE_RPC_URL ?? 'https://ethereum-sepolia-rpc.publicnode.com',
   teeUrl: (env.LIVE_TEE_URL ?? 'https://tee.abdulrashid.dev').replace(/\/+$/, ''),
   storageUrl: (env.LIVE_STORAGE_URL ?? 'https://storage.googleapis.com/paperseal-demo-paperseal-exams').replace(/\/+$/, ''),
@@ -30,11 +30,6 @@ export const deployed = {
   /** A path only. It is handed to `cast --password-file` and never read here. */
   passwordFile: env.LIVE_PASSWORD_FILE ?? resolve(homedir(), '.paperseal/board-keystore-password'),
   releasesRepo: env.LIVE_RELEASES_REPO ?? 'AbdulRashidReshamwala/paperseal',
-  /** Same list as apps/web shared/config.ts. */
-  approvedHwModels: (env.LIVE_APPROVED_HW_MODELS ?? 'GCP_AMD_SEV,GCP_AMD_SEV_ES,GCP_INTEL_TDX')
-    .split(',')
-    .map((model) => model.trim())
-    .filter(Boolean),
 };
 
 export const rpcHost = new URL(deployed.rpcUrl).hostname;

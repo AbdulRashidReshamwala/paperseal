@@ -37,7 +37,6 @@ export function status(): void {
   if (run.approvedList) console.log(`List      ${run.approvedList.hash} block ${run.approvedList.blockNumber}${run.approvedList.seenByTeeAt ? `, TEE saw it ${run.approvedList.seenByTeeAt}` : ', not yet seen by the TEE'}`);
   console.log(`Receipts  ${String(run.receipts.length)}   Released ${String(run.released.length)} of 8${run.build ? `\nBuild     posted, instance key ${run.build.instancePublicKey.slice(0, 20)}...` : ''}`);
   if (run.paperSha256) console.log(`Paper     sha256 ${run.paperSha256}`);
-  if (run.reveal) console.log(`Reveal    ${run.reveal.map((r) => `${r.name} ${r.onChain ? 'on chain' : 'NOT on chain'}`).join(', ')}`);
   if (!existsSync(reportPath)) return;
   const report = JSON.parse(readFileSync(reportPath, 'utf8')) as { summary: { pass: number; fail: number }; entries: ReportEntry[] };
   console.log(`\nReport    ${String(report.summary.pass)} Pass, ${String(report.summary.fail)} Fail  (${reportPath})`);

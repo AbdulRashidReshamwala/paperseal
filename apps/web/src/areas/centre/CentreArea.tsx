@@ -11,7 +11,7 @@ import { Unlock } from './UnlockScreen';
 function RegisterWithStatus() {
   return (
     <>
-      <Register />
+      <Register role="centre" />
       <TeeStatus />
     </>
   );
@@ -21,7 +21,7 @@ export const screens: AreaScreen[] = [
   { path: '', label: 'Download', element: <Download /> },
   { path: 'countdown', label: 'Countdown', element: <Countdown /> },
   { path: 'register', label: 'Register', element: <RegisterWithStatus /> },
-  { path: 'release', label: 'Release', element: <ReleaseRoute /> },
+  { path: 'release', label: 'Release', element: <ReleaseRoute role="centre" /> },
   { path: 'unlock', label: 'Unlock', element: <Unlock /> },
   { path: 'log', label: 'Log', element: <UnlockLog /> },
 ];

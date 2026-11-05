@@ -13,7 +13,14 @@ import {
   type StoredReceipt,
 } from './receipts';
 import { describeStage, useSession } from './session';
-import { checkQuestion, ReceiptInvalidError, sealAndSubmit, submitNotOpen } from './submit';
+import {
+  checkQuestion,
+  ConfirmationLostError,
+  ReceiptInvalidError,
+  sealAndSubmit,
+  submitNotOpen,
+  type PendingSubmission,
+} from './submit';
 
 const stepLabels = { chain: 'Exam on-chain', attestation: 'TEE attestation', list: 'Approved list hash' } as const;
 
@@ -84,7 +91,7 @@ export function SignIn() {
         tee={env.tee}
         keys={env.keys()}
         onRegistered={(registered) => {
-          session.setCredential(registered);
+          session.credentialSaved(registered);
           setAgain(false);
         }}
       />
@@ -95,7 +102,7 @@ export function SignIn() {
     <Screen title="Sign in" lede="Setters sign in with a passkey on a security key.">
       <Panel title="Your key">
         <Rows>
-          <Row label="Commitment">
+          <Row label="Setter">
             <Mono>{credential.owner}</Mono>
           </Row>
           <Row label="Passkey public key">
@@ -136,9 +143,13 @@ export function SignIn() {
 type ItemState = 'queued' | 'sending' | 'sealed' | 'failed';
 interface QueueItem {
   id: number;
-  question: Question;
+  /** Dropped once the question is sealed, so its text is not kept in the page. */
+  question: Question | null;
+  topic: string;
   state: ItemState;
   message?: string;
+  /** The unresolved send of this question, kept so a retry doesn't store it twice. */
+  pending: { current: PendingSubmission | null };
 }
 
 export function Upload() {
@@ -191,7 +202,10 @@ export function Upload() {
 
   const add = () => {
     if (check.error) return;
-    setQueue((items) => [...items, { id: nextId, question, state: 'queued' }]);
+    setQueue((items) => [
+      ...items,
+      { id: nextId, question, topic: question.topic, state: 'queued', pending: { current: null } },
+    ]);
     setNextId(nextId + 1);
     setText('');
   };
@@ -200,19 +214,28 @@ export function Upload() {
     setSending(true);
     const keys = env.keys();
     for (const item of queue.filter((entry) => entry.state === 'queued' || entry.state === 'failed')) {
+      if (!item.question) continue;
       patch(item.id, { state: 'sending' });
       try {
         await sealAndSubmit(
-          { keys, tee: env.tee as NonNullable<typeof env.tee>, credentialId: credential.credentialId, passkeyPublicKey: credential.passkeyPublicKey },
+          {
+            keys,
+            tee: env.tee as NonNullable<typeof env.tee>,
+            credentialId: credential.credentialId,
+            passkeyPublicKey: credential.passkeyPublicKey,
+            pending: item.pending,
+          },
           confirmed,
           item.question,
         );
-        patch(item.id, { state: 'sealed' });
+        // Sealed: the receipt is kept, and the question text is not.
+        patch(item.id, { state: 'sealed', question: null });
       } catch (error) {
         patch(item.id, {
           state: 'failed',
-          message: error instanceof ReceiptInvalidError ? error.message : describeError(error),
+          message: error instanceof ReceiptInvalidError || error instanceof ConfirmationLostError ? error.message : describeError(error),
         });
+        if (error instanceof ConfirmationLostError) session.dropConfirmation(error.message);
         // A refused or unreachable TEE will refuse the rest, so stop and let the setter read why.
         break;
       }
@@ -274,7 +297,7 @@ export function Upload() {
         <Panel title="To send">
           <Rows>
             {queue.map((item) => (
-              <Row key={item.id} label={item.question.topic}>
+              <Row key={item.id} label={item.topic}>
                 {item.state === 'sealed' ? (
                   <Badge tone="ok">sealed ✓</Badge>
                 ) : item.state === 'sending' ? (

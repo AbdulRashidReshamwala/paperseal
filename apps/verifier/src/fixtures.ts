@@ -15,7 +15,7 @@ import {
   hashMessage,
   padPaper,
   saltedPaperHash,
-  setterCommitment,
+  setterOwner,
   startupArgs,
   storageManifestHash,
   toHex,
@@ -27,7 +27,7 @@ import { BasicConstraintsExtension, X509Certificate, X509CertificateGenerator } 
 import { CompactSign } from 'jose';
 import { Buffer as TlockBuffer, defaultChainInfo, timelockEncrypt, type ChainInfo } from 'tlock-js';
 
-import { examSettings, type Build, type Exam } from './attest';
+import { examSettings, teeStorageBucket, type Build, type Exam } from './attest';
 import type { StorageReader } from './storage';
 
 /*
@@ -152,20 +152,20 @@ export const paper: Paper = {
   ],
 };
 
-/** What the board publishes after the end round. The list holds only the commitment. */
-export const setterSalt: Hex = `0x${'5a'.repeat(32)}`;
-export const setterName = 'Setter A';
-
+/** The list holds a setter only as the hash of its own passkey public key, and never as a name. */
 export function approvedList(): ApprovedListEntry[] {
   const key = (n: number) => Uint8Array.from([0x04, n, ...random(63)]);
-  const entry = (role: number, name: string, n: number): ApprovedListEntry => ({
-    role,
-    owner: name,
-    passkeyPublicKey: key(n),
-    derivedPublicKey: role === 1 ? new Uint8Array(0) : key(n + 100),
-  });
+  const entry = (role: number, name: string, n: number): ApprovedListEntry => {
+    const passkeyPublicKey = key(n);
+    return {
+      role,
+      owner: role === 1 ? setterOwner(passkeyPublicKey) : name,
+      passkeyPublicKey,
+      derivedPublicKey: role === 1 ? new Uint8Array(0) : key(n + 100),
+    };
+  };
   return [
-    entry(1, setterCommitment(fromHex(examId), setterName, fromHex(setterSalt)), 1),
+    entry(1, '', 1),
     ...[0, 1, 2].map((i) => entry(2, `Neutral ${String(i + 1)}`, 10 + i)),
     ...[0, 1, 2, 3, 4, 5, 6].map((i) => entry(3, `Centre ${String(i + 1)}`, 20 + i)),
     entry(4, 'Approved centre', 40),
@@ -240,7 +240,7 @@ export async function buildWorld(options: WorldOptions = {}) {
     eat_nonce: attestationNonce(signing.publicKey, examBytes),
     submods: {
       confidential_space: { support_attributes: ['STABLE'] },
-      container: { image_digest: `sha256:${imageDigest.slice(2)}`, args: startupArgs(settings), cmd_override: [], env: {} },
+      container: { image_digest: `sha256:${imageDigest.slice(2)}`, args: ['/tee', ...startupArgs(settings)], cmd_override: startupArgs(settings), env_override: { STORAGE_BUCKET: teeStorageBucket } },
     },
   };
   const token = await signToken(claims, pki);

@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -61,6 +62,9 @@ type Config struct {
 	Beacon   timelock.Beacon
 	Sealer   timelock.Sealer
 	Store    storage.Store
+	// Bucket is this instance's STORAGE_BUCKET, which a Build instance's env_override must
+	// equal. It is empty for a local STORAGE_DIR run.
+	Bucket string
 	// Now is for challenge expiry and the lock-round cache only. A nil Now uses
 	// the system clock. drand is the clock for every decision that matters.
 	Now func() time.Time
@@ -151,7 +155,10 @@ func (m *Machine) setStage(s Stage) {
 func (m *Machine) markFailed(err error) {
 	m.mu.Lock()
 	m.stage, m.failure = StageFailed, err
+	m.questions = nil
 	m.mu.Unlock()
+	// A failed exam keeps no plaintext questions.
+	m.bank.Wipe()
 	slog.Error("stage failed", "err", err)
 }
 
@@ -363,35 +370,99 @@ type file struct {
 	meta storage.ManifestFile
 }
 
+// timeSealOpen fails the exam if the unlock round is already published. A seal
+// made to a round that has passed is already open, so Build must not ship it.
+// Not published is the normal case. An error that isn't "not yet" is retried.
+func (m *Machine) timeSealOpen(ctx context.Context) error {
+	_, err := m.cfg.Beacon.Randomness(ctx, m.cfg.Exam.UnlockRound)
+	switch {
+	case err == nil:
+		return fail("the unlock round %d is already published, so K_pub would be sealed open", m.cfg.Exam.UnlockRound)
+	case errors.Is(err, timelock.ErrNotPublished):
+		return nil
+	}
+	return err
+}
+
+// proveSplit shows that what Build made opens, before anything secret is
+// wiped: the shares rebuild K_priv, K_pub XOR K_priv is K, and K opens the
+// encrypted paper to the same seed and paper. If it doesn't, the exam can never
+// be opened, so it must fail now and not after the Build is on-chain.
+func proveSplit(examID [32]byte, paper *build.Paper, kPub []byte, shares [][]byte) error {
+	if len(shares) < spec.C.Threshold.Required {
+		return errors.New("too few shares to prove the split")
+	}
+	// The first eight and the last eight shares between them cover every share,
+	// so a defect in any one of them shows.
+	req := spec.C.Threshold.Required
+	var k []byte
+	for _, window := range [][][]byte{shares[:req], shares[len(shares)-req:]} {
+		kPriv, err := split.CombineShares(window)
+		if err != nil {
+			return err
+		}
+		got, err := split.CombineKey(kPub, kPriv)
+		wipe(kPriv)
+		if err != nil {
+			return err
+		}
+		if subtle.ConstantTimeCompare(got, paper.K) != 1 {
+			wipe(got)
+			return errors.New("the shares and K_pub do not rebuild K")
+		}
+		wipe(k)
+		k = got
+	}
+	defer wipe(k)
+	seed, doc, err := build.OpenPaper(k, examID, paper.EncryptedPaper)
+	if err != nil {
+		return fmt.Errorf("the rebuilt K does not open the paper: %w", err)
+	}
+	defer wipe(seed[:], doc)
+	if subtle.ConstantTimeCompare(seed[:], paper.Seed[:]) != 1 || subtle.ConstantTimeCompare(doc, paper.PaperJSON) != 1 {
+		return errors.New("the opened paper is not the paper that was built")
+	}
+	return nil
+}
+
 // stepBuild runs Build and Split. It generates the seed after Lock, picks the
 // questions, encrypts the paper, splits K, timelocks K_pub and encrypts each
-// share to its holder.
+// share to its holder. Every secret is zeroed on every way out.
 func (m *Machine) stepBuild(ctx context.Context) error {
 	m.mu.RLock()
 	qs, c, list := m.questions, *m.criteria, m.list
 	m.mu.RUnlock()
 	exam := m.cfg.Exam
 
+	if err := m.timeSealOpen(ctx); err != nil {
+		return err
+	}
 	paper, err := build.Build(exam.ExamID, c, qs)
 	if err != nil {
 		return fail("build: %w", err)
 	}
+	defer paper.Wipe()
 	kPub, kPriv, err := split.SplitKey(paper.K)
 	if err != nil {
 		return fail("split: %w", err)
 	}
+	defer wipe(kPub, kPriv)
 	shares, err := split.SplitShares(kPriv)
 	if err != nil {
 		return fail("split: %w", err)
 	}
-	wipe(paper.K, kPriv)
-	paper.K = nil
+	defer wipe(shares...)
+	if err := proveSplit(exam.ExamID, &paper, kPub, shares); err != nil {
+		return fail("build: %w", err)
+	}
 
 	locked, err := m.cfg.Sealer.Seal(ctx, exam.UnlockRound, kPub)
-	wipe(kPub)
 	if err != nil {
-		wipe(shares...)
 		return err // The sealer may fail for a reason that passes.
+	}
+	// Time has passed since the first look.
+	if err := m.timeSealOpen(ctx); err != nil {
+		return err
 	}
 
 	p := &pending{selected: paper.Selected}
@@ -415,7 +486,6 @@ func (m *Machine) stepBuild(ctx context.Context) error {
 			continue
 		}
 		if next >= len(shares) {
-			wipe(shares...)
 			return fail("more key holders than shares")
 		}
 		share := shares[next]
@@ -427,13 +497,11 @@ func (m *Machine) stepBuild(ctx context.Context) error {
 		sh := hm.Sum()
 		framed, err := encryption.Seal(encryption.PurposeShare, e.DerivedPublicKey, exam.ExamID, share)
 		if err != nil {
-			wipe(shares...)
 			return fail("encrypt share: %w", err)
 		}
 		add("shares/"+storage.Hex(e.DerivedPublicKey)+".bin", framed, storage.Hex(e.DerivedPublicKey), storage.Hex(sh[:]))
 		holders = append(holders, release.Holder{PasskeyPublicKey: e.PasskeyPublicKey, ShareHash: sh})
 	}
-	wipe(shares...)
 	if next != spec.C.Threshold.Holders {
 		return fail("%d key holders, need %d", next, spec.C.Threshold.Holders)
 	}
@@ -447,15 +515,16 @@ func (m *Machine) stepBuild(ctx context.Context) error {
 	m.pending = p
 	m.questions = nil // The plaintext bank is gone once the paper is built.
 	m.mu.Unlock()
+	// Build succeeded. The bank keeps every question, selected or not, so it
+	// is wiped too: the questions that weren't selected stay secret.
+	m.bank.Wipe()
 	m.setStage(StageDistribute)
 	return nil
 }
 
 func wipe(bs ...[]byte) {
 	for _, b := range bs {
-		for i := range b {
-			b[i] = 0
-		}
+		clear(b)
 	}
 }
 
@@ -468,6 +537,11 @@ func (m *Machine) stepDistribute(ctx context.Context) error {
 	m.mu.RUnlock()
 	exam := m.cfg.Exam
 
+	// Once the unlock round is published the time seal is open, and the Build
+	// must not commit to it. Retries pass through here too.
+	if err := m.timeSealOpen(ctx); err != nil {
+		return err
+	}
 	if p.token == "" {
 		nonce, err := attestation.Nonce(m.cfg.Keys.PublicKey(), exam.ExamID)
 		if err != nil {
@@ -503,6 +577,10 @@ func (m *Machine) stepDistribute(ctx context.Context) error {
 		return err
 	}
 
+	// The writes took time. Check again before the Build is signed and queued.
+	if err := m.timeSealOpen(ctx); err != nil {
+		return err
+	}
 	fields := p.fields
 	fields.StorageManifestHash = storage.Hash(manifest)
 	sig, err := m.cfg.Keys.Sign(hashing.Build(fields))
@@ -527,7 +605,7 @@ func (m *Machine) stepDistribute(ctx context.Context) error {
 func (m *Machine) startUnlock(f release.Facts) {
 	c := release.New(f, release.Deps{
 		Opener: m.cfg.Keys, Signer: m.cfg.Keys, Beacon: m.cfg.Beacon, Sealer: m.cfg.Sealer,
-		Store: m.cfg.Store, Challenges: m.releaseChallenges, Tokens: m.cfg.Tokens,
+		Store: m.cfg.Store, Challenges: m.releaseChallenges, Tokens: m.cfg.Tokens, Now: m.now,
 	})
 	m.mu.Lock()
 	m.collector = c
@@ -542,6 +620,8 @@ func (m *Machine) stepUnlock(ctx context.Context) error {
 	m.mu.RUnlock()
 	if err := c.Step(ctx); err != nil {
 		if errors.Is(err, attestation.ErrUnattested) {
+			// No retry can fix this, so K_priv doesn't wait in memory for one.
+			c.Wipe()
 			return fail("unlock: %w", err)
 		}
 		return err

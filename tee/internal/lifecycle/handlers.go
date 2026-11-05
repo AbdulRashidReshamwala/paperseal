@@ -12,7 +12,6 @@ import (
 	"paperseal/tee/internal/attestation"
 	"paperseal/tee/internal/bank"
 	"paperseal/tee/internal/challenge"
-	"paperseal/tee/internal/encryption"
 	"paperseal/tee/internal/hashing"
 	"paperseal/tee/internal/registration"
 	"paperseal/tee/internal/release"
@@ -58,7 +57,7 @@ func (m *Machine) Attestation(ctx context.Context) (api.AttestationResponse, err
 	if err != nil {
 		return resp, err
 	}
-	tok, err := m.cfg.Tokens.Token(ctx, attestation.TokenOIDC, spec.C.Attestation.Audience, nonce)
+	tok, err := m.cfg.Tokens.Token(ctx, attestation.TokenPKI, spec.C.Attestation.Audience, nonce)
 	if errors.Is(err, attestation.ErrUnattested) {
 		return resp, nil
 	}
@@ -69,24 +68,28 @@ func (m *Machine) Attestation(ctx context.Context) (api.AttestationResponse, err
 	return resp, nil
 }
 
-// Status implements api.Backend.
+// Status implements api.Backend. It reads the machine's state under mu and
+// then asks the collector with no lock held, so a slow delivery can't hold up
+// every other request that needs mu.
 func (m *Machine) Status(context.Context) (api.StatusResponse, error) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
 	resp := api.StatusResponse{
 		Stage: string(m.stage), QuestionCount: m.bankSize,
 		Release: api.ReleaseStatus{Released: []api.Hex{}, Required: spec.C.Threshold.Required},
 	}
-	if m.stage == StageSubmit || m.stage == StageOnboard {
-		resp.QuestionCount = m.bank.Count()
-	}
+	stage := m.stage
 	if m.list != nil {
 		resp.ApprovedList = &api.ApprovedListStatus{
 			ExamID: m.cfg.Exam.ExamID[:], Entries: m.list.raw, Hash: m.list.hash[:], TEESignature: m.list.signature[:],
 		}
 	}
-	if m.collector != nil {
-		p := m.collector.Progress()
+	collector := m.collector
+	m.mu.RUnlock()
+	if stage == StageSubmit || stage == StageOnboard {
+		resp.QuestionCount = m.bank.Count()
+	}
+	if collector != nil {
+		p := collector.Progress()
 		for _, k := range p.Released {
 			resp.Release.Released = append(resp.Release.Released, k)
 		}
@@ -123,7 +126,9 @@ func (m *Machine) Register(_ context.Context, req api.RegisterRequest) error {
 	if err != nil {
 		return badRequest("invalid_key", "derivedPublicKey: "+err.Error())
 	}
-	if err := m.registerChallenges.Consume(req.Challenge); err != nil {
+	// Check first and Consume only after the signature verifies, so a request
+	// that can't sign can't use up the room for spent challenges.
+	if err := m.registerChallenges.Check(req.Challenge); err != nil {
 		return challengeError(err)
 	}
 	err = webauthn.Verify(req.PasskeyPublicKey, webauthn.TypeGet, msg, webauthn.Assertion{
@@ -131,6 +136,9 @@ func (m *Machine) Register(_ context.Context, req api.RegisterRequest) error {
 	})
 	if err != nil {
 		return badRequest("invalid_signature", err.Error())
+	}
+	if err := m.registerChallenges.Consume(req.Challenge); err != nil {
+		return challengeError(err)
 	}
 	if _, err := webauthn.CheckAttestation(req.AttestationObject); err != nil {
 		return err
@@ -218,7 +226,9 @@ func (m *Machine) Questions(ctx context.Context, req api.QuestionRequest) (api.Q
 	if err != nil {
 		return api.QuestionResponse{}, err
 	}
-	if err := m.questionChallenges.Consume(req.Challenge); err != nil {
+	// Check first and Consume only after the signature verifies, so a request
+	// that can't sign can't use up the room for spent challenges.
+	if err := m.questionChallenges.Check(req.Challenge); err != nil {
 		return api.QuestionResponse{}, challengeError(err)
 	}
 	err = webauthn.Verify(req.PasskeyPublicKey, webauthn.TypeGet, msg, webauthn.Assertion{
@@ -227,10 +237,16 @@ func (m *Machine) Questions(ctx context.Context, req api.QuestionRequest) (api.Q
 	if err != nil {
 		return api.QuestionResponse{}, badRequest("invalid_signature", err.Error())
 	}
-	padded, err := m.cfg.Keys.Open(encryption.PurposeQuestion, req.Ciphertext)
+	if err := m.questionChallenges.Consume(req.Challenge); err != nil {
+		return api.QuestionResponse{}, challengeError(err)
+	}
+	// The aad binds the ciphertext to its setter, so another setter can't
+	// resubmit it.
+	padded, err := m.cfg.Keys.OpenQuestion(req.PasskeyPublicKey, req.Ciphertext)
 	if err != nil {
 		return api.QuestionResponse{}, badRequest("decryption_failed", "the question did not decrypt")
 	}
+	defer wipe(padded) // The text below is a copy.
 	topic, text, err := bank.Parse(padded, *c)
 	switch {
 	case errors.Is(err, bank.ErrUnknownTopic):
@@ -281,38 +297,20 @@ func (m *Machine) Outbox(ctx context.Context) (api.OutboxResponse, error) {
 	return out, nil
 }
 
+// unlockCollector returns the collector only while the stage is Unlock. A
+// failed instance has wiped its secrets and takes no more releases.
 func (m *Machine) unlockCollector() (*release.Collector, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if m.collector == nil {
+	if m.stage != StageUnlock || m.collector == nil {
 		return nil, wrongStage(StageUnlock, m.stage)
 	}
 	return m.collector, nil
 }
 
-// ReleaseChallenge implements api.Backend.
-func (m *Machine) ReleaseChallenge(context.Context) (api.ChallengeResponse, error) {
-	c, err := m.unlockCollector()
-	if err != nil {
-		return api.ChallengeResponse{}, err
-	}
-	ch, err := c.Challenge()
-	if err != nil {
-		return api.ChallengeResponse{}, challengeError(err)
-	}
-	return api.ChallengeResponse{Challenge: ch}, nil
-}
-
-// ReleaseShare implements api.Backend.
-func (m *Machine) ReleaseShare(ctx context.Context, req api.ShareRequest) error {
-	c, err := m.unlockCollector()
-	if err != nil {
-		return err
-	}
-	err = c.Submit(ctx, req.PasskeyPublicKey, req.Challenge, req.Sealed)
+// releaseError maps what the collector refuses to a response.
+func releaseError(err error) error {
 	switch {
-	case err == nil:
-		return nil
 	case errors.Is(err, release.ErrTooEarly):
 		return api.Errorf(http.StatusTooEarly, "too_early", "the unlock round is not published yet")
 	case errors.Is(err, release.ErrTooLate):
@@ -327,15 +325,49 @@ func (m *Machine) ReleaseShare(ctx context.Context, req api.ShareRequest) error 
 		return badRequest("invalid_share", "the share does not match its published hash")
 	case errors.Is(err, release.ErrBadRelease):
 		return badRequest("invalid_release", err.Error())
+	case errors.Is(err, release.ErrStale):
+		return api.Errorf(http.StatusServiceUnavailable, "stale_beacon", "drand's newest round is not current, try again")
+	case errors.Is(err, challenge.ErrBusy):
+		return challengeError(err)
 	}
 	return err
 }
 
-// ReleaseLog implements api.Backend.
-func (m *Machine) ReleaseLog(context.Context) (release.Log, error) {
+// ReleaseChallenge implements api.Backend. No challenge is issued until the
+// unlock round is published.
+func (m *Machine) ReleaseChallenge(ctx context.Context) (api.ChallengeResponse, error) {
 	c, err := m.unlockCollector()
 	if err != nil {
-		return release.Log{}, err
+		return api.ChallengeResponse{}, err
+	}
+	ch, err := c.Challenge(ctx)
+	if err != nil {
+		return api.ChallengeResponse{}, releaseError(err)
+	}
+	return api.ChallengeResponse{Challenge: ch}, nil
+}
+
+// ReleaseShare implements api.Backend.
+func (m *Machine) ReleaseShare(ctx context.Context, req api.ShareRequest) error {
+	if m.Stage() == StageReleased {
+		return releaseError(release.ErrReleased)
+	}
+	c, err := m.unlockCollector()
+	if err != nil {
+		return err
+	}
+	return releaseError(c.Submit(ctx, req.PasskeyPublicKey, req.Challenge, req.Sealed))
+}
+
+// ReleaseLog implements api.Backend.
+func (m *Machine) ReleaseLog(context.Context) (release.Log, error) {
+	// The log is public once released, so it stays readable. A failed instance
+	// serves none.
+	m.mu.RLock()
+	c, stage := m.collector, m.stage
+	m.mu.RUnlock()
+	if c == nil || (stage != StageUnlock && stage != StageReleased) {
+		return release.Log{}, wrongStage(StageUnlock, stage)
 	}
 	return c.SignedLog()
 }

@@ -3,6 +3,7 @@ import type { ExamRegistry } from '@paperseal/chain';
 import { verifyTeeSignature } from '@paperseal/crypto';
 import {
   approvedListHash,
+  attestation as attestationSpec,
   chain,
   criteriaHash,
   decodeCriteria,
@@ -22,29 +23,15 @@ import type { StatusResponse, TeeClient } from '@paperseal/tee-client';
  */
 
 /**
- * What the app expects from a token beyond the on-chain exam record. The README and
- * docs/ARCHITECTURE.md leave the approved `hwmodel` values and expected `env` unspecified, so they
- * are deployment configuration. An empty `approvedHwModels` approves nothing, so the check fails.
+ * What the app expects from a token beyond the on-chain exam record: the bucket the TEE was
+ * started with. The approved `hwmodel` values come from spec/constants.json.
  */
 export interface TrustPolicy {
-  approvedHwModels: readonly string[];
-  cmdOverride: readonly string[];
-  env: Readonly<Record<string, string>>;
+  storageBucket: string;
 }
 
-export function policyFromEnv(env: Record<string, string | undefined>): TrustPolicy {
-  const models = (env.VITE_APPROVED_HW_MODELS ?? '')
-    .split(',')
-    .map((model) => model.trim())
-    .filter(Boolean);
-  let expectedEnv: Record<string, string> = {};
-  try {
-    if (env.VITE_EXPECTED_TEE_ENV) expectedEnv = JSON.parse(env.VITE_EXPECTED_TEE_ENV) as Record<string, string>;
-  } catch {
-    // A malformed value stays empty, and the env claim then fails against the token.
-  }
-  return { approvedHwModels: models, cmdOverride: [], env: expectedEnv };
-}
+/** A confirmation is good for 5 minutes. After that the TEE must be checked again before anything is sealed. */
+export const CONFIRMATION_TTL_MS = 5 * 60 * 1000;
 
 export interface ConfirmDeps {
   examId: Hex;
@@ -57,6 +44,8 @@ export interface ConfirmDeps {
   verifyToken?: typeof checkToken;
   /** Unix seconds. */
   now?: () => number;
+  /** Unix milliseconds, for the confirmation's age. */
+  nowMs?: () => number;
 }
 
 declare const confirmedBrand: unique symbol;
@@ -69,6 +58,14 @@ export interface Confirmed {
   readonly instancePublicKey: Hex;
   readonly criteria: Criteria;
   readonly status: StatusResponse;
+  /** Unix milliseconds when the checks passed. Expires after `CONFIRMATION_TTL_MS`. */
+  readonly confirmedAt: number;
+}
+
+/** True once a confirmation is older than `CONFIRMATION_TTL_MS`, or its age can't be told. */
+export function confirmationExpired(confirmed: Pick<Confirmed, 'confirmedAt'>, nowMs: number): boolean {
+  const age = nowMs - confirmed.confirmedAt;
+  return !(age >= 0 && age <= CONFIRMATION_TTL_MS);
 }
 
 export type ConfirmStep = 'chain' | 'attestation' | 'list';
@@ -159,11 +156,10 @@ export async function confirmTee(deps: ConfirmDeps): Promise<ConfirmOutcome> {
       instanceKeySignature: fromHex(attestation.instanceKeySignature),
       examId: examBytes,
       imageDigest: exam.imageDigest,
-      approvedHwModels: deps.policy.approvedHwModels,
+      approvedHwModels: attestationSpec.hwModels,
       settings: examSettings,
       registry: deps.registryAddress,
-      cmdOverride: deps.policy.cmdOverride,
-      env: deps.policy.env,
+      storageBucket: deps.policy.storageBucket,
     };
     verdict = await (deps.verifyToken ?? checkToken)(attestation.token, expected, {
       mode: 'live',
@@ -222,6 +218,7 @@ export async function confirmTee(deps: ConfirmDeps): Promise<ConfirmOutcome> {
       instancePublicKey: attestation.instancePublicKey,
       criteria,
       status,
+      confirmedAt: deps.nowMs?.() ?? Date.now(),
     } as Confirmed,
   };
 }

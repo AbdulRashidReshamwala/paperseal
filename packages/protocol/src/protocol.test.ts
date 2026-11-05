@@ -10,8 +10,7 @@ import {
   approvedListHash,
   attestationNonce,
   checkApprovedList,
-  isSetterCommitment,
-  setterCommitment,
+  setterOwner,
   constants,
   CriteriaError,
   criteriaHash,
@@ -78,15 +77,11 @@ describe('abi.encode messages', () => {
     expect(toHex(expected).slice(2, 66)).toBe(`${'0'.repeat(62)}60`); // tag offset, no packed tag
   });
 
-  it('encodes setterCommitment as tag, bytes32 examId, string name, bytes32 salt', () => {
-    const examId = fill(1);
-    const salt = fill(7);
-    const expected = abi(
-      ['string', 'bytes32', 'string', 'bytes32'],
-      ['paperseal/v1/setter-commitment', toHex(examId), 'Asha Rao', toHex(salt)],
-    );
-    expect(toHex(encodeMessage('setterCommitment', { examId, name: 'Asha Rao', salt }))).toBe(toHex(expected));
-    expect(setterCommitment(examId, 'Asha Rao', salt)).toBe(toHex(sha(expected)));
+  it('encodes setterOwner as tag and bytes passkeyPublicKey', () => {
+    const passkeyPublicKey = key(1);
+    const expected = abi(['string', 'bytes'], ['paperseal/v1/setter-owner', toHex(passkeyPublicKey)]);
+    expect(toHex(encodeMessage('setterOwner', { passkeyPublicKey }))).toBe(toHex(expected));
+    expect(setterOwner(passkeyPublicKey)).toBe(toHex(sha(expected)));
   });
 
   it('encodes registration with an empty derived key for setters', () => {
@@ -189,12 +184,11 @@ describe('attestation nonce', () => {
   });
 });
 
-const commitmentFor = (n: number) => setterCommitment(fill(9), `setter-${String(n)}`, fill(n + 50));
 const entry = (role: number, n: number): ApprovedListEntry => ({
   role,
   passkeyPublicKey: key(n),
   derivedPublicKey: role === roles.setter ? new Uint8Array() : key(n + 100),
-  owner: role === roles.setter ? commitmentFor(n) : `owner-${String(n)}`,
+  owner: role === roles.setter ? setterOwner(key(n)) : `owner-${String(n)}`,
 });
 const validList = (): ApprovedListEntry[] => [
   entry(roles.setter, 1),
@@ -261,26 +255,22 @@ describe('approved list', () => {
     expect(() => checkApprovedList(list2)).toThrow('derivedPublicKey must be');
   });
 
-  it('requires a setter owner to be a commitment and rejects a plain name', () => {
-    expect(isSetterCommitment(commitmentFor(1))).toBe(true);
-    for (const bad of ['Asha Rao', '0x1234', commitmentFor(1).toUpperCase(), commitmentFor(1).slice(2), `${commitmentFor(1)}00`]) {
-      expect(isSetterCommitment(bad)).toBe(false);
+  it('requires a setter owner to equal the hash of its own passkey and rejects a name or another key hash', () => {
+    for (const bad of ['Asha Rao', '0x1234', setterOwner(key(1)).toUpperCase(), setterOwner(key(1)).slice(2), setterOwner(key(2))]) {
       const list = validList();
       list[0] = { ...(list[0] as ApprovedListEntry), owner: bad };
-      expect(() => checkApprovedList(list)).toThrow('setter commitment');
+      expect(() => checkApprovedList(list)).toThrow('setterOwner hash');
     }
     // Other roles keep names.
     expect(() => checkApprovedList(validList())).not.toThrow();
   });
 
-  it('commits to the exam, the name and the salt', () => {
-    const base = setterCommitment(fill(1), 'A', fill(2));
+  it('hashes only the passkey public key', () => {
+    const base = setterOwner(key(1));
     expect(base).toMatch(/^0x[0-9a-f]{64}$/);
-    expect(setterCommitment(fill(3), 'A', fill(2))).not.toBe(base);
-    expect(setterCommitment(fill(1), 'B', fill(2))).not.toBe(base);
-    expect(setterCommitment(fill(1), 'A', fill(4))).not.toBe(base);
-    expect(setterCommitment(fill(1), 'A', fill(2))).toBe(base);
-    expect(() => setterCommitment(fill(1), 'A', fill(2, 31))).toThrow(RangeError);
+    expect(setterOwner(key(2))).not.toBe(base);
+    expect(setterOwner(key(1))).toBe(base);
+    expect(() => setterOwner(fill(1, 64))).toThrow(RangeError);
   });
 
   it('rejects wrong key-holder counts and empty owners', () => {
@@ -330,6 +320,13 @@ describe('selection criteria', () => {
     ['zero questions', { ...criteria, topics: [{ name: 'a', questions: 0 }] }],
   ])('rejects %s', (_, bad) => {
     expect(() => encodeCriteria(bad)).toThrow(CriteriaError);
+  });
+
+  it('rejects questions that cannot fit in the paper, and accepts the exact fit', () => {
+    const room = Math.floor((constants.padding.paperBytes - 1024) / constants.padding.questionBytes);
+    expect(() => encodeCriteria({ ...criteria, topics: [{ name: 'a', questions: room }] })).not.toThrow();
+    expect(() => encodeCriteria({ ...criteria, topics: [{ name: 'a', questions: room + 1 }] })).toThrow('paperBytes');
+    expect(() => encodeCriteria({ ...criteria, topics: [{ name: 'a', questions: room - 5 }, { name: 'b', questions: 6 }] })).toThrow(CriteriaError);
   });
 
   it('accepts the bounds', () => {
@@ -433,12 +430,11 @@ describe('tee/ cross-language vectors', () => {
     expect(() => decodeApprovedList(fromHex(list.entries))).toThrow('key holders');
   });
 
-  it('matches the tee/ setter commitment vector through setterCommitment()', () => {
-    const vector = vectors.hash.find((v) => v.message === 'setterCommitment');
-    // The vector is in the hash list, so it also passes through encodeMessage above.
-    expect(vector, 'tee/testdata/vectors.json has no setterCommitment vector').toBeDefined();
+  it('matches the tee/ setterOwner vector through setterOwner()', () => {
+    const vector = vectors.hash.find((v) => v.message === 'setterOwner');
+    expect(vector, 'tee/testdata/vectors.json has no setterOwner vector').toBeDefined();
     const field = (name: string) => vector?.fields.find((f) => f.name === name)?.value ?? '';
-    expect(setterCommitment(fromHex(field('examId')), field('name'), fromHex(field('salt')))).toBe(vector?.hash);
+    expect(setterOwner(fromHex(field('passkeyPublicKey')))).toBe(vector?.hash);
   });
 
   it('matches tee/ for the attestation nonce', () => {

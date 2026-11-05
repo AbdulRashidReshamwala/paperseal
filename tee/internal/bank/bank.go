@@ -92,15 +92,30 @@ type Bank struct {
 // New returns an empty bank.
 func New() *Bank { return &Bank{seen: map[[32]byte]bool{}} }
 
-func textKey(text string) [32]byte {
-	return sha256.Sum256([]byte("text\x00" + strings.ToLower(strings.Join(strings.Fields(text), " "))))
+// Both keys are per setter. A setter that could see "duplicate" for a question
+// someone else sent could test guesses at other setters' questions.
+func textKey(passkey []byte, text string) [32]byte {
+	h := sha256.New()
+	h.Write([]byte("text\x00"))
+	h.Write(passkey)
+	h.Write([]byte{0})
+	h.Write([]byte(strings.ToLower(strings.Join(strings.Fields(text), " "))))
+	return [32]byte(h.Sum(nil))
 }
 
-func hashKey(h [32]byte) [32]byte { return sha256.Sum256(append([]byte("ct\x00"), h[:]...)) }
+func hashKey(passkey []byte, ct [32]byte) [32]byte {
+	h := sha256.New()
+	h.Write([]byte("ct\x00"))
+	h.Write(passkey)
+	h.Write([]byte{0})
+	h.Write(ct[:])
+	return [32]byte(h.Sum(nil))
+}
 
-// Add keeps a question. It refuses one whose ciphertext was seen, and one
-// whose text matches another question, ignoring case and spacing, whoever sent
-// it, so one idea can't fill a topic's quota twice.
+// Add keeps a question. It refuses one whose ciphertext this setter already
+// sent, and one whose text matches another question from the same setter,
+// ignoring case and spacing, so a setter can't fill a topic's quota with one
+// idea. Questions from different setters are never duplicates of each other.
 func (b *Bank) Add(q Question) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -110,7 +125,7 @@ func (b *Bank) Add(q Question) error {
 	if len(b.list) >= MaxQuestions {
 		return ErrFull
 	}
-	tk, hk := textKey(q.Text), hashKey(q.Hash)
+	tk, hk := textKey(q.Passkey, q.Text), hashKey(q.Passkey, q.Hash)
 	if b.seen[tk] || b.seen[hk] {
 		return ErrDuplicate
 	}
@@ -128,6 +143,24 @@ func (b *Bank) Close() []Question {
 	defer b.mu.Unlock()
 	b.closed = true
 	return append([]Question(nil), b.list...)
+}
+
+// Wipe drops every question and the duplicate index, and zeroes what it can.
+// It closes the bank, so nothing more is accepted. Build calls it once the
+// paper is made, so the questions it didn't select don't stay in memory and
+// stay secret. The text of a question is a Go string, which can't be zeroed in
+// place: Wipe overwrites each entry and drops every reference, so the strings
+// are garbage and no longer reachable from the bank.
+func (b *Bank) Wipe() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.closed = true
+	for i := range b.list {
+		clear(b.list[i].Passkey)
+		b.list[i] = Question{}
+	}
+	b.list = nil
+	clear(b.seen)
 }
 
 // Count returns how many questions are held.

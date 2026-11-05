@@ -5,9 +5,12 @@ package lock
 import (
 	"errors"
 	"fmt"
+	"sort"
 
 	"paperseal/tee/internal/bank"
+	"paperseal/tee/internal/build"
 	"paperseal/tee/internal/criteria"
+	"paperseal/tee/internal/spec"
 )
 
 // Reasons the bank fails.
@@ -15,6 +18,7 @@ var (
 	ErrBankTooSmall = errors.New("lock: a topic's bank is smaller than minBankMultiple times its questions")
 	ErrSetterShare  = errors.New("lock: one setter holds more of a topic than maxSetterPercent")
 	ErrEmpty        = errors.New("lock: the bank is empty")
+	ErrPaperTooBig  = errors.New("lock: the largest paper this bank can give doesn't fit in padding.paperBytes")
 )
 
 // Result is the outcome of the checks. It stays inside the TEE: Lock posts
@@ -30,6 +34,9 @@ type Result struct {
 // than maxSetterPercent of the topic's bank. The criteria must already match
 // the attested criteriaHash.
 func Check(questions []bank.Question, c criteria.Criteria) (Result, error) {
+	if err := c.Validate(); err != nil {
+		return Result{}, err
+	}
 	if len(questions) == 0 {
 		return Result{}, ErrEmpty
 	}
@@ -55,5 +62,37 @@ func Check(questions []bank.Question, c criteria.Criteria) (Result, error) {
 			}
 		}
 	}
+	if err := checkFits(questions, c); err != nil {
+		return Result{}, err
+	}
 	return Result{QuestionCount: uint32(len(questions)), PerTopic: perTopic}, nil
+}
+
+// checkFits refuses a bank whose worst draw, the longest questions of each
+// topic, makes a paper that doesn't fit padding.paperBytes. The draw is random
+// and made after Lock, so Lock can't wait to see it.
+func checkFits(questions []bank.Question, c criteria.Criteria) error {
+	sizes := map[string][]int{}
+	for _, q := range questions {
+		n, err := build.EntrySize(q)
+		if err != nil {
+			return err
+		}
+		sizes[q.Topic] = append(sizes[q.Topic], n)
+	}
+	var worst []int
+	for _, t := range c.Topics {
+		s := sizes[t.Name]
+		sort.Sort(sort.Reverse(sort.IntSlice(s)))
+		worst = append(worst, s[:t.Questions]...)
+	}
+	n, err := build.MaxPaperJSONBytes(worst)
+	if err != nil {
+		return err
+	}
+	// The padding takes a 4-byte length first.
+	if n > spec.C.Padding.PaperBytes-4 {
+		return fmt.Errorf("%w: %d bytes, at most %d", ErrPaperTooBig, n, spec.C.Padding.PaperBytes-4)
+	}
+	return nil
 }

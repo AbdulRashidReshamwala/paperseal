@@ -22,15 +22,17 @@ import {
   type PublishedVerdict,
   type RecordVerdict,
 } from './attest';
-import { chainChecks, computedListHash, criteriaMatches, loadChain, sameHex, type ChainData, type CheckResult } from './checks';
-import { approvedEntries, checkManifest, holdersOf, type ManifestReport } from './commitments';
 import {
-  checkPublishedSetters,
-  parsePublishedSetters,
-  SetterJsonError,
-  type PublishedSetter,
-  type SetterReport,
-} from './setters';
+  chainChecks,
+  computedListHash,
+  criteriaMatches,
+  loadChain,
+  sameHex,
+  type ChainData,
+  type ChainProblem,
+  type CheckResult,
+} from './checks';
+import { approvedEntries, checkManifest, holdersOf, type ManifestReport } from './commitments';
 import { RoundRow, useLatestRound, useNow, type LatestRound } from './live';
 import { runProof, type ProofChecks, type ProofState } from './proof';
 import { releaseTokenName, utf8Text } from './storage';
@@ -53,21 +55,33 @@ function TeePanel<T>(props: {
   /** Shown when the TEE URL is set but something else is still missing. */
   notConnected?: string;
   hasTee: boolean;
+  /** Reads the TEE again this often, so a live panel doesn't go stale. */
+  pollMs?: number;
   children: (value: T) => ReactNode;
 }) {
   if (!props.hasTee) return <EmptyState title={`${props.title}: optional`}>{needsTee}</EmptyState>;
   return (
-    <Connected title={props.title} notConnected={props.notConnected ?? needsTee} load={props.load}>
+    <Connected
+      title={props.title}
+      notConnected={props.notConnected ?? needsTee}
+      load={props.load}
+      {...(props.pollMs === undefined ? {} : { pollMs: props.pollMs })}
+    >
       {props.children}
     </Connected>
   );
 }
 
+/** How often the live panels read the TEE again. */
+export const LIVE_STATUS_POLL_MS = 5000;
+/** The live release panel also checks a fresh attestation each time, so it reads less often. */
+export const LIVE_RELEASE_POLL_MS = 10_000;
+
 function TeeStatus() {
   const { tee } = useConnections();
   const load = useMemo(() => (tee ? () => tee.status() : null), [tee]);
   return (
-    <TeePanel title="Live TEE status" hasTee={tee !== null} load={load}>
+    <TeePanel title="Live TEE status" hasTee={tee !== null} load={load} pollMs={LIVE_STATUS_POLL_MS}>
       {(status) => (
         <Rows>
           <Row label="Stage">{status.stage}</Row>
@@ -77,6 +91,18 @@ function TeeStatus() {
         </Rows>
       )}
     </TeePanel>
+  );
+}
+
+/** A record that is on-chain but whose bytes can't be used. Never shown as "not posted". */
+function ProblemRow({ label, problem }: { label: string; problem: ChainProblem }) {
+  return (
+    <Row label={label}>
+      <Badge tone={problem.kind === 'mismatch' ? 'bad' : 'warn'}>
+        {problem.kind === 'mismatch' ? 'Fail' : 'Could not be read'}
+      </Badge>{' '}
+      {problem.message}
+    </Row>
   );
 }
 
@@ -108,7 +134,9 @@ export function Overview() {
               <Row label="Exam published">{posted(checks.published, 'Published', 'Not published')}</Row>
               {data.exam && <ExamSettingsRows exam={data.exam} />}
               <Row label="Criteria hash matches the exam">{checkBadge(checks.criteria)}</Row>
+              {data.problems?.criteria ? <ProblemRow label="Criteria bytes" problem={data.problems.criteria} /> : null}
               <Row label="Approved list hash matches the chain">{checkBadge(checks.list)}</Row>
+              {data.problems?.list ? <ProblemRow label="Approved list bytes" problem={data.problems.list} /> : null}
               <Row label="Build">{posted(checks.build, 'Exists', 'No Build yet')}</Row>
             </Rows>
           );
@@ -151,7 +179,8 @@ function ExamSettingsRows({ exam }: { exam: Exam }) {
   );
 }
 
-function CriteriaRows({ exam, encoded }: { exam: Exam; encoded: Hex | null }) {
+function CriteriaRows({ exam, encoded, problem }: { exam: Exam; encoded: Hex | null; problem?: ChainProblem | undefined }) {
+  if (problem) return <ProblemRow label="Criteria" problem={problem} />;
   if (!encoded) return <Row label="Criteria">Not published</Row>;
   const bytes = fromHex(encoded);
   const hashOk = criteriaMatches(bytes, exam.settings.criteriaHash);
@@ -185,8 +214,10 @@ function ListRows(props: {
   encoded: Hex | null;
   chainHash: Hex | null;
   buildHash: Hex | null;
+  problem?: ChainProblem | undefined;
 }) {
   const { examId, encoded, chainHash, buildHash } = props;
+  if (props.problem) return <ProblemRow label="Approved list" problem={props.problem} />;
   if (!encoded || !chainHash) return <Row label="Approved list">Not posted</Row>;
   const bytes = fromHex(encoded);
   const computed = computedListHash(examId, bytes);
@@ -214,7 +245,7 @@ function ListRows(props: {
       {Array.isArray(entries) ? (
         entries.map((entry, index) =>
           entry.role === roles.setter ? (
-            <Row key={index} label="Setter (sealed)">
+            <Row key={index} label="Setter">
               <Mono>{entry.owner}</Mono>
             </Row>
           ) : (
@@ -443,79 +474,6 @@ function ManifestRows({ result }: { result: Extract<ManifestResult, { kind: 'rea
   );
 }
 
-/**
- * Setters are sealed on the chain until the board publishes each name and salt after the end round.
- * Anyone can paste that JSON here and each entry is recomputed against the on-chain list.
- */
-function SetterNames({ examId, entries }: { examId: Hex; entries: Hex | null }) {
-  const [text, setText] = useState('');
-  const [result, setResult] = useState<{ report: SetterReport } | { error: string } | null>(null);
-  const list = useMemo(() => approvedEntries(entries), [entries]);
-
-  const run = (event: FormEvent) => {
-    event.preventDefault();
-    if (!list) return;
-    try {
-      const published: PublishedSetter[] = parsePublishedSetters(text);
-      setResult({ report: checkPublishedSetters(examId, list, published) });
-    } catch (error) {
-      if (!(error instanceof SetterJsonError)) throw error;
-      setResult({ error: error.message });
-    }
-  };
-
-  return (
-    <Panel title="Setter names (after the board publishes)">
-      <p>
-        Setters appear on the list as a salted hash, so nobody can see who they are before the exam. This check only
-        works after the board publishes each setter&apos;s name and salt, which it does after the end round. Before
-        that there is nothing to check and nothing here can pass.
-      </p>
-      {!list ? (
-        <NeutralNote>There is no approved list on the chain to check against yet.</NeutralNote>
-      ) : (
-        <form onSubmit={run}>
-          <label className="ps-field">
-            <span>Published JSON, an array of name and salt</span>
-            <textarea
-              className="ps-input"
-              rows={6}
-              spellCheck={false}
-              value={text}
-              placeholder='[{"name": "…", "salt": "0x…"}]'
-              onChange={(event) => {
-                setText(event.target.value);
-              }}
-            />
-          </label>
-          <Button type="submit" disabled={text.trim() === ''}>
-            Check against the list
-          </Button>
-        </form>
-      )}
-      {result && 'error' in result && (
-        <p role="alert">
-          <Badge tone="bad">Fail</Badge> {result.error}
-        </p>
-      )}
-      {result && 'report' in result && (
-        <Rows>
-          {result.report.rows.map((row, index) => (
-            <Row key={index} label={row.name}>
-              {verdict(row.check === 'pass')} <Mono>{row.commitment}</Mono>
-              {row.check === 'pass' ? '' : ' is not a setter on the chain list'}
-            </Row>
-          ))}
-          <Row label="Every setter on the chain list is named">
-            {verdict(result.report.coverage === 'pass')}
-            {result.report.unmatched.length > 0 ? ` ${String(result.report.unmatched.length)} still sealed` : ''}
-          </Row>
-        </Rows>
-      )}
-    </Panel>
-  );
-}
-
 export function Commitments() {
   const { registry, examId, storage } = useConnections();
   const chainLoad = useMemo(() => loadChain(registry, examId), [registry, examId]);
@@ -539,11 +497,11 @@ export function Commitments() {
   return (
     <Screen title="Commitments" lede="Write-once records in ExamRegistry, and the files in storage they commit to.">
       <Connected title="ExamRegistry" notConnected={setChain} load={chainLoad}>
-        {({ exam, list, build, criteria, entries }) => (
+        {({ exam, list, build, criteria, entries, problems }) => (
           <Rows>
             <Row label="Exam settings">{posted(exam !== null)}</Row>
             {exam && <ExamSettingsRows exam={exam} />}
-            {exam && <CriteriaRows exam={exam} encoded={criteria} />}
+            {exam && <CriteriaRows exam={exam} encoded={criteria} problem={problems?.criteria} />}
             <Row label="Approved list">{posted(list !== null)}</Row>
             {examId && (
               <ListRows
@@ -551,6 +509,7 @@ export function Commitments() {
                 encoded={entries}
                 chainHash={list?.listHash ?? null}
                 buildHash={build?.approvedListHash ?? null}
+                problem={problems?.list}
               />
             )}
             <Row label="Build">{posted(build !== null)}</Row>
@@ -561,9 +520,6 @@ export function Commitments() {
             )}
           </Rows>
         )}
-      </Connected>
-      <Connected title="Setter names" notConnected={setChain} load={chainLoad}>
-        {({ entries }) => (examId ? <SetterNames examId={examId} entries={entries} /> : null)}
       </Connected>
       <Connected
         title="Storage manifest"
@@ -600,20 +556,24 @@ function Schedule({ exam }: { exam: Exam }) {
   );
 }
 
-function ProgressRows({ progress }: { progress: ReleaseProgress }) {
+/**
+ * Release progress. Until `trusted`, which says the TEE or token behind it passed, every badge is
+ * neutral: a count from an unverified source is something said, not evidence.
+ */
+function ProgressRows({ progress, trusted }: { progress: ReleaseProgress; trusted: boolean }) {
   return (
     <>
       <Row label="Holders released">
-        {progress.count} of {progress.required} needed
+        {progress.count} of {progress.required} needed{trusted ? '' : ' (not verified)'}
       </Row>
       {progress.rows.map((row) => (
         <Row key={`${row.owner}${String(row.role)}`} label={`${row.owner}, ${roleNames[row.role] ?? 'key holder'}`}>
-          <Badge tone={row.released ? 'ok' : 'neutral'}>{row.released ? 'Released' : 'Not released'}</Badge>
+          <Badge tone={row.released && trusted ? 'ok' : 'neutral'}>{row.released ? 'Released' : 'Not released'}</Badge>
         </Row>
       ))}
       {progress.unknown.map((key) => (
         <Row key={key} label="Released by a key that is not an approved key holder">
-          <Badge tone="bad">Fail</Badge> <Mono>{key}</Mono>
+          <Badge tone={trusted ? 'bad' : 'neutral'}>{trusted ? 'Fail' : 'Unverified'}</Badge> <Mono>{key}</Mono>
         </Row>
       ))}
     </>
@@ -695,8 +655,9 @@ export function UnlockStatus() {
       const list = approvedEntries(entries);
       return {
         kind: 'ready',
-        // Under the key the log names. That key is only trusted if its token passes.
-        verdict: await checkReleaseLog(log, examId, log.instancePublicKey),
+        // The log's own key is only used once `release-token.jwt` attests it. Until then there is no
+        // key to check under, so the signature shows "Not checked" and never a pass.
+        verdict: await checkReleaseLog(log, examId, token?.verified ? log.instancePublicKey : null),
         token,
         progress: list
           ? releaseProgress(
@@ -765,15 +726,22 @@ export function UnlockStatus() {
               </Rows>
             );
           }
+          const trusted = result.token?.verified === true;
           return (
             <>
+              {trusted ? null : (
+                <p>
+                  <Badge tone="warn">Unverified</Badge> Until that token passes, nothing says which TEE signed this
+                  log, so its release list is not evidence.
+                </p>
+              )}
               <Rows>
                 <LogRows
                   verdict={result.verdict}
                   signatureLabel="Signed by the key the log names"
                   signatureAbsent="Not checked"
                 />
-                {result.progress && <ProgressRows progress={result.progress} />}
+                {result.progress && <ProgressRows progress={result.progress} trusted={trusted} />}
               </Rows>
               <Rows>
                 <Row label="release-token.jwt attests the key that signed the log">
@@ -791,9 +759,6 @@ export function UnlockStatus() {
                   )}
                 </Row>
               </Rows>
-              {!result.token?.verified && (
-                <p>Until that token passes, nothing says which TEE signed this log, so its release list is not evidence.</p>
-              )}
             </>
           );
         }}
@@ -803,22 +768,32 @@ export function UnlockStatus() {
         hasTee={tee !== null}
         notConnected={`Also needs the chain settings. ${setChain}`}
         load={live}
+        pollMs={LIVE_RELEASE_POLL_MS}
       >
         {(result) =>
           result.kind === 'neutral' ? (
             <NeutralNote>{result.message}</NeutralNote>
           ) : (
             <>
+              {result.fresh.trusted ? null : (
+                <p>
+                  <Badge tone="warn">Unverified</Badge> The TEE failed attestation, so what it reports here is not
+                  evidence. See Attestation.
+                </p>
+              )}
               <Rows>
                 <Row label="TEE attestation passes, so its answers can be trusted">
                   <Badge tone={result.fresh.trusted ? 'ok' : 'bad'}>{result.fresh.trusted ? 'Pass' : 'Fail'}</Badge>
                 </Row>
-                <Row label="Stage">{result.stage}</Row>
+                <Row label="Stage">
+                  {result.stage}
+                  {result.fresh.trusted ? '' : ' (not verified)'}
+                </Row>
                 {result.progress ? (
-                  <ProgressRows progress={result.progress} />
+                  <ProgressRows progress={result.progress} trusted={result.fresh.trusted} />
                 ) : (
                   <Row label="Holders released">
-                    {result.released} of {result.required} needed
+                    {result.released} of {result.required} needed{result.fresh.trusted ? '' : ' (not verified)'}
                   </Row>
                 )}
                 {result.log ? (
@@ -833,9 +808,6 @@ export function UnlockStatus() {
                   </Row>
                 )}
               </Rows>
-              {!result.fresh.trusted && (
-                <p>The TEE failed attestation, so what it reports here is not evidence. See Attestation.</p>
-              )}
             </>
           )
         }

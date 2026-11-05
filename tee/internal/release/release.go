@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 
@@ -38,7 +39,13 @@ var (
 	ErrReleased   = errors.New("release: K_priv is already rebuilt")
 	ErrBadRelease = errors.New("release: the release message is invalid")
 	ErrBadShare   = errors.New("release: the share does not match its published hash")
+	ErrStale      = errors.New("release: the relay's newest round is before the unlock round")
 )
+
+// missTTL is how long "this round is not published" is believed. Published
+// rounds are cached for good by the beacon, so only the misses need this, and
+// without it every request would cost a drand call.
+const missTTL = time.Second
 
 // Holder is a key holder and the hash of the share published for them.
 type Holder struct {
@@ -74,12 +81,26 @@ type Collector struct {
 	store      storage.Store
 	challenges *challenge.Store
 	tokens     attestation.TokenSource
+	now        func() time.Time
 
-	mu        sync.Mutex
-	entries   []Entry
-	shares    map[string][]byte // passkey -> share, until K_priv is rebuilt
-	kPriv     []byte            // Held only until it is delivered.
-	delivered bool
+	// mu serialises accepting a release and delivering K_priv. It is never held
+	// across a beacon call or a signature check. Cheap checks and Progress use
+	// pm instead, so a slow delivery doesn't hold them up.
+	mu       sync.Mutex
+	entries  []Entry
+	shares   map[string][]byte // passkey -> share, until K_priv is rebuilt
+	kPriv    []byte            // Held only until the delivery is prepared.
+	files    []outFile         // The prepared delivery, kept so a retry uploads the same bytes.
+	uploaded int               // How many of files are stored.
+
+	pm       sync.RWMutex
+	released [][]byte // Passkeys of accepted releases, in order.
+	closed   bool     // The threshold was reached, delivered or not, or the collector was wiped.
+	done     bool     // K_priv was delivered.
+
+	cacheMu    sync.Mutex
+	unlockMiss time.Time // When the unlock round was last seen unpublished.
+	endMiss    time.Time // When the end round was last seen unpublished.
 }
 
 // Deps are the Collector's collaborators.
@@ -92,13 +113,20 @@ type Deps struct {
 	Challenges *challenge.Store
 	// Tokens makes the PKI token of this instance, written as release-token.jwt.
 	Tokens attestation.TokenSource
+	// Now only times the cache of unpublished rounds. A nil Now uses the system
+	// clock. drand decides every round.
+	Now func() time.Time
 }
 
 // New returns a Collector.
 func New(f Facts, d Deps) *Collector {
+	now := d.Now
+	if now == nil {
+		now = time.Now
+	}
 	return &Collector{
 		facts: f, opener: d.Opener, signer: d.Signer, beacon: d.Beacon, sealer: d.Sealer,
-		store: d.Store, challenges: d.Challenges, tokens: d.Tokens, shares: map[string][]byte{},
+		store: d.Store, challenges: d.Challenges, tokens: d.Tokens, now: now, shares: map[string][]byte{},
 	}
 }
 
@@ -115,67 +143,136 @@ type Progress struct {
 	Required int
 }
 
-// Challenge returns a fresh release challenge.
-func (c *Collector) Challenge() ([]byte, error) { return c.challenges.Issue() }
+// published asks whether a round is published. A published round is final, and
+// the beacon remembers it. A miss is remembered here for missTTL. No lock is
+// held while the beacon is called.
+func (c *Collector) published(ctx context.Context, round uint64, miss *time.Time) (bool, error) {
+	c.cacheMu.Lock()
+	last := *miss
+	c.cacheMu.Unlock()
+	if !last.IsZero() && c.now().Sub(last) < missTTL {
+		return false, nil
+	}
+	_, err := c.beacon.Randomness(ctx, round)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, timelock.ErrNotPublished):
+		c.cacheMu.Lock()
+		*miss = c.now()
+		c.cacheMu.Unlock()
+		return false, nil
+	}
+	return false, err
+}
 
-// Progress reports who has released.
+// checkRounds is ErrTooEarly before the unlock round is published, and
+// ErrTooLate once the end round is.
+func (c *Collector) checkRounds(ctx context.Context) error {
+	ok, err := c.published(ctx, c.facts.UnlockRound, &c.unlockMiss)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrTooEarly
+	}
+	late, err := c.published(ctx, c.facts.EndRound, &c.endMiss)
+	if err != nil {
+		return err
+	}
+	if late {
+		return ErrTooLate
+	}
+	return nil
+}
+
+// Challenge returns a fresh release challenge. None is issued until the unlock
+// round is published, because no release is accepted before then.
+func (c *Collector) Challenge(ctx context.Context) ([]byte, error) {
+	ok, err := c.published(ctx, c.facts.UnlockRound, &c.unlockMiss)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, ErrTooEarly
+	}
+	return c.challenges.Issue()
+}
+
+// Progress reports who has released. It doesn't wait for a delivery in progress.
 func (c *Collector) Progress() Progress {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.pm.RLock()
+	defer c.pm.RUnlock()
 	p := Progress{Required: spec.C.Threshold.Required, Released: [][]byte{}}
-	for _, e := range c.entries {
-		p.Released = append(p.Released, bytes.Clone(e.PasskeyPublicKey))
+	for _, k := range c.released {
+		p.Released = append(p.Released, bytes.Clone(k))
 	}
 	return p
 }
 
 // Done reports whether K_priv was rebuilt and delivered.
 func (c *Collector) Done() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.delivered
+	c.pm.RLock()
+	defer c.pm.RUnlock()
+	return c.done
+}
+
+// cheap is the part of Submit that needs no network and no cryptography beyond
+// a MAC, so a flood of bad requests costs little.
+func (c *Collector) cheap(passkey []byte) (Holder, error) {
+	c.pm.RLock()
+	defer c.pm.RUnlock()
+	if c.closed {
+		return Holder{}, ErrReleased
+	}
+	holder, ok := c.holder(passkey)
+	if !ok {
+		return Holder{}, ErrNotHolder
+	}
+	for _, k := range c.released {
+		if bytes.Equal(k, passkey) {
+			return Holder{}, ErrDuplicate
+		}
+	}
+	return holder, nil
+}
+
+func wipe(bs ...[]byte) {
+	for _, b := range bs {
+		clear(b)
+	}
 }
 
 // Submit checks one holder's release and, at the threshold, rebuilds K_priv
 // and delivers it. A failed delivery leaves it pending for Step to retry.
+//
+// The cheap checks come first: holder, duplicate and the challenge's MAC. Then
+// the rounds, then decryption and signatures. None of that holds mu, which is
+// taken last, to re-check and to record the release. The challenge is spent
+// only once the signature and the share hash have passed, so a request that
+// can't produce them can't use up room for others.
 func (c *Collector) Submit(ctx context.Context, passkey, challengeBytes, sealed []byte) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.kPriv != nil || c.delivered {
-		return ErrReleased
-	}
-	// The round is published, as drand says and as verified against its key.
-	if _, err := c.beacon.Randomness(ctx, c.facts.UnlockRound); err != nil {
-		if errors.Is(err, timelock.ErrNotPublished) {
-			return ErrTooEarly
-		}
+	holder, err := c.cheap(passkey)
+	if err != nil {
 		return err
 	}
-	if _, err := c.beacon.Randomness(ctx, c.facts.EndRound); err == nil {
-		return ErrTooLate
-	} else if !errors.Is(err, timelock.ErrNotPublished) {
-		return err
-	}
-	holder, ok := c.holder(passkey)
-	if !ok {
-		return ErrNotHolder
-	}
-	for _, e := range c.entries {
-		if bytes.Equal(e.PasskeyPublicKey, passkey) {
-			return ErrDuplicate
-		}
-	}
-	if err := c.challenges.Consume(challengeBytes); err != nil {
+	if err := c.challenges.Check(challengeBytes); err != nil {
 		return fmt.Errorf("%w: %v", ErrBadRelease, err)
+	}
+	// The rounds are published, as drand says and as verified against its key.
+	if err := c.checkRounds(ctx); err != nil {
+		return err
 	}
 	plain, err := c.opener.Open(encryption.PurposeRelease, sealed)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrBadRelease, err)
 	}
+	defer wipe(plain)
 	share, assertion, err := DecodeRelease(plain)
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrBadRelease, err)
 	}
+	defer wipe(share)
 	msg, err := hashing.ShareRelease(c.facts.ExamID, challengeBytes)
 	if err != nil {
 		return err
@@ -194,28 +291,73 @@ func (c *Collector) Submit(ctx context.Context, passkey, challengeBytes, sealed 
 	if err != nil {
 		return err
 	}
+	// The log records the round the release was accepted in, so a relay's stale
+	// answer can't put an earlier one on it.
+	if round < c.facts.UnlockRound {
+		return fmt.Errorf("%w: %d < %d", ErrStale, round, c.facts.UnlockRound)
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// Another request may have got here first.
+	if _, err := c.cheap(passkey); err != nil {
+		return err
+	}
+	if err := c.challenges.Consume(challengeBytes); err != nil {
+		if errors.Is(err, challenge.ErrBusy) {
+			return err
+		}
+		return fmt.Errorf("%w: %v", ErrBadRelease, err)
+	}
 	c.entries = append(c.entries, Entry{bytes.Clone(passkey), holder.ShareHash, round})
 	c.shares[string(passkey)] = bytes.Clone(share)
-
-	if len(c.entries) < spec.C.Threshold.Required {
+	c.pm.Lock()
+	c.released = append(c.released, bytes.Clone(passkey))
+	reached := len(c.entries) >= spec.C.Threshold.Required
+	if reached {
+		c.closed = true
+	}
+	c.pm.Unlock()
+	if !reached {
 		return nil
 	}
-	var all [][]byte
+	all := make([][]byte, 0, len(c.entries))
 	for _, e := range c.entries {
 		all = append(all, c.shares[string(e.PasskeyPublicKey)])
 	}
 	kPriv, err := split.CombineShares(all)
+	for _, sh := range c.shares {
+		wipe(sh)
+	}
+	c.shares = map[string][]byte{}
 	if err != nil {
 		return err
 	}
 	c.kPriv = kPriv
-	c.shares = map[string][]byte{}
 	// A failure here is not the holder's: the share is accepted, and Step
 	// retries the delivery.
 	_ = c.deliver(ctx)
 	return nil
 }
 
+// Wipe zeroes K_priv and every held share and refuses all further releases. The
+// lifecycle calls it when the instance fails for good, so nothing secret
+// outlives the failure.
+func (c *Collector) Wipe() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	wipe(c.kPriv)
+	c.kPriv = nil
+	for _, sh := range c.shares {
+		wipe(sh)
+	}
+	c.shares = map[string][]byte{}
+	c.pm.Lock()
+	c.closed = true
+	c.pm.Unlock()
+}
+
+// holder is read-only on facts, which never change.
 func (c *Collector) holder(passkey []byte) (Holder, bool) {
 	for _, h := range c.facts.Holders {
 		if bytes.Equal(h.PasskeyPublicKey, passkey) {
@@ -229,35 +371,28 @@ func (c *Collector) holder(passkey []byte) (Holder, bool) {
 func (c *Collector) Step(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.kPriv == nil {
+	if c.kPriv == nil && c.files == nil {
 		return nil
 	}
 	return c.deliver(ctx)
 }
 
-// deliver publishes K_priv encrypted to each centre, K_priv timelocked to the
-// end round, this instance's token and the signed log. The log goes last, so it never covers files
-// that aren't there. mu is held.
-func (c *Collector) deliver(ctx context.Context) error {
+// outFile is one file of the delivery, ready to upload.
+type outFile struct {
+	name string
+	data []byte
+}
+
+// prepare makes every file of the delivery once: K_priv encrypted to each
+// centre, K_priv timelocked to the end round, this instance's token and the
+// signed log. The log goes last, so it never covers files that aren't there.
+// Storage is create-only, and encryption, timelocks and signatures are random,
+// so a retry must upload these same bytes and not make new ones. Once they are
+// made K_priv is no longer needed and is wiped. mu is held.
+func (c *Collector) prepare(ctx context.Context) error {
 	prefix := storage.Prefix(c.facts.ExamID)
-	for _, derived := range c.facts.Centres {
-		framed, err := encryption.Seal(encryption.PurposeKeyPriv, derived, c.facts.ExamID, c.kPriv)
-		if err != nil {
-			return err
-		}
-		if err := c.store.Put(ctx, prefix+"key-priv/"+storage.Hex(derived)+".bin", framed); err != nil {
-			return err
-		}
-	}
-	locked, err := c.sealer.Seal(ctx, c.facts.EndRound, c.kPriv)
-	if err != nil {
-		return err
-	}
-	if err := c.store.Put(ctx, prefix+"key-priv.tlock", locked); err != nil {
-		return err
-	}
-	// Unlock may run on another instance than Build, so the log names its signer
-	// and this token attests that key.
+	// The token comes first. If this instance can't make one, nothing has been
+	// made or written, so a failed delivery leaves no key-priv files behind.
 	nonce, err := attestation.Nonce(c.signer.PublicKey(), c.facts.ExamID)
 	if err != nil {
 		return err
@@ -266,21 +401,54 @@ func (c *Collector) deliver(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := c.store.Put(ctx, prefix+"release-token.jwt", []byte(tok.Raw)); err != nil {
+	var files []outFile
+	for _, derived := range c.facts.Centres {
+		framed, err := encryption.Seal(encryption.PurposeKeyPriv, derived, c.facts.ExamID, c.kPriv)
+		if err != nil {
+			return err
+		}
+		files = append(files, outFile{prefix + "key-priv/" + storage.Hex(derived) + ".bin", framed})
+	}
+	locked, err := c.sealer.Seal(ctx, c.facts.EndRound, c.kPriv)
+	if err != nil {
 		return err
 	}
+	// Unlock may run on another instance than Build, so the log names its signer
+	// and this token attests that key.
 	body, err := c.logLocked()
 	if err != nil {
 		return err
 	}
-	if err := c.store.Put(ctx, prefix+"release-log.json", body.JSON); err != nil {
-		return err
-	}
-	for i := range c.kPriv {
-		c.kPriv[i] = 0
-	}
+	c.files = append(files,
+		outFile{prefix + "key-priv.tlock", locked},
+		outFile{prefix + "release-token.jwt", []byte(tok.Raw)},
+		outFile{prefix + "release-log.json", body.JSON},
+	)
+	wipe(c.kPriv)
 	c.kPriv = nil
-	c.delivered = true
+	return nil
+}
+
+// deliver uploads the files, preparing them first if need be. mu is held.
+func (c *Collector) deliver(ctx context.Context) error {
+	if c.files == nil {
+		if err := c.prepare(ctx); err != nil {
+			return err
+		}
+	}
+	// These are the unlock files, which a new instance may have to write over
+	// after an instance that stopped part way: Replace, not Put.
+	for c.uploaded < len(c.files) {
+		f := c.files[c.uploaded]
+		if err := c.store.Replace(ctx, f.name, f.data); err != nil {
+			return err
+		}
+		c.uploaded++
+	}
+	c.files = nil
+	c.pm.Lock()
+	c.done = true
+	c.pm.Unlock()
 	return nil
 }
 

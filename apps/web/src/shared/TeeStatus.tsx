@@ -4,9 +4,12 @@ import { fromTee, notConnectedToTee } from './tee';
 
 const loadStatus = fromTee((tee) => tee.status());
 
+/** How often the TEE's stage and release count are read again. */
+export const TEE_STATUS_POLL_MS = 5000;
+
 export function TeeStatus() {
   return (
-    <Connected title="TEE" notConnected={notConnectedToTee} load={loadStatus}>
+    <Connected title="TEE" notConnected={notConnectedToTee} load={loadStatus} pollMs={TEE_STATUS_POLL_MS}>
       {(status) => (
         <Rows>
           <Row label="Stage">{status.stage}</Row>

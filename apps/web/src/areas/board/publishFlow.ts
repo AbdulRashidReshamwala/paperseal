@@ -1,4 +1,4 @@
-import { createExamRegistry, examRegistryAbi, type ExamRegistry } from '@paperseal/chain';
+import { createExamRegistry, examRegistryAbi, OnChainBytesError, type ExamRegistry } from '@paperseal/chain';
 import { chain, decodeCriteria, fromHex, type Criteria, type Hex } from '@paperseal/protocol';
 import {
   BaseError,
@@ -102,19 +102,27 @@ export async function readBack(
 ): Promise<Pick<PublishOutcome, 'rows' | 'matches' | 'criteria'>> {
   let exam = null;
   let criteriaHex: Hex | null = null;
+  let criteriaMismatch = false;
   // An RPC node can briefly lag the node that mined the block.
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     exam = await registry.getExam(request.examId);
-    criteriaHex = exam ? await registry.getCriteria(request.examId) : null;
-    if (exam && criteriaHex) break;
+    try {
+      criteriaHex = exam ? await registry.getCriteria(request.examId) : null;
+    } catch (error) {
+      // `missing`: the event isn't visible yet. `mismatch`: the bytes don't hash to what was stored.
+      if (!(error instanceof OnChainBytesError)) throw error;
+      criteriaMismatch = error.kind === 'mismatch';
+    }
+    if (exam && (criteriaHex || criteriaMismatch)) break;
     await wait(1000);
   }
-  if (!exam || !criteriaHex) {
+  if (!exam || (!criteriaHex && !criteriaMismatch)) {
     throw new Error('The transaction was mined, but ExamRegistry does not return the exam yet. Reload and check the overview.');
   }
   const expected = settingsArgs(request);
   const { settings } = exam;
   const criteria = ((): Criteria | null => {
+    if (!criteriaHex) return null;
     try {
       return decodeCriteria(fromHex(criteriaHex));
     } catch {
@@ -138,7 +146,9 @@ export async function readBack(
     row('End round', String(expected.endRound), String(settings.endRound)),
     row('RPC operator host', expected.rpcHost, settings.rpcHost),
     row('Criteria hash', lower(expected.criteriaHash), lower(settings.criteriaHash)),
-    row('Criteria bytes', lower(request.criteria.encoded), lower(criteriaHex), lower(request.criteria.encoded) === lower(criteriaHex)),
+    criteriaHex
+      ? row('Criteria bytes', lower(request.criteria.encoded), lower(criteriaHex))
+      : row('Criteria bytes', lower(request.criteria.encoded), 'bytes that do not hash to the criteria hash'),
   ];
   return { rows, matches: rows.every((r) => r.match) && criteria !== null, criteria };
 }

@@ -16,26 +16,54 @@ import { hpkeOpen, hpkeSeal, type HpkeOptions } from './hpke';
 
 /*
  * The Encryption table in spec/api.md, one helper per purpose. `info` comes from
- * `crypto.hpke.info` and `aad` is `examId`, so no caller picks either.
+ * `crypto.hpke.info` and `aad` from the examId (and, for `question`, the passkey), so no caller picks either.
  */
 
 export type HpkePurpose = keyof typeof specCrypto.hpke.info;
 
 const EXAM_ID_BYTES = 32;
 
-/** The HPKE `info` and `aad` for a purpose and exam. */
-export function hpkeContext(purpose: HpkePurpose, examId: Uint8Array): HpkeOptions {
+const PUBLIC_KEY_BYTES = 65;
+
+/**
+ * The HPKE `info` and `aad` for a purpose and exam. `aad` is `examId`, except for `question`, where
+ * it is `examId || passkeyPublicKey`, so one setter can't resubmit another's ciphertext. The
+ * setter's passkey public key is required for `question` and refused for every other purpose.
+ */
+export function hpkeContext(purpose: 'question', examId: Uint8Array, passkeyPublicKey: Uint8Array): HpkeOptions;
+export function hpkeContext(purpose: Exclude<HpkePurpose, 'question'>, examId: Uint8Array): HpkeOptions;
+export function hpkeContext(purpose: HpkePurpose, examId: Uint8Array, passkeyPublicKey?: Uint8Array): HpkeOptions;
+export function hpkeContext(purpose: HpkePurpose, examId: Uint8Array, passkeyPublicKey?: Uint8Array): HpkeOptions {
   if (examId.length !== EXAM_ID_BYTES) throw new RangeError('examId must be 32 bytes');
-  return { info: utf8ToBytes(specCrypto.hpke.info[purpose]), aad: examId.slice() };
+  const info = utf8ToBytes(specCrypto.hpke.info[purpose]);
+  if (purpose !== 'question') {
+    if (passkeyPublicKey !== undefined) throw new TypeError(`${purpose} aad is examId alone`);
+    return { info, aad: examId.slice() };
+  }
+  if (passkeyPublicKey?.length !== PUBLIC_KEY_BYTES || passkeyPublicKey[0] !== 0x04) {
+    throw new RangeError('question aad needs the setter passkey public key, a 65-byte uncompressed point');
+  }
+  const aad = new Uint8Array(EXAM_ID_BYTES + PUBLIC_KEY_BYTES);
+  aad.set(examId, 0);
+  aad.set(passkeyPublicKey, EXAM_ID_BYTES);
+  return { info, aad };
 }
 
-/** `question`, setter app to the TEE: the question JSON padded to `padding.questionBytes`. */
+/**
+ * `question`, setter app to the TEE: the question JSON padded to `padding.questionBytes`. The `aad`
+ * binds the setter's passkey public key.
+ */
 export function sealQuestion(
   encryptionPublicKey: Uint8Array,
   examId: Uint8Array,
+  passkeyPublicKey: Uint8Array,
   question: Question,
 ): Promise<Uint8Array> {
-  return hpkeSeal(encryptionPublicKey, padQuestion(encodeQuestion(question)), hpkeContext('question', examId));
+  return hpkeSeal(
+    encryptionPublicKey,
+    padQuestion(encodeQuestion(question)),
+    hpkeContext('question', examId, passkeyPublicKey),
+  );
 }
 
 /** `release`, key holder app to the TEE: `abi.encode(share, signature, authenticatorData, clientDataJSON)`. */

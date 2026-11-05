@@ -94,12 +94,6 @@ The README leaves these open. They are defaults for the build and can change.
 - Where are published artefacts found? The verifier needs a PKI token per instance key, and the TEE keeps no state to serve them later. The default is to list them in a storage manifest.
 - Which RPC operator does the exam use, and how is its API key handled? Attested settings are public, so a key in `rpcHost` or the startup arguments would be exposed.
 
-## Spec Gaps
-
-- Expected `env` in a real Google token
-- Where startup arguments appear in a real Google token
-- Size limits for the ABI decoders
-
 ## Not Set Up Yet
 
 - CI for tests. `.github/workflows/repro.yml` covers the image rebuild only

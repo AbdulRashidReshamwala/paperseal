@@ -1,4 +1,6 @@
-import { attestationNonce, startupArgs, type ExamSettings, type Hex } from '@paperseal/protocol';
+import { readFileSync } from 'node:fs';
+
+import { attestationNonce, fromHex, startupArgs, type ExamSettings, type Hex } from '@paperseal/protocol';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -41,8 +43,7 @@ const expected: ExpectedClaims = {
   approvedHwModels: ['GCP_AMD_SEV', 'GCP_INTEL_TDX'],
   settings,
   registry,
-  cmdOverride: ['--exam-id=1'],
-  env: { MODE: 'prod' },
+  storageBucket: 'bucket-1',
 };
 
 const live: CheckOptions = { mode: 'live', now };
@@ -64,9 +65,10 @@ function goodClaims(): Record<string, unknown> {
       },
       container: {
         image_digest: `sha256:${'ab'.repeat(32)}`,
-        args: startupArgs(settings),
-        cmd_override: ['--exam-id=1'],
-        env: { MODE: 'prod' },
+        args: ['/tee', ...startupArgs(settings)],
+        cmd_override: startupArgs(settings),
+        env: { PATH: '/bin', STORAGE_BUCKET: 'bucket-1' },
+        env_override: { STORAGE_BUCKET: 'bucket-1' },
       },
     },
   };
@@ -110,8 +112,9 @@ describe('checkClaims', () => {
       (c) => (c.submods.container.image_digest = `sha256:${'cd'.repeat(32)}`),
     ],
     ['wrong override', 'cmd_override', (c) => (c.submods.container.cmd_override = [])],
-    ['changed env', 'env', (c) => (c.submods.container.env = { MODE: 'dev' })],
-    ['extra env', 'env', (c) => (c.submods.container.env.EXTRA = '1')],
+    ['changed env_override', 'env_override', (c) => (c.submods.container.env_override = { STORAGE_BUCKET: 'other' })],
+    ['extra env_override', 'env_override', (c) => (c.submods.container.env_override.EXTRA = '1')],
+    ['missing entrypoint in args', 'args', (c) => c.submods.container.args.shift()],
     ['wrong nonce', 'eat_nonce', (c) => (c.eat_nonce = 'ff'.repeat(32))],
     ['several nonces', 'eat_nonce', (c) => (c.eat_nonce = [c.eat_nonce, 'other'])],
   ];
@@ -123,7 +126,7 @@ describe('checkClaims', () => {
   it.each(
     claimNames.filter(
       (name) =>
-        !['support_attributes', 'image_digest', 'args', 'cmd_override', 'env'].includes(name),
+        !['support_attributes', 'image_digest', 'args', 'cmd_override', 'env_override'].includes(name),
     ),
   )('fails when %s is missing', (claim) => {
     expect(
@@ -140,7 +143,7 @@ describe('checkClaims', () => {
       'image_digest',
       'args',
       'cmd_override',
-      'env',
+      'env_override',
     ]);
   });
 
@@ -181,7 +184,7 @@ describe('args', () => {
   const argsCheck = (exp: ExpectedClaims) =>
     checkClaims(goodClaims(), exp, live).filter((c) => c.claim === 'args')[0] as ClaimCheck;
 
-  it('passes when the token args equal startupArgs(settings)', () => {
+  it('passes when the token args are /tee then startupArgs(settings)', () => {
     expect(argsCheck(expected).ok).toBe(true);
   });
 
@@ -212,5 +215,80 @@ describe('token', () => {
 
   it.each(['', 'a.b', 'a.!!!.c', `a.${encode([1])}.c`])('rejects malformed token %j', (token) => {
     expect(() => decodeToken(token)).toThrow(MalformedTokenError);
+  });
+});
+
+describe('real Confidential Space token claims', () => {
+  const real = JSON.parse(
+    readFileSync(new URL('../../../spec/fixtures/confidential-space-claims.json', import.meta.url), 'utf8'),
+  ) as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+  const fromOverride = (override: string[]): ExamSettings => {
+    const arg = (name: string) => (override.find((a) => a.startsWith(`--${name}=`)) ?? '').split('=').slice(1).join('=');
+    return {
+      examId: arg('exam-id') as Hex,
+      examStart: Number(arg('exam-start')),
+      delta: Number(arg('delta')),
+      lockRound: arg('lock-round'),
+      unlockRound: arg('unlock-round'),
+      endRound: arg('end-round'),
+      criteriaHash: arg('criteria-hash') as Hex,
+      rpcHost: arg('rpc-host'),
+      registry: arg('registry') as Hex,
+      chainId: Number(arg('chain-id')),
+    };
+  };
+
+  const realSettings = fromOverride(real.submods.container.cmd_override as string[]);
+  const realExpected: ExpectedClaims = {
+    instancePublicKey: new Uint8Array(65).fill(4),
+    encryptionPublicKey: new Uint8Array(),
+    instanceKeySignature: new Uint8Array(),
+    examId: fromHex(realSettings.examId),
+    imageDigest: `0x${(real.submods.container.image_digest as string).slice('sha256:'.length)}` as Hex,
+    approvedHwModels: ['GCP_AMD_SEV'],
+    settings: realSettings,
+    registry: realSettings.registry,
+    storageBucket: 'paperseal-demo-paperseal-exams',
+  };
+  const published: CheckOptions = { mode: 'published', now: real.iat as number };
+
+  // The fixture's nonce belongs to a key that is not in the fixture, so it is not under test here.
+  const failures = (claims: Record<string, unknown>, expectedClaims = realExpected) =>
+    checkClaims(claims, expectedClaims, published)
+      .filter((c) => !c.ok && c.claim !== 'eat_nonce')
+      .map((c) => c.claim);
+  const copy = () => structuredClone(real);
+
+  it('passes with expected values built from the token own cmd_override', () => {
+    expect(failures(copy())).toEqual([]);
+  });
+
+  it('fails when one startup argument is changed', () => {
+    const claims = copy();
+    claims.submods.container.cmd_override[2] = '--delta=601';
+    claims.submods.container.args[3] = '--delta=601';
+    expect(failures(claims)).toEqual(['args', 'cmd_override']);
+    const onlyArgs = copy();
+    onlyArgs.submods.container.args[3] = '--delta=601';
+    expect(failures(onlyArgs)).toEqual(['args']);
+  });
+
+  it('fails when env_override has an extra key', () => {
+    const claims = copy();
+    claims.submods.container.env_override.EXTRA = '1';
+    expect(failures(claims)).toEqual(['env_override']);
+  });
+
+  it('ignores env, which holds base image variables', () => {
+    const claims = copy();
+    claims.submods.container.env.EXTRA = '1';
+    expect(failures(claims)).toEqual([]);
+  });
+
+  it('fails when dbgstat is not disabled-since-boot', () => {
+    const claims = copy();
+    claims.dbgstat = 'enabled';
+    expect(failures(claims)).toEqual(['dbgstat']);
   });
 });

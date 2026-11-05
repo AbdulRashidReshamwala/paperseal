@@ -94,33 +94,84 @@ func TestSealOpenRoundTripAndBinding(t *testing.T) {
 	}
 	var exam, other [32]byte
 	exam[0], other[0] = 1, 2
-	framed, err := Seal(PurposeQuestion, key.PublicKey(), exam, []byte("hello"))
+	framed, err := Seal(PurposeShare, key.PublicKey(), exam, []byte("hello"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(framed) != 65+5+16 {
 		t.Fatalf("framed length %d", len(framed))
 	}
-	got, err := key.Open(PurposeQuestion, exam, framed)
+	got, err := key.Open(PurposeShare, exam, framed)
 	if err != nil || string(got) != "hello" {
 		t.Fatalf("open: %q %v", got, err)
 	}
-	if _, err := key.Open(PurposeShare, exam, framed); !errors.Is(err, ErrOpen) {
+	if _, err := key.Open(PurposeRelease, exam, framed); !errors.Is(err, ErrOpen) {
 		t.Error("opened under another purpose")
 	}
-	if _, err := key.Open(PurposeQuestion, other, framed); !errors.Is(err, ErrOpen) {
+	if _, err := key.Open(PurposeShare, other, framed); !errors.Is(err, ErrOpen) {
 		t.Error("opened under another exam")
 	}
 	framed[len(framed)-1] ^= 1
-	if _, err := key.Open(PurposeQuestion, exam, framed); !errors.Is(err, ErrOpen) {
+	if _, err := key.Open(PurposeShare, exam, framed); !errors.Is(err, ErrOpen) {
 		t.Error("opened a tampered message")
 	}
-	if _, err := key.Open(PurposeQuestion, exam, framed[:10]); !errors.Is(err, ErrOpen) {
+	if _, err := key.Open(PurposeShare, exam, framed[:10]); !errors.Is(err, ErrOpen) {
 		t.Error("opened a short message")
 	}
-	if _, err := Seal(PurposeQuestion, []byte{1, 2, 3}, exam, nil); err == nil {
+	if _, err := Seal(PurposeShare, []byte{1, 2, 3}, exam, nil); err == nil {
 		t.Error("sealed to a bad key")
 	}
+}
+
+// A question's aad is examId || passkeyPublicKey, so a ciphertext only opens
+// for the setter who sent it.
+func TestQuestionAADBindsTheSetter(t *testing.T) {
+	key, err := GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var exam, other [32]byte
+	exam[0], other[0] = 1, 2
+	asha, ben := testKey(t, 1), testKey(t, 2)
+	framed, err := SealQuestion(key.PublicKey(), exam, asha, []byte("q"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := key.OpenQuestion(exam, asha, framed); err != nil || string(got) != "q" {
+		t.Fatalf("open: %q %v", got, err)
+	}
+	if _, err := key.OpenQuestion(exam, ben, framed); !errors.Is(err, ErrOpen) {
+		t.Error("another setter's passkey opened it")
+	}
+	if _, err := key.OpenQuestion(other, asha, framed); !errors.Is(err, ErrOpen) {
+		t.Error("opened under another exam")
+	}
+	// The aad is not examId alone, which is what the question used to carry.
+	if _, err := key.openAAD(PurposeQuestion, exam[:], framed); !errors.Is(err, ErrOpen) {
+		t.Error("opened with examId as the aad")
+	}
+	if want := append(exam[:], asha...); !bytes.Equal(QuestionAAD(exam, asha), want) {
+		t.Error("aad is not examId || passkeyPublicKey")
+	}
+	// The generic calls refuse a question rather than use the wrong aad.
+	if _, err := Seal(PurposeQuestion, key.PublicKey(), exam, nil); !errors.Is(err, ErrQuestionAAD) {
+		t.Errorf("Seal(question): %v", err)
+	}
+	if _, err := key.Open(PurposeQuestion, exam, framed); !errors.Is(err, ErrQuestionAAD) {
+		t.Errorf("Open(question): %v", err)
+	}
+	if _, err := SealQuestion(key.PublicKey(), exam, []byte{1}, nil); err == nil {
+		t.Error("sealed with a bad passkey")
+	}
+}
+
+func testKey(t *testing.T, n byte) []byte {
+	t.Helper()
+	k, err := DeriveKey(bytes.Repeat([]byte{n}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return k.PublicKey()
 }
 
 func TestAESRoundTrip(t *testing.T) {

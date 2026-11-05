@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"math/big"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -95,6 +96,9 @@ func (p *PKI) Token(t *testing.T, header, claims map[string]any) string {
 	return signed + "." + b64(sig)
 }
 
+// Bucket is the STORAGE_BUCKET in GoodClaims.
+const Bucket = "b"
+
 func TestExam(t *testing.T) settings.Exam {
 	t.Helper()
 	e, err := settings.Parse([]string{
@@ -121,7 +125,8 @@ func GoodClaims(t *testing.T, e settings.Exam, nonce string, digest [32]byte, ia
 			"container": map[string]any{
 				"image_digest": "sha256:" + hex.EncodeToString(digest[:]),
 				"args":         append([]string{"/tee"}, e.Args()...),
-				"env":          map[string]string{"STORAGE_BUCKET": "b"},
+				"cmd_override": e.Args(),
+				"env_override": map[string]string{"STORAGE_BUCKET": Bucket},
 			},
 		},
 	}
@@ -143,12 +148,25 @@ type Source struct {
 	ImageDigest [32]byte
 	// Unattested makes Token fail the way a missing launcher socket does.
 	Unattested bool
+
+	mu        sync.Mutex
+	requested []attestation.TokenType
+}
+
+// Requested returns the token types asked for so far, in order.
+func (s *Source) Requested() []attestation.TokenType {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]attestation.TokenType(nil), s.requested...)
 }
 
 var _ attestation.TokenSource = (*Source)(nil)
 
 // Token implements attestation.TokenSource.
 func (s *Source) Token(_ context.Context, tt attestation.TokenType, audience, nonce string) (attestation.Token, error) {
+	s.mu.Lock()
+	s.requested = append(s.requested, tt)
+	s.mu.Unlock()
 	if s.Unattested {
 		return attestation.Token{}, attestation.ErrUnattested
 	}

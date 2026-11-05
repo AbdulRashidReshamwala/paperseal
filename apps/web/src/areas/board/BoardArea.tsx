@@ -1,11 +1,9 @@
-import type { ExamRegistry } from '@paperseal/chain';
+import { OnChainBytesError, type ExamRegistry } from '@paperseal/chain';
 import {
-  approvedListHash,
   decodeApprovedList,
   decodeCriteria,
   fromHex,
   selectedCount,
-  toHex,
   type ApprovedListEntry,
   type Criteria,
   type Hex,
@@ -24,41 +22,50 @@ import { Publish } from './Publish';
 import { Schedule } from './Schedule';
 import type { PublishEnvironment } from './publishFlow';
 
-/** The on-chain list: its hash, and the posted bytes decoded and checked against that hash. */
+/**
+ * The on-chain list: its hash, and the posted bytes decoded. `getApprovedListEntries` hashes the
+ * bytes against `listHash`, so a list whose bytes can't be read or don't match is reported as that,
+ * which is not the same as no list being posted.
+ */
 async function readApprovedList(registry: ExamRegistry, id: Hex) {
   const list = await registry.getApprovedList(id);
   if (!list) return null;
-  const encoded = await registry.getApprovedListEntries(id);
   let entries: ApprovedListEntry[] = [];
   let problem: string | null = null;
-  if (!encoded) {
-    problem = 'The posted entries could not be read from the chain.';
-  } else if (toHex(approvedListHash(fromHex(id), fromHex(encoded))) !== list.listHash.toLowerCase()) {
-    problem = 'The posted entries do not hash to the list hash stored on-chain.';
-  } else {
-    try {
+  try {
+    const encoded = await registry.getApprovedListEntries(id);
+    if (!encoded) {
+      problem = 'The list is posted on-chain, but its entries could not be read.';
+    } else {
       entries = decodeApprovedList(fromHex(encoded));
-    } catch (error) {
-      problem = `The posted entries are malformed: ${(error as Error).message}`;
     }
+  } catch (error) {
+    problem =
+      error instanceof OnChainBytesError
+        ? error.kind === 'missing'
+          ? `The list hash is on-chain, but the list's bytes could not be read from the RPC. This is not an empty list: ${error.message} Try another RPC.`
+          : `The list's bytes read from the RPC do not match the hash on-chain, so they are not shown. ${error.message}`
+        : `The posted entries are malformed: ${(error as Error).message}`;
   }
   return { list, entries, problem };
 }
 
-/** The exam and its full criteria, both from ExamRegistry. */
+/** The exam and its full criteria, both from ExamRegistry. `getCriteria` has checked them against `criteriaHash`. */
 async function readExam(registry: ExamRegistry, id: Hex) {
   const exam = await registry.getExam(id);
   if (!exam) return null;
-  const encoded = await registry.getCriteria(id);
   let criteria: Criteria | null = null;
-  if (encoded) {
-    try {
-      criteria = decodeCriteria(fromHex(encoded));
-    } catch {
-      criteria = null;
-    }
+  let criteriaProblem: string | null = null;
+  try {
+    const encoded = await registry.getCriteria(id);
+    if (encoded) criteria = decodeCriteria(fromHex(encoded));
+  } catch (error) {
+    criteriaProblem =
+      error instanceof OnChainBytesError
+        ? `The criteria could not be shown: ${error.message}`
+        : `The criteria on-chain are malformed: ${(error as Error).message}`;
   }
-  return { exam, criteria };
+  return { exam, criteria, criteriaProblem };
 }
 
 const notConnected =
@@ -93,6 +100,11 @@ function Overview() {
               <Row label="criteriaHash">
                 <Mono>{found.exam.settings.criteriaHash}</Mono>
               </Row>
+              {found.criteriaProblem ? (
+                <Row label="Criteria">
+                  <Badge tone="bad">{found.criteriaProblem}</Badge>
+                </Row>
+              ) : null}
               {found.criteria ? (
                 <>
                   <Row label="Selected">{selectedCount(found.criteria)} questions</Row>

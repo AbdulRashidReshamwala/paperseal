@@ -132,3 +132,50 @@ func TestBuildProducesTheCommittedPaper(t *testing.T) {
 		t.Fatal("seed or key repeated")
 	}
 }
+
+// Lock reasons about the paper's size from the entries, so they must add up to
+// the paper Build writes.
+func TestEntrySizesAddUpToThePaper(t *testing.T) {
+	qs := questions()
+	qs[0].Text = "tab\t quote\" slash\\ line\u2028 \u00e9 <&>"
+	p, err := Build([32]byte{9}, crit, qs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc PaperDoc
+	if err := json.Unmarshal(p.PaperJSON, &doc); err != nil {
+		t.Fatal(err)
+	}
+	var sizes []int
+	for _, q := range doc.Questions {
+		n, err := EntrySize(bank.Question{Topic: q.Topic, Text: q.Text})
+		if err != nil {
+			t.Fatal(err)
+		}
+		sizes = append(sizes, n)
+	}
+	got, err := MaxPaperJSONBytes(sizes)
+	if err != nil || got != len(p.PaperJSON) {
+		t.Fatalf("entries add up to %d, the paper is %d: %v", got, len(p.PaperJSON), err)
+	}
+}
+
+func TestPaperWipeZeroesWhatMustNotOutliveTheBuild(t *testing.T) {
+	p, err := Build([32]byte{9}, crit, questions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	k, doc, enc := p.K, p.PaperJSON, p.EncryptedPaper
+	if bytes.Equal(p.Seed[:], make([]byte, 32)) {
+		t.Fatal("setup: no seed")
+	}
+	p.Wipe()
+	for name, b := range map[string][]byte{"K": k, "seed": p.Seed[:], "paper JSON": doc} {
+		if !bytes.Equal(b, make([]byte, len(b))) {
+			t.Errorf("%s left in memory", name)
+		}
+	}
+	if bytes.Equal(enc, make([]byte, len(enc))) {
+		t.Error("the published encrypted paper was wiped")
+	}
+}

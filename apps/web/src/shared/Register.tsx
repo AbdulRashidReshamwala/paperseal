@@ -1,5 +1,5 @@
 import { createWebAuthnKeys, KeyError, type Keys, type Registration } from '@paperseal/keys';
-import { fromHex, isSetterCommitment, NotImplementedError, toHex, type Hex } from '@paperseal/protocol';
+import { fromHex, NotImplementedError, toHex, type Hex } from '@paperseal/protocol';
 import { TeeApiError, type TeeClient } from '@paperseal/tee-client';
 import { Button, EmptyState, Field, Mono, Panel, Row, Rows, Screen } from '@paperseal/ui';
 import { useState } from 'react';
@@ -9,12 +9,14 @@ import { tee as defaultTee } from './tee';
 
 /*
  * Registration is the same for setters, key holders and centres. A setter registers a passkey
- * only (role 'setter', no PRF key). The README's Hardware Keys section describes the ceremony.
- * `credentialId` is not secret, but a passkey cannot be used without it, so it is kept in this
- * browser's localStorage per exam and role.
+ * only (no PRF key) and has no name: its owner is the `setterOwner` hash of its own passkey public
+ * key, which `keys.register` computes after the passkey exists. The README's Hardware Keys section
+ * describes the ceremony. `credentialId` is not secret, but a passkey cannot be used without it,
+ * so it is kept in this browser's localStorage per exam and role. A key holder and a centre are
+ * separate roles with separate keys, because one browser can hold both.
  */
 
-export type RegisterRole = 'setter' | 'holder';
+export type RegisterRole = 'setter' | 'keyholder' | 'centre';
 
 export interface StoredCredential {
   owner: string;
@@ -69,44 +71,31 @@ export function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/**
- * A setter registers under the commitment from the board's invite, never a name, because the
- * approved list is public. Key holders and centres keep names. Returns a message in words, or null.
- */
-export function ownerProblem(role: RegisterRole, owner: string): string | null {
-  const value = owner.trim();
-  if (value === '') return null;
-  if (role === 'setter' && !isSetterCommitment(value)) {
-    return 'This is not a commitment. Paste the commitment from your invite: 0x followed by 64 lowercase hex digits, not your name.';
-  }
-  return null;
-}
-
 export interface RegisterFlowInput {
   keys: Pick<Keys, 'register'>;
   tee: Pick<TeeClient, 'registerChallenge' | 'register'>;
+  /** The name a key holder or centre registers under. A setter has none, so it is ignored for one. */
   owner: string;
   role: RegisterRole;
 }
 
 /**
  * Challenge, passkey ceremony, then the TEE's check. Nothing is remembered unless the TEE
- * accepted the registration.
+ * accepted the registration. The challenge is passed on as the TEE gave it, whatever its width.
  */
 export async function registerWithTee(input: RegisterFlowInput): Promise<Registration> {
   const { challenge } = await input.tee.registerChallenge();
-  const registration = await input.keys.register({
-    owner: input.owner,
-    role: input.role,
-    challenge: fromHex(challenge),
-  });
+  const registration = await input.keys.register(
+    input.role === 'setter'
+      ? { role: 'setter', challenge: fromHex(challenge) }
+      : { role: 'holder', owner: input.owner, challenge: fromHex(challenge) },
+  );
   await input.tee.register(registration.request);
   return registration;
 }
 
 export interface RegisterProps {
-  /** Defaults to the holder flow used by centres and key holders. */
-  role?: RegisterRole;
+  role: RegisterRole;
   keys?: Pick<Keys, 'register'>;
   tee?: Pick<TeeClient, 'registerChallenge' | 'register'> | null;
   examId?: Hex | null;
@@ -114,7 +103,7 @@ export interface RegisterProps {
 }
 
 export function Register(props: RegisterProps) {
-  const role = props.role ?? 'holder';
+  const { role } = props;
   const currentExam = useCurrentExamId();
   const examId = props.examId === undefined ? currentExam : props.examId;
   const tee = props.tee === undefined ? defaultTee : props.tee;
@@ -123,16 +112,17 @@ export function Register(props: RegisterProps) {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<StoredCredential | null>(() => (examId ? loadCredential(examId, role) : null));
 
-  const problem = ownerProblem(role, owner);
+  const isSetter = role === 'setter';
 
   const submit = async () => {
-    if (!examId || !tee || problem) return;
+    if (!examId || !tee) return;
     setBusy(true);
     setError(null);
     try {
       const registration = await registerWithTee({ keys: props.keys ?? browserKeys(), tee, owner: owner.trim(), role });
       const credential: StoredCredential = {
-        owner: owner.trim(),
+        // A setter's owner is the hash `keys.register` computed from its new passkey.
+        owner: registration.owner,
         role,
         credentialId: toHex(registration.credentialId),
         passkeyPublicKey: registration.request.passkeyPublicKey,
@@ -151,8 +141,8 @@ export function Register(props: RegisterProps) {
     <Screen
       title="Register"
       lede={
-        role === 'setter'
-          ? 'Create a device-bound passkey on your security key. Nothing is ever encrypted to a setter, so no derived key is made.'
+        isSetter
+          ? 'Create a device-bound passkey on your security key. Nothing is ever encrypted to a setter, so no derived key is made, and no name is published.'
           : 'Create a device-bound passkey on your security key.'
       }
     >
@@ -164,7 +154,13 @@ export function Register(props: RegisterProps) {
       {done ? (
         <Panel title="Registered">
           <Rows>
-            <Row label={done.role === 'setter' ? 'Commitment' : 'Name'}>{done.owner}</Row>
+            {done.role === 'setter' ? (
+              <Row label="Setter">
+                <Mono>{done.owner}</Mono>
+              </Row>
+            ) : (
+              <Row label="Name">{done.owner}</Row>
+            )}
             <Row label="Role">{done.role}</Row>
             <Row label="Passkey public key">
               <Mono>{done.passkeyPublicKey}</Mono>
@@ -173,8 +169,8 @@ export function Register(props: RegisterProps) {
         </Panel>
       ) : (
         <EmptyState title="No key registered">
-          {role === 'setter'
-            ? 'Registration needs a connection to the TEE, and the commitment from the board\u2019s invite.'
+          {isSetter
+            ? 'Registration needs a connection to the TEE. You register with no name.'
             : 'Registration needs a connection to the TEE, and the name the board invited you under.'}
         </EmptyState>
       )}
@@ -184,19 +180,16 @@ export function Register(props: RegisterProps) {
         <EmptyState title="TEE not connected">Set VITE_TEE_URL to connect to the TEE.</EmptyState>
       ) : (
         <Panel title={done ? 'Register again' : 'Register'}>
-          {role === 'setter' ? (
-            <Field
-              label="Commitment from your invite"
-              hint="The board gave you this, with a salt. It goes on the public list in place of your name."
-              error={problem ?? undefined}
-              value={owner}
-              onChange={setOwner}
-            />
+          {isSetter ? (
+            <p>
+              You register with no name. The public approved list shows only a hash of your passkey public key,
+              which this page computes after your passkey is created.
+            </p>
           ) : (
             <Field label="Name on the approved list" value={owner} onChange={setOwner} />
           )}
           <Button
-            disabled={busy || owner.trim() === '' || problem !== null}
+            disabled={busy || (!isSetter && owner.trim() === '')}
             onClick={() => {
               void submit();
             }}

@@ -134,11 +134,14 @@ func limitsVector() LimitsVector {
 // HPKEVector is one message sealed in Go. A reader derives the recipient key
 // from RecipientIKM with RFC 9180 DeriveKeyPair (the WebAuthn PRF output plays
 // this role in the apps), checks it gives RecipientPublicKey, and opens Sealed
-// with the purpose's info and ExamID as aad to get Plaintext.
+// with the purpose's info and AAD to get Plaintext. AAD is ExamID, except for
+// question, where it is ExamID followed by PasskeyPublicKey, the setter's.
 type HPKEVector struct {
 	Purpose            string `json:"purpose"`
 	Info               string `json:"info"`
 	ExamID             string `json:"examId"`
+	PasskeyPublicKey   string `json:"passkeyPublicKey,omitempty"`
+	AAD                string `json:"aad"`
 	RecipientIKM       string `json:"recipientIkm"`
 	RecipientPublicKey string `json:"recipientPublicKey"`
 	Plaintext          string `json:"plaintext"`
@@ -297,14 +300,15 @@ func SampleCriteria() criteria.Criteria {
 	}
 }
 
-// sampleSetterCommitment is the commitment of the sample setter, "setter-01".
-func sampleSetterCommitment() (hashing.Message, error) {
-	return hashing.SetterCommitment(fill(0x11), "setter-01", fill(0x77))
+// sampleSetterOwner is the setterOwner hash of the sample setter's passkey.
+func sampleSetterOwner() (hashing.Message, error) {
+	return hashing.SetterOwner(pubKey(1))
 }
 
-// SamplePerRole has one entry per role. The setter's owner is its commitment.
+// SamplePerRole has one entry per role. The setter's owner is the setterOwner
+// hash of its own passkey.
 func SamplePerRole() []approvedlist.Entry {
-	commitment, err := sampleSetterCommitment()
+	commitment, err := sampleSetterOwner()
 	if err != nil {
 		panic(err)
 	}
@@ -358,7 +362,7 @@ func Build() (File, error) {
 		msgs = append(msgs, m)
 	}
 	add(hashing.InstanceKey(examID, pubKey(2)))
-	add(sampleSetterCommitment())
+	add(sampleSetterOwner())
 	add(hashing.Registration(pubKey(1), []byte("centre-01"), challenge[:]))
 	add(criteriaMessage, nil)
 	add(list, nil)
@@ -459,12 +463,21 @@ func addEncryption(f *File, examID [32]byte) error {
 		if err != nil {
 			return err
 		}
-		sealed, err := encryption.SealFrom(&stream{seed: "hpke/" + pu.name}, pu.p, key.PublicKey(), examID, []byte(pu.pt))
+		var sealed []byte
+		var passkey string
+		aad := examID[:]
+		if pu.p == encryption.PurposeQuestion {
+			setter := pubKey(1)
+			passkey, aad = x(setter), encryption.QuestionAAD(examID, setter)
+			sealed, err = encryption.SealQuestionFrom(&stream{seed: "hpke/" + pu.name}, key.PublicKey(), examID, setter, []byte(pu.pt))
+		} else {
+			sealed, err = encryption.SealFrom(&stream{seed: "hpke/" + pu.name}, pu.p, key.PublicKey(), examID, []byte(pu.pt))
+		}
 		if err != nil {
 			return err
 		}
 		f.HPKE = append(f.HPKE, HPKEVector{
-			Purpose: pu.name, Info: pu.info, ExamID: x(examID[:]), RecipientIKM: x(ikm[:]),
+			Purpose: pu.name, Info: pu.info, ExamID: x(examID[:]), PasskeyPublicKey: passkey, AAD: x(aad), RecipientIKM: x(ikm[:]),
 			RecipientPublicKey: x(key.PublicKey()), Plaintext: x([]byte(pu.pt)), Sealed: x(sealed),
 		})
 	}

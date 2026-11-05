@@ -2,6 +2,7 @@ package bank
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"paperseal/tee/internal/criteria"
@@ -68,10 +69,10 @@ func TestAddRejectsDuplicatesAndClosed(t *testing.T) {
 	if err := b.Add(q2); !errors.Is(err, ErrDuplicate) {
 		t.Errorf("same ciphertext: %v", err)
 	}
-	// The same text from another setter, differently spaced and cased.
-	q3 := Question{Passkey: []byte{2}, Topic: "algebra", Text: "  what IS\tx? ", Hash: [32]byte{3}}
+	// The same setter again, differently spaced and cased.
+	q3 := Question{Passkey: []byte{1}, Topic: "algebra", Text: "  what IS\tx? ", Hash: [32]byte{3}}
 	if err := b.Add(q3); !errors.Is(err, ErrDuplicate) {
-		t.Errorf("same text: %v", err)
+		t.Errorf("same text, same setter: %v", err)
 	}
 	if err := b.Add(Question{Passkey: []byte{2}, Topic: "algebra", Text: "Another", Hash: [32]byte{4}}); err != nil {
 		t.Fatal(err)
@@ -88,5 +89,59 @@ func TestAddRejectsDuplicatesAndClosed(t *testing.T) {
 	}
 	if len(b.Close()) != 2 {
 		t.Error("second Close changed the bank")
+	}
+}
+
+// Duplicates are refused for the same setter only, so a setter can't learn
+// whether someone else already submitted a question, by guessing its text or
+// replaying its ciphertext.
+func TestDuplicatesArePerSetterOnly(t *testing.T) {
+	b := New()
+	if err := b.Add(Question{Passkey: []byte{1}, Topic: "algebra", Text: "What is x?", Hash: [32]byte{1}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Add(Question{Passkey: []byte{2}, Topic: "algebra", Text: "  what IS\tx? ", Hash: [32]byte{3}}); err != nil {
+		t.Errorf("same text from another setter was refused, which leaks that it exists: %v", err)
+	}
+	if err := b.Add(Question{Passkey: []byte{3}, Topic: "algebra", Text: "Other", Hash: [32]byte{1}}); err != nil {
+		t.Errorf("same ciphertext hash from another setter was refused: %v", err)
+	}
+	if err := b.Add(Question{Passkey: []byte{2}, Topic: "algebra", Text: "what is x?", Hash: [32]byte{5}}); !errors.Is(err, ErrDuplicate) {
+		t.Errorf("same setter, same text: %v", err)
+	}
+	if b.Count() != 3 {
+		t.Fatalf("count %d", b.Count())
+	}
+}
+
+func TestWipeClearsTheBank(t *testing.T) {
+	b := New()
+	pass := []byte{1, 2, 3}
+	for i := range 5 {
+		if err := b.Add(Question{Passkey: pass, Topic: "algebra", Text: fmt.Sprint("secret ", i), Hash: [32]byte{byte(i + 1)}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	held := b.list // The slice the bank keeps.
+	heldPass := held[0].Passkey
+	b.Wipe()
+	if b.Count() != 0 || len(b.seen) != 0 || b.list != nil {
+		t.Fatalf("bank kept %d questions, %d seen", b.Count(), len(b.seen))
+	}
+	for i, q := range held {
+		if q.Text != "" || q.Hash != ([32]byte{}) || q.Topic != "" {
+			t.Fatalf("question %d left behind: %+v", i, q)
+		}
+	}
+	for _, c := range heldPass {
+		if c != 0 {
+			t.Fatal("passkey bytes kept")
+		}
+	}
+	if len(b.Close()) != 0 {
+		t.Fatal("Close returns questions after Wipe")
+	}
+	if err := b.Add(Question{Passkey: pass, Text: "late", Hash: [32]byte{9}}); !errors.Is(err, ErrClosed) {
+		t.Fatalf("Add after Wipe: %v", err)
 	}
 }

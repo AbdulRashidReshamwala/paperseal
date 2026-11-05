@@ -124,14 +124,15 @@ func InstanceKey(examID [32]byte, encryptionPublicKey []byte) (Message, error) {
 		Bytes("encryptionPublicKey", encryptionPublicKey))
 }
 
-// SetterCommitment is the public, salted commitment to a setter's name. Its Sum
-// is the setter's owner, as lowercase 0x hex. The TEE never sees the name, so it
-// can't check the hash. Anyone can once the board publishes the name and salt.
-func SetterCommitment(examID [32]byte, name string, salt [32]byte) (Message, error) {
-	return New("setterCommitment", spec.C.DomainTags.SetterCommitment,
-		Bytes32("examId", examID),
-		String("name", name),
-		Bytes32("salt", salt))
+// SetterOwner is the public hash of a setter's own passkey public key. Its Sum
+// is the setter's owner on the approved list, as lowercase 0x hex. Setter names
+// are never published, and anyone can recompute this from the list.
+func SetterOwner(passkeyPublicKey []byte) (Message, error) {
+	if err := checkKeys("setterOwner", passkeyPublicKey); err != nil {
+		return Message{}, err
+	}
+	return New("setterOwner", spec.C.DomainTags.SetterOwner,
+		Bytes("passkeyPublicKey", passkeyPublicKey))
 }
 
 // Registration is the message a passkey signs at registration. A setter

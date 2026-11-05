@@ -1,7 +1,7 @@
 import { createPublicKey, createHash, verify } from 'node:crypto';
 
 import { hpkeContext, hpkeSeal } from '@paperseal/crypto';
-import { hashMessage, utf8ToBytes, webauthn } from '@paperseal/protocol';
+import { hashMessage, setterOwner, utf8ToBytes, webauthn } from '@paperseal/protocol';
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Page } from 'playwright-core';
 import { createServer, type ViteDevServer } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -289,9 +289,10 @@ describe('register and keyPriv', () => {
     const holder = await session.ps('register', 'x', 'holder', toHex(challenge));
     expect(holder).toMatchObject({ ok: false, code: 'prf_unavailable' });
 
-    const { request } = ok(await session.ps('register', 'setter-1', 'setter', toHex(challenge)));
+    const { request } = ok(await session.ps('register', null, 'setter', toHex(challenge)));
     expect(request.derivedPublicKey).toBe('0x');
-    const message = hashMessage('registration', { derivedPublicKey: new Uint8Array(), holderId: utf8ToBytes('setter-1'), challenge });
+    expect(request.owner).toBe(setterOwner(wire(request.passkeyPublicKey)));
+    const message = hashMessage('registration', { derivedPublicKey: new Uint8Array(), holderId: utf8ToBytes(request.owner), challenge });
     const clientData = JSON.parse(Buffer.from(request.clientDataJSON.slice(2), 'hex').toString('utf8')) as { challenge: string };
     expect(Buffer.from(clientData.challenge, 'base64url').toString('hex')).toBe(toHex(message));
     expect(verifyPasskey(wire(request.passkeyPublicKey), request.authenticatorData.slice(2), request.clientDataJSON.slice(2), request.signature.slice(2))).toBe(true);

@@ -1,12 +1,14 @@
-import { drand, roundAtSeconds, roundTimeSeconds, roles } from '@paperseal/protocol';
+import type { ExamRegistry } from '@paperseal/chain';
+import { drand, roundAtSeconds, roundTimeSeconds, roles, type Hex } from '@paperseal/protocol';
 import { Badge, Connected, Row, Rows, Screen } from '@paperseal/ui';
 import { useEffect, useMemo, useState } from 'react';
 
-import { holderCredential } from '../../shared/holder';
-import { examId, fromExam, notConnectedToChain, registry } from '../../shared/registry';
+import { useCurrentExamId, useExamLoader } from '../../shared/currentExam';
+import { useHolderCredential } from '../../shared/holder';
+import { notConnectedToChain, registry } from '../../shared/registry';
 import { roleOnList } from './readers';
 
-const loadExam = fromExam((client, id) => client.getExam(id));
+const readExam = (client: ExamRegistry, id: Hex) => client.getExam(id);
 
 /** Whole seconds remaining until a drand round is produced, from its time in the quicknet schedule. */
 export function secondsUntilRound(round: number, nowSeconds: number): number {
@@ -53,12 +55,12 @@ export function UnlockClock(props: { unlockRound: number; now?: () => number }) 
 
 /** Says whether this browser's key is a key holder, who must also release a share at unlock. */
 function ShareDuty() {
-  const identity = useMemo(() => holderCredential(), []);
+  const exam = useCurrentExamId();
+  const identity = useHolderCredential('centre');
   const load = useMemo(() => {
     const reader = registry;
-    const exam = examId;
     return reader && exam && identity ? () => roleOnList(reader, exam, identity.passkeyPublicKey) : null;
-  }, [identity]);
+  }, [exam, identity]);
   return (
     <Connected title="Your role" notConnected="Register your security key in this browser, and set the chain and exam, to see your role." load={load}>
       {(role) =>
@@ -75,6 +77,7 @@ function ShareDuty() {
 }
 
 export function Countdown() {
+  const loadExam = useExamLoader(readExam);
   return (
     <Screen title="Countdown" lede="Unlock follows the drand round, the only clock.">
       <Connected title="Unlock round" notConnected={notConnectedToChain} load={loadExam}>

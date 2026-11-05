@@ -9,10 +9,9 @@ import {
   encodeApprovedList,
   approvedListHash,
   fromHex,
-  isSetterCommitment,
   ApprovedListError,
   ScheduleError,
-  setterCommitment,
+  setterOwner,
   startupArgs,
   threshold,
   toHex,
@@ -140,7 +139,7 @@ export async function dryCheck(): Promise<void> {
     expect(viaCast.status === 0, `cast calldata failed: ${viaCast.stderr.trim()}`);
     expect(viaCast.stdout.trim() === createData, 'createExam calldata differs from cast');
 
-    const entries = syntheticList(built.examId);
+    const entries = syntheticList();
     const listData = calldata('postApprovedList', [built.examId, entries.encoded]);
     const list = cast(['calldata', sigOf('postApprovedList'), built.examId, entries.encoded]);
     expect(list.status === 0 && list.stdout.trim() === listData, 'postApprovedList calldata differs from cast');
@@ -154,13 +153,13 @@ export async function dryCheck(): Promise<void> {
     return 'all three equal';
   });
 
-  await check('approved list: setters are commitments, composed and encoded by the protocol package, calldata decodes back', () => {
-    const { encoded, entries } = syntheticList(built.examId);
+  await check('approved list: setters are the hash of their own passkey, composed and encoded by the protocol package, calldata decodes back', () => {
+    const { encoded, entries } = syntheticList();
     checkApprovedList(entries);
     const data = calldata('postApprovedList', [built.examId, encoded]);
     const decoded = decodeFunctionData({ abi: examRegistryAbi, data });
     expect(decoded.functionName === 'postApprovedList' && (decoded.args as unknown as Hex[])[1] === encoded, 'round trip');
-    for (const e of entries.filter((x) => x.role === 1)) expect(isSetterCommitment(e.owner), 'setter owner is not a commitment');
+    for (const e of entries.filter((x) => x.role === 1)) expect(e.owner === setterOwner(e.passkeyPublicKey), 'setter owner is not the hash of its passkey');
     const bad = entries.map((e) => (e.role === 1 ? { ...e, owner: 'Alice' } : e));
     try {
       checkApprovedList(bad);
@@ -171,13 +170,24 @@ export async function dryCheck(): Promise<void> {
     throw new Error('a setter with a plain name was accepted');
   });
 
-  await check('setterCommitment is deterministic and depends on the salt and the name', () => {
-    const id = fromHex(built.examId);
-    const a = setterCommitment(id, 'setter-1', fromHex(`0x${'01'.repeat(32)}`));
-    expect(a === setterCommitment(id, 'setter-1', fromHex(`0x${'01'.repeat(32)}`)), 'not deterministic');
-    expect(a !== setterCommitment(id, 'setter-1', fromHex(`0x${'02'.repeat(32)}`)), 'salt does not matter');
-    expect(a !== setterCommitment(id, 'setter-2', fromHex(`0x${'01'.repeat(32)}`)), 'name does not matter');
-    expect(isSetterCommitment(a), 'shape');
+  await check('setterOwner depends only on the passkey public key, and another key is rejected', () => {
+    const { entries } = syntheticList();
+    const setter = entries.find((e) => e.role === 1);
+    if (!setter) throw new Error('no setter in the synthetic list');
+    const a = setterOwner(setter.passkeyPublicKey);
+    expect(a === setterOwner(setter.passkeyPublicKey), 'not deterministic');
+    const other = new Uint8Array(setter.passkeyPublicKey);
+    other[1] = (other[1] ?? 0) ^ 1;
+    expect(a !== setterOwner(other), 'the key does not matter');
+    expect(/^0x[0-9a-f]{64}$/.test(a), 'shape');
+    const swapped = entries.map((e) => (e === setter ? { ...e, owner: setterOwner(other) } : e));
+    try {
+      checkApprovedList(swapped);
+    } catch (error) {
+      expect(error instanceof ApprovedListError, 'wrong error type');
+      return 'an owner that is the hash of another key is rejected';
+    }
+    throw new Error('a setter owner that is not the hash of its own passkey was accepted');
   });
 
   await check('cast send arguments: keystore account and password file path, calldata passed as --data, no key or prompt flags', () => {
@@ -222,7 +232,7 @@ export async function dryCheck(): Promise<void> {
 }
 
 /** A well-formed list of 13 entries with fake keys, for encoding checks only. Never posted. */
-function syntheticList(examId: Hex): { entries: ApprovedListEntry[]; encoded: Hex } {
+function syntheticList(): { entries: ApprovedListEntry[]; encoded: Hex } {
   const point = (n: number): Uint8Array => {
     const out = new Uint8Array(65);
     out[0] = 4;
@@ -233,7 +243,7 @@ function syntheticList(examId: Hex): { entries: ApprovedListEntry[]; encoded: He
     role: r.role,
     passkeyPublicKey: point(i + 1),
     derivedPublicKey: r.role === 1 ? new Uint8Array() : point(100 + i),
-    owner: r.role === 1 ? setterCommitment(fromHex(examId), r.name, fromHex(`0x${(i + 1).toString(16).padStart(2, '0').repeat(32)}`)) : r.name,
+    owner: r.role === 1 ? setterOwner(point(i + 1)) : r.name,
   }));
   return { entries, encoded: toHex(encodeApprovedList(entries)) };
 }

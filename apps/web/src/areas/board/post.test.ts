@@ -5,7 +5,7 @@ import {
   encodeMessage,
   fromHex,
   roles,
-  setterCommitment,
+  setterOwner,
   toHex,
   type ApprovedListEntry,
   type Hex,
@@ -32,7 +32,7 @@ const records = Array.from({ length: 10 }, (_, i) => ({
   passkeyPublicKey: key(10 + i),
   derivedPublicKey: key(50 + i),
 }));
-const setter = { owner: setterCommitment(fromHex(examId), 'Setter One', new Uint8Array(32).fill(7)), role: roles.setter, passkeyPublicKey: key(90), derivedPublicKey: '0x' as Hex };
+const setter = { owner: setterOwner(fromHex(key(90))), role: roles.setter, passkeyPublicKey: key(90), derivedPublicKey: '0x' as Hex };
 const entries = (): ApprovedListEntry[] => withRoles([...records, setter], Object.fromEntries([...records, setter].map((r) => [r.passkeyPublicKey, r.role])));
 
 function environment(options: Partial<FakeChainOptions> = {}) {
@@ -56,11 +56,13 @@ describe('registrations', () => {
     expect(list.hash).toBe(toHex(approvedListHash(fromHex(examId), fromHex(list.encoded))));
   });
 
-  it('refuses a setter registered under a plain name', () => {
+  it('refuses a setter whose owner is a plain name, or the hash of another key', () => {
     const named = withRoles([{ ...setter, owner: 'Setter One' }], { [setter.passkeyPublicKey]: roles.setter });
-    expect(() => composeApprovedList(examId, [...entries().slice(0, -1), ...named])).toThrow('setter commitment');
+    expect(() => composeApprovedList(examId, [...entries().slice(0, -1), ...named])).toThrow('setterOwner hash');
     const result = tryCompose(examId, [...entries().slice(0, -1), ...named]);
-    expect(result.ok ? '' : result.reason).toContain('not a setter commitment');
+    expect(result.ok ? '' : result.reason).toContain('not the setterOwner hash');
+    const other = withRoles([{ ...setter, owner: setterOwner(fromHex(key(91))) }], { [setter.passkeyPublicKey]: roles.setter });
+    expect(tryCompose(examId, [...entries().slice(0, -1), ...other])).toMatchObject({ ok: false });
   });
 
   it('says in words why a list cannot be composed', () => {

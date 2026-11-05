@@ -79,7 +79,7 @@ This only fills in the board's form. The on-chain values are what count, and any
 | `name` | `string`, not empty and unique within the exam |
 | `questions` | `uint32`, how many questions the paper takes from this topic, at least 1 |
 
-`criteriaHash` is the hash of the `criteria` message. The board app and the TEE reject criteria that break these rules, or whose re-encoded bytes differ, so one set of criteria has one encoding. The paper's `selected` count is the sum of `questions`.
+The sum of `questions` times `padding.questionBytes`, plus 1024 bytes for the paper's JSON, must fit in `padding.paperBytes`, so a paper that passes Lock always fits. `criteriaHash` is the hash of the `criteria` message. The board app and the TEE reject criteria that break these rules, or whose re-encoded bytes differ, so one set of criteria has one encoding. The paper's `selected` count is the sum of `questions`.
 
 ## Approved List
 
@@ -101,7 +101,7 @@ This only fills in the board's form. The on-chain values are what count, and any
 | `3` | Centre that is a key holder | 65 bytes |
 | `4` | Approved centre without a share | 65 bytes |
 
-For a setter, `owner` is the lowercase `0x`-prefixed hex of the `setterCommitment` hash, not a name. The board picks a random 32-byte `salt` per setter and gives it to the setter with the invite, because a name list could otherwise be tested against an unsalted hash. The setter registers with that commitment as `owner`. After the end round, the board publishes each setter's name and salt, and anyone can recompute the commitment.
+For a setter, `owner` is the lowercase `0x`-prefixed hex of the `setterOwner` hash of its own passkey public key. Setter names are never published. Readers recompute the hash and reject an entry where it differs.
 
 Order is free, because the hash covers the posted bytes. The TEE decodes `entries`, then re-encodes it and rejects the list if the bytes differ, so one list has one encoding. It also rejects a list with an unknown role, a repeated passkey, a repeated derived key, the wrong number of key holders from `threshold`, or an entry it didn't verify at registration.
 
@@ -115,7 +115,7 @@ Every client reads `entries` and `criteria` this way. `getExam` returns `created
 | --- | --- | --- |
 | `registration` | Passkey | `bytes derivedPublicKey`, `bytes holderId`, `bytes challenge` |
 | `instanceKey` | TEE | `bytes32 examId`, `bytes encryptionPublicKey` |
-| `setterCommitment` | None, a public hash | `bytes32 examId`, `string name`, `bytes32 salt` |
+| `setterOwner` | None, a public hash | `bytes passkeyPublicKey` |
 | `criteria` | None, a public hash | `bytes criteria` |
 | `approvedList` | TEE | `bytes32 examId`, `bytes entries` |
 | `questionSubmission` | Passkey | `bytes32 examId`, `bytes challenge`, `bytes32 questionHash` |
@@ -141,7 +141,7 @@ Each TEE instance generates two P-256 keys in memory at start and never stores t
 
 ## Encryption
 
-- **HPKE:** base mode, framed as `enc || ciphertext`. `info` is the UTF-8 bytes of the purpose's `crypto.hpke.info` value, and `aad` is `examId`.
+- **HPKE:** base mode, framed as `enc || ciphertext`. `info` is the UTF-8 bytes of the purpose's `crypto.hpke.info` value. `aad` is `examId`, except for `question`, where it is `examId || passkeyPublicKey`, so one setter can't resubmit another's ciphertext.
 - **AES-256-GCM:** framed as a random 12-byte nonce, then ciphertext and tag. `aad` is `examId`.
 - **Padding:** a big-endian `uint32` length, the data, then zero bytes up to the target size from `padding`. Reject data that doesn't fit, and reject non-zero padding when removing it.
 - **Derived keys:** RFC 9180 `DeriveKeyPair` for the HPKE suite, with the 32-byte PRF output as the input keying material.
@@ -168,7 +168,7 @@ The message hash is the WebAuthn `challenge`. The signature is ES256 in DER form
 
 The TEE checks the signature, that `clientDataJSON.challenge` is the base64url message hash, that `type` matches the ceremony, that user present and user verified are set, and that both backup flags are clear. It doesn't check `origin` or `rpIdHash`, because the passkey public key identifies the holder and the board serves the app anyway.
 
-A challenge is 32 random bytes, single use, and expires after 5 minutes.
+A challenge is 32 random bytes plus an expiry, authenticated with an in-memory key, so issuing one stores nothing. It is single use and expires after 5 minutes. Release challenges are only issued once `unlockRound` is published.
 
 `webauthn.requireHardwareAttestation` is `false` for the demo, so the TEE doesn't check the attestation chain. The value is in the attested image, and the verifier page shows it. When it's `true`, an attestation check that isn't implemented rejects the registration.
 
@@ -212,7 +212,7 @@ After decoding, readers also apply `limits.entries`, `limits.topics`, `limits.ow
 
 ## TEE Lifecycle
 
-The TEE runs each stage by itself, with no board calls, so it needs no board login. It serves plain HTTP on port 8080, and the Cloudflare proxy adds HTTPS.
+The TEE runs each stage by itself, with no board calls, so it needs no board login. It serves HTTPS on port 8080 directly, with a self-signed P-256 certificate generated in memory at startup and never written to disk, so Cloudflare's connection to the origin is never downgraded to plain HTTP. The certificate is valid for `tee.abdulrashid.dev` and any host, and has no trust role: apps trust the attestation and HPKE, not this certificate. TLS 1.2 is the minimum version.
 
 1. **Onboard:** register until the list appears on-chain, then check it.
 2. **Submit:** accept questions from setters on the list until the lock round is published.
@@ -220,7 +220,7 @@ The TEE runs each stage by itself, with no board calls, so it needs no board log
 4. **Build and Distribute:** run straight after Lock, ending with the Build in the outbox for the board to post.
 5. **Unlock:** accept shares once `unlockRound` is published, as in "Unlock Instance" on a new instance.
 
-`maxSetterPercent` limits each setter's share of a topic's bank. `seed` is 32 random bytes generated after Lock. `selected` questions are picked at random per topic, using randomness that never leaves the TEE.
+Duplicate questions are rejected only for the same setter, so a setter can't test guesses about other setters' questions. `maxSetterPercent` limits each setter's share of a topic's bank. `seed` is 32 random bytes generated after Lock. `selected` questions are picked at random per topic, using randomness that never leaves the TEE.
 
 ## TEE API
 
@@ -253,6 +253,20 @@ Unlock can run on a new TEE instance that shares no state with the one that ran 
 5. Check that `build.approvedListHash` equals the on-chain list hash and the hash of `entries`.
 
 If any step fails, the instance refuses every share. After these checks it trusts the on-chain list without re-checking registrations, because the attested Build instance already committed to that list.
+
+## Attestation Token
+
+`GET /v1/attestation` and the published files always use the PKI token type, because a browser can check it against Google's root without fetching keys. `spec/fixtures/confidential-space-claims.json` holds the claims of a real token from an earlier test.
+
+The launcher sets these claims under `submods.container`, and readers compare them exactly:
+
+| Claim | Expected value |
+| --- | --- |
+| `cmd_override` | The startup arguments |
+| `args` | `/tee`, then the startup arguments |
+| `env_override` | `{"STORAGE_BUCKET": <bucket>}` |
+
+`submods.container.env` also holds variables from the base image, such as `PATH` and `HOSTNAME`, so readers don't compare it. Only `env_override` shows what the operator set.
 
 ## Attestation Nonce
 

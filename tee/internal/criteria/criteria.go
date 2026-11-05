@@ -30,7 +30,12 @@ var (
 	ErrSelectedOverflow = errors.New("criteria: questions sum exceeds uint32")
 	ErrTooLarge         = errors.New("criteria: bytes exceed limits.criteriaBytes")
 	ErrLimit            = errors.New("criteria: over a limit in spec limits")
+	ErrPaperTooLarge    = errors.New("criteria: the questions can't fit in padding.paperBytes")
 )
+
+// PaperJSONBytes is what the paper's JSON may take beyond its questions' padded
+// size, from spec/api.md "Selection Criteria".
+const PaperJSONBytes = 1024
 
 // Topic is one topic of the paper.
 type Topic struct {
@@ -74,6 +79,10 @@ func (c Criteria) Selected() (uint32, error) {
 	return uint32(sum), nil
 }
 
+// Validate applies the rules in spec/api.md "Selection Criteria", including the
+// paper size rule. Decode and Encode do, and Lock does again on what it holds.
+func (c Criteria) Validate() error { return c.check() }
+
 func (c Criteria) check() error {
 	if c.MaxSetterPercent < 1 || c.MaxSetterPercent > 100 {
 		return fmt.Errorf("%w, got %d", ErrMaxSetterPercent, c.MaxSetterPercent)
@@ -97,8 +106,16 @@ func (c Criteria) check() error {
 			return fmt.Errorf("topic %d: %w", i, ErrTopicQuestions)
 		}
 	}
-	_, err := c.Selected()
-	return err
+	selected, err := c.Selected()
+	if err != nil {
+		return err
+	}
+	// The questions times padding.questionBytes, plus the paper's JSON, must fit
+	// in padding.paperBytes, so a paper that passes Lock always fits.
+	if need := uint64(selected)*uint64(spec.C.Padding.QuestionBytes) + PaperJSONBytes; need > uint64(spec.C.Padding.PaperBytes) {
+		return fmt.Errorf("%w: %d questions need %d bytes, at most %d", ErrPaperTooLarge, selected, need, spec.C.Padding.PaperBytes)
+	}
+	return nil
 }
 
 // Encode writes valid criteria.

@@ -1,16 +1,17 @@
-import type { ExamRegistry } from '@paperseal/chain';
-import { decodeApprovedList, fromHex, roles, toHex, type ApprovedListEntry, type Hex } from '@paperseal/protocol';
+import { decodeApprovedList, fromHex, roles, toHex, type ApprovedListEntry } from '@paperseal/protocol';
 import type { RegistrationEntry } from '@paperseal/tee-client';
-import { Badge, Connected, EmptyState, Mono, Panel, Row, Rows, Screen } from '@paperseal/ui';
-import { useEffect, useMemo, useState } from 'react';
+import { Badge, Button, Connected, EmptyState, Mono, Panel, Row, Rows, Screen } from '@paperseal/ui';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { useCurrentExamId, useExamLoader } from '../../shared/currentExam';
-import { fromTee, notConnectedToTee } from '../../shared/tee';
+import { useCurrentExamId } from '../../shared/currentExam';
+import { fromTee, notConnectedToTee, tee } from '../../shared/tee';
 import { TeeStatus } from '../../shared/TeeStatus';
 import { useBoardForm, useReader } from './BoardForm';
-import { InviteStep } from './InviteStep';
+import { checkPostTarget, type PostGate } from './postGate';
 import { postApprovedListFlow } from './postFlow';
 import { PostPanel } from './PostPanel';
+import { explainError } from './publishFlow';
+import { formatClock } from './form';
 import { roleNames, rolesFor, tryCompose, withRoles } from './registrations';
 
 const loadRegistrations = fromTee((client) => client.registrations());
@@ -25,8 +26,6 @@ const loadList = fromTee(async (client) => {
   }
 });
 
-const loadEndRound = (client: ExamRegistry, id: Hex) => client.getExam(id).then((exam) => (exam ? Number(exam.settings.endRound) : null));
-
 const short = (key: string) => (key === '0x' ? 'none' : `${key.slice(0, 14)}…`);
 
 export function EntryRows(props: { entries: readonly ApprovedListEntry[] }) {
@@ -35,7 +34,7 @@ export function EntryRows(props: { entries: readonly ApprovedListEntry[] }) {
       {props.entries.map((entry) => (
         <Row
           key={toHex(entry.passkeyPublicKey)}
-          label={entry.role === roles.setter ? 'Setter (sealed)' : entry.owner}
+          label={entry.role === roles.setter ? 'Setter' : entry.owner}
         >
           {entry.role === roles.setter ? (
             <>
@@ -67,9 +66,76 @@ function Registered() {
   );
 }
 
+/**
+ * Checks the TEE and the exam before the list can be posted: the TEE must attest for this exam
+ * against the chain and be at Onboard. Runs when the exam changes, and again on request.
+ */
+function usePostGate(): { gate: PostGate; recheck: () => void } {
+  const examId = useCurrentExamId();
+  const reader = useReader();
+  const [result, setResult] = useState<{ key: string; gate: Exclude<PostGate, { state: 'checking' }> } | null>(null);
+  const [round, setRound] = useState(0);
+  const key = `${examId ?? ''}:${String(round)}`;
+  useEffect(() => {
+    if (!examId || !reader || !tee) return;
+    let live = true;
+    checkPostTarget({ tee, registry: reader, examId }).then(
+      (target) => {
+        if (live) setResult({ key, gate: { state: 'ok', target } });
+      },
+      (error: unknown) => {
+        if (live) setResult({ key, gate: { state: 'blocked', reason: explainError(error) } });
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [examId, reader, key]);
+  const recheck = useCallback(() => {
+    setRound((n) => n + 1);
+  }, []);
+  const gate: PostGate = result?.key === key ? result.gate : { state: 'checking' };
+  return { gate, recheck };
+}
+
+function TargetPanel(props: { gate: PostGate; recheck: () => void }) {
+  const { gate } = props;
+  return (
+    <Panel title="The exam this list is written for">
+      {gate.state === 'checking' ? <p>Checking the TEE against the chain.</p> : null}
+      {gate.state === 'blocked' ? <Badge tone="bad">{gate.reason}</Badge> : null}
+      {gate.state === 'ok' ? (
+        <>
+          <Badge tone="ok">The TEE attests for this exam and is at the Onboard stage.</Badge>
+          <Rows>
+            <Row label="Exam ID">
+              <Mono>{gate.target.examId}</Mono>
+            </Row>
+            <Row label="Commit">
+              <Mono>{gate.target.exam.commitHash}</Mono>
+            </Row>
+            <Row label="Image digest">
+              <Mono>{gate.target.exam.imageDigest}</Mono>
+            </Row>
+            <Row label="Exam start, T">{formatClock(Number(gate.target.exam.settings.examStart))}</Row>
+            <Row label="End round">{String(gate.target.exam.settings.endRound)}</Row>
+            <Row label="TEE instance key">
+              <Mono>{gate.target.instancePublicKey}</Mono>
+            </Row>
+          </Rows>
+        </>
+      ) : null}
+      <p>The approved list is written once. Check that this is the exam you mean before posting.</p>
+      <Button onClick={props.recheck}>Check again</Button>
+    </Panel>
+  );
+}
+
 function Composer(props: { registrations: readonly RegistrationEntry[] }) {
   const { environment } = useBoardForm();
   const examId = useCurrentExamId();
+  const reader = useReader();
+  const { gate, recheck } = usePostGate();
   const [picked, setPicked] = useState<Record<string, number | undefined>>({});
   const entries = useMemo(() => withRoles(props.registrations, picked), [props.registrations, picked]);
   const composed = useMemo(() => (examId && entries.length > 0 ? tryCompose(examId, entries) : null), [examId, entries]);
@@ -79,7 +145,11 @@ function Composer(props: { registrations: readonly RegistrationEntry[] }) {
       ? 'Choose a role for each registration to include.'
       : composed && !composed.ok
         ? composed.reason
-        : null;
+        : gate.state === 'checking'
+          ? 'Checking the TEE and the exam before posting.'
+          : gate.state === 'blocked'
+            ? gate.reason
+            : null;
 
   return (
     <>
@@ -125,12 +195,16 @@ function Composer(props: { registrations: readonly RegistrationEntry[] }) {
       ) : (
         <EmptyState title="No list composed">{composed ? composed.reason : 'The list is composed once roles are chosen and the list passes the approved list rules.'}</EmptyState>
       )}
+      <TargetPanel gate={gate} recheck={recheck} />
       <PostPanel
         title="Post the approved list"
         label="Post approved list"
         blocked={blocked}
-        post={(onStage) => {
-          if (!examId || !composed?.ok) return Promise.reject(new Error('There is no composed list to post.'));
+        post={async (onStage) => {
+          if (!examId || !composed?.ok) throw new Error('There is no composed list to post.');
+          if (!tee || !reader) throw new Error('The TEE and ExamRegistry must be connected to post.');
+          // Checked again right before sending: the result on screen may be minutes old.
+          await checkPostTarget({ tee, registry: reader, examId });
           return postApprovedListFlow(environment, { examId, entries: composed.list.encoded }, onStage);
         }}
       />
@@ -138,35 +212,10 @@ function Composer(props: { registrations: readonly RegistrationEntry[] }) {
   );
 }
 
-/** The invite step, with the end round read from ExamRegistry. */
-function InviteSection() {
-  const examId = useCurrentExamId();
-  const load = useExamLoader(loadEndRound, useReader());
-  const [endRound, setEndRound] = useState<number | null>(null);
-  useEffect(() => {
-    let live = true;
-    if (load) {
-      load().then(
-        (round) => {
-          if (live) setEndRound(round);
-        },
-        () => {
-          if (live) setEndRound(null);
-        },
-      );
-    }
-    return () => {
-      live = false;
-    };
-  }, [load]);
-  return <InviteStep examId={examId} endRound={endRound} />;
-}
-
 export function Onboarding() {
   return (
-    <Screen title="Onboarding" lede="Invite setters, then compose the registrations the TEE verified, with the role you give each, into the approved list and post it from the board wallet.">
+    <Screen title="Onboarding" lede="Compose the registrations the TEE verified, with the role you give each, into the approved list and post it from the board wallet. Setters register with no name.">
       <TeeStatus />
-      <InviteSection />
       <Registered />
       <Connected title="Registrations" notConnected={notConnectedToTee} load={loadRegistrations}>
         {({ registrations }) => <Composer registrations={registrations} />}

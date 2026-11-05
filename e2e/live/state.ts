@@ -42,7 +42,7 @@ export interface ParticipantRecord {
   name: string;
   kind: 'setter' | 'neutral' | 'centre-holder' | 'centre';
   role: number;
-  /** For a setter, the `owner` on the approved list is the commitment, not the name. */
+  /** For a setter, the `owner` on the approved list is the `setterOwner` hash of its passkey, never a name. */
   owner: string;
   passkeyPublicKey: Hex;
   derivedPublicKey: Hex;
@@ -62,8 +62,6 @@ export interface RunState {
   build?: { transactionHash: Hex; instancePublicKey: Hex; saltedPaperHash: Hex; storageManifestHash: Hex; paperHash: Hex };
   released: { name: string; passkeyPublicKey: Hex }[];
   paperSha256?: Hex;
-  /** Written once, after the end round: the names and salts behind the setter commitments. */
-  reveal?: { name: string; salt: Hex; commitment: Hex; onChain: boolean }[];
 }
 
 export interface LiveState {

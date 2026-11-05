@@ -14,6 +14,7 @@ import {
   type ApprovedListEntry,
   type Hex,
 } from '@paperseal/protocol';
+import { RELEASE_NOT_OPEN_MESSAGE, TeeApiError } from '@paperseal/tee-client';
 import { renderToString } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -24,6 +25,9 @@ const examId: Hex = `0x${'11'.repeat(32)}`;
 const share = () => new Uint8Array([1, 2, 3, 4]);
 const key = (seed: number) => new Uint8Array([4, ...new Uint8Array(64).fill(seed)]);
 const sha = (bytes: Uint8Array) => new Uint8Array(createHash('sha256').update(bytes).digest());
+
+/** Longer than 32 bytes: the TEE's challenge carries an expiry and a tag, so no width is assumed. */
+const challenge = `0x${'ab'.repeat(80)}`;
 
 const trusted = { trusted: true, signature: { ok: true }, instanceKey: { ok: true }, claims: [] } as TokenVerdict;
 
@@ -124,12 +128,12 @@ async function setup() {
           release: { released: [] as Hex[], required: 8 },
         }),
       ),
-      releaseChallenge: vi.fn(() => Promise.resolve({ challenge: '0xabcd' as Hex })),
+      releaseChallenge: vi.fn(() => Promise.resolve({ challenge: challenge as Hex })),
       releaseShare: vi.fn(() => Promise.resolve({})),
     },
     checkAttestation: vi.fn((_attestation: unknown) => Promise.resolve(trusted)),
     readOnChainListHash: vi.fn(() => Promise.resolve(listHash)),
-    readBuild: vi.fn(() => Promise.resolve({ storageManifestHash: toHex(sha(manifestBytes)) })),
+    readBuild: vi.fn(() => Promise.resolve({ storageManifestHash: toHex(sha(manifestBytes)), paperHash: `0x${'00'.repeat(32)}` as Hex })),
     fetchFile: vi.fn((name: string) => {
       const found = files.get(name);
       return found ? Promise.resolve(found) : Promise.reject(new Error(`no ${name}`));
@@ -154,7 +158,7 @@ describe('runRelease', () => {
     await runRelease(context);
     const [request] = context.tee.releaseShare.mock.calls[0] as unknown as [{ sealed: Hex; passkeyPublicKey: Hex; challenge: Hex }];
     expect(request.passkeyPublicKey).toBe(toHex(own.passkeyPublicKey));
-    expect(request.challenge).toBe('0xabcd');
+    expect(request.challenge).toBe(challenge);
     const opened = decodeRelease(await hpkeOpen(hpkeKey, fromHex(request.sealed), hpkeContext('release', fromHex(examId))));
     expect(opened.share).toEqual(share());
     expect(opened.signature).toHaveLength(70);
@@ -179,6 +183,14 @@ describe('runRelease', () => {
     const info = hpkeContext('release', fromHex(examId));
     await expect(hpkeOpen(hpkeKey, fromHex(request.sealed), info)).rejects.toThrow();
     await expect(hpkeOpen(other.hpkeKey, fromHex(request.sealed), info)).resolves.toBeDefined();
+  });
+
+  it('says plainly that release is not open yet when the TEE refuses the challenge before the unlock round', async () => {
+    const { context } = await setup();
+    context.tee.releaseChallenge.mockRejectedValue(new TeeApiError(425, 'too_early', 'the unlock round is not published yet'));
+    await expect(runRelease(context)).rejects.toMatchObject({ step: 'challenge', message: RELEASE_NOT_OPEN_MESSAGE });
+    expect(context.keys.releaseShare).not.toHaveBeenCalled();
+    expect(context.tee.releaseShare).not.toHaveBeenCalled();
   });
 
   it('sends nothing if the attestation is not trusted', async () => {
@@ -228,7 +240,7 @@ describe('runRelease', () => {
 
   it('refuses a manifest that does not match the Build', async () => {
     const { context } = await setup();
-    context.readBuild.mockResolvedValue({ storageManifestHash: `0x${'44'.repeat(32)}` });
+    context.readBuild.mockResolvedValue({ storageManifestHash: `0x${'44'.repeat(32)}`, paperHash: `0x${'00'.repeat(32)}` });
     await expect(runRelease(context)).rejects.toMatchObject({ step: 'fetch' });
     expect(context.keys.releaseShare).not.toHaveBeenCalled();
   });
@@ -254,7 +266,7 @@ describe('runRelease', () => {
     expect(credentialId).toEqual(new Uint8Array([1]));
     expect(id).toEqual(fromHex(examId));
     expect(sealed).toEqual(sealedShare);
-    expect(digest).toEqual(hashMessage('shareRelease', { examId: fromHex(examId), challenge: fromHex('0xabcd') }));
+    expect(digest).toEqual(hashMessage('shareRelease', { examId: fromHex(examId), challenge: fromHex(challenge) }));
   });
 
   it('does not send a share whose hash differs from the manifest', async () => {

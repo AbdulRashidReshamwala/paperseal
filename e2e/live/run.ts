@@ -1,5 +1,3 @@
-import { randomBytes } from 'node:crypto';
-
 import { openPaperFile, quicknetClient, sealQuestion, sealRelease, timelockDecrypt, verifyTeeSignature, xorCombine } from '@paperseal/crypto';
 import {
   approvedListHash,
@@ -16,7 +14,7 @@ import {
   releaseEntryFromWire,
   saltedPaperHash,
   selectedCount,
-  setterCommitment,
+  setterOwner,
   storageNames,
   toHex,
   type ApprovedListEntry,
@@ -218,12 +216,8 @@ async function setup(ctx: Ctx) {
     for (const spec of roster) {
       ctx.people.push(await addParticipant(started, spec));
     }
-    // Setters get a random 32-byte salt each. The board keeps it secret until after the exam.
-    for (const p of ofKind(ctx, 'setter')) {
-      p.salt = toHex(randomBytes(32));
-      p.owner = setterCommitment(fromHex(exam.examId), p.name, fromHex(p.salt));
-    }
-    for (const p of ctx.people) p.owner ??= p.name;
+    // A setter has no name on the list: its owner is made from its passkey when it registers.
+    for (const p of ctx.people) if (p.kind !== 'setter') p.owner ??= p.name;
     rep.record(
       'setup',
       'one isolated browser context and one virtual authenticator per participant',
@@ -264,9 +258,11 @@ async function register(ctx: Ctx): Promise<{ listHash: Hex; entries: Hex }> {
     for (const p of ctx.people) {
       await rep.check('b-register', `register ${p.name} (${p.kind}) with the TEE through tee-client`, async () => {
         const { challenge } = await teeRead(() => tee.registerChallenge());
-        const { credentialId, request } = await call(p, 'register', p.owner as string, p.kind === 'setter' ? 'setter' : 'holder', challenge);
+        const { credentialId, owner, request } = await call(p, 'register', p.kind === 'setter' ? null : (p.owner as string), p.kind === 'setter' ? 'setter' : 'holder', challenge);
         p.credentialId = credentialId as Hex;
+        p.owner = owner;
         p.passkeyPublicKey = request.passkeyPublicKey;
+        if (p.kind === 'setter' && owner !== setterOwner(fromHex(request.passkeyPublicKey))) throw new Error(`${p.name}: the owner is not the setterOwner hash of its passkey`);
         p.derivedPublicKey = request.derivedPublicKey;
         // A POST that changes TEE state is sent once, never retried.
         await tee.register(request);
@@ -293,9 +289,9 @@ async function register(ctx: Ctx): Promise<{ listHash: Hex; entries: Hex }> {
         if (found.owner !== p.owner) throw new Error(`${p.name}: owner ${found.owner} differs from ${String(p.owner)}`);
         if (found.derivedPublicKey !== p.derivedPublicKey) throw new Error(`${p.name}: derived key differs`);
       }
-      const setterOwners = registrations.filter((r) => r.derivedPublicKey === '0x').map((r) => r.owner);
-      if (setterOwners.some((o) => !/^0x[0-9a-f]{64}$/.test(o))) throw new Error('a setter is registered under something other than a commitment');
-      return `${String(registrations.length)} registrations; setters appear only as commitments`;
+      const setterRegistrations = registrations.filter((r) => r.derivedPublicKey === '0x');
+      if (setterRegistrations.some((r) => r.owner !== setterOwner(fromHex(r.passkeyPublicKey)))) throw new Error('a setter is registered under something other than the setterOwner hash of its passkey');
+      return `${String(registrations.length)} registrations; setters appear only as the hash of their passkey`;
     });
 
     // Compose the approved list with the protocol package, exactly as the board app does.
@@ -314,7 +310,7 @@ async function register(ctx: Ctx): Promise<{ listHash: Hex; entries: Hex }> {
       listHash = toHex(approvedListHash(fromHex(exam.examId), bytes));
       decodeApprovedList(bytes);
       const setters = decodeApprovedList(bytes).filter((e) => e.role === 1);
-      if (setters.some((e) => !/^0x[0-9a-f]{64}$/.test(e.owner))) throw new Error('a setter entry is not a commitment');
+      if (setters.some((e) => e.owner !== setterOwner(e.passkeyPublicKey))) throw new Error('a setter entry is not the setterOwner hash of its passkey');
       return `list hash ${listHash}, ${String(bytes.length)} bytes`;
     });
     if (encoded === '0x') throw new RunStopped('the approved list could not be composed');
@@ -373,7 +369,7 @@ async function setters(ctx: Ctx, listHash: Hex): Promise<{ setter: string; quest
             const status = await teeRead(() => tee.status());
             if (status.stage !== 'submit') throw new Error(`the TEE is at the ${status.stage} stage, not submit`);
             const examBytes = fromHex(exam.examId);
-            const ciphertext = await sealQuestion(c.encryptionPublicKey, examBytes, question);
+            const ciphertext = await sealQuestion(c.encryptionPublicKey, examBytes, fromHex(p.passkeyPublicKey as Hex), question);
             const qHash = hashQuestion(ciphertext);
             const { challenge } = await teeRead(() => tee.questionChallenge());
             const digest = hashMessage('questionSubmission', { examId: examBytes, challenge: fromHex(challenge), questionHash: qHash });
@@ -772,20 +768,15 @@ async function proofStep(ctx: Ctx, build: BuildPost, centrePaperHash: Hex): Prom
       return `${String(entries.length)} entries, signature, entriesHash, token and share hashes verified, signer ${short(stored.instancePublicKey)}`;
     });
 
-    // Reveal: the board publishes each setter's name and salt, and anyone recomputes the commitment.
-    await rep.check('h-proof', 'setter names and salts, written to the state file, match the commitments on the on-chain list', async () => {
+    // No names are published. The list shows only the hash of each setter's passkey, and anyone recomputes it.
+    await rep.check('h-proof', 'no setter name is on the on-chain list, and each setter owner is the hash of its own passkey', async () => {
       const entries = await ctx.io.read(() => ctx.io.registry.getApprovedListEntries(exam.examId));
       if (!entries) throw new Error('the approved list is not readable from the chain');
-      const onChain = decodeApprovedList(fromHex(entries)).filter((e) => e.role === 1).map((e) => e.owner);
-      const reveal = ofKind(ctx, 'setter').map((p) => {
-        const commitment = setterCommitment(fromHex(exam.examId), p.name, fromHex(p.salt as Hex));
-        return { name: p.name, salt: p.salt as Hex, commitment, onChain: onChain.includes(commitment) };
-      });
-      updateRun((r) => (r.reveal = reveal));
-      const bad = reveal.filter((r) => !r.onChain).map((r) => r.name);
-      if (bad.length > 0) throw new Error(`no on-chain commitment for ${bad.join(', ')}`);
-      if (onChain.some((o) => ctx.people.some((p) => p.kind === 'setter' && o === p.name))) throw new Error('a setter name appears on the list in the clear');
-      return `${String(reveal.length)} setters revealed; every commitment is on the list and no name was on it before`;
+      const setters = decodeApprovedList(fromHex(entries)).filter((e) => e.role === 1);
+      const bad = setters.filter((e) => e.owner !== setterOwner(e.passkeyPublicKey));
+      if (bad.length > 0) throw new Error(`${String(bad.length)} setter owner(s) are not the setterOwner hash of their passkey`);
+      if (setters.some((e) => ctx.people.some((p) => p.kind === 'setter' && e.owner === p.name))) throw new Error('a setter name appears on the list in the clear');
+      return `${String(setters.length)} setters, each listed only by the hash of its passkey`;
     });
   });
 }

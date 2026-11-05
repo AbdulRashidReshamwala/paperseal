@@ -12,7 +12,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"paperseal/tee/internal/api"
 	"paperseal/tee/internal/approvedlist"
@@ -114,17 +116,16 @@ type person struct {
 
 func newPerson(t *testing.T, owner string, role approvedlist.Role) *person {
 	t.Helper()
+	p := &person{owner: owner, role: role, passkey: webauthntest.New(t)}
 	if role == approvedlist.RoleSetter {
-		// A setter's owner is the commitment, not the name.
-		var examID, salt [32]byte
-		m, err := hashing.SetterCommitment(examID, owner, salt)
+		// A setter's owner is the setterOwner hash of its own passkey.
+		m, err := hashing.SetterOwner(p.passkey.PublicKey())
 		if err != nil {
 			t.Fatal(err)
 		}
 		sum := m.Sum()
-		owner = "0x" + hex.EncodeToString(sum[:])
+		p.owner = "0x" + hex.EncodeToString(sum[:])
 	}
-	p := &person{owner: owner, role: role, passkey: webauthntest.New(t)}
 	if role != approvedlist.RoleSetter {
 		ikm := make([]byte, 32)
 		rand.Read(ikm)
@@ -161,7 +162,12 @@ type world struct {
 	holders []*person // Neutrals, then centre holders.
 	centre  *person   // A centre without a share.
 	all     []*person
+	skew    atomic.Int64 // Added to the machine's clock, in nanoseconds.
 }
+
+// advance moves the machine's clock on, past its one-second caches of which
+// drand rounds are unpublished.
+func (w *world) advance(d time.Duration) { w.skew.Add(int64(d)) }
 
 func newWorld(t *testing.T) *world {
 	t.Helper()
@@ -201,7 +207,8 @@ func (w *world) machine(opts ...func(*lifecycle.Config)) (*lifecycle.Machine, *a
 		Exam: w.exam, Keys: keys,
 		Tokens:   &attestationtest.Source{PKI: w.pki, T: w.t, Exam: w.exam, ImageDigest: w.chain.imageDigest},
 		Verifier: w.pki.Verifier(), Chain: w.chain, Beacon: w.beacon,
-		Sealer: timelock.NewSealer(w.drand.Chain), Store: w.store,
+		Sealer: timelock.NewSealer(w.drand.Chain), Store: w.store, Bucket: attestationtest.Bucket,
+		Now: func() time.Time { return time.Now().Add(time.Duration(w.skew.Load())) },
 	}
 	for _, o := range opts {
 		o(&cfg)
@@ -327,7 +334,7 @@ func (c client) submit(p *person, plaintext []byte, enc []byte, exam [32]byte) (
 	if err != nil {
 		c.t.Fatal(err)
 	}
-	ct, err := encryption.Seal(encryption.PurposeQuestion, enc, exam, padded)
+	ct, err := encryption.SealQuestion(enc, exam, p.passkey.PublicKey(), padded)
 	if err != nil {
 		c.t.Fatal(err)
 	}
@@ -358,7 +365,9 @@ func (c client) releaseShare(w *world, p *person, enc []byte) (int, string) {
 		c.t.Fatalf("%s cannot open their share: %v", p.owner, err)
 	}
 	var ch api.ChallengeResponse
-	c.mustOK("POST", "/v1/release/challenge", map[string]any{}, &ch)
+	if code, why := c.do("POST", "/v1/release/challenge", map[string]any{}, &ch); code != http.StatusOK {
+		return code, string(why) // No challenge is issued before the unlock round.
+	}
 	msg, _ := hashing.ShareRelease(w.exam.ExamID, ch.Challenge)
 	plain, err := release.EncodeRelease(share, p.passkey.Sign(c.t, msg))
 	if err != nil {

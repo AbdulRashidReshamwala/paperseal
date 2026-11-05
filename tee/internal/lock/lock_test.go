@@ -3,6 +3,7 @@ package lock
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"paperseal/tee/internal/bank"
@@ -89,5 +90,43 @@ func TestOneSetterAt100Percent(t *testing.T) {
 	qs := fill(fill(nil, "a", 6), "b", 3)
 	if _, err := Check(qs, c); err != nil {
 		t.Fatalf("100%% limit: %v", err)
+	}
+}
+
+// Criteria that break the paper size rule are refused at Lock too.
+func TestCheckRefusesCriteriaThatCannotFit(t *testing.T) {
+	c := criteria.Criteria{MaxSetterPercent: 100, MinBankMultiple: 2, Topics: []criteria.Topic{{Name: "a", Questions: 300}}}
+	if _, err := Check(ones(nil, "a", 600), c); !errors.Is(err, criteria.ErrPaperTooLarge) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+// The paper escapes some characters the question sent as they were, so a
+// question can take more room in the paper than in its padded form. A bank
+// whose longest questions make a paper that overflows is refused at Lock.
+func TestCheckRefusesABankWhoseWorstPaperDoesNotFit(t *testing.T) {
+	c := criteria.Criteria{MaxSetterPercent: 100, MinBankMultiple: 2, Topics: []criteria.Topic{{Name: "a", Questions: 255}}}
+	if err := c.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	long := strings.Repeat("\u2028", 1300) // 3 bytes sent, 6 in the paper.
+	var qs []bank.Question
+	for i := range 510 {
+		qs = append(qs, bank.Question{Passkey: []byte{byte(i)}, Topic: "a", Text: fmt.Sprint(i, long)})
+	}
+	if _, err := Check(qs, c); !errors.Is(err, ErrPaperTooBig) {
+		t.Fatalf("worst paper doesn't fit: %v", err)
+	}
+	// Short questions fit.
+	for i := range qs {
+		qs[i].Text = fmt.Sprint(i, "short")
+	}
+	if _, err := Check(qs, c); err != nil {
+		t.Fatalf("short questions: %v", err)
+	}
+	// One long question among short ones does not break the worst draw.
+	qs[0].Text = fmt.Sprint(0, long)
+	if _, err := Check(qs, c); err != nil {
+		t.Fatalf("one long question: %v", err)
 	}
 }

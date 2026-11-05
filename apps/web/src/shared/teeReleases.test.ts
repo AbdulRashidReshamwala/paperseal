@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { checkTag, fetchReleases, parseReleaseBody, parseReleases, releasesRepo, TeeReleasesError } from './teeReleases';
+import { checkTag, fetchReleases, isRunUrlOf, parseReleaseBody, parseReleases, releasesRepo, TeeReleasesError } from './teeReleases';
 
 const commit = `0x${'a'.repeat(40)}`;
 const digest = `0x${'b'.repeat(64)}`;
@@ -118,5 +118,27 @@ describe('releasesRepo', () => {
     expect(releasesRepo({})).toBe('AbdulRashidReshamwala/paperseal');
     expect(releasesRepo({ VITE_RELEASES_REPO: 'me/fork' })).toBe('me/fork');
     expect(() => releasesRepo({ VITE_RELEASES_REPO: 'bad repo' })).toThrow();
+  });
+});
+
+describe('isRunUrlOf', () => {
+  it('accepts only an Actions run of the releases repository', () => {
+    expect(isRunUrlOf('https://github.com/example/paperseal/actions/runs/12345', 'example/paperseal')).toBe(true);
+    expect(isRunUrlOf('https://github.com/Example/Paperseal/actions/runs/12345/attempts/2', 'example/paperseal')).toBe(true);
+    for (const bad of [
+      'https://github.com/other/paperseal/actions/runs/1',
+      'https://github.com/example/paperseal/actions/workflows/repro.yml',
+      'https://github.com/example/paperseal/pull/1',
+      'https://github.com/example/paperseal/actions/runs/1?x=1',
+      'https://github.com/example/paperseal/actions/runs/abc',
+      'https://github.com.evil.example/example/paperseal/actions/runs/1',
+      'https://evil.example/example/paperseal/actions/runs/1',
+      'https://user@github.com/example/paperseal/actions/runs/1',
+      'http://github.com/example/paperseal/actions/runs/1',
+      'javascript:alert(1)',
+      'not a url',
+    ]) {
+      expect(isRunUrlOf(bad, 'example/paperseal'), bad).toBe(false);
+    }
   });
 });

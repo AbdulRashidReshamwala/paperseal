@@ -27,7 +27,7 @@ func TestVerifyPKI(t *testing.T) {
 	k, _ := attestation.NewKeys(e.ExamID)
 	var digest [32]byte
 	digest[0] = 0xab
-	want := attestation.Expect{Exam: e, ImageDigest: digest, InstancePublicKey: k.PublicKey()}
+	want := attestation.Expect{Exam: e, ImageDigest: digest, InstancePublicKey: k.PublicKey(), Bucket: attestationtest.Bucket}
 	hdr := func() map[string]any { return map[string]any{"alg": "RS256"} }
 
 	tok := pki.Token(t, hdr(), claims(t, e, k.PublicKey(), digest, now))
@@ -63,20 +63,28 @@ func TestVerifyPKI(t *testing.T) {
 	})
 	mutate("digest", func(c map[string]any) { cont(c)["image_digest"] = "sha256:" + strings.Repeat("00", 32) })
 	mutate("args", func(c map[string]any) { cont(c)["args"] = []string{"/tee", "--exam-id=0x00"} })
-	mutate("env", func(c map[string]any) { cont(c)["env"] = map[string]string{"SECRET": "1"} })
+	mutate("args without /tee", func(c map[string]any) { cont(c)["args"] = e.Args() })
+	mutate("no cmd_override", func(c map[string]any) { delete(cont(c), "cmd_override") })
+	mutate("no env_override", func(c map[string]any) { delete(cont(c), "env_override") })
+	mutate("extra env_override", func(c map[string]any) {
+		cont(c)["env_override"] = map[string]string{"STORAGE_BUCKET": attestationtest.Bucket, "SECRET": "1"}
+	})
+	mutate("other bucket", func(c map[string]any) {
+		cont(c)["env_override"] = map[string]string{"STORAGE_BUCKET": "other"}
+	})
 	mutate("cmd_override", func(c map[string]any) { cont(c)["cmd_override"] = []string{"/bin/sh"} })
 	mutate("nonce", func(c map[string]any) { c["eat_nonce"] = []string{strings.Repeat("0", 64)} })
 	mutate("no iat", func(c map[string]any) { delete(c, "iat") })
 
 	// Another instance key fails the nonce binding.
 	k2, _ := attestation.NewKeys(e.ExamID)
-	if _, err := v.VerifyPKI(tok, attestation.Expect{Exam: e, ImageDigest: digest, InstancePublicKey: k2.PublicKey()}); err == nil {
+	if _, err := v.VerifyPKI(tok, attestation.Expect{Exam: e, ImageDigest: digest, InstancePublicKey: k2.PublicKey(), Bucket: attestationtest.Bucket}); err == nil {
 		t.Fatal("accepted a token for another instance key")
 	}
 	// Other settings fail the args check.
 	e2 := e
 	e2.Delta = 1801
-	if _, err := v.VerifyPKI(tok, attestation.Expect{Exam: e2, ImageDigest: digest, InstancePublicKey: k.PublicKey()}); err == nil {
+	if _, err := v.VerifyPKI(tok, attestation.Expect{Exam: e2, ImageDigest: digest, InstancePublicKey: k.PublicKey(), Bucket: attestationtest.Bucket}); err == nil {
 		t.Fatal("accepted a token for other settings")
 	}
 

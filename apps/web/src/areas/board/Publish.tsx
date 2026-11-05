@@ -6,7 +6,7 @@ import { Link } from 'react-router';
 import { setCurrentExamId } from '../../shared/currentExam';
 import { currentAccount, requestAccount, walletChainId } from '../../shared/wallet';
 import { useBoardForm, useEvaluated } from './BoardForm';
-import { checkTag, fetchReleases, releasesRepo, TeeReleasesError, type TeeRelease } from '../../shared/teeReleases';
+import { checkTag, fetchReleases, isRunUrlOf, releasesRepo, TeeReleasesError, type TeeRelease } from '../../shared/teeReleases';
 import { evaluatePublish, evaluateSchedule, formatClock, whenTyped, type ScheduleResult } from './form';
 import { explainError, publishExam, type PublishOutcome, type PublishRequest, type PublishStage } from './publishFlow';
 
@@ -91,6 +91,7 @@ function useReleases(version: string) {
 
   const status: TagStatus | null = selected ? (checked?.key === key ? checked.status : { state: 'checking' }) : null;
   return {
+    repo,
     list,
     selected,
     status,
@@ -103,7 +104,7 @@ function useReleases(version: string) {
 }
 
 function ReleasePanel(props: { releases: ReturnType<typeof useReleases>; version: string; onSelect: (version: string) => void }) {
-  const { list, selected, status } = props.releases;
+  const { list, selected, status, repo } = props.releases;
   const unreachable = (error: TeeReleasesError) => (
     <>
       <Badge tone="bad">
@@ -152,9 +153,15 @@ function ReleasePanel(props: { releases: ReturnType<typeof useReleases>; version
             <Mono>{selected.imageDigest}</Mono>
           </Row>
           <Row label="Build run">
-            <a href={selected.run} target="_blank" rel="noreferrer">
-              {selected.run}
-            </a>
+            {isRunUrlOf(selected.run, repo) ? (
+              <a href={selected.run} target="_blank" rel="noreferrer">
+                {selected.run}
+              </a>
+            ) : (
+              <>
+                <Badge tone="warn">Not a workflow run of {repo}, so it is not linked.</Badge> <Mono>{selected.run}</Mono>
+              </>
+            )}
           </Row>
         </Rows>
       ) : null}
@@ -324,7 +331,8 @@ export function Publish() {
       const outcome = await publishExam(environment, request, (stage) => {
         setProgress({ state: 'running', stage });
       });
-      setCurrentExamId(request.examId);
+      // The pointer follows the exam only when ExamRegistry returns what was sent. A mismatch leaves it where it was.
+      if (outcome.matches) setCurrentExamId(request.examId);
       setProgress({ state: 'done', outcome, version: request.fields.version });
     } catch (error) {
       setProgress({ state: 'failed', message: explainError(error) });
@@ -400,9 +408,16 @@ export function Publish() {
               </Row>
             ))}
           </Rows>
-          <p>
-            The exam is now the one shown in the <Link to="/board">overview</Link>.
-          </p>
+          {progress.outcome.matches ? (
+            <p>
+              The exam is now the one shown in the <Link to="/board">overview</Link>.
+            </p>
+          ) : (
+            <p>
+              <Badge tone="bad">The read-back differs, so this exam was not selected.</Badge> The overview still shows the
+              exam it showed before. Compare the rows above with what you entered before using this exam.
+            </p>
+          )}
         </Panel>
       ) : null}
       <Button

@@ -90,11 +90,11 @@ Keys sit behind one small interface (`generateKey`, `getPublicKey`, `decryptShar
 
 ### Approved List
 
-The board posts one final list per exam on-chain, and the TEE reads it back over TLS, so the board's network can't change who is approved. The list is public, so anyone can see every key holder and approved centre, and which key each one holds. Setters appear as a salted hash of their name until after the exam, so the list doesn't show who to pressure, and the board then publishes each name and salt so anyone can check them.
+The board posts one final list per exam on-chain, and the TEE reads it back over TLS, so the board's network can't change who is approved. The list is public, so anyone can see every key holder and approved centre, and which key each one holds. Setters appear only as a hash of their public key, and their names are never published, so the list doesn't show who to pressure.
 
 The TEE knows the board through its attested settings: they name `ExamRegistry`, and only that contract's fixed board address can write to it. The board announces the contract address on its official site, which is how everyone else knows it is the real board.
 
-1. **Register:** the board invites each setter, key holder and centre, and each one registers with the TEE as in [Hardware Keys](#hardware-keys). Setters register a passkey only, because nothing is ever encrypted to them, and the invite carries the salted hash they register under.
+1. **Register:** the board invites each setter, key holder and centre, and each one registers with the TEE as in [Hardware Keys](#hardware-keys). Setters register a passkey only, because nothing is ever encrypted to them, and they need no name.
 2. **Post:** the board's address posts the list to `ExamRegistry`, where it can be written only once. Each entry has the owner, role, passkey public key and derived public key. The contract stores a hash of the list and emits the full list, so reading it doesn't depend on storage the board controls.
 3. **Read:** the TEE reads the list at a finalised block from the RPC operator named in its attested settings. The TLS root certificates are part of the attested image, so the board can block this read but can't change it.
 4. **Check:** the TEE rejects the list if any entry wasn't verified at registration. It signs the list hash into the Build, and `ExamRegistry` rejects a Build whose hash differs from the posted one.
@@ -156,7 +156,7 @@ Anyone can check that the TEE runs the exact open-source code, unchanged. The TE
 | `secboot` | `true` |
 | `submods.confidential_space.support_attributes` | Includes `STABLE` |
 | `submods.container.image_digest` | The digest recorded on-chain |
-| `submods.container.args`, `submods.container.cmd_override`, `submods.container.env` | The arguments match the on-chain exam settings, and the environment is as expected |
+| `submods.container.args`, `submods.container.cmd_override`, `submods.container.env_override` | The arguments match the on-chain exam settings, and the operator set only the storage bucket |
 | `eat_nonce` | The hash of the TEE's public key and the exam ID |
 
 A TEE given fake exam settings fails this check, whichever Google Cloud project it runs in. A copy given the real settings can't post anything, because `ExamRegistry` accepts writes only from the board's address, and each write after the list is signed by the TEE.
@@ -198,7 +198,7 @@ The paper stays with approved centres from `T−Δ` until the end round. At that
 - Attestation proves the published code made the selection. That code holds the bank in memory and applies the attested criteria, so the proof relies on the TEE instead of a public re-run of the selection.
 - The criteria set how many questions come from each topic and limit each setter's share of a topic. Questions are picked at random, and the TEE relies on the topic each setter assigns.
 - Setters know their own questions, so one could recognise a selected question. A setter with 10% of the bank is likely to know at least one question on a 20-question paper. The setter cap limits each setter's share of the paper, but doesn't remove this risk.
-- Setter names are hidden behind salted hashes until after the exam, but the board knows them, so a leak from the board would still show who to pressure.
+- Setter names are never published, so the public can't check who set the paper. The board still knows who it invited, so a leak from the board would show who to pressure.
 - Nobody reviews question content, so a poor question could reach the paper with no way to replace it.
 
 ### Time

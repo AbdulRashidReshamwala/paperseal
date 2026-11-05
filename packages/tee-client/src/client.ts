@@ -27,6 +27,17 @@ export class TeeApiError extends Error {
   }
 }
 
+/**
+ * The TEE refuses a release challenge, and a share, until `unlockRound` is published. It answers
+ * 425 `too_early`, which is not a fault: the exam has simply not unlocked yet.
+ */
+export function isReleaseNotOpen(error: unknown): boolean {
+  return error instanceof TeeApiError && (error.code === 'too_early' || error.status === 425);
+}
+
+export const RELEASE_NOT_OPEN_MESSAGE =
+  'Release opens once the unlock round is published. The TEE refuses release challenges before then, so wait for the countdown to finish and try again.';
+
 function isErrorBody(body: unknown): body is ApiErrorBody {
   const error = (body as Partial<ApiErrorBody> | null)?.error;
   return typeof error?.code === 'string' && typeof error.message === 'string';

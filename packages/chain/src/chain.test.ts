@@ -12,16 +12,18 @@ import {
   zeroAddress,
   type Hex,
 } from 'viem';
-import { drand } from '@paperseal/protocol';
+import { approvedListHash, criteriaHash, drand, fromHex, toHex } from '@paperseal/protocol';
 import { describe, expect, it } from 'vitest';
 
-import { createExamRegistry, examRegistryAbi, NoWalletError } from './index';
+import { createExamRegistry, examRegistryAbi, NoWalletError, OnChainBytesError } from './index';
 
 const script = resolve(import.meta.dirname, '../scripts/sync-abi.mjs');
 const address = '0x00000000000000000000000000000000000000aa';
 const examId: Hex = `0x${'11'.repeat(32)}`;
 const hash32: Hex = `0x${'22'.repeat(32)}`;
 const zero32: Hex = `0x${'00'.repeat(32)}`;
+const listHashOf = (entries: Hex): Hex => toHex(approvedListHash(fromHex(examId), fromHex(entries)));
+const criteriaHashOf = (criteria: Hex): Hex => toHex(criteriaHash(fromHex(criteria)));
 
 /**
  * A local EIP-1193 stub that answers eth_call and eth_getLogs. Like a public RPC, it rejects any
@@ -193,7 +195,7 @@ describe('createExamRegistry', () => {
     const registry = createExamRegistry({
       address,
       transport: chainStub(
-        () => ({ listHash: hash32, postedAt: 9n, postedBlock: 77n }),
+        () => ({ listHash: listHashOf(entries), postedAt: 9n, postedBlock: 77n }),
         (filter) => {
           expect(filter.fromBlock).toBe(77n);
           expect(filter.topics).toEqual(log);
@@ -219,6 +221,46 @@ describe('createExamRegistry', () => {
     expect(await registry.getApprovedListEntries(examId)).toBe(entries);
   });
 
+  const listLog = (entries: Hex) => ({
+    address,
+    topics: encodeEventTopics({ abi: examRegistryAbi, eventName: 'ApprovedListPosted', args: { examId } }),
+    data: encodeAbiParameters([{ type: 'bytes32' }, { type: 'bytes' }], [hash32, entries]),
+    blockNumber: '0x1',
+    blockHash: hash32,
+    transactionHash: hash32,
+    transactionIndex: '0x0',
+    logIndex: '0x0',
+    removed: false,
+  });
+
+  it('rejects approved-list bytes that do not hash to the on-chain listHash', async () => {
+    const registry = createExamRegistry({
+      address,
+      transport: chainStub(
+        () => ({ listHash: listHashOf('0x1234abcd'), postedAt: 9n, postedBlock: 77n }),
+        () => [listLog('0x1234abce')],
+      ),
+    });
+    await expect(registry.getApprovedListEntries(examId)).rejects.toMatchObject({
+      name: 'OnChainBytesError',
+      what: 'approvedList',
+      kind: 'mismatch',
+    });
+  });
+
+  it('says so when a posted list has no event, instead of returning null', async () => {
+    const registry = createExamRegistry({
+      address,
+      transport: chainStub(
+        () => ({ listHash: listHashOf('0x1234abcd'), postedAt: 9n, postedBlock: 77n }),
+        () => [],
+      ),
+    });
+    const error: unknown = await registry.getApprovedListEntries(examId).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(OnChainBytesError);
+    expect(error).toMatchObject({ kind: 'missing' });
+  });
+
   it('returns null when no approved list was posted', async () => {
     const registry = createExamRegistry({
       address,
@@ -242,7 +284,7 @@ describe('createExamRegistry', () => {
     const registry = createExamRegistry({
       address,
       transport: chainStub(
-        () => ({ ...exam, createdAt: 9n, createdBlock: 55n }),
+        () => ({ ...exam, settings: { ...exam.settings, criteriaHash: criteriaHashOf(criteria) }, createdAt: 9n, createdBlock: 55n }),
         (filter) => {
           expect(filter.fromBlock).toBe(55n);
           expect(filter.topics).toEqual(topics);
@@ -288,6 +330,33 @@ describe('createExamRegistry', () => {
       ),
     });
     expect(await registry.getCriteria(examId)).toBe(criteria);
+  });
+
+  it('rejects criteria bytes that do not hash to settings.criteriaHash, and a missing event', async () => {
+    const criteria: Hex = '0xc0ffee';
+    const topics = encodeEventTopics({ abi: examRegistryAbi, eventName: 'ExamCreated', args: { examId } });
+    const log = (bytes: Hex) => ({
+      address,
+      topics,
+      data: encodeAbiParameters(
+        [
+          { type: 'bytes20' }, { type: 'bytes32' }, { type: 'uint64' }, { type: 'uint64' }, { type: 'uint64' },
+          { type: 'uint64' }, { type: 'uint64' }, { type: 'bytes32' }, { type: 'string' }, { type: 'bytes' },
+        ],
+        [`0x${'01'.repeat(20)}`, hash32, 1n, 2n, 3n, 4n, 5n, hash32, 'rpc.example.org', bytes],
+      ),
+      blockNumber: '0x1',
+      blockHash: hash32,
+      transactionHash: hash32,
+      transactionIndex: '0x0',
+      logIndex: '0x0',
+      removed: false,
+    });
+    const record = () => ({ ...exam, settings: { ...exam.settings, criteriaHash: criteriaHashOf(criteria) }, createdAt: 9n, createdBlock: 55n });
+    const tampered = createExamRegistry({ address, transport: chainStub(record, () => [log('0xc0ffef')]) });
+    await expect(tampered.getCriteria(examId)).rejects.toMatchObject({ what: 'criteria', kind: 'mismatch' });
+    const missing = createExamRegistry({ address, transport: chainStub(record, () => []) });
+    await expect(missing.getCriteria(examId)).rejects.toMatchObject({ what: 'criteria', kind: 'missing' });
   });
 
   it('returns null criteria before the exam exists', async () => {

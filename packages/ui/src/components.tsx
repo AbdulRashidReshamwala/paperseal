@@ -87,9 +87,10 @@ export function Rows(props: { children: ReactNode }) {
   return <ul className="ps-rows">{props.children}</ul>;
 }
 
-export function Row(props: { label: ReactNode; children: ReactNode }) {
+/** `muted` greys the row out, for content that has not been verified and should not read as fact. */
+export function Row(props: { label: ReactNode; children: ReactNode; muted?: boolean }) {
   return (
-    <li>
+    <li data-muted={props.muted ? 'true' : undefined}>
       <span>{props.label}</span>
       <span>{props.children}</span>
     </li>
@@ -107,34 +108,46 @@ type Loaded<T> =
 /**
  * Loads from a real source, or shows that the source is not set up. `load` is
  * null when nothing is configured. Pass a stable function, and a new one to
- * reload. Nothing here supplies placeholder data.
+ * reload. Nothing here supplies placeholder data. With `pollMs`, the source is read again that
+ * long after each read finishes, so a slow source is never read twice at once.
  */
 export function Connected<T>(props: {
   title: string;
   /** Shown when `load` is null, naming what to configure. */
   notConnected: ReactNode;
   load: (() => Promise<T>) | null;
+  /** Milliseconds between reads. Unset reads once per `load`. */
+  pollMs?: number;
   children: (value: T) => ReactNode;
 }) {
-  const { load } = props;
+  const { load, pollMs } = props;
   const [loaded, setLoaded] = useState<Loaded<T> | null>(null);
 
   useEffect(() => {
     if (!load) return;
     let live = true;
-    load().then(
-      (value) => {
-        if (live) setLoaded({ source: load, state: 'ready', value });
-      },
-      (error: unknown) => {
-        const message = error instanceof Error ? error.message : String(error);
-        if (live) setLoaded({ source: load, state: 'error', message });
-      },
-    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const read = () => {
+      load()
+        .then(
+          (value) => {
+            if (live) setLoaded({ source: load, state: 'ready', value });
+          },
+          (error: unknown) => {
+            const message = error instanceof Error ? error.message : String(error);
+            if (live) setLoaded({ source: load, state: 'error', message });
+          },
+        )
+        .finally(() => {
+          if (live && pollMs !== undefined && pollMs > 0) timer = setTimeout(read, pollMs);
+        });
+    };
+    read();
     return () => {
       live = false;
+      if (timer !== undefined) clearTimeout(timer);
     };
-  }, [load]);
+  }, [load, pollMs]);
 
   if (!load) return <EmptyState title={`${props.title}: not connected`}>{props.notConnected}</EmptyState>;
   if (loaded?.source !== load) return <EmptyState title={props.title}>Loading.</EmptyState>;

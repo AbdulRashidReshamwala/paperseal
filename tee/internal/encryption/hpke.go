@@ -91,8 +91,18 @@ func wrap(sk kem.PrivateKey) (*PrivateKey, error) {
 // PublicKey returns the 65-byte uncompressed public key.
 func (k *PrivateKey) PublicKey() []byte { return append([]byte(nil), k.pub...) }
 
+// ErrQuestionAAD is returned when a question is sealed or opened without its
+// setter, because its aad is examId || passkeyPublicKey, not examId.
+var ErrQuestionAAD = errors.New("encryption: a question's aad needs the setter's passkey, use SealQuestion and OpenQuestion")
+
+// QuestionAAD is the aad of a question: examId || passkeyPublicKey. It ties the
+// ciphertext to the setter who sent it, so another setter can't resubmit it.
+func QuestionAAD(examID [32]byte, passkeyPublicKey []byte) []byte {
+	return append(append(make([]byte, 0, 32+len(passkeyPublicKey)), examID[:]...), passkeyPublicKey...)
+}
+
 // Seal encrypts plaintext to a public key, framed as enc || ciphertext. The
-// examID is the HPKE aad.
+// examId is the HPKE aad. A question has another aad, see SealQuestion.
 func Seal(p Purpose, publicKey []byte, examID [32]byte, plaintext []byte) ([]byte, error) {
 	return SealFrom(rand.Reader, p, publicKey, examID, plaintext)
 }
@@ -100,6 +110,27 @@ func Seal(p Purpose, publicKey []byte, examID [32]byte, plaintext []byte) ([]byt
 // SealFrom is Seal with the randomness supplied. Only the test vectors pass
 // anything but crypto/rand, to make their output repeatable.
 func SealFrom(rnd io.Reader, p Purpose, publicKey []byte, examID [32]byte, plaintext []byte) ([]byte, error) {
+	if p == PurposeQuestion {
+		return nil, ErrQuestionAAD
+	}
+	return sealAAD(rnd, p, publicKey, examID[:], plaintext)
+}
+
+// SealQuestion encrypts a padded question for the TEE, with the aad the spec
+// sets for it: examId || the setter's passkey public key.
+func SealQuestion(publicKey []byte, examID [32]byte, passkeyPublicKey, plaintext []byte) ([]byte, error) {
+	return SealQuestionFrom(rand.Reader, publicKey, examID, passkeyPublicKey, plaintext)
+}
+
+// SealQuestionFrom is SealQuestion with the randomness supplied, for vectors.
+func SealQuestionFrom(rnd io.Reader, publicKey []byte, examID [32]byte, passkeyPublicKey, plaintext []byte) ([]byte, error) {
+	if err := hashing.CheckPublicKey(passkeyPublicKey); err != nil {
+		return nil, fmt.Errorf("encryption: setter: %w", err)
+	}
+	return sealAAD(rnd, PurposeQuestion, publicKey, QuestionAAD(examID, passkeyPublicKey), plaintext)
+}
+
+func sealAAD(rnd io.Reader, p Purpose, publicKey, aad, plaintext []byte) ([]byte, error) {
 	info, err := p.info()
 	if err != nil {
 		return nil, err
@@ -119,15 +150,28 @@ func SealFrom(rnd io.Reader, p Purpose, publicKey []byte, examID [32]byte, plain
 	if err != nil {
 		return nil, fmt.Errorf("encryption: setup: %w", err)
 	}
-	ct, err := sealer.Seal(plaintext, examID[:])
+	ct, err := sealer.Seal(plaintext, aad)
 	if err != nil {
 		return nil, fmt.Errorf("encryption: seal: %w", err)
 	}
 	return append(enc, ct...), nil
 }
 
-// Open decrypts an enc || ciphertext message.
+// Open decrypts an enc || ciphertext message whose aad is the examId. A
+// question has another aad, see OpenQuestion.
 func (k *PrivateKey) Open(p Purpose, examID [32]byte, framed []byte) ([]byte, error) {
+	if p == PurposeQuestion {
+		return nil, ErrQuestionAAD
+	}
+	return k.openAAD(p, examID[:], framed)
+}
+
+// OpenQuestion decrypts a question sent by the setter with this passkey.
+func (k *PrivateKey) OpenQuestion(examID [32]byte, passkeyPublicKey, framed []byte) ([]byte, error) {
+	return k.openAAD(PurposeQuestion, QuestionAAD(examID, passkeyPublicKey), framed)
+}
+
+func (k *PrivateKey) openAAD(p Purpose, aad, framed []byte) ([]byte, error) {
 	info, err := p.info()
 	if err != nil {
 		return nil, err
@@ -144,7 +188,7 @@ func (k *PrivateKey) Open(p Purpose, examID [32]byte, framed []byte) ([]byte, er
 	if err != nil {
 		return nil, ErrOpen
 	}
-	pt, err := opener.Open(framed[encLen:], examID[:])
+	pt, err := opener.Open(framed[encLen:], aad)
 	if err != nil {
 		return nil, ErrOpen
 	}

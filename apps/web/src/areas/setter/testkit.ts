@@ -1,5 +1,5 @@
 import type { TokenVerdict } from '@paperseal/attestation';
-import { hpkeDeriveKeyPair, hpkeSerializePublicKey } from '@paperseal/crypto';
+import { hpkeContext, hpkeDeriveKeyPair, hpkeOpen, hpkeSerializePublicKey } from '@paperseal/crypto';
 import type { Keys } from '@paperseal/keys';
 import {
   approvedListHash,
@@ -14,7 +14,7 @@ import {
   type Criteria,
   type Hex,
 } from '@paperseal/protocol';
-import type { StatusResponse } from '@paperseal/tee-client';
+import { TeeApiError, type StatusResponse } from '@paperseal/tee-client';
 import { vi } from 'vitest';
 
 import type { SetterEnv } from './session';
@@ -110,7 +110,14 @@ export async function makeWorld(options: WorldOptions = {}): Promise<World> {
   );
   const receiptSigner = options.receiptSigner ?? signer;
 
-  const teeQuestion = vi.fn(async (body: { ciphertext: Hex }) => {
+  const teeQuestion = vi.fn(async (body: { ciphertext: Hex; passkeyPublicKey: Hex }) => {
+    // The TEE opens a question with `examId || passkeyPublicKey` as aad, so a ciphertext sealed for
+    // another passkey is refused here as it is by the real TEE.
+    try {
+      await hpkeOpen(encryption, fromHex(body.ciphertext), hpkeContext('question', fromHex(examId), fromHex(body.passkeyPublicKey)));
+    } catch {
+      throw new TeeApiError(400, 'decryption_failed', 'the question did not decrypt');
+    }
     const hash = questionHash(fromHex(body.ciphertext));
     return {
       questionHash: toHex(options.wrongReceiptHash ? new Uint8Array(32).fill(9) : hash),
@@ -158,7 +165,8 @@ export async function makeWorld(options: WorldOptions = {}): Promise<World> {
         }),
       registerChallenge: () => Promise.reject(new Error('unused')),
       register: () => Promise.reject(new Error('unused')),
-      questionChallenge: () => Promise.resolve({ challenge: toHex(new Uint8Array(32).fill(5)) }),
+      // Longer than 32 bytes, like the TEE's: nothing may assume a challenge width.
+      questionChallenge: () => Promise.resolve({ challenge: toHex(new Uint8Array(80).fill(5)) }),
       question: teeQuestion as never,
     },
     chain: {
@@ -186,7 +194,7 @@ export async function makeWorld(options: WorldOptions = {}): Promise<World> {
         Promise.resolve(build.current ? ({ ...build.current, examId } as never) : null),
     } as unknown as NonNullable<SetterEnv['chain']>,
     keys: () => keys,
-    policy: { approvedHwModels: ['GCP_AMD_SEV'], cmdOverride: [], env: {} },
+    policy: { storageBucket: 'test-bucket' },
     ...(options.realAttestation ? {} : { verifyToken: verifyToken as never }),
   };
   return { env, tee: env.tee as NonNullable<SetterEnv['tee']>, chain: env.chain as NonNullable<SetterEnv['chain']>, signer, encryption, encryptionPublicKey, signed, teeQuestion, stage, chainListHash, build, verifyToken };

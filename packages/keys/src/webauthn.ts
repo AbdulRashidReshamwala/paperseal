@@ -4,7 +4,7 @@ import {
   openKeyPriv,
   openShare,
 } from '@paperseal/crypto';
-import { hashMessage, toHex, utf8ToBytes, webauthn, type Hex } from '@paperseal/protocol';
+import { hashMessage, setterOwner, toHex, utf8ToBytes, webauthn, type Hex } from '@paperseal/protocol';
 
 import { assertDeviceBound } from './authenticator-data';
 import { KeyError } from './errors';
@@ -41,17 +41,30 @@ export interface GenerateKeyOptions {
   prf?: boolean;
 }
 
-export interface RegisterOptions {
-  /** The name on the approved list. `holderId` in the `registration` message is its UTF-8 bytes. */
+/**
+ * A key holder registers under a name for roles 2 to 4, so its passkey must support PRF.
+ * `holderId` in the `registration` message is the UTF-8 bytes of `owner`.
+ */
+export interface HolderRegisterOptions {
+  role: 'holder';
+  /** The name on the approved list. */
   owner: string;
-  /**
-   * `holder` registers a derived key for roles 2 to 4, so the passkey must support PRF.
-   * `setter` registers no derived key and needs no PRF.
-   */
-  role: 'holder' | 'setter';
-  /** From `POST /v1/register/challenge`. */
+  /** From `POST /v1/register/challenge`. Any length: the TEE chooses it. */
   challenge: Uint8Array;
 }
+
+/**
+ * A setter registers no derived key and needs no PRF. It has no name: its `owner` is
+ * `setterOwner(passkeyPublicKey)`, which can only be computed once the passkey exists, so it is
+ * made after the create and before the passkey signs `registration`.
+ */
+export interface SetterRegisterOptions {
+  role: 'setter';
+  /** From `POST /v1/register/challenge`. Any length: the TEE chooses it. */
+  challenge: Uint8Array;
+}
+
+export type RegisterOptions = HolderRegisterOptions | SetterRegisterOptions;
 
 /** The body of `POST /v1/register`, as hex. It matches `RegisterRequest` in @paperseal/tee-client. */
 export interface RegisterRequestBody {
@@ -68,6 +81,8 @@ export interface RegisterRequestBody {
 
 export interface Registration {
   credentialId: Uint8Array;
+  /** The name a holder gave, or a setter's `setterOwner` hash. Equal to `request.owner`. */
+  owner: string;
   request: RegisterRequestBody;
 }
 
@@ -83,7 +98,8 @@ export interface Keys {
   /**
    * Everything `POST /v1/register` needs. The passkey signs the `registration` message with a
    * WebAuthn get, so one ceremony can't do it: the passkey must exist first, and a holder's
-   * derived key goes into the message. A setter takes a create and a get. A holder takes a
+   * derived key goes into the message. A setter's `owner` is the hash of its new passkey's
+   * public key, computed after the create and before the get. A setter takes a create and a get. A holder takes a
    * create and a get, plus a second get for the derived key when the authenticator doesn't
    * return the PRF output at creation.
    */
@@ -226,10 +242,15 @@ export function createWebAuthnKeys(options: WebAuthnKeysOptions): Keys {
       return generated(await create(user, options.prf ?? true, false));
     },
 
-    async register({ owner, role, challenge }) {
+    async register(options) {
+      const { role, challenge } = options;
       const holder = role === 'holder';
-      const userId = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', copy(utf8ToBytes(owner))));
-      const created = await create({ id: userId, name: owner }, holder, holder);
+      // A setter has no name to derive an id from, so its user handle is random.
+      const userId = holder
+        ? new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', copy(utf8ToBytes(options.owner))))
+        : globalThis.crypto.getRandomValues(new Uint8Array(32));
+      const created = await create({ id: userId, name: holder ? options.owner : 'Setter' }, holder, holder);
+      const owner = holder ? options.owner : setterOwner(created.passkeyPublicKey);
 
       let derivedPublicKey: Uint8Array = new Uint8Array();
       if (holder) {
@@ -249,6 +270,7 @@ export function createWebAuthnKeys(options: WebAuthnKeysOptions): Keys {
       const signature = signatureOf(response);
       return {
         credentialId: created.credentialId,
+        owner,
         request: {
           owner,
           challenge: toHex(challenge),

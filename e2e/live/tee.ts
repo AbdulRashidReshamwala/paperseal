@@ -9,13 +9,13 @@ import {
 import { verifyTeeSignature } from '@paperseal/crypto';
 import {
   approvedListHash,
+  attestation,
   chain,
   criteriaHash,
   decodeCriteria,
   encodeMessage,
   equalBytes,
   fromHex,
-  startupArgs,
   toHex,
   type Criteria,
   type ExamSettings,
@@ -104,12 +104,10 @@ function expectedFor(env: Env, chainBound: Awaited<ReturnType<typeof chainSettin
     instanceKeySignature: fromHex(a.instanceKeySignature),
     examId: fromHex(env.examId),
     imageDigest: chainBound.imageDigest,
-    approvedHwModels: deployed.approvedHwModels,
+    approvedHwModels: attestation.hwModels,
     settings: chainBound.settings,
     registry: deployed.registry,
-    // The startup arguments are passed with tee-cmd, so the token shows them as the command override.
-    cmdOverride: startupArgs(chainBound.settings),
-    env: { STORAGE_BUCKET: deployed.storageBucket },
+    storageBucket: deployed.storageBucket,
   };
 }
 
@@ -189,11 +187,10 @@ export async function checkPublishedToken(env: Env, token: string, instancePubli
     instanceKeySignature: new Uint8Array(),
     examId: fromHex(env.examId),
     imageDigest: bound.imageDigest,
-    approvedHwModels: deployed.approvedHwModels,
+    approvedHwModels: attestation.hwModels,
     settings: bound.settings,
     registry: deployed.registry,
-    cmdOverride: startupArgs(bound.settings),
-    env: { STORAGE_BUCKET: deployed.storageBucket },
+    storageBucket: deployed.storageBucket,
   };
   const failures: string[] = [];
   const signature = await verifyPkiToken(token);

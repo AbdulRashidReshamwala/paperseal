@@ -1,12 +1,13 @@
 import { timelockDecrypt } from '@paperseal/crypto';
 import { fromHex, toHex, type Paper } from '@paperseal/protocol';
 import { Badge, Button, EmptyState, Panel, Row, Rows, Screen } from '@paperseal/ui';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 
 import { storageUrl } from '../../shared/config';
-import { holderCredential, listEntryFor } from '../../shared/holder';
+import { useCurrentExamId } from '../../shared/currentExam';
+import { listEntryFor, useHolderCredential } from '../../shared/holder';
 import { browserKeys } from '../../shared/Register';
-import { examId, registry } from '../../shared/registry';
+import { registry } from '../../shared/registry';
 import { storageFetcher } from '../../shared/storage';
 import { TeeStatus } from '../../shared/TeeStatus';
 import { useCentreState } from './CentreState';
@@ -41,7 +42,8 @@ export function PaperView(props: { paper: Paper }) {
 
 export function Unlock() {
   const { downloaded, setDownloaded } = useCentreState();
-  const identity = useMemo(() => holderCredential(), []);
+  const examId = useCurrentExamId();
+  const identity = useHolderCredential('centre');
   const [progress, setProgress] = useState<Progress>({ state: 'idle' });
   const [paper, setPaper] = useState<Paper | null>(null);
   const ready = registry !== null && examId !== null && storageUrl !== null && identity !== null;

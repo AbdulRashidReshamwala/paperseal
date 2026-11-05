@@ -1,4 +1,4 @@
-import { examRegistryAbi, type ExamRegistry } from '@paperseal/chain';
+import { examRegistryAbi, OnChainBytesError, type ExamRegistry } from '@paperseal/chain';
 import { approvedListHash, chain, fromHex, toHex, type Hex } from '@paperseal/protocol';
 import { BaseError, ContractFunctionRevertedError, UserRejectedRequestError, type Address } from 'viem';
 
@@ -100,10 +100,24 @@ const row = (label: string, expected: string, actual: string) => ({
   match: expected === actual,
 });
 
-async function retry<T>(read: () => Promise<T | null>, attempts: number, wait: (ms: number) => Promise<void>): Promise<T | null> {
+/**
+ * Reads until a value comes back. An RPC node can lag the node that mined the block, so a posted
+ * record whose event isn't visible yet (`missing`) counts as not there yet. Bytes that come back
+ * but don't match the on-chain hash (`mismatch`) are an answer, and are returned as one.
+ */
+async function retry<T>(
+  read: () => Promise<T | null>,
+  attempts: number,
+  wait: (ms: number) => Promise<void>,
+): Promise<{ value: T } | { value: null; mismatch: OnChainBytesError } | null> {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const value = await read();
-    if (value) return value;
+    try {
+      const value = await read();
+      if (value) return { value };
+    } catch (error) {
+      if (!(error instanceof OnChainBytesError)) throw error;
+      if (error.kind === 'mismatch') return { value: null, mismatch: error };
+    }
     await wait(1000);
   }
   return null;
@@ -136,14 +150,16 @@ export async function postApprovedListFlow(
   onStage('reading');
   const wait = options.wait ?? sleep;
   const attempts = options.readBackAttempts ?? 5;
-  const list = await retry(() => sent.reader.getApprovedList(examId), attempts, wait);
-  const emitted = await retry(() => sent.reader.getApprovedListEntries(examId), attempts, wait);
-  if (!list || !emitted) {
+  const listRead = await retry(() => sent.reader.getApprovedList(examId), attempts, wait);
+  const emittedRead = await retry(() => sent.reader.getApprovedListEntries(examId), attempts, wait);
+  const list = listRead?.value;
+  if (!list || !emittedRead) {
     throw new Error('The transaction was mined, but ExamRegistry does not return the list yet. Reload and check the approved list screen.');
   }
   const rows = [
     row('List hash', lower(toHex(approvedListHash(fromHex(examId), fromHex(entries)))), lower(list.listHash)),
-    row('Posted bytes', lower(entries), lower(emitted)),
+    // Bytes the client refused (they don't hash to the stored list hash) are shown as a mismatch.
+    row('Posted bytes', lower(entries), emittedRead.value ? lower(emittedRead.value) : 'bytes that do not hash to the list hash'),
   ];
   return { ...sent, rows, matches: rows.every((r) => r.match) };
 }
@@ -189,7 +205,8 @@ export async function postBuildFlow(
     onStage,
   );
   onStage('reading');
-  const stored = await retry(() => sent.reader.getBuild(build.examId), options.readBackAttempts ?? 5, options.wait ?? sleep);
+  const storedRead = await retry(() => sent.reader.getBuild(build.examId), options.readBackAttempts ?? 5, options.wait ?? sleep);
+  const stored = storedRead?.value;
   if (!stored) {
     throw new Error('The transaction was mined, but ExamRegistry does not return the Build yet. Reload and check the overview.');
   }

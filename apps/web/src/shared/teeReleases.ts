@@ -60,6 +60,31 @@ function httpsUrl(value: string): boolean {
   }
 }
 
+/**
+ * True only for a GitHub Actions run of `repo`: `https://github.com/<owner>/<name>/actions/runs/<id>`,
+ * with an optional `/attempts/<n>`. The release notes are text anyone with write access can edit, so
+ * the board links nothing else, whatever scheme or host they name.
+ */
+export function isRunUrlOf(run: string, repo: string): boolean {
+  if (!repoPattern.test(repo)) return false;
+  let url: URL;
+  try {
+    url = new URL(run);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== 'https:' || url.hostname !== 'github.com' || url.port !== '' || url.username !== '' || url.password !== '') {
+    return false;
+  }
+  if (url.search !== '' || url.hash !== '') return false;
+  const [owner, name] = repo.toLowerCase().split('/');
+  return new RegExp(`^/${escapeRegExp(owner ?? '')}/${escapeRegExp(name ?? '')}/actions/runs/[0-9]+(/attempts/[0-9]+)?$`).test(
+    url.pathname.toLowerCase(),
+  );
+}
+
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 /** The release metadata from a release's notes, or null if it is absent or does not validate. */
 export function parseReleaseBody(body: unknown, tagName: unknown): Omit<TeeRelease, 'publishedAt'> | null {
   if (typeof body !== 'string' || typeof tagName !== 'string' || !versionPattern.test(tagName)) return null;

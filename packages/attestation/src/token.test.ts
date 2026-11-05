@@ -230,8 +230,7 @@ describe('checkToken with instanceKeySignature', () => {
       approvedHwModels: ['GCP_AMD_SEV'],
       settings,
       registry,
-      cmdOverride: [],
-      env: {},
+      storageBucket: 'bucket-1',
     };
     const claims = {
       iss: 'https://confidentialcomputing.googleapis.com',
@@ -245,7 +244,7 @@ describe('checkToken with instanceKeySignature', () => {
       eat_nonce: attestationNonce(signing.publicKey, examId),
       submods: {
         confidential_space: { support_attributes: ['STABLE'] },
-        container: { image_digest: `sha256:${'ab'.repeat(32)}`, args: startupArgs(settings), cmd_override: [], env: {} },
+        container: { image_digest: `sha256:${'ab'.repeat(32)}`, args: ['/tee', ...startupArgs(settings)], cmd_override: startupArgs(settings), env_override: { STORAGE_BUCKET: 'bucket-1' } },
       },
     };
     return { pki, signing, encryption, expected, claims, token: await signToken(claims, pki) };

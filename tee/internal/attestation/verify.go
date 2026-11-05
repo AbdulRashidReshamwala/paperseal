@@ -13,6 +13,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"time"
@@ -38,13 +39,8 @@ func GoogleRoot() (*x509.Certificate, error) {
 	return x509.ParseCertificate(block.Bytes)
 }
 
-// allowedEnv are the environment variables the workload may be started with.
-// STORAGE_BUCKET is a public bucket name and STORAGE_DIR is for local runs, so
-// neither affects secrecy. Any other variable makes the token fail.
-var allowedEnv = []string{"STORAGE_BUCKET"}
-
 // entrypoint is the first element of the `args` claim: the full argv, which
-// starts with the image's entrypoint.
+// starts with the image's entrypoint, then the settings args.
 const entrypoint = "/tee"
 
 // Expect is what a published token must say.
@@ -52,6 +48,7 @@ type Expect struct {
 	Exam              settings.Exam
 	ImageDigest       [32]byte // The imageDigest recorded on-chain.
 	InstancePublicKey []byte   // The key eat_nonce must bind.
+	Bucket            string   // The STORAGE_BUCKET the operator set, which env_override must hold alone.
 }
 
 // Claims are the token claims this package reads.
@@ -77,7 +74,7 @@ type claimsJSON struct {
 			ImageDigest string            `json:"image_digest"`
 			Args        []string          `json:"args"`
 			CmdOverride []string          `json:"cmd_override"`
-			Env         map[string]string `json:"env"`
+			EnvOverride map[string]string `json:"env_override"`
 		} `json:"container"`
 	} `json:"submods"`
 }
@@ -216,16 +213,16 @@ func checkClaims(c claimsJSON, want Expect) error {
 		return fmt.Errorf("attestation: image digest %q is not the one on-chain", k.ImageDigest)
 	}
 	args := want.Exam.Args()
-	if !slices.Equal(k.Args, args) && !slices.Equal(k.Args, append([]string{entrypoint}, args...)) {
-		return errors.New("attestation: container args differ from the exam settings")
+	if !slices.Equal(k.Args, append([]string{entrypoint}, args...)) {
+		return errors.New("attestation: container args differ from /tee and the exam settings")
 	}
-	if len(k.CmdOverride) != 0 && !slices.Equal(k.CmdOverride, args) {
+	if !slices.Equal(k.CmdOverride, args) {
 		return errors.New("attestation: cmd_override differs from the exam settings")
 	}
-	for name := range k.Env {
-		if !slices.Contains(allowedEnv, name) {
-			return fmt.Errorf("attestation: unexpected environment variable %q", name)
-		}
+	// env is not compared: it also holds the base image's variables. Only
+	// env_override shows what the operator set.
+	if !maps.Equal(k.EnvOverride, map[string]string{"STORAGE_BUCKET": want.Bucket}) {
+		return errors.New("attestation: env_override is not exactly STORAGE_BUCKET")
 	}
 	nonce, err := Nonce(want.InstancePublicKey, want.Exam.ExamID)
 	if err != nil {

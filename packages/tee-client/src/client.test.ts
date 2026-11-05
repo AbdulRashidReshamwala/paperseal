@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { createTeeClient, TeeApiError, type TeeClient } from './index';
+import { createTeeClient, isReleaseNotOpen, TeeApiError, type TeeClient } from './index';
 
 const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
 
@@ -80,5 +80,15 @@ describe('errors', () => {
   it('reports a non-JSON success body', async () => {
     const { tee } = client(() => new Response('oops', { status: 200 }));
     await expect(tee.status()).rejects.toMatchObject({ code: 'invalid_response' });
+  });
+
+  it('recognises the too_early refusal of a release challenge', async () => {
+    const { tee } = client(
+      () => new Response(JSON.stringify({ error: { code: 'too_early', message: 'not yet' } }), { status: 425 }),
+    );
+    const error = await tee.releaseChallenge().catch((e: unknown) => e);
+    expect(isReleaseNotOpen(error)).toBe(true);
+    expect(isReleaseNotOpen(new TeeApiError(400, 'bad_share', 'no'))).toBe(false);
+    expect(isReleaseNotOpen(new Error('network'))).toBe(false);
   });
 });

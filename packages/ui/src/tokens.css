@@ -149,6 +149,11 @@ body {
   list-style: none;
 }
 
+.ps-rows li[data-muted='true'] {
+  color: var(--ps-muted);
+  font-style: italic;
+}
+
 .ps-rows li {
   display: flex;
   flex-wrap: wrap;

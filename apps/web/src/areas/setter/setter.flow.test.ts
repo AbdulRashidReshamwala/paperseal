@@ -1,10 +1,19 @@
 import { hpkeContext, hpkeOpen } from '@paperseal/crypto';
 import { encodeQuestion, fromHex, padding, parseQuestion, questionHash, toHex, unpad, utf8ToBytes } from '@paperseal/protocol';
+import { TeeApiError } from '@paperseal/tee-client';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { confirmTee, type Confirmed } from './confirm';
+import { CONFIRMATION_TTL_MS, confirmTee, type Confirmed } from './confirm';
 import { compareWithBuild, loadReceipts, verifyReceipt, type StoredReceipt } from './receipts';
-import { checkQuestion, ReceiptInvalidError, sealAndSubmit, SubmitBlockedError } from './submit';
+import {
+  AlreadyHeldError,
+  checkQuestion,
+  ConfirmationLostError,
+  ReceiptInvalidError,
+  sealAndSubmit,
+  SubmitBlockedError,
+  type PendingSubmission,
+} from './submit';
 import { credentialId, examId, makeSigner, makeWorld, passkeyPublicKey, postedBody, submissionDigest, type World } from './testkit';
 
 const memory = new Map<string, string>();
@@ -114,7 +123,7 @@ describe('sealing', () => {
     // enc (65) + padded question + 16-byte tag, whatever the text.
     expect(ciphertext.length).toBe(65 + padding.questionBytes + 16);
 
-    const padded = await hpkeOpen(world.encryption, ciphertext, hpkeContext('question', fromHex(examId)));
+    const padded = await hpkeOpen(world.encryption, ciphertext, hpkeContext('question', fromHex(examId), fromHex(passkeyPublicKey)));
     expect(parseQuestion(unpad(padded, padding.questionBytes))).toEqual(question);
   });
 
@@ -177,6 +186,18 @@ describe('sealing', () => {
     expect(world.signed).toEqual([]);
   });
 
+  it('seals to the setter passkey, so another setter cannot resubmit the ciphertext', async () => {
+    const world = await makeWorld();
+    const proof = await confirmed(world);
+    await sealAndSubmit(submitDeps(world), proof, question);
+    const body = postedBody(world);
+    const otherPasskey = `0x04${'66'.repeat(64)}`;
+    const send = world.teeQuestion as unknown as (b: { ciphertext: `0x${string}`; passkeyPublicKey: `0x${string}` }) => Promise<unknown>;
+    await expect(send({ ciphertext: body.ciphertext, passkeyPublicKey: otherPasskey as `0x${string}` })).rejects.toMatchObject({
+      code: 'decryption_failed',
+    });
+  });
+
   it('rejects an invalid question before encrypting', async () => {
     const world = await makeWorld();
     const proof = await confirmed(world);
@@ -184,6 +205,91 @@ describe('sealing', () => {
       SubmitBlockedError,
     );
     expect(world.teeQuestion).not.toHaveBeenCalled();
+  });
+});
+
+describe('a stale or swapped confirmation', () => {
+  it('refuses to seal after 5 minutes, and sends nothing', async () => {
+    const world = await makeWorld();
+    const proof = await confirmed(world);
+    const late = () => proof.confirmedAt + CONFIRMATION_TTL_MS + 1;
+    await expect(sealAndSubmit({ ...submitDeps(world), now: late }, proof, question)).rejects.toBeInstanceOf(
+      ConfirmationLostError,
+    );
+    expect(world.teeQuestion).not.toHaveBeenCalled();
+    expect(world.signed).toEqual([]);
+    // Exactly at 5 minutes it still holds.
+    const edge = () => proof.confirmedAt + CONFIRMATION_TTL_MS;
+    await expect(sealAndSubmit({ ...submitDeps(world), now: edge }, proof, question)).resolves.toBeDefined();
+  });
+
+  it('refuses when a fresh attestation shows a different encryption key', async () => {
+    const world = await makeWorld();
+    const proof = await confirmed(world);
+    const other = await makeWorld();
+    (world.tee as { attestation: unknown }).attestation = other.tee.attestation;
+    await expect(sealAndSubmit(submitDeps(world), proof, question)).rejects.toBeInstanceOf(ConfirmationLostError);
+    expect(world.teeQuestion).not.toHaveBeenCalled();
+    expect(world.signed).toEqual([]);
+  });
+
+  it('refuses when only the instance key changed', async () => {
+    const world = await makeWorld();
+    const proof = await confirmed(world);
+    const real = await world.tee.attestation();
+    const swapped = await makeSigner();
+    (world.tee as { attestation: unknown }).attestation = () => Promise.resolve({ ...real, instancePublicKey: swapped.publicKey });
+    await expect(sealAndSubmit(submitDeps(world), proof, question)).rejects.toBeInstanceOf(ConfirmationLostError);
+    expect(world.teeQuestion).not.toHaveBeenCalled();
+  });
+});
+
+describe('an ambiguous send', () => {
+  it('retries with the same ciphertext, so the question is not stored twice', async () => {
+    const world = await makeWorld();
+    const proof = await confirmed(world);
+    const pending: { current: PendingSubmission | null } = { current: null };
+    world.teeQuestion.mockRejectedValueOnce(new TypeError('connection reset'));
+    await expect(sealAndSubmit({ ...submitDeps(world), pending }, proof, question)).rejects.toBeInstanceOf(TypeError);
+    const first = pending.current;
+    expect(first).not.toBeNull();
+
+    const receipt = await sealAndSubmit({ ...submitDeps(world), pending }, proof, question);
+    expect(postedBody(world, 1).ciphertext).toBe(postedBody(world, 0).ciphertext);
+    expect(receipt.questionHash).toBe(first?.questionHash);
+    // Each attempt had its own challenge and signature, because a challenge is single use.
+    expect(world.signed).toHaveLength(2);
+    expect(pending.current).toBeNull();
+  });
+
+  it('says the TEE already holds it when the retry is a duplicate', async () => {
+    const world = await makeWorld();
+    const proof = await confirmed(world);
+    const pending: { current: PendingSubmission | null } = { current: null };
+    world.teeQuestion.mockRejectedValueOnce(new TypeError('connection reset'));
+    await expect(sealAndSubmit({ ...submitDeps(world), pending }, proof, question)).rejects.toBeInstanceOf(TypeError);
+    world.teeQuestion.mockRejectedValueOnce(new TeeApiError(409, 'duplicate_question', 'this question is already in the bank'));
+    await expect(sealAndSubmit({ ...submitDeps(world), pending }, proof, question)).rejects.toBeInstanceOf(AlreadyHeldError);
+    expect(pending.current).toBeNull();
+    expect(loadReceipts(examId)).toEqual([]);
+  });
+
+  it('drops the pending question when the TEE refuses it outright', async () => {
+    const world = await makeWorld();
+    const proof = await confirmed(world);
+    const pending: { current: PendingSubmission | null } = { current: null };
+    world.teeQuestion.mockRejectedValueOnce(new TeeApiError(400, 'unknown_topic', 'no'));
+    await expect(sealAndSubmit({ ...submitDeps(world), pending }, proof, question)).rejects.toBeInstanceOf(TeeApiError);
+    expect(pending.current).toBeNull();
+  });
+
+  it('keeps the pending question when the TEE answered with a server error', async () => {
+    const world = await makeWorld();
+    const proof = await confirmed(world);
+    const pending: { current: PendingSubmission | null } = { current: null };
+    world.teeQuestion.mockRejectedValueOnce(new TeeApiError(502, 'bad_gateway', 'oops'));
+    await expect(sealAndSubmit({ ...submitDeps(world), pending }, proof, question)).rejects.toBeInstanceOf(TeeApiError);
+    expect(pending.current).not.toBeNull();
   });
 });
 

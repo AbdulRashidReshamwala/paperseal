@@ -63,7 +63,7 @@
   "domainTags": {
     "attestationNonce": "paperseal/v1/attestation-nonce",
     "instanceKey": "paperseal/v1/instance-key",
-    "setterCommitment": "paperseal/v1/setter-commitment",
+    "setterOwner": "paperseal/v1/setter-owner",
     "registration": "paperseal/v1/registration",
     "criteria": "paperseal/v1/criteria",
     "approvedList": "paperseal/v1/approved-list",

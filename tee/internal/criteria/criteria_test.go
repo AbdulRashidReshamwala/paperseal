@@ -7,6 +7,8 @@ import (
 	"math"
 	"reflect"
 	"testing"
+
+	"paperseal/tee/internal/spec"
 )
 
 func word(n uint64) []byte {
@@ -80,7 +82,6 @@ func TestBoundaryValuesPass(t *testing.T) {
 	for name, input := range map[string][]byte{
 		"lowest percent":  hand(1, 2, topic("a", 1)),
 		"highest percent": hand(100, 2, topic("a", 1)),
-		"largest sum":     hand(10, 3, topic("a", math.MaxUint32-1), topic("b", 1)),
 		"UTF-8 name":      hand(10, 3, topic("gé", 1)),
 		"long name":       hand(10, 3, topic(string(bytes.Repeat([]byte("a"), 33)), 1)),
 	} {
@@ -235,4 +236,29 @@ func FuzzDecode(f *testing.F) {
 			t.Fatalf("accepted criteria that don't round-trip: %v", err)
 		}
 	})
+}
+
+// The paper must fit: the questions' padded size plus 1024 bytes of JSON fit in
+// padding.paperBytes, so a paper that passes Lock always fits.
+func TestPaperSizeRule(t *testing.T) {
+	fits := uint64((spec.C.Padding.PaperBytes - PaperJSONBytes) / spec.C.Padding.QuestionBytes)
+	ok := hand(50, 2, topic("a", fits-1), topic("b", 1))
+	if _, err := Decode(ok); err != nil {
+		t.Fatalf("exactly at the limit: %v", err)
+	}
+	over := hand(50, 2, topic("a", fits-1), topic("b", 2))
+	if _, err := Decode(over); !errors.Is(err, ErrPaperTooLarge) {
+		t.Fatalf("Decode one over: %v", err)
+	}
+	if _, err := Encode(Criteria{MaxSetterPercent: 50, MinBankMultiple: 2, Topics: []Topic{{"a", uint32(fits + 1)}}}); !errors.Is(err, ErrPaperTooLarge) {
+		t.Fatalf("Encode one over: %v", err)
+	}
+	if _, err := Encode(Criteria{MaxSetterPercent: 50, MinBankMultiple: 2, Topics: []Topic{{"a", uint32(fits)}}}); err != nil {
+		t.Fatalf("Encode at the limit: %v", err)
+	}
+	// Sums that would wrap a smaller integer are refused too.
+	huge := Criteria{MaxSetterPercent: 50, MinBankMultiple: 2, Topics: []Topic{{"a", math.MaxUint32}, {"b", math.MaxUint32}}}
+	if err := huge.check(); err == nil {
+		t.Fatal("overflowing sum accepted")
+	}
 }

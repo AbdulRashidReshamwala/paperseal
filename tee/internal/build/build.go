@@ -69,6 +69,59 @@ func Select(seed [32]byte, c criteria.Criteria, questions []bank.Question) ([]ba
 	return out, nil
 }
 
+// encodeDoc is the paper's JSON, written the one way Build and EntrySize share.
+func encodeDoc(doc PaperDoc) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(doc); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+}
+
+// MaxPaperJSONBytes is the most the paper's JSON can take when it holds
+// questions of the given encoded sizes: the envelope, then each question's
+// entry and the commas between them. A question's size in the paper can differ
+// from the bytes it was sent in, because the paper escapes some characters, so
+// Lock uses this to refuse a bank whose worst draw wouldn't fit.
+func MaxPaperJSONBytes(entrySizes []int) (int, error) {
+	empty, err := encodeDoc(PaperDoc{ExamID: "0x" + hex.EncodeToString(make([]byte, 32)), Questions: []PaperQuestion{}})
+	if err != nil {
+		return 0, err
+	}
+	total := len(empty)
+	for i, n := range entrySizes {
+		total += n
+		if i > 0 {
+			total++ // The comma.
+		}
+	}
+	return total, nil
+}
+
+// EntrySize is how many bytes a question takes in the paper's JSON.
+func EntrySize(q bank.Question) (int, error) {
+	b, err := encodeDoc(PaperDoc{Questions: []PaperQuestion{{q.Topic, q.Text}}})
+	if err != nil {
+		return 0, err
+	}
+	empty, err := encodeDoc(PaperDoc{Questions: []PaperQuestion{}})
+	if err != nil {
+		return 0, err
+	}
+	return len(b) - len(empty), nil
+}
+
+// Wipe zeroes what Build made that must not outlive the build: K, the seed
+// and the paper's plaintext JSON. The encrypted paper and its hashes are
+// published and stay.
+func (p *Paper) Wipe() {
+	clear(p.K)
+	clear(p.Seed[:])
+	clear(p.PaperJSON)
+}
+
 // Build runs Build after Lock. It generates the private seed and K itself, so
 // the randomness that picks the questions never comes from outside the TEE.
 func Build(examID [32]byte, c criteria.Criteria, questions []bank.Question) (Paper, error) {
@@ -99,13 +152,9 @@ func buildFrom(rnd io.Reader, examID [32]byte, c criteria.Criteria, questions []
 	if uint32(len(doc.Questions)) != selected {
 		return Paper{}, errors.New("build: selected count differs from the criteria")
 	}
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(doc); err != nil {
+	if p.PaperJSON, err = encodeDoc(doc); err != nil {
 		return Paper{}, err
 	}
-	p.PaperJSON = bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
 
 	padded, err := encryption.Pad(p.PaperJSON, spec.C.Padding.PaperBytes)
 	if err != nil {

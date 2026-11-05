@@ -3,7 +3,7 @@ import { keccak_256 } from '@noble/hashes/sha3.js';
 import { decodeAbiParameters, encodeAbiParameters, type AbiParameter } from 'viem';
 
 import { fromHex, toHex, utf8ToBytes } from './bytes';
-import { domainTags, limits, threshold, type DomainTagName } from './constants';
+import { domainTags, limits, padding, threshold, type DomainTagName } from './constants';
 import type { Hex } from './types';
 
 /*
@@ -33,11 +33,7 @@ export const messageSchemas = {
     ['examId', 'bytes32'],
     ['encryptionPublicKey', 'bytes', 'publicKey'],
   ],
-  setterCommitment: [
-    ['examId', 'bytes32'],
-    ['name', 'string'],
-    ['salt', 'bytes32'],
-  ],
+  setterOwner: [['passkeyPublicKey', 'bytes', 'publicKey']],
   registration: [
     ['derivedPublicKey', 'bytes', 'optionalPublicKey'],
     ['holderId', 'bytes'],
@@ -138,17 +134,11 @@ export function hashMessage<N extends MessageName>(name: N, fields: MessageField
 }
 
 /**
- * `setterCommitment(examId, name, salt)`: the lowercase 0x hex of the message hash, which is the
- * `owner` of a setter on the approved list. The name is hashed as given, so callers pass the
- * exact text the board will publish.
+ * `setterOwner(passkeyPublicKey)`: the lowercase 0x hex of the message hash. It is the `owner` of a
+ * setter on the approved list, so no name is ever published and anyone can recompute it.
  */
-export function setterCommitment(examId: Uint8Array, name: string, salt: Uint8Array): Hex {
-  return toHex(hashMessage('setterCommitment', { examId, name, salt }));
-}
-
-/** True for a string shaped like a commitment: `0x` and 64 lowercase hex digits. */
-export function isSetterCommitment(value: string): value is Hex {
-  return /^0x[0-9a-f]{64}$/.test(value);
+export function setterOwner(passkeyPublicKey: Uint8Array): Hex {
+  return toHex(hashMessage('setterOwner', { passkeyPublicKey }));
 }
 
 /** `build.paperHash`: the plain SHA-256 of the encrypted paper file. */
@@ -243,17 +233,17 @@ function checkEntry(entry: ApprovedListEntry, index: number): void {
   if (entry.owner.length === 0) throw new ApprovedListError(`${at} has an empty owner`);
 }
 
-/** A setter's owner must look like a `setterCommitment`, never a name. */
+/** A setter's owner must be the `setterOwner` hash of its own passkey public key. */
 function checkSetterOwner(entry: ApprovedListEntry, index: number): void {
-  if (entry.role === roles.setter && !isSetterCommitment(entry.owner)) {
+  if (entry.role === roles.setter && entry.owner !== setterOwner(entry.passkeyPublicKey)) {
     throw new ApprovedListError(
-      `entry ${String(index)} is a setter whose owner is not a setter commitment (lowercase 0x and 64 hex digits)`,
+      `entry ${String(index)} is a setter whose owner is not the setterOwner hash of its passkey public key`,
     );
   }
 }
 
 /**
- * The list rules from spec/api.md: a setter's owner is a commitment, no repeated passkey, no repeated non-empty
+ * The list rules from spec/api.md: a setter's owner is the hash of its passkey, no repeated passkey, no repeated non-empty
  * derived key, and key-holder counts from `threshold`. Applies the per-entry
  * rules too. Order is free.
  */
@@ -504,6 +494,9 @@ export class CriteriaError extends Error {
 const isUint32 = (value: unknown): value is number =>
   typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < 2 ** 32;
 
+/** Bytes set aside for the paper's JSON around its questions, from "Selection Criteria" in spec/api.md. */
+const PAPER_JSON_BYTES = 1024;
+
 /** Every rule in "Selection Criteria" in spec/api.md. */
 export function checkCriteria(criteria: Criteria): void {
   const { maxSetterPercent, minBankMultiple, topics } = criteria;
@@ -523,8 +516,16 @@ export function checkCriteria(criteria: Criteria): void {
       throw new CriteriaError(`topic ${String(index)} questions must be at least 1`);
     }
   });
-  if (selectedCount(criteria) >= 2 ** 32) {
+  const selected = selectedCount(criteria);
+  if (selected >= 2 ** 32) {
     throw new CriteriaError('selected count does not fit in a uint32');
+  }
+  // A paper that passes Lock must always fit, so every question counts at its full padded size.
+  const paperNeeds = selected * padding.questionBytes + PAPER_JSON_BYTES;
+  if (paperNeeds > padding.paperBytes) {
+    throw new CriteriaError(
+      `questions need ${String(paperNeeds)} bytes (${String(selected)} x ${String(padding.questionBytes)} + ${String(PAPER_JSON_BYTES)}), more than paperBytes ${String(padding.paperBytes)}`,
+    );
   }
 }
 

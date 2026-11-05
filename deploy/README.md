@@ -5,7 +5,7 @@ Order of steps for a Sepolia demo with the TEE on Google Confidential Space. Not
 Every GCP script takes `PROJECT_ID`, `REGION` and `ZONE` from the environment and prints its commands instead of running them when `DRY_RUN=1`.
 
 ```sh
-export PROJECT_ID=<your project> REGION=us-central1 ZONE=us-central1-a
+export PROJECT_ID=<your project> REGION=asia-south2 ZONE=asia-south2-a
 export DRY_RUN=1   # unset it to run for real
 ```
 
@@ -62,19 +62,19 @@ Publish the exam in the board app first, so the on-chain settings exist. Then st
 
 It reserves a static IP, opens port 8080 to Cloudflare's published IPv4 ranges only (read from `https://www.cloudflare.com/ips-v4` each run), and starts one `n2d-standard-2` Confidential VM (AMD SEV) on the production `confidential-space` image family, not debug. `tee-cmd` carries the ten arguments in the order of `spec/api.md`, "Exam Settings". Check with `DRY_RUN=1` first and compare the arguments with the chain. It prints the IP.
 
-Wait a minute or two, then check `curl http://<ip>:8080/v1/status` from an allowed source (or through Cloudflare once step 4 is done). Logs go to Cloud Logging.
+Wait a minute or two, then check `curl -k https://<ip>:8080/v1/status` (`-k` because the certificate is self-signed) from an allowed source (or through Cloudflare once step 4 is done). The production image doesn't send container logs anywhere, so check the TEE through `/v1/status`.
 
 ### Cost, and stopping it
 
-Estimated cost of one `n2d-standard-2` Confidential VM in `us-central1` running all month: roughly 75 to 100 US dollars, plus a few dollars for the static IP and disk. This is **not verified against Google's pricing page**: the page is rendered by script and could not be read when this was written. Check the [pricing calculator](https://cloud.google.com/products/calculator) (Compute Engine, N2D, Confidential VM, 2 vCPU, 8 GB) before you rely on the number.
+Estimated cost of one `n2d-standard-2` Confidential VM in `asia-south2` running all month: roughly 75 to 100 US dollars, plus a few dollars for the static IP and disk. This is **not verified against Google's pricing page**: the page is rendered by script and could not be read when this was written. Check the [pricing calculator](https://cloud.google.com/products/calculator) (Compute Engine, N2D, Confidential VM, 2 vCPU, 8 GB) before you rely on the number.
 
 **Stop the VM after a demo:** `./stop-tee.sh`. Stopping ends the instance, so its in-memory question bank and keys are gone. Only stop it once the exam is released. The static IP is billed while reserved. `./teardown.sh` removes everything (VM, firewall rule, IP, bucket with all its files, service account). It prints the list and needs you to type the project ID.
 
 ## 4. DNS: `tee.abdulrashid.dev`
 
-In Cloudflare, add an `A` record `tee` pointing to the static IP, with the proxy on (orange cloud). Cloudflare serves HTTPS to browsers and connects to the origin over plain HTTP on port 8080. Set the origin port with a Cloudflare Origin Rule (rewrite destination port to 8080) because Cloudflare otherwise uses 80 for HTTP.
+In Cloudflare, add an `A` record `tee` pointing to the static IP, with the proxy on (orange cloud). The TEE serves HTTPS on port 8080 with a self-signed certificate it generates in memory at startup, so keep the zone's SSL/TLS encryption mode on **Full** (not Full strict, which would reject that certificate, and not Flexible, which would use plain HTTP). Add a Cloudflare Origin Rule (rewrite destination port to 8080) because Cloudflare otherwise connects to the origin on 443.
 
-Plain HTTP between Cloudflare and the TEE is acceptable here. Apps do not trust the transport: they verify the TEE's attestation token against Google's root and the on-chain settings, and encrypt to the key that token binds. Anything an observer on that hop sees is already encrypted to the TEE or public. Cloudflare can block the TEE but cannot make an app trust a fake one.
+The certificate has no trust role. Apps do not trust the transport: they verify the TEE's attestation token against Google's root and the on-chain settings, and encrypt to the key that token binds. Cloudflare can block the TEE but cannot make an app trust a fake one.
 
 ## 5. App environment values
 
@@ -88,7 +88,5 @@ Set at build time for `apps/web` and `apps/verifier` (viewers can change them in
 | `VITE_EXAM_ID` | the published exam ID, as a fallback |
 | `VITE_STORAGE_URL` | `https://storage.googleapis.com/<BUCKET>` |
 | `VITE_TEE_STORAGE_BUCKET` | `<BUCKET>`, the one environment value the token check allows |
-| `VITE_APPROVED_HW_MODELS` | `GCP_AMD_SEV` for this machine type |
 | `VITE_RELEASES_REPO` | only if you use a fork |
 
-`VITE_EXPECTED_TEE_ENV` is optional; the token's `env` claim should hold only `STORAGE_BUCKET`.

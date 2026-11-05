@@ -66,6 +66,7 @@ func (m *Machine) startFreshUnlock(ctx context.Context, list chainread.List, bui
 	// record, so its expiry is not checked.
 	if _, err := m.cfg.Verifier.VerifyPKI(string(token), attestation.Expect{
 		Exam: exam, ImageDigest: rec.ImageDigest, InstancePublicKey: built.InstancePublicKey,
+		Bucket: m.cfg.Bucket,
 	}); err != nil {
 		return fail("unlock: %w", err)
 	}

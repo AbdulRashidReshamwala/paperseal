@@ -13,7 +13,7 @@ import {
   toHex,
   type Hex,
 } from '@paperseal/protocol';
-import type { AttestationResponse, TeeClient } from '@paperseal/tee-client';
+import { isReleaseNotOpen, RELEASE_NOT_OPEN_MESSAGE, type AttestationResponse, type TeeClient } from '@paperseal/tee-client';
 
 import { describeVerdict } from '../shared/attest';
 import { fetchListedFile, fetchManifest, StorageVerificationError, type BuildCommitment, type FetchFile } from '../shared/storage';
@@ -137,7 +137,15 @@ export async function runRelease(context: ReleaseContext): Promise<void> {
   }
 
   step('challenge');
-  const { challenge } = await tee.releaseChallenge();
+  let challenge: Hex;
+  try {
+    // The challenge is longer than 32 bytes and is used as given, never cut or padded to a width.
+    ({ challenge } = await tee.releaseChallenge());
+  } catch (error) {
+    // The TEE refuses release challenges until `unlockRound` is published. That is not a fault.
+    if (isReleaseNotOpen(error)) throw new ReleaseAbortedError('challenge', RELEASE_NOT_OPEN_MESSAGE);
+    throw error;
+  }
 
   step('release');
   const digest = hashMessage('shareRelease', { examId: fromHex(examId), challenge: fromHex(challenge) });

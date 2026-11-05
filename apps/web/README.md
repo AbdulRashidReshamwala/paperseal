@@ -6,7 +6,7 @@ The release flow in `src/release` is shared by `/centre` and `/keyholder`, so it
 
 ## Board: create and publish an exam
 
-`/board/blueprint`, `/board/schedule` and `/board/publish` hold one form in the board route area, so it survives moving between screens. Publishing sends `createExam` from the connected browser wallet (`window.ethereum`, through viem's custom transport) on Sepolia. The app holds no private key. Before sending it checks that the wallet is on chain 11155111 and that its account equals `registry.board()`, dry-runs the call so reverts are explained in words, and after mining reads `getExam` and `getCriteria` back and compares them with what was entered. The published exam ID is kept in this browser's localStorage, so the overview shows it without a rebuild. `VITE_EXAM_ID` is the fallback.
+`/board/blueprint`, `/board/schedule` and `/board/publish` hold one form in the board route area, so it survives moving between screens. Publishing sends `createExam` from the connected browser wallet (`window.ethereum`, through viem's custom transport) on Sepolia. The app holds no private key. Before sending it checks that the wallet is on chain 11155111 and that its account equals `registry.board()`, dry-runs the call so reverts are explained in words, and after mining reads `getExam` and `getCriteria` back and compares them with what was entered. The published exam ID is kept in this browser's localStorage, only when the read-back matches, so the overview shows it without a rebuild. `VITE_EXAM_ID` is the fallback. Every area (Register, key holder, centre, setter, release and the board) reads the one current exam from `src/shared/currentExam.ts`, and a key holder and a centre keep separate stored credentials.
 
 Tests: `pnpm test` runs everything except the anvil test. `pnpm test:integration` starts `anvil --chain-id 11155111`, deploys `contracts/out/ExamRegistry.sol/ExamRegistry.json` (run `forge build` in `contracts/` first) and publishes through `packages/chain`. It uses anvil's public dev key, only in `src/integration/anvil.integration.ts`.
 
@@ -18,4 +18,8 @@ To try it by hand against anvil, deploy with `BOARD_ADDRESS=<anvil account 0> fo
 
 ## Board: onboarding and outbox
 
-The TEE has no route that lists registrations, so `/board/onboarding` takes registration records pasted by the board, composes the list with `encodeApprovedList` after `checkApprovedList`, and posts it with `postApprovedList` from the wallet. `/board/outbox` verifies the Build's TEE signature against an attested instance key before `postBuild`.
+`/board/onboarding` reads the registrations the TEE verified from `GET /v1/registrations`, composes the list with `encodeApprovedList` after `checkApprovedList`, and posts it with `postApprovedList` from the wallet. The list slot is write-once, so posting stays blocked until the TEE passes attestation for the current exam against the chain and is at the `onboard` stage. The screen shows the exam being written, and the check runs again right before the wallet is asked. Setters register with no name. Their `owner` is the `setterOwner` hash of their own passkey public key, and `checkApprovedList` rejects any other value. `/board/outbox` verifies the Build's TEE signature against an attested instance key before `postBuild`.
+
+## Setter
+
+A setter confirms the TEE (attestation and the on-chain list hash), and the confirmation lasts 5 minutes. Before each question is sealed, the app reads a fresh attestation and requires the same keys. A question is sealed with `examId || passkeyPublicKey` as the HPKE aad. If a send is ambiguous, the sealed question is kept in memory, so a retry sends the same ciphertext instead of a second copy. The question text is dropped once its receipt is verified.

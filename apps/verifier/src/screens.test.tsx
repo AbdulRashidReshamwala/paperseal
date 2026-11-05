@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { decodeApprovedList, fromHex, setterOwner, toHex } from '@paperseal/protocol';
+import { cleanup, render, within, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from './App';
-import { buildWorld, examId, offlineQuicknet, registryAddress, setterName, setterSalt, type World } from './fixtures';
+import { buildWorld, examId, offlineQuicknet, registryAddress, type World } from './fixtures';
 import { SettingsProvider, type Settings } from './settings';
 
 let chainData: unknown;
@@ -19,6 +20,27 @@ vi.mock('./checks', async (original) => ({
   ...(await original<typeof import('./checks')>()),
   loadChain: (registry: unknown, id: unknown) => (registry && id ? () => Promise.resolve(chainData) : null),
 }));
+
+/** Whether `release-token.jwt` counts as verified. The test PKI does not lead to Google's root, so by default it does not. */
+let tokenVerified = false;
+/** What a fresh attestation from the live TEE comes to. */
+let freshTrusted = false;
+vi.mock('./attest', async (original) => {
+  const real = await original<typeof import('./attest')>();
+  return {
+    ...real,
+    checkFreshToken: () =>
+      Promise.resolve({
+        trusted: freshTrusted,
+        signature: { ok: freshTrusted, ...(freshTrusted ? {} : { error: new Error('not Google') }) },
+        instanceKey: { ok: true },
+        claims: [],
+        instancePublicKey: `0x04${'dd'.repeat(64)}`,
+      }),
+    checkRecordToken: (args: Parameters<typeof real.checkRecordToken>[0]) =>
+      tokenVerified ? Promise.resolve({ verified: true, signature: { ok: true }, claims: [] }) : real.checkRecordToken(args),
+  };
+});
 
 const settings: Settings = {
   rpcUrl: 'https://rpc.example',
@@ -129,28 +151,18 @@ describe('screens with data', () => {
     expect(screen.getByText(/Manifest hash matches/)).toBeTruthy();
   });
 
-  it('Commitments shows the setter as sealed, then Pass or Fail per published name', async () => {
+  it('Commitments shows a setter as "Setter" with the hash of its passkey, and no name or paste panel', async () => {
     const world = await buildWorld();
     arrange(world);
     open('/commitments', 1000);
-    expect(await screen.findByText('Setter (sealed)')).toBeTruthy();
-    expect(screen.queryByText(setterName)).toBeNull();
-    expect(screen.getByText(/only works after the board publishes/)).toBeTruthy();
-    const box = await screen.findByPlaceholderText(/"salt"/);
-    const check = () => fireEvent.click(screen.getByRole('button', { name: 'Check against the list' }));
-
-    fireEvent.change(box, { target: { value: JSON.stringify([{ name: 'Not A Setter', salt: setterSalt }]) } });
-    check();
-    expect(await screen.findByText(/is not a setter on the chain list/)).toBeTruthy();
-
-    fireEvent.change(box, { target: { value: JSON.stringify([{ name: setterName, salt: setterSalt }]) } });
-    check();
-    await waitFor(() => expect(screen.queryByText(/is not a setter on the chain list/)).toBeNull());
-    expect(screen.getByText(setterName)).toBeTruthy();
-
-    fireEvent.change(box, { target: { value: 'not json' } });
-    check();
-    expect(await screen.findByText('This is not JSON.')).toBeTruthy();
+    expect(await screen.findByText('Setter')).toBeTruthy();
+    const setter = must(decodeApprovedList(fromHex(world.entriesHex)).find((entry) => entry.role === 1));
+    // The list decoded only because the setter's owner is the hash of its own passkey.
+    expect(setter.owner).toBe(setterOwner(setter.passkeyPublicKey));
+    expect(screen.getByText('Setter').closest('li')?.textContent).toContain(setter.owner);
+    expect(screen.queryByText(/Setter names/)).toBeNull();
+    expect(screen.queryByPlaceholderText(/"salt"/)).toBeNull();
+    expect(screen.queryByText(/Setter \(sealed\)/)).toBeNull();
   });
 
   it('Commitments is neutral, not failing, when the manifest is not published', async () => {
@@ -161,15 +173,110 @@ describe('screens with data', () => {
     expect(await screen.findByText(/manifest.json is not in storage yet/)).toBeTruthy();
   });
 
-  it('Unlock shows holders released from the verified published log', async () => {
+  it('Unlock shows progress with neutral badges, a warning above the rows and no signature check until the token passes', async () => {
+    tokenVerified = false;
     const world = await buildWorld();
     arrange(world);
     open('/unlock', 1000);
-    expect(await screen.findByText('8 of 8 needed')).toBeTruthy();
-    expect(screen.getAllByText('Released')).toHaveLength(8);
-    expect(screen.getAllByText('Not released')).toHaveLength(2);
+    expect(await screen.findByText('8 of 8 needed (not verified)')).toBeTruthy();
+    const released = screen.getAllByText('Released');
+    expect(released).toHaveLength(8);
+    for (const badge of released) expect(badge.getAttribute('data-tone')).toBe('neutral');
+    expect(screen.getByText('Not checked')).toBeTruthy();
+    const warning = screen.getByText(/nothing says which TEE signed this/);
+    const rows = screen.getByText('Holders released').closest('ul');
+    // The warning comes before the rows it qualifies.
+    expect(warning.compareDocumentPosition(rows ?? warning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText('Round clock')).toBeTruthy();
-    expect(await screen.findAllByText('Published')).toHaveLength(3);
+  });
+
+  it('Unlock shows progress as evidence once release-token.jwt verifies', async () => {
+    tokenVerified = true;
+    try {
+      const world = await buildWorld();
+      arrange(world);
+      open('/unlock', 1000);
+      expect(await screen.findByText('8 of 8 needed')).toBeTruthy();
+      const released = screen.getAllByText('Released');
+      expect(released).toHaveLength(8);
+      for (const badge of released) expect(badge.getAttribute('data-tone')).toBe('ok');
+      expect(screen.getAllByText('Not released')).toHaveLength(2);
+      expect(screen.queryByText(/nothing says which TEE signed this/)).toBeNull();
+      expect(screen.queryByText('Not checked')).toBeNull();
+    } finally {
+      tokenVerified = false;
+    }
+  });
+
+  describe('the live TEE release panel', () => {
+    async function openLive(trusted: boolean) {
+      freshTrusted = trusted;
+      const world = await buildWorld();
+      arrange(world);
+      const holders = decodeApprovedList(fromHex(world.entriesHex)).filter((e) => e.role === 2 || e.role === 3);
+      const released = holders.slice(0, 8).map((e) => toHex(e.passkeyPublicKey));
+      const files = vi.mocked(fetch);
+      const storageFetch = files.getMockImplementation();
+      vi.stubGlobal(
+        'fetch',
+        vi.fn((input: string | URL | Request) => {
+          const url = String(input);
+          if (url.startsWith('https://tee.example/v1/status')) {
+            return Promise.resolve(
+              new Response(JSON.stringify({ stage: 'unlock', questionCount: 3, release: { released, required: 8 } })),
+            );
+          }
+          if (url.startsWith('https://tee.example/')) return Promise.resolve(new Response('no', { status: 404 }));
+          return (storageFetch as (i: string | URL | Request) => Promise<Response>)(input);
+        }),
+      );
+      open('/unlock', 1000, { teeUrl: 'https://tee.example' });
+      return screen.findByText('Live TEE release');
+    }
+
+    it('is neutral, with the warning above the rows, when the fresh attestation is not trusted', async () => {
+      await openLive(false);
+      const warning = await screen.findByText(/The TEE failed attestation/);
+      const panel = warning.closest('.ps-panel');
+      const rows = panel?.querySelector('ul');
+      expect(warning.compareDocumentPosition(rows ?? warning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(within(panel as HTMLElement).getByText('8 of 8 needed (not verified)')).toBeTruthy();
+      for (const badge of within(panel as HTMLElement).getAllByText('Released')) expect(badge.getAttribute('data-tone')).toBe('neutral');
+    });
+
+    it('shows progress as evidence when the fresh attestation is trusted', async () => {
+      await openLive(true);
+      const panel = (await screen.findByText('TEE attestation passes, so its answers can be trusted')).closest('.ps-panel') as HTMLElement;
+      expect(within(panel).getByText('8 of 8 needed')).toBeTruthy();
+      for (const badge of within(panel).getAllByText('Released')) expect(badge.getAttribute('data-tone')).toBe('ok');
+      expect(within(panel).queryByText(/The TEE failed attestation/)).toBeNull();
+    });
+  });
+
+  it('Overview says an on-chain list could not be read, which is not the same as no list', async () => {
+    const world = await buildWorld();
+    arrange(world);
+    (chainData as Record<string, unknown>).entries = null;
+    (chainData as Record<string, unknown>).problems = {
+      list: { kind: 'unreadable', message: 'The RPC returned no ApprovedListPosted event.' },
+    };
+    open('/', 1000);
+    expect(await screen.findByText('Approved list bytes')).toBeTruthy();
+    expect(screen.getByText('Could not be read')).toBeTruthy();
+    expect(screen.getByText(/returned no ApprovedListPosted event/)).toBeTruthy();
+    expect(screen.queryByText('Fail')).toBeNull();
+  });
+
+  it('Overview fails an on-chain list whose bytes do not match the stored hash', async () => {
+    const world = await buildWorld();
+    arrange(world);
+    (chainData as Record<string, unknown>).entries = null;
+    (chainData as Record<string, unknown>).problems = {
+      list: { kind: 'mismatch', message: 'The ApprovedListPosted bytes do not hash to the on-chain listHash.' },
+    };
+    open('/', 1000);
+    expect(await screen.findByText('Approved list bytes')).toBeTruthy();
+    expect(screen.getAllByText('Fail').length).toBeGreaterThan(0);
   });
 
   it('Unlock is neutral when no log is published yet', async () => {

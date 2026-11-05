@@ -3,9 +3,12 @@ package storage
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"net/http"
 	"net/url"
@@ -13,6 +16,9 @@ import (
 	"sync"
 	"time"
 )
+
+// ErrExists is returned by Put when the name already holds other content.
+var ErrExists = errors.New("storage: file already exists with different content")
 
 const (
 	gcsUpload   = "https://storage.googleapis.com/upload/storage/v1/b"
@@ -94,9 +100,29 @@ func contentType(name string) string {
 	return "application/octet-stream"
 }
 
-// Put uploads one object, replacing any earlier one of that name, so a retry
-// after a partial failure is safe.
+// Put creates one object. It is create-only (ifGenerationMatch=0), so nothing
+// the TEE has published can be replaced. A retry after a lost reply is safe:
+// the object then exists, the server says 412, and Put reads it back. If it
+// holds exactly these bytes the write counts as done, and any other content is
+// ErrExists. The server's crc32c of what it stored is checked against the
+// bytes sent, so a corrupted upload is an error.
 func (b *Bucket) Put(ctx context.Context, name string, data []byte) error {
+	return b.upload(ctx, name, data, true)
+}
+
+// Replace uploads an unlock file whether or not it exists, see IsUnlockFile.
+// The reply's crc32c is checked as for Put. Any other name is refused.
+func (b *Bucket) Replace(ctx context.Context, name string, data []byte) error {
+	if err := checkName(name); err != nil {
+		return err
+	}
+	if !IsUnlockFile(name) {
+		return fmt.Errorf("storage: %s is not an unlock file and can't be replaced", name)
+	}
+	return b.upload(ctx, name, data, false)
+}
+
+func (b *Bucket) upload(ctx context.Context, name string, data []byte, createOnly bool) error {
 	if err := checkName(name); err != nil {
 		return err
 	}
@@ -107,8 +133,12 @@ func (b *Bucket) Put(ctx context.Context, name string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	u := fmt.Sprintf("%s/%s/o?uploadType=media&name=%s", or(b.UploadURL, gcsUpload),
-		url.PathEscape(b.Name), url.QueryEscape(name))
+	cond := ""
+	if createOnly {
+		cond = "&ifGenerationMatch=0"
+	}
+	u := fmt.Sprintf("%s/%s/o?uploadType=media%s&name=%s", or(b.UploadURL, gcsUpload),
+		url.PathEscape(b.Name), cond, url.QueryEscape(name))
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(data))
 	if err != nil {
 		return err
@@ -120,9 +150,43 @@ func (b *Bucket) Put(ctx context.Context, name string, data []byte) error {
 		return fmt.Errorf("storage: upload %s: %w", name, err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<10))
-		return fmt.Errorf("storage: upload %s: status %d: %s", name, resp.StatusCode, strings.TrimSpace(string(msg)))
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return checkUploaded(name, data, resp.Body)
+	case http.StatusPreconditionFailed:
+		got, err := b.Get(ctx, name)
+		if err != nil {
+			return fmt.Errorf("storage: upload %s: it exists and could not be read back: %w", name, err)
+		}
+		if !bytes.Equal(got, data) {
+			return fmt.Errorf("%w: %s", ErrExists, name)
+		}
+		return nil
+	}
+	msg, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<10))
+	return fmt.Errorf("storage: upload %s: status %d: %s", name, resp.StatusCode, strings.TrimSpace(string(msg)))
+}
+
+// checkUploaded compares the object's metadata in the reply with the bytes
+// sent. crc32c is Castagnoli, as base64 of the big-endian value.
+func checkUploaded(name string, data []byte, body io.Reader) error {
+	var meta struct {
+		CRC32C string `json:"crc32c"`
+		Size   string `json:"size"`
+	}
+	if err := json.NewDecoder(io.LimitReader(body, 1<<16)).Decode(&meta); err != nil {
+		return fmt.Errorf("storage: upload %s: unreadable reply: %w", name, err)
+	}
+	if meta.CRC32C == "" {
+		return fmt.Errorf("storage: upload %s: the reply has no crc32c to check", name)
+	}
+	var want [4]byte
+	binary.BigEndian.PutUint32(want[:], crc32.Checksum(data, crc32.MakeTable(crc32.Castagnoli)))
+	if meta.CRC32C != base64.StdEncoding.EncodeToString(want[:]) {
+		return fmt.Errorf("storage: upload %s: the stored object's crc32c is not the bytes sent", name)
+	}
+	if meta.Size != "" && meta.Size != fmt.Sprint(len(data)) {
+		return fmt.Errorf("storage: upload %s: stored size %s, sent %d", name, meta.Size, len(data))
 	}
 	return nil
 }

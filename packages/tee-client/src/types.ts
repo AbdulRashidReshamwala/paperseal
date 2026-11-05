@@ -15,6 +15,8 @@ export interface AttestationResponse {
   encryptionPublicKey: Hex;
   /** `instancePublicKey`'s signature over the `instanceKey` message. */
   instanceKeySignature: Hex;
+  /** Present in real responses. The app does not rely on it: only the token's checks establish trust. */
+  attested?: boolean;
 }
 
 /**
@@ -38,7 +40,11 @@ export interface StatusResponse {
   release: { released: Hex[]; required: number };
 }
 
-/** The response of every `.../challenge` route. 32 random bytes, single use, 5 minutes. */
+/**
+ * The response of every `.../challenge` route. An opaque token: 32 random bytes plus an expiry, authenticated by the TEE. It is
+ * single use and expires after 5 minutes. Its width is the TEE's choice, so callers pass it back and sign it as given.
+ * Release challenges are refused until `unlockRound` is published (see `isReleaseNotOpen`).
+ */
 export interface ChallengeResponse {
   challenge: Hex;
 }

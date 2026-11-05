@@ -214,22 +214,39 @@ describe('purpose helpers', () => {
   };
 
   it('takes info from constants.json and aad from the examId', () => {
+    const passkeyKey = new Uint8Array(65).fill(7);
+    passkeyKey[0] = 4;
     for (const purpose of ['question', 'share', 'release', 'keyPriv'] as const) {
-      const { info, aad } = hpkeContext(purpose, examId);
+      const { info, aad } = hpkeContext(purpose, examId, purpose === 'question' ? passkeyKey : undefined);
       expect(new TextDecoder().decode(info)).toBe(constants.crypto.hpke.info[purpose]);
-      expect(aad).toEqual(examId);
+      expect(aad).toEqual(purpose === 'question' ? new Uint8Array([...examId, ...passkeyKey]) : examId);
     }
     expect(() => hpkeContext('share', new Uint8Array(31))).toThrow(RangeError);
   });
 
+  it('uses examId || passkeyPublicKey as the question aad, and nothing else does', () => {
+    const passkey = new Uint8Array(65).fill(7);
+    passkey[0] = 4;
+    expect(hpkeContext('question', examId, passkey).aad).toEqual(new Uint8Array([...examId, ...passkey]));
+    expect(() => hpkeContext('question', examId)).toThrow(RangeError);
+    expect(() => hpkeContext('question', examId, new Uint8Array(64))).toThrow(RangeError);
+    expect(() => hpkeContext('share', examId, passkey)).toThrow(TypeError);
+  });
+
   it('seals a question padded to questionBytes, and only the question purpose opens it', async () => {
     const { pair, publicKey } = await kem();
-    const sealed = await sealQuestion(publicKey, examId, { topic: 'algebra', text: 'x?' });
+    const passkey = new Uint8Array(65).fill(7);
+    passkey[0] = 4;
+    const other = new Uint8Array(65).fill(8);
+    other[0] = 4;
+    const sealed = await sealQuestion(publicKey, examId, passkey, { topic: 'algebra', text: 'x?' });
     expect(sealed).toHaveLength(HPKE_ENC_BYTES + constants.padding.questionBytes + 16);
-    const padded = await hpkeOpen(pair, sealed, hpkeContext('question', examId));
+    const padded = await hpkeOpen(pair, sealed, hpkeContext('question', examId, passkey));
     expect(parseQuestion(unpadQuestion(padded))).toEqual({ topic: 'algebra', text: 'x?' });
     await expect(hpkeOpen(pair, sealed, hpkeContext('share', examId))).rejects.toThrow();
-    await expect(hpkeOpen(pair, sealed, hpkeContext('question', new Uint8Array(32)))).rejects.toThrow();
+    await expect(hpkeOpen(pair, sealed, hpkeContext('question', new Uint8Array(32), passkey))).rejects.toThrow();
+    // Another setter's passkey cannot open it, so a ciphertext can't be resubmitted under another key.
+    await expect(hpkeOpen(pair, sealed, hpkeContext('question', examId, other))).rejects.toThrow();
   });
 
   it('seals the release plaintext for the TEE', async () => {

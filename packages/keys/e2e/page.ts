@@ -73,10 +73,11 @@ const api = {
     attempt(async () => toHex(await keys.decryptShare(fromHex(credentialIdHex), fromHex(examIdHex), fromHex(sealedHex)))),
   openKeyPriv: (credentialIdHex: string, examIdHex: string, sealedHex: string) =>
     attempt(async () => toHex(await keys.openKeyPriv(fromHex(credentialIdHex), fromHex(examIdHex), fromHex(sealedHex)))),
-  register: (owner: string, role: 'holder' | 'setter', challengeHex: string) =>
+  register: (owner: string | null, role: 'holder' | 'setter', challengeHex: string) =>
     attempt(async () => {
-      const r = await keys.register({ owner, role, challenge: fromHex(challengeHex) });
-      return { credentialId: toHex(r.credentialId), request: r.request };
+      const challenge = fromHex(challengeHex);
+      const r = await keys.register(role === 'setter' || owner === null ? { role: 'setter', challenge } : { role, owner, challenge });
+      return { credentialId: toHex(r.credentialId), owner: r.owner, request: r.request };
     }),
   sign: (credentialIdHex: string, messageHex: string) =>
     attempt(async () => {
