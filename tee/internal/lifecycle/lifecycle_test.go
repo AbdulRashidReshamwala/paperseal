@@ -14,9 +14,11 @@ import (
 	"time"
 
 	"paperseal/tee/internal/api"
+	"paperseal/tee/internal/approvedlist"
 	"paperseal/tee/internal/attestation"
 	"paperseal/tee/internal/attestation/attestationtest"
 	"paperseal/tee/internal/build"
+	"paperseal/tee/internal/chainread"
 	"paperseal/tee/internal/encryption"
 	"paperseal/tee/internal/hashing"
 	"paperseal/tee/internal/lifecycle"
@@ -447,6 +449,37 @@ func TestUnverifiedListEntryFails(t *testing.T) {
 	if m.Stage() != lifecycle.StageFailed {
 		t.Fatalf("stage %s, want failed for an entry that never registered", m.Stage())
 	}
+}
+
+// One registration is enough to make this the Onboard instance, so a list it
+// can't verify, or can't decode, is still fatal.
+func TestOnboardInstanceWithRegistrationsFailsOnAWrongList(t *testing.T) {
+	onboard := func(t *testing.T) (*world, *lifecycle.Machine) {
+		t.Helper()
+		w := newWorld(t)
+		m, _, h := w.machine()
+		w.chain.created = true
+		if code, why := (client{t, h}).register(w.setters[0], nil); code != http.StatusOK {
+			t.Fatalf("%d %s", code, why)
+		}
+		return w, m
+	}
+	t.Run("unverified entries", func(t *testing.T) {
+		w, m := onboard(t)
+		w.postList(w.entries()...)
+		m.Step(context.Background())
+		if m.Stage() != lifecycle.StageFailed || !errors.Is(m.Failure(), approvedlist.ErrNotRegistered) {
+			t.Fatalf("stage %s, failure %v", m.Stage(), m.Failure())
+		}
+	})
+	t.Run("undecodable", func(t *testing.T) {
+		w, m := onboard(t)
+		w.chain.list = &chainread.List{Entries: []byte("not an encoded list"), Hash: [32]byte{1}, Block: 2}
+		m.Step(context.Background())
+		if m.Stage() != lifecycle.StageFailed {
+			t.Fatalf("stage %s", m.Stage())
+		}
+	})
 }
 
 func TestListWithWrongCriteriaHashFails(t *testing.T) {

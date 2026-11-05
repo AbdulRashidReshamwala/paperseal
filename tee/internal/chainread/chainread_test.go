@@ -207,8 +207,8 @@ func TestCriteriaReadsTheCreatedBlockOnly(t *testing.T) {
 		t.Fatalf("criteria: %q %v", got, err)
 	}
 	for _, tag := range c.tags {
-		if tag != "finalized" {
-			t.Errorf("eth_call block tag %v", tag)
+		if tag != spec.C.Chain.ReadBlock {
+			t.Errorf("eth_call block tag %v, want the constant %s", tag, spec.C.Chain.ReadBlock)
 		}
 	}
 	if len(c.logQueries) != 1 {
@@ -217,6 +217,68 @@ func TestCriteriaReadsTheCreatedBlockOnly(t *testing.T) {
 	q := c.logQueries[0]
 	if q["fromBlock"] != "0x3e8" || q["toBlock"] != "0x3e8" {
 		t.Errorf("log range %v..%v, want the single block 0x3e8", q["fromBlock"], q["toBlock"])
+	}
+}
+
+// Both values of chain.readBlock go out as the eth_call tag on every read, and
+// neither changes the log query, which stays on one numbered block.
+func TestReadBlockIsTheCallTag(t *testing.T) {
+	for _, tag := range []string{spec.ReadBlockLatest, spec.ReadBlockFinalized} {
+		t.Run(tag, func(t *testing.T) {
+			c, r, _ := setup(t)
+			r.readBlock = tag
+			c.listPosted, c.buildPosted = true, true
+			c.listHash = listHashFor(t, c.exam, c.entries)
+			ctx := context.Background()
+			if _, err := r.Exam(ctx); err != nil {
+				t.Fatalf("exam: %v", err)
+			}
+			if _, err := r.Criteria(ctx); err != nil {
+				t.Fatalf("criteria: %v", err)
+			}
+			if _, err := r.ApprovedList(ctx); err != nil {
+				t.Fatalf("list: %v", err)
+			}
+			if _, err := r.Build(ctx); err != nil {
+				t.Fatalf("build: %v", err)
+			}
+			if len(c.tags) != 4 {
+				t.Fatalf("%d eth_calls, want 4", len(c.tags))
+			}
+			for _, got := range c.tags {
+				if got != tag {
+					t.Errorf("eth_call block tag %v, want %s", got, tag)
+				}
+			}
+			want := []string{"0x3e8", "0x7d0"}
+			if len(c.logQueries) != len(want) {
+				t.Fatalf("%d log queries, want %d", len(c.logQueries), len(want))
+			}
+			for i, q := range c.logQueries {
+				if q["fromBlock"] != want[i] || q["toBlock"] != want[i] {
+					t.Errorf("log range %v..%v, want the single block %s", q["fromBlock"], q["toBlock"], want[i])
+				}
+			}
+		})
+	}
+}
+
+// At latest, a getter can name a block whose log the RPC node can't serve yet.
+// That must be a retryable error, not ErrNotPosted or a wrong answer.
+func TestRecordWithoutItsLogIsRetryable(t *testing.T) {
+	c, r, _ := setup(t)
+	r.readBlock = spec.ReadBlockLatest
+	c.listPosted = true
+	c.listHash = listHashFor(t, c.exam, c.entries)
+	c.logBlock = postedBlock + 1 // The node's log is not in the block the record names.
+	ctx := context.Background()
+	if _, err := r.ApprovedList(ctx); err == nil || errors.Is(err, ErrNotPosted) || errors.Is(err, ErrWrongExam) ||
+		!strings.Contains(err.Error(), "want one log") {
+		t.Fatalf("got %v", err)
+	}
+	c.logBlock = postedBlock
+	if _, err := r.ApprovedList(ctx); err != nil {
+		t.Fatalf("retry: %v", err)
 	}
 }
 

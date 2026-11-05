@@ -19,6 +19,7 @@ import (
 	"paperseal/tee/internal/chainread"
 	"paperseal/tee/internal/lifecycle"
 	"paperseal/tee/internal/settings"
+	"paperseal/tee/internal/spec"
 	"paperseal/tee/internal/storage"
 	"paperseal/tee/internal/timelock"
 )
@@ -43,6 +44,7 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
+	slog.Info("chain read mode", "readBlock", spec.C.Chain.ReadBlock)
 	roots, err := chainread.LoadRoots(chainread.RootsPath)
 	if err != nil {
 		return err

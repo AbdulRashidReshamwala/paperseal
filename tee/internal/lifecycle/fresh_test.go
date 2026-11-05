@@ -45,6 +45,66 @@ func (w *world) postBuild(b chainread.Build) {
 	w.chain.mu.Unlock()
 }
 
+// waitsForBuild steps a fresh instance and checks it neither moves nor fails.
+func waitsForBuild(t *testing.T, m *lifecycle.Machine) {
+	t.Helper()
+	for i := 0; i < 5; i++ {
+		if err := m.Step(context.Background()); err != nil {
+			t.Fatalf("step: %v", err)
+		}
+		if m.Stage() != lifecycle.StageOnboard || m.Failure() != nil {
+			t.Fatalf("stage %s, failure %v, want it waiting in onboard", m.Stage(), m.Failure())
+		}
+	}
+}
+
+// A read can show the list before the Build. An instance with no registrations
+// can't have run Onboard, so it waits for the Build and then starts Unlock.
+func TestFreshInstanceSeesTheListFirstAndTheBuildLater(t *testing.T) {
+	w, b, _ := built(t)
+	m, _, h := w.machine()
+	c := client{t, h}
+	waitsForBuild(t, m)
+	if st := c.status(); st.Stage != "onboard" || st.ApprovedList != nil {
+		t.Fatalf("status while waiting %+v", st)
+	}
+
+	w.postBuild(b)
+	stepUntil(t, m, lifecycle.StageUnlock)
+	if st := c.status(); st.ApprovedList == nil || st.QuestionCount != 20 {
+		t.Fatalf("status %+v", st)
+	}
+}
+
+// With no Build, a fresh instance waits for as long as it takes, whatever the
+// list says, because the list is only checked against the Build.
+func TestFreshInstanceWithNoBuildStaysWaiting(t *testing.T) {
+	w := newWorld(t)
+	w.chain.created = true
+	w.postList(w.entries()...)
+	m, _, _ := w.machine()
+	waitsForBuild(t, m)
+
+	w.chain.mu.Lock()
+	w.chain.list = &chainread.List{Entries: []byte("not an encoded list"), Hash: [32]byte{1}, Block: 2}
+	w.chain.mu.Unlock()
+	waitsForBuild(t, m)
+}
+
+// Nobody can register on a waiting instance to send it into CheckRegistered.
+func TestRegistrationCannotFailAWaitingInstance(t *testing.T) {
+	w, b, _ := built(t)
+	m, _, h := w.machine()
+	c := client{t, h}
+	waitsForBuild(t, m)
+	if code, why := c.register(w.setters[0], nil); code != http.StatusConflict {
+		t.Fatalf("register while waiting: %d %s", code, why)
+	}
+	waitsForBuild(t, m)
+	w.postBuild(b)
+	stepUntil(t, m, lifecycle.StageUnlock)
+}
+
 // A fresh instance shares no state with the one that built the paper. It
 // verifies the Build, then runs Unlock, and the paper still opens.
 func TestFreshInstanceUnlocks(t *testing.T) {

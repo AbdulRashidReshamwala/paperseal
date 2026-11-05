@@ -15,7 +15,7 @@ The Go workload that runs on Google Confidential Space. See the [root README](..
 | `internal/encryption` | HPKE (circl, RFC 9180), AES-256-GCM and padding |
 | `internal/attestation` | `eat_nonce`, the two instance keys, the launcher token client and published-token verification |
 | `internal/timelock` | drand timelock sealing (tlock) and a Beacon that verifies every round against `drand.publicKey` |
-| `internal/chainread` | JSON-RPC over TLS to `rpcHost` at `finalized`: `getExam`, `getApprovedList`, `getBuild` and their logs |
+| `internal/chainread` | JSON-RPC over TLS to `rpcHost` at `chain.readBlock`: `getExam`, `getApprovedList`, `getBuild` and their logs |
 | `internal/webauthn` | Passkey signature check, and the attestation policy |
 | `internal/challenge`, `registration` | Single-use challenges and verified registrations |
 | `internal/approvedlist`, `criteria` | Strict encode and decode, and `CheckRegistered` |
@@ -35,11 +35,13 @@ The TEE has no wallet and writes nothing to the chain. Its chain reads are the e
 
 `lifecycle.Machine` runs by itself, stepping every two seconds, with no board calls:
 
-1. **Onboard:** read the criteria and check them against `criteriaHash`, accept registrations, then read the approved list at the finalized block, check it and each entry's registration. A list that fails ends the exam (`failed`). If the chain already holds a Build, this is a fresh Unlock instance and it starts "Unlock Instance" instead.
+1. **Onboard:** read the criteria and check them against `criteriaHash`, accept registrations, then read the approved list at the `chain.readBlock` block, check it and each entry's registration. A list that fails ends the exam (`failed`). If the chain already holds a Build, this is a fresh Unlock instance and it starts "Unlock Instance" instead. An instance with no registrations can't have run Onboard, so it closes registration, skips the list check and keeps polling for the Build.
 2. **Submit:** accept questions from setters on the list until drand publishes the lock round.
 3. **Lock:** check the bank against the criteria. On failure the stage is `failed`.
 4. **Build and Distribute:** draw a seed, pick the questions per topic, encrypt the paper, split `K`, timelock `K_pub`, encrypt shares, write the files, then the manifest last, then queue the signed Build. `K`, `K_pub`, `K_priv`, the shares and the seed are zeroed before anything waits on storage.
 5. **Unlock:** accept shares once drand publishes the unlock round, check each against the manifest's `shareHash`, rebuild `K_priv` at 8, then write `key-priv/*`, `key-priv.tlock`, `release-token.jwt` and `release-log.json`. Shares are refused once the end round is published.
+
+`chain.readBlock` is `latest` during development and must be `finalized` for a real exam (see "Dev Mode" in `spec/api.md`). The TEE panics at startup on any other value and logs the value once. At `latest` a reorg can remove a list the TEE already accepted. The TEE doesn't read it again, so a different list then fails at `postBuild`, which checks the list hash.
 
 Errors that a retry can fix (RPC, storage, drand) leave the stage unchanged. Errors that cannot (a bad list, failed criteria, a Build that does not verify) move to `failed`.
 

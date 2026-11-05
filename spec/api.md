@@ -105,7 +105,7 @@ For a setter, `owner` is the lowercase `0x`-prefixed hex of the `setterOwner` ha
 
 Order is free, because the hash covers the posted bytes. The TEE decodes `entries`, then re-encodes it and rejects the list if the bytes differ, so one list has one encoding. It also rejects a list with an unknown role, a repeated passkey, a repeated derived key, the wrong number of key holders from `threshold`, or an entry it didn't verify at registration.
 
-The TEE reads `getApprovedList` over TLS at the `finalized` block, from `rpcHost`, using root certificates in the attested image. It then calls `eth_getLogs` for that record's `postedBlock` only.
+The TEE reads `getApprovedList` over TLS at the `chain.readBlock` block, either `finalized` or `latest`, from `rpcHost`, using root certificates in the attested image. It then calls `eth_getLogs` for that record's `postedBlock` only.
 
 Every client reads `entries` and `criteria` this way. `getExam` returns `createdBlock`, and `getApprovedList` returns `postedBlock`, so a log query covers exactly one block. Public RPC operators reject wide block ranges, so clients never search from an earlier block.
 
@@ -201,6 +201,10 @@ Written at unlock, each covered by the signed release log:
 
 Unlock may run on a different instance from the Build, so the log names its signer in `instancePublicKey`, and `release-token.jwt` attests that key. `entriesHash` is the plain SHA-256 of `abi.encode(ReleaseEntry[])`, with `ReleaseEntry` being `(bytes passkeyPublicKey, bytes32 shareHash, uint64 round)`, in the order received.
 
+## Dev Mode
+
+`chain.readBlock` is `latest` during development, so a full test exam takes under 5 minutes, and must be `finalized` for any real exam. A block at `latest` can be reorged, so a run may fail, but `ExamRegistry` still rejects a mismatched Build. The value is in the attested image, like `webauthn.requireHardwareAttestation`, and the verifier shows both.
+
 ## Size Limits
 
 `limits` in `constants.json` caps `entries` and `criteria`, because ABI offsets let many elements share one large value, so a small input can decode to a huge one. Every reader must reject a value before decoding it if:
@@ -252,7 +256,7 @@ Unlock can run on a new TEE instance that shares no state with the one that ran 
 4. Verify `build.teeSignature` over the `build` message with `build.instancePublicKey`.
 5. Check that `build.approvedListHash` equals the on-chain list hash and the hash of `entries`.
 
-If any step fails, the instance refuses every share. After these checks it trusts the on-chain list without re-checking registrations, because the attested Build instance already committed to that list.
+An instance that holds no registrations waits in `onboard` until it can see the Build, and refuses registrations once the list is visible, so start spare instances after the list is posted. If any step fails, the instance refuses every share. After these checks it trusts the on-chain list without re-checking registrations, because the attested Build instance already committed to that list.
 
 ## Attestation Token
 

@@ -3,11 +3,15 @@
 // sends no transactions.
 //
 // Each read has two steps over TLS to exam.RPCHost, for exam.Registry and
-// exam.ExamID. First eth_call a getter at the finalized block, which gives the
-// record and the one block that holds its log. A record with no block isn't
-// written yet, and that is ErrNotPosted. Then call eth_getLogs with fromBlock and
-// toBlock both set to that block. Never search a range, because public RPC
-// operators reject wide ones.
+// exam.ExamID. First eth_call a getter at the chain.readBlock block tag, which
+// gives the record and the one block that holds its log. A record with no block
+// isn't written yet, and that is ErrNotPosted. Then call eth_getLogs with
+// fromBlock and toBlock both set to that block. Never search a range, because
+// public RPC operators reject wide ones.
+//
+// At latest, the first step can see a block the second doesn't, because of a
+// reorg or a lagging RPC node. The log query then finds nothing and returns a
+// plain error, so the caller retries and reads the record again.
 //
 // Root certificates must come from the image, because the image is attested.
 // The TLS config loads them from a fixed path in the image into its own
@@ -132,9 +136,10 @@ func HTTPClient(roots *x509.CertPool) *http.Client {
 
 // RPC reads ExamRegistry through JSON-RPC.
 type RPC struct {
-	exam   settings.Exam
-	url    string
-	client *http.Client
+	exam      settings.Exam
+	url       string
+	client    *http.Client
+	readBlock string // The eth_call block tag, chain.readBlock.
 
 	mu      sync.Mutex
 	chainOK bool
@@ -145,13 +150,13 @@ var _ Source = (*RPC)(nil)
 
 // New reads from https://<rpcHost>/ with a client that trusts only roots.
 func New(exam settings.Exam, roots *x509.CertPool) *RPC {
-	return &RPC{exam: exam, url: "https://" + exam.RPCHost + "/", client: HTTPClient(roots)}
+	return NewAt(exam, "https://"+exam.RPCHost+"/", HTTPClient(roots))
 }
 
 // NewAt reads from an explicit URL with an explicit client. It is for tests
 // against httptest, which can't serve the attested host name.
 func NewAt(exam settings.Exam, url string, client *http.Client) *RPC {
-	return &RPC{exam: exam, url: url, client: client}
+	return &RPC{exam: exam, url: url, client: client, readBlock: spec.C.Chain.ReadBlock}
 }
 
 type rpcRequest struct {
@@ -239,7 +244,7 @@ func (r *RPC) checkChain(ctx context.Context) error {
 
 func (r *RPC) registryHex() string { return "0x" + hex.EncodeToString(r.exam.Registry[:]) }
 
-// ethCall calls a getter at the finalized block and unpacks its one output.
+// ethCall calls a getter at the chain.readBlock block and unpacks its one output.
 func (r *RPC) ethCall(ctx context.Context, method string) ([]any, error) {
 	if err := r.checkChain(ctx); err != nil {
 		return nil, err
@@ -249,7 +254,7 @@ func (r *RPC) ethCall(ctx context.Context, method string) ([]any, error) {
 		return nil, err
 	}
 	raw, err := r.call(ctx, "eth_call",
-		map[string]string{"to": r.registryHex(), "data": "0x" + hex.EncodeToString(data)}, "finalized")
+		map[string]string{"to": r.registryHex(), "data": "0x" + hex.EncodeToString(data)}, r.readBlock)
 	if err != nil {
 		return nil, err
 	}

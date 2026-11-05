@@ -5,12 +5,20 @@ package spec
 import (
 	_ "embed"
 	"encoding/json"
+	"fmt"
 )
 
 //go:generate cp ../../../spec/constants.json constants.json
 
 //go:embed constants.json
 var raw []byte
+
+// The two values of chain.readBlock. See "Dev Mode" in spec/api.md: latest is
+// for development, and a real exam must use finalized.
+const (
+	ReadBlockLatest    = "latest"
+	ReadBlockFinalized = "finalized"
+)
 
 // Constants mirrors spec/constants.json.
 type Constants struct {
@@ -30,8 +38,9 @@ type Constants struct {
 		GenesisTime   int64  `json:"genesisTime"`
 	} `json:"drand"`
 	Chain struct {
-		Name    string `json:"name"`
-		ChainID int64  `json:"chainId"`
+		Name      string `json:"name"`
+		ChainID   int64  `json:"chainId"`
+		ReadBlock string `json:"readBlock"`
 	} `json:"chain"`
 	Crypto struct {
 		KeyBytes int    `json:"keyBytes"`
@@ -92,7 +101,8 @@ type Constants struct {
 	} `json:"domainTags"`
 }
 
-// C holds the embedded constants.
+// C holds the embedded constants. An image with invalid constants panics here,
+// before main runs, so no code path can start without the check.
 var C = mustParse(raw)
 
 func mustParse(b []byte) Constants {
@@ -100,5 +110,19 @@ func mustParse(b []byte) Constants {
 	if err := json.Unmarshal(b, &c); err != nil {
 		panic("spec: embedded constants.json: " + err.Error())
 	}
+	if err := c.validate(); err != nil {
+		panic("spec: embedded constants.json: " + err.Error())
+	}
 	return c
+}
+
+// validate checks the values that go straight to an external system.
+// chain.readBlock is sent as a JSON-RPC block tag, so a typo must stop the TEE
+// and not reach the RPC operator.
+func (c Constants) validate() error {
+	switch c.Chain.ReadBlock {
+	case ReadBlockLatest, ReadBlockFinalized:
+		return nil
+	}
+	return fmt.Errorf("chain.readBlock must be %q or %q, got %q", ReadBlockLatest, ReadBlockFinalized, c.Chain.ReadBlock)
 }

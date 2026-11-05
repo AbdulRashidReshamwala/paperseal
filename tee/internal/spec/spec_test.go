@@ -30,6 +30,43 @@ func TestStructCoversEveryKey(t *testing.T) {
 	}
 }
 
+func TestReadBlockIsExactlyOneOfTheTwoValues(t *testing.T) {
+	var c Constants
+	for _, ok := range []string{"latest", "finalized"} {
+		c.Chain.ReadBlock = ok
+		if err := c.validate(); err != nil {
+			t.Errorf("%q refused: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "safe", "pending", "earliest", "Latest", "FINALIZED", " latest", "latest ", "0x10"} {
+		c.Chain.ReadBlock = bad
+		if err := c.validate(); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}
+
+// The check runs when the embedded file is parsed, so a bad value stops every
+// binary at startup. A file without the key is refused too.
+func TestBadReadBlockStopsStartup(t *testing.T) {
+	for name, doc := range map[string]string{
+		"wrong value": `{"chain":{"readBlock":"safe"}}`,
+		"missing key": `{"chain":{}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r == nil {
+					t.Fatal("mustParse did not panic")
+				}
+			}()
+			mustParse([]byte(doc))
+		})
+	}
+	if c := mustParse([]byte(`{"chain":{"readBlock":"finalized"}}`)); c.Chain.ReadBlock != "finalized" {
+		t.Fatalf("readBlock %q", c.Chain.ReadBlock)
+	}
+}
+
 func TestDomainTagsAreDistinctAndPrefixed(t *testing.T) {
 	var tags map[string]string
 	b, err := json.Marshal(C.DomainTags)

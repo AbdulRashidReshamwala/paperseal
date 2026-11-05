@@ -150,7 +150,8 @@ func (m *Machine) Register(_ context.Context, req api.RegisterRequest) error {
 	case errors.Is(err, registration.ErrDuplicate):
 		return api.Errorf(http.StatusConflict, "already_registered", "this passkey or derived key is already registered")
 	case errors.Is(err, registration.ErrClosed):
-		return wrongStage(StageOnboard, m.Stage())
+		// The stage can still be onboard here, on an instance waiting for the Build.
+		return api.Errorf(http.StatusConflict, "wrong_stage", "registration is closed, because the approved list has been read")
 	}
 	return err
 }

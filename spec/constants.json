@@ -16,7 +16,8 @@
   },
   "chain": {
     "name": "sepolia",
-    "chainId": 11155111
+    "chainId": 11155111,
+    "readBlock": "latest"
   },
   "crypto": {
     "keyBytes": 32,

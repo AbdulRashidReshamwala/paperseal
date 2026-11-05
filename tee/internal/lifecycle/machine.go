@@ -90,7 +90,8 @@ type Machine struct {
 	outbox             *outbox.Memory
 	bank               *bank.Bank
 
-	stepMu sync.Mutex // Serialises Step.
+	stepMu          sync.Mutex // Serialises Step.
+	waitingForBuild bool       // Guarded by stepMu. Logs the wait once.
 
 	mu         sync.RWMutex
 	stage      Stage
@@ -214,6 +215,8 @@ func (m *Machine) Step(ctx context.Context) error {
 
 // stepOnboard loads the criteria, then waits for the approved list. If the
 // chain already holds a Build, this is a fresh instance and it starts Unlock.
+// An instance with no registrations waits for that Build. Any other instance
+// checks the list, and a list that fails ends the exam.
 func (m *Machine) stepOnboard(ctx context.Context) error {
 	if err := m.loadCriteria(ctx); err != nil {
 		return err
@@ -239,8 +242,22 @@ func (m *Machine) stepOnboard(ctx context.Context) error {
 		return m.classify(err)
 	}
 
-	// No registration may arrive after the check.
+	// No registration may arrive after the check. Closing before counting also
+	// makes the count final, so nobody can register on a waiting instance to
+	// send it into the check below and fail it.
 	m.registrations.Close()
+	if m.registrations.Count() == 0 {
+		// A list is accepted only from registrations this instance verified, so
+		// one with none didn't run Onboard. It is a fresh instance whose read
+		// doesn't show the Build yet, which is normal: the Build may not have
+		// reached chain.readBlock. The list isn't this instance's to judge, so
+		// keep polling, and startFreshUnlock checks it against the Build.
+		if !m.waitingForBuild {
+			m.waitingForBuild = true
+			slog.Info("list seen with no registrations here, waiting for the Build")
+		}
+		return nil
+	}
 	entries, err := approvedlist.Decode(list.Entries)
 	if err != nil {
 		return fail("the approved list is invalid: %w", err)

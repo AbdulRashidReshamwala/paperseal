@@ -96,7 +96,7 @@ The TEE knows the board through its attested settings: they name `ExamRegistry`,
 
 1. **Register:** the board invites each setter, key holder and centre, and each one registers with the TEE as in [Hardware Keys](#hardware-keys). Setters register a passkey only, because nothing is ever encrypted to them, and they need no name.
 2. **Post:** the board's address posts the list to `ExamRegistry`, where it can be written only once. Each entry has the owner, role, passkey public key and derived public key. The contract stores a hash of the list and emits the full list, so reading it doesn't depend on storage the board controls.
-3. **Read:** the TEE reads the list at a finalised block from the RPC operator named in its attested settings. The TLS root certificates are part of the attested image, so the board can block this read but can't change it.
+3. **Read:** the TEE reads the list at a finalised block from the RPC operator named in its attested settings. Development builds read the latest block to run faster, and the verifier page shows this. The TLS root certificates are part of the attested image, so the board can block this read but can't change it.
 4. **Check:** the TEE rejects the list if any entry wasn't verified at registration. It signs the list hash into the Build, and `ExamRegistry` rejects a Build whose hash differs from the posted one.
 5. **Use:** the TEE accepts questions only from setters on the list, and encrypts shares and `K_priv` only to keys on the list. Each published copy names its recipient. The verifier page compares recipients with the list, and each centre can check its own entry.
 

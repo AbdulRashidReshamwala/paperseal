@@ -20,7 +20,8 @@ import (
 // only after verifying that it came from attested code, and then trusts the
 // list the Build committed to. It needs no registrations, so CheckRegistered
 // isn't run. If any step fails, the instance refuses every share: it fails
-// rather than collecting shares it can't vouch for.
+// rather than collecting shares it can't vouch for. Until the Build is visible,
+// stepOnboard keeps such an instance waiting.
 func (m *Machine) startFreshUnlock(ctx context.Context, list chainread.List, built chainread.Build) error {
 	exam := m.cfg.Exam
 	if m.cfg.Verifier == nil {
