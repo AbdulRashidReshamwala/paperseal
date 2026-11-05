@@ -27,9 +27,9 @@ import type { Schedule } from './state';
  * 1 minute.
  *
  * `latest`: the TEE sees the list as soon as it is mined, so a whole exam fits in under 5 minutes.
- * Lock is at 3:30, unlock 30 seconds later, T 15 seconds after that, so delta is 15 seconds, and the
- * end round is at 4:55. That leaves 55 seconds for all 8 shares, which took 31 seconds in a real run,
- * because the TEE refuses a share once the end round is out.
+ * Lock is at 2:45, unlock 30 seconds later, T 15 seconds after that, so delta is 15 seconds, and the
+ * end round is at 4:55. That leaves 100 seconds for the download and all 8 shares, because the TEE
+ * refuses a share once the end round is out, and a real run spent 36 seconds downloading and 31 on shares.
  */
 
 export const liveCriteria: Criteria = {

@@ -61,7 +61,7 @@ export async function dryCheck(): Promise<void> {
 
   // Written out here, so a change to config.ts has to be made twice to pass.
   const expected = {
-    latest: { lock: 210, unlock: 240, examStart: 255, end: 295, delta: 15, lead: 60 },
+    latest: { lock: 165, unlock: 195, examStart: 210, end: 295, delta: 15, lead: 100 },
     finalized: { lock: 1680, unlock: 1860, examStart: 1920, end: 2160, delta: 60, lead: 1200 },
   };
   for (const mode of ['latest', 'finalized'] as const) {
