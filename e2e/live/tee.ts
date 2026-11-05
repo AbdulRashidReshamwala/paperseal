@@ -178,7 +178,7 @@ export async function confirm(env: Env): Promise<Confirmed> {
 }
 
 /** A published PKI token (token.jwt, release-token.jwt) checked as a record: signature and claims, no expiry. */
-export async function checkPublishedToken(env: Env, token: string, instancePublicKey: Hex): Promise<string[]> {
+export async function checkPublishedToken(env: Pick<Env, 'io' | 'examId'>, token: string, instancePublicKey: Hex): Promise<string[]> {
   const bound = await chainSettings(env);
   const expected: ExpectedClaims = {
     instancePublicKey: fromHex(instancePublicKey),

@@ -2,7 +2,7 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import type { Hex } from '@paperseal/protocol';
+import { chain, type Hex } from '@paperseal/protocol';
 
 /*
  * The deployed system the live run drives. Every value here is public. The board's key never enters
@@ -34,7 +34,30 @@ export const deployed = {
 
 export const rpcHost = new URL(deployed.rpcUrl).hostname;
 
-/** Gaps from the moment `publish` runs, in seconds. See the notes in schedule.ts. */
-export const gaps = { lock: 28 * 60, unlock: 31 * 60, examStart: 32 * 60, end: 36 * 60 } as const;
+export interface LiveGaps {
+  /** Seconds from the moment `publish` runs. See the notes in schedule.ts. */
+  lock: number;
+  unlock: number;
+  examStart: number;
+  end: number;
+  /** `run` refuses to start with less than this many seconds left before Lock. */
+  minLeadBeforeLock: number;
+  /** When the TEE sees a posted approved list, in words. */
+  listDelay: string;
+}
+
+/** `chain.readBlock` decides how long a posted list takes to reach the TEE, so it picks the gaps. */
+export function gapsFor(readBlock: string): LiveGaps {
+  switch (readBlock) {
+    case 'latest':
+      return { lock: 210, unlock: 240, examStart: 255, end: 295, minLeadBeforeLock: 60, listDelay: 'within seconds, at the latest block' };
+    case 'finalized':
+      return { lock: 28 * 60, unlock: 31 * 60, examStart: 32 * 60, end: 36 * 60, minLeadBeforeLock: 20 * 60, listDelay: 'at the finalized block, in about 13 to 15 minutes' };
+    default:
+      throw new Error(`chain.readBlock must be latest or finalized, not ${readBlock}`);
+  }
+}
+
+export const gaps = gapsFor(chain.readBlock);
 
 export const participantCounts = { setters: 2, neutrals: 3, centreHolders: 7, centresWithoutShare: 1 } as const;

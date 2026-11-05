@@ -14,14 +14,22 @@ import {
   type Hex,
 } from '@paperseal/protocol';
 
-import { gaps, rpcHost, deployed } from './config';
+import { gaps, rpcHost, deployed, type LiveGaps } from './config';
 import type { Schedule } from './state';
 
 /*
- * Why these gaps: the TEE reads the approved list at Sepolia's `finalized` block, which took about
- * 17 minutes in a real run. So Lock is 28 minutes out, which leaves room to register, post, wait for
- * finality and let the setters submit. Unlock is 3 minutes after Lock, T is 1 minute later and the
- * end round is 4 minutes after that, so delta is 1 minute.
+ * Why these gaps. `chain.readBlock` says which block the TEE reads the approved list at, and gapsFor
+ * in config.ts holds both sets.
+ *
+ * `finalized`: Sepolia's finalized block took about 17 minutes in a real run. So Lock is 28 minutes
+ * out, which leaves room to register, post, wait for finality and let the setters submit. Unlock is
+ * 3 minutes after Lock, T is 1 minute later and the end round is 4 minutes after that, so delta is
+ * 1 minute.
+ *
+ * `latest`: the TEE sees the list as soon as it is mined, so a whole exam fits in under 5 minutes.
+ * Lock is at 3:30, unlock 30 seconds later, T 15 seconds after that, so delta is 15 seconds, and the
+ * end round is at 4:45. That leaves 45 seconds for all 8 shares, which took 31 seconds in a real run,
+ * because the TEE refuses a share once the end round is out.
  */
 
 export const liveCriteria: Criteria = {
@@ -36,12 +44,12 @@ export const liveCriteria: Criteria = {
 /** Two setters at 50 percent each give 3 per topic, which is the 6 per topic the multiple of 2 needs. */
 export const questionsPerSetterPerTopic = 3;
 
-export function computeSchedule(nowSeconds: number): Schedule {
-  const examStart = nowSeconds + gaps.examStart;
-  const delta = gaps.examStart - gaps.unlock;
-  const lockRound = firstRoundAtOrAfter(nowSeconds + gaps.lock);
+export function computeSchedule(nowSeconds: number, using: LiveGaps = gaps): Schedule {
+  const examStart = nowSeconds + using.examStart;
+  const delta = using.examStart - using.unlock;
+  const lockRound = firstRoundAtOrAfter(nowSeconds + using.lock);
   const unlockRound = firstRoundAtOrAfter(examStart - delta);
-  const endRound = firstRoundAtOrAfter(nowSeconds + gaps.end);
+  const endRound = firstRoundAtOrAfter(nowSeconds + using.end);
   return {
     createdAtUnix: nowSeconds,
     examStart,

@@ -21,7 +21,7 @@ import {
 import { decodeFunctionData, getAbiItem, toFunctionSelector, type AbiFunction } from 'viem';
 
 import { calldata, castSendArgs } from './cast';
-import { deployed, gaps, rpcHost } from './config';
+import { deployed, gapsFor, rpcHost } from './config';
 import { parseReleaseBody } from './github';
 import { releaseOrder, roster } from './roster';
 import { computeSchedule, liveCriteria, plan, questionsPerSetterPerTopic, runTeeArgs } from './schedule';
@@ -59,16 +59,32 @@ export async function dryCheck(): Promise<void> {
   const schedule = computeSchedule(NOW);
   const settings = plan('Dry check exam', schedule).settings;
 
-  await check('schedule: gaps are +40, +52, +55 and +65 minutes, each round the first at or after its time', () => {
-    const near = (actual: number, want: number) => actual >= want && actual < want + 3;
-    expect(near(schedule.lockAtUnix, NOW + gaps.lock), `lock ${String(schedule.lockAtUnix - NOW)}s`);
-    expect(near(schedule.unlockAtUnix, schedule.examStart - schedule.delta), 'unlock round is not the first at or after T - delta');
-    expect(schedule.examStart === NOW + 55 * 60 && schedule.delta === 180, 'T or delta');
-    expect(near(schedule.endAtUnix, NOW + gaps.end), 'end round');
-    expect(BigInt(schedule.lockRound) < BigInt(schedule.unlockRound) && BigInt(schedule.unlockRound) < BigInt(schedule.endRound), 'round order');
-    expect(schedule.endAtUnix > schedule.examStart, 'the end round must be after T');
-    return `lock ${schedule.lockRound}, unlock ${schedule.unlockRound}, end ${schedule.endRound}`;
-  });
+  // Written out here, so a change to config.ts has to be made twice to pass.
+  const expected = {
+    latest: { lock: 210, unlock: 240, examStart: 255, end: 295, delta: 15, lead: 60 },
+    finalized: { lock: 1680, unlock: 1860, examStart: 1920, end: 2160, delta: 60, lead: 1200 },
+  };
+  for (const mode of ['latest', 'finalized'] as const) {
+    const want = expected[mode];
+    const active = mode === chain.readBlock ? ', the active mode' : '';
+    const minutes = (s: number) => `${String(Math.floor(s / 60))}:${String(s % 60).padStart(2, '0')}`;
+    await check(`schedule for ${mode}${active}: lock +${minutes(want.lock)}, unlock +${minutes(want.unlock)}, T +${minutes(want.examStart)}, end +${minutes(want.end)}, each round the first at or after its time`, () => {
+      const using = gapsFor(mode);
+      const s = computeSchedule(NOW, using);
+      const near = (actual: number, target: number) => actual >= target && actual < target + 3;
+      expect(using.minLeadBeforeLock === want.lead, `lead before Lock ${String(using.minLeadBeforeLock)}s`);
+      expect(near(s.lockAtUnix, NOW + want.lock), `lock ${String(s.lockAtUnix - NOW)}s`);
+      expect(near(s.unlockAtUnix, s.examStart - s.delta), 'unlock round is not the first at or after T - delta');
+      expect(s.unlockAtUnix - NOW < want.unlock + 3, `unlock ${String(s.unlockAtUnix - NOW)}s`);
+      expect(s.examStart === NOW + want.examStart && s.delta === want.delta, 'T or delta');
+      expect(near(s.endAtUnix, NOW + want.end), 'end round');
+      expect(BigInt(s.lockRound) < BigInt(s.unlockRound) && BigInt(s.unlockRound) < BigInt(s.endRound), 'round order');
+      expect(s.endAtUnix > s.examStart, 'the end round must be after T');
+      expect(mode !== 'latest' || s.endAtUnix - NOW < 300, 'a dev exam must finish in under 5 minutes');
+      checkSchedule(plan('Dry check exam', s).settings);
+      return `lock ${s.lockRound}, unlock ${s.unlockRound}, end ${s.endRound}, delta ${String(s.delta)}s, run needs ${String(want.lead)}s before Lock`;
+    });
+  }
 
   await check('checkSchedule accepts it and rejects a wrong unlock round, a wrong chain and a zero delta', () => {
     checkSchedule({ ...settings, chainId: chain.chainId });

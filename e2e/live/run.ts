@@ -1,18 +1,14 @@
-import { openPaperFile, quicknetClient, sealQuestion, sealRelease, timelockDecrypt, verifyTeeSignature, xorCombine } from '@paperseal/crypto';
+import { sealQuestion, sealRelease, timelockDecrypt, verifyTeeSignature } from '@paperseal/crypto';
 import {
   approvedListHash,
   checkApprovedList,
   decodeApprovedList,
   encodeApprovedList,
   encodeMessage,
-  entriesHash,
   equalBytes,
   fromHex,
   hashMessage,
-  parsePaper,
   questionHash as hashQuestion,
-  releaseEntryFromWire,
-  saltedPaperHash,
   selectedCount,
   setterOwner,
   storageNames,
@@ -21,11 +17,13 @@ import {
   type Hex,
   type Question,
 } from '@paperseal/protocol';
-import { TeeApiError, type TeeClient } from '@paperseal/tee-client';
+import { isReleaseNotOpen, TeeApiError, type TeeClient } from '@paperseal/tee-client';
 
 import { boardSend, checkDeployment, connectChain } from './chainio';
 import { buildArgs, verifyOutboxBuild, type BuildPost } from './build';
 import { addParticipant, call, startLab, type Participant } from './browser';
+import { gaps } from './config';
+import { checkLogHolders, checkSetterOwners, openPaper, verifySignedLog, waitForRound } from './proof';
 import { releaseOrder, roster, type Kind } from './roster';
 import { liveCriteria, questionsPerSetterPerTopic } from './schedule';
 import {
@@ -208,7 +206,7 @@ async function setup(ctx: Ctx) {
     });
     await rep.check('setup', 'enough time is left before Lock to register, post, finalise and submit', () => {
       const left = exam.schedule.lockAtUnix - unixNow();
-      if (left < 20 * 60) throw new Error(`only ${String(left)}s until Lock at ${iso(exam.schedule.lockAtUnix)}; the list needs about 15 minutes to finalise. Publish a new exam`);
+      if (left < gaps.minLeadBeforeLock) throw new Error(`only ${String(left)}s until Lock at ${iso(exam.schedule.lockAtUnix)}; the TEE sees the list ${gaps.listDelay}. Publish a new exam`);
       return `${String(Math.round(left / 60))} minutes until Lock`;
     });
     const started = await startLab();
@@ -324,7 +322,7 @@ async function register(ctx: Ctx): Promise<{ listHash: Hex; entries: Hex }> {
       if (back.listHash.toLowerCase() !== listHash) throw new Error(`stored hash ${back.listHash} differs from ${listHash}`);
       if (emitted.toLowerCase() !== encoded) throw new Error('the emitted entries differ from the bytes posted');
       updateRun((r) => (r.approvedList = { hash: listHash, transactionHash: sent.transactionHash, blockNumber: sent.blockNumber.toString() }));
-      return `block ${sent.blockNumber.toString()}, tx ${sent.transactionHash}; the TEE reads it at the finalized block in about 13 to 15 minutes`;
+      return `block ${sent.blockNumber.toString()}, tx ${sent.transactionHash}; the TEE sees it ${gaps.listDelay}`;
     });
     return { listHash, entries: encoded };
   });
@@ -344,7 +342,7 @@ async function setters(ctx: Ctx, listHash: Hex): Promise<{ setter: string; quest
           if (s.stage === 'failed') throw new Error('the TEE stage is failed');
           return s.approvedList ? s : null;
         },
-        { timeoutMs: Math.max(exam.schedule.lockAtUnix * 1000 - Date.now() - 60_000, 60_000), intervalMs: 20_000, onWait: notify },
+        { timeoutMs: Math.max(exam.schedule.lockAtUnix * 1000 - Date.now() - 60_000, 60_000), intervalMs: 5_000, onWait: notify },
       );
       if (status.approvedList?.hash !== listHash) throw new Error(`the TEE list hash ${String(status.approvedList?.hash)} differs from ${listHash}`);
       updateRun((r) => {
@@ -429,7 +427,7 @@ async function buildStep(ctx: Ctx, listHash: Hex, receipts: { setter: string; qu
           const out = await teeRead(() => tee.outbox());
           return out.messages.find((m) => m.kind === 'build') ?? null;
         },
-        { timeoutMs: Math.max((exam.schedule.lockAtUnix + 20 * 60) * 1000 - Date.now(), 120_000), intervalMs: 10_000, onWait: notify },
+        { timeoutMs: Math.max((exam.schedule.lockAtUnix + 20 * 60) * 1000 - Date.now(), 120_000), intervalMs: 3_000, onWait: notify },
       );
       const trusted = await attest(env);
       if (!trusted.verdict.trusted) throw new UntrustedTeeError(trusted.claimLines);
@@ -530,8 +528,7 @@ async function releaseStep(ctx: Ctx, build: BuildPost): Promise<void> {
   await rep.step('f-release', async () => {
     await waitUntil(rep, exam.schedule.unlockAtUnix, 'the unlock round T - delta');
     await rep.check('f-release', 'the unlock round is published by drand (quicknet) and the TEE is at the unlock stage', async () => {
-      const client = quicknetClient();
-      await poll('drand to publish the unlock round', async () => (await client.get(Number(exam.schedule.unlockRound))).round, { timeoutMs: 5 * 60_000, intervalMs: 3_000 });
+      await waitForRound(Number(exam.schedule.unlockRound), { timeoutMs: 5 * 60_000 });
       const status = await poll(
         'the TEE unlock stage',
         async () => {
@@ -549,7 +546,7 @@ async function releaseStep(ctx: Ctx, build: BuildPost): Promise<void> {
     for (const name of RELEASE_ORDER) {
       const p = person(ctx, name);
       const ok = await rep.check('f-release', `${p.name}: one-touch releaseShare, sealRelease, submit`, async () => {
-        await releaseOne(ctx, build, p);
+        await releaseWhenOpen(ctx, build, p);
         return 'share verified against the manifest, sealed to the TEE encryption key, accepted';
       });
       if (!ok) return;
@@ -563,7 +560,7 @@ async function releaseStep(ctx: Ctx, build: BuildPost): Promise<void> {
             return cur.release.released.length === n ? cur : null;
           }, { timeoutMs: 60_000, intervalMs: 2_000 });
           if (s.stage === 'released') throw new Error(`the TEE reached released with only ${String(n)} shares`);
-          if (n === 7) await assertNothingPublished(ctx);
+          if (n === 7) await assertNothingPublished(ctx, submitted);
           return `stage ${s.stage}, ${String(s.release.released.length)} of ${String(s.release.required)}`;
         });
       }
@@ -585,10 +582,13 @@ async function releaseStep(ctx: Ctx, build: BuildPost): Promise<void> {
   });
 }
 
-/** With 7 of 10 shares (all centres, no neutral party) nothing may be in storage or in the log. */
-async function assertNothingPublished(ctx: Ctx): Promise<void> {
-  const centre8 = person(ctx, 'centre-8');
-  const names = [storageNames.centreKeyPriv(fromHex(centre8.derivedPublicKey as Hex)), storageNames.keyPriv, storageNames.releaseLog, 'release-token.jwt'];
+/**
+ * With 7 of 10 shares (all centres, no neutral party) the signed log is public and correct to be
+ * partial, as the README says for the time during delta, but nothing that opens the paper exists.
+ */
+async function assertNothingPublished(ctx: Ctx, released: readonly Participant[]): Promise<void> {
+  const centres = ofKind(ctx, 'centre-holder', 'centre');
+  const names = [...centres.map((c) => storageNames.centreKeyPriv(fromHex(c.derivedPublicKey as Hex))), storageNames.keyPriv, storageNames.releaseLog, 'release-token.jwt'];
   for (const name of names) {
     try {
       await ctx.fetchFile(name);
@@ -598,13 +598,28 @@ async function assertNothingPublished(ctx: Ctx): Promise<void> {
     }
     throw new Error(`storage already holds ${name} after 7 shares`);
   }
-  try {
-    await ctx.tee.releaseLog();
-  } catch (error) {
-    if (error instanceof TeeApiError) return;
-    throw error;
+  const log = await teeRead(() => ctx.tee.releaseLog());
+  await verifySignedLog(log, ctx.exam.examId);
+  if (log.entries.length !== 7) throw new Error(`GET /v1/release/log lists ${String(log.entries.length)} entries after 7 shares`);
+  const logged = log.entries.map((e) => e.passkeyPublicKey);
+  if (JSON.stringify(logged) !== JSON.stringify(released.map((p) => p.passkeyPublicKey))) throw new Error('GET /v1/release/log does not list the 7 who released, in order');
+}
+
+/**
+ * A share the TEE turned away with `too_early` or `stale_beacon` was not accepted, and the TEE says
+ * to try again: its view of drand lags the public one by a moment. Any other refusal is a failure.
+ */
+async function releaseWhenOpen(ctx: Ctx, build: BuildPost, p: Participant): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await releaseOne(ctx, build, p);
+      return;
+    } catch (error) {
+      const retry = isReleaseNotOpen(error) || (error instanceof TeeApiError && error.code === 'stale_beacon');
+      if (!retry || attempt >= 5) throw error;
+      await sleep(1_000);
+    }
   }
-  throw new Error('GET /v1/release/log answered after 7 shares');
 }
 
 async function releaseOne(ctx: Ctx, build: BuildPost, p: Participant): Promise<void> {
@@ -645,24 +660,6 @@ async function releaseOne(ctx: Ctx, build: BuildPost, p: Participant): Promise<v
 
 /* ---------------------------------------------------------------- g. Unlock */
 
-async function openPaper(ctx: Ctx, build: BuildPost, kPubTlock: string, kPriv: Uint8Array, paperFile: Uint8Array) {
-  const examBytes = fromHex(ctx.exam.examId);
-  const kPub = await retryTransient(() => timelockDecrypt(kPubTlock));
-  const key = xorCombine(kPub, kPriv);
-  try {
-    const opened = await openPaperFile(key, examBytes, paperFile);
-    if (!equalBytes(saltedPaperHash(opened.seed, opened.paper), fromHex(build.saltedPaperHash))) {
-      throw new Error('the paper does not match the salted paper hash in the Build');
-    }
-    const paper = parsePaper(opened.paper, liveCriteria);
-    if (paper.examId !== ctx.exam.examId.toLowerCase()) throw new Error('the paper is for a different exam');
-    return { paperBytes: opened.paper, paper };
-  } finally {
-    key.fill(0);
-    kPub.fill(0);
-  }
-}
-
 async function unlockStep(ctx: Ctx, build: BuildPost, downloads: Map<string, Download>): Promise<Hex> {
   const { rep, exam } = ctx;
   return rep.step('g-unlock', async () => {
@@ -675,7 +672,7 @@ async function unlockStep(ctx: Ctx, build: BuildPost, downloads: Map<string, Dow
         const kPriv = await call(p, 'openKeyPriv', p.credentialId as string, exam.examId, toHex(sealed));
         const kPrivBytes = fromHex(kPriv);
         try {
-          const { paperBytes, paper } = await openPaper(ctx, build, dl.keyPubTlock, kPrivBytes, dl.paper);
+          const { paperBytes, paper } = await openPaper({ examId: exam.examId, saltedPaperHash: build.saltedPaperHash, criteria: liveCriteria, keyPubTlock: dl.keyPubTlock, kPriv: kPrivBytes, paperFile: dl.paper });
           hashes.set(p.name, toHex(await sha256(paperBytes)));
           return `${String(paper.questions.length)} questions, paper sha256 ${short(hashes.get(p.name) as string)}`;
         } finally {
@@ -717,9 +714,7 @@ async function proofStep(ctx: Ctx, build: BuildPost, centrePaperHash: Hex): Prom
   await rep.step('h-proof', async () => {
     await waitUntil(rep, exam.schedule.endAtUnix, 'the end round');
     await rep.check('h-proof', 'the end round is published by drand', async () => {
-      const client = quicknetClient();
-      const beacon = await poll('drand to publish the end round', async () => (await client.get(Number(exam.schedule.endRound))).round, { timeoutMs: 10 * 60_000, intervalMs: 3_000 });
-      return `round ${String(beacon)}`;
+      return `round ${String(await waitForRound(Number(exam.schedule.endRound), { timeoutMs: 10 * 60_000 }))}`;
     });
 
     // From here on nothing uses a passkey, a browser or any participant: only public data.
@@ -730,7 +725,7 @@ async function proofStep(ctx: Ctx, build: BuildPost, centrePaperHash: Hex): Prom
       const paperFile = await fetchListedFile(ctx.fetchFile, manifest, build, storageNames.paper);
       const kPriv = await retryTransient(() => timelockDecrypt(keyPrivTlock));
       try {
-        const { paperBytes, paper } = await openPaper(ctx, build, keyPubTlock, kPriv, paperFile);
+        const { paperBytes, paper } = await openPaper({ examId: exam.examId, saltedPaperHash: build.saltedPaperHash, criteria: liveCriteria, keyPubTlock, kPriv, paperFile });
         const digest = toHex(await sha256(paperBytes));
         if (digest !== centrePaperHash) throw new Error(`the public paper ${digest} differs from the one the centres got, ${centrePaperHash}`);
         return `${String(paper.questions.length)} questions, salted paper hash equals the Build, same paper as the centres`;
@@ -742,41 +737,32 @@ async function proofStep(ctx: Ctx, build: BuildPost, centrePaperHash: Hex): Prom
     await rep.check('h-proof', 'release-log.json and release-token.jwt verify, and the log names the 8 holders who released', async () => {
       const stored = JSON.parse(new TextDecoder().decode(await ctx.fetchFile(storageNames.releaseLog))) as Awaited<ReturnType<TeeClient['releaseLog']>>;
       const live = await teeRead(() => tee.releaseLog());
-      if (JSON.stringify(stored) !== JSON.stringify(live)) throw new Error('release-log.json differs from GET /v1/release/log');
-      if (stored.examId.toLowerCase() !== exam.examId.toLowerCase()) throw new Error('the log names a different exam');
-      const entries = stored.entries.map(releaseEntryFromWire);
-      if (!equalBytes(entriesHash(entries), fromHex(stored.entriesHash))) throw new Error('entriesHash is not the hash of the entries');
-      const signed = await verifyTeeSignature(
-        fromHex(stored.instancePublicKey),
-        fromHex(stored.teeSignature),
-        encodeMessage('releaseLog', { examId: fromHex(stored.examId), entriesHash: fromHex(stored.entriesHash) }),
-      );
-      if (!signed) throw new Error('the log signature does not verify under its instance key');
+      await verifySignedLog(stored, exam.examId);
+      // The TEE signs afresh on each GET and ECDSA is randomised, so two signatures differ. Each one
+      // verifies, and everything else must be identical.
+      await verifySignedLog(live, exam.examId);
+      const body = (log: typeof stored) => JSON.stringify([log.examId, log.entries, log.entriesHash, log.instancePublicKey]);
+      if (body(stored) !== body(live)) throw new Error('release-log.json differs from GET /v1/release/log');
       const token = new TextDecoder().decode(await ctx.fetchFile('release-token.jwt'));
       const failures = await checkPublishedToken(env, token, stored.instancePublicKey);
       if (failures.length > 0) throw new Error(`release-token.jwt: ${failures.join('; ')}`);
       const expected = RELEASE_ORDER.map((n) => person(ctx, n).passkeyPublicKey as Hex);
       const got = stored.entries.map((e) => e.passkeyPublicKey);
       if (JSON.stringify(got) !== JSON.stringify(expected)) throw new Error(`the log lists ${got.map((k) => short(k, 8)).join(', ')} instead of the 8 who released, in order`);
-      const manifestFiles = (await fetchManifest(ctx.fetchFile, build, exam.examId)).manifest.files;
-      for (const e of stored.entries) {
-        const holder = ctx.people.find((p) => p.passkeyPublicKey === e.passkeyPublicKey);
-        const file = manifestFiles.find((f) => f.name === storageNames.share(fromHex(holder?.derivedPublicKey as Hex)));
-        if (file?.shareHash !== e.shareHash) throw new Error(`the logged share hash for ${String(holder?.name)} differs from the manifest`);
-        if (BigInt(e.round) < BigInt(exam.schedule.unlockRound)) throw new Error(`the log has round ${e.round} before the unlock round`);
-      }
-      return `${String(entries.length)} entries, signature, entriesHash, token and share hashes verified, signer ${short(stored.instancePublicKey)}`;
+      const listEntries = await ctx.io.read(() => ctx.io.registry.getApprovedListEntries(exam.examId));
+      if (!listEntries) throw new Error('the approved list is not readable from the chain');
+      checkLogHolders(stored, listEntries, (await fetchManifest(ctx.fetchFile, build, exam.examId)).manifest, exam.schedule.unlockRound);
+      return `${String(stored.entries.length)} entries, signature, entriesHash, token and share hashes verified, signer ${short(stored.instancePublicKey)}`;
     });
 
     // No names are published. The list shows only the hash of each setter's passkey, and anyone recomputes it.
     await rep.check('h-proof', 'no setter name is on the on-chain list, and each setter owner is the hash of its own passkey', async () => {
       const entries = await ctx.io.read(() => ctx.io.registry.getApprovedListEntries(exam.examId));
       if (!entries) throw new Error('the approved list is not readable from the chain');
+      const count = checkSetterOwners(entries);
       const setters = decodeApprovedList(fromHex(entries)).filter((e) => e.role === 1);
-      const bad = setters.filter((e) => e.owner !== setterOwner(e.passkeyPublicKey));
-      if (bad.length > 0) throw new Error(`${String(bad.length)} setter owner(s) are not the setterOwner hash of their passkey`);
       if (setters.some((e) => ctx.people.some((p) => p.kind === 'setter' && e.owner === p.name))) throw new Error('a setter name appears on the list in the clear');
-      return `${String(setters.length)} setters, each listed only by the hash of its passkey`;
+      return `${String(count)} setters, each listed only by the hash of its passkey`;
     });
   });
 }
