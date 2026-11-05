@@ -66,26 +66,33 @@ describe('Register', () => {
   const mount = (role: 'setter' | 'keyholder' | 'centre', keys = makeKeys(), tee = makeTee()) =>
     render(<Register role={role} examId={examId} tee={tee} keys={keys} />);
 
-  it('asks a setter for nothing, registers, and shows only the hash', async () => {
+  const registerButton = () => screen.getByRole('button', { name: 'Register your security key' });
+
+  it('asks a setter for nothing, registers, and keeps only the hash', async () => {
     const keys = makeKeys();
     mount('setter', keys);
     expect(screen.queryByLabelText(/Commitment/)).toBeNull();
     expect(screen.queryByLabelText('Name on the approved list')).toBeNull();
-    const button = screen.getByText('Create passkey and register') as HTMLButtonElement;
-    expect(button.disabled).toBe(false);
-    fireEvent.click(button);
+    fireEvent.click(registerButton());
     await waitFor(() => {
-      expect(screen.getByText('Registered')).toBeTruthy();
+      expect(screen.getByText('Your security key is registered')).toBeTruthy();
     });
-    expect(screen.getByText(setterOwner(fromHex(passkey)))).toBeTruthy();
+    expect(screen.queryByText(/Registered as/)).toBeNull();
     expect(loadCredential(examId, 'setter')?.owner).toBe(setterOwner(fromHex(passkey)));
   });
 
-  it('keeps names for key holders and centres', () => {
-    mount('keyholder');
-    expect((screen.getByText('Create passkey and register') as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText('Name on the approved list'), { target: { value: 'Centre One' } });
-    expect((screen.getByText('Create passkey and register') as HTMLButtonElement).disabled).toBe(false);
+  it.each(['keyholder', 'centre'] as const)('keeps a name for a %s, and asks for it before any key touch', async (role) => {
+    const keys = makeKeys();
+    mount(role, keys);
+    fireEvent.click(registerButton());
+    expect(await screen.findByText('Enter your name first.')).toBeTruthy();
+    expect(keys.register).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText(/Name on the approved list/), { target: { value: 'Centre One' } });
+    fireEvent.click(registerButton());
+    await waitFor(() => {
+      expect(keys.register).toHaveBeenCalledWith({ role: 'holder', owner: 'Centre One', challenge: fromHex(challenge) });
+    });
+    expect(await screen.findByText('Registered as Centre One.')).toBeTruthy();
   });
 });
 

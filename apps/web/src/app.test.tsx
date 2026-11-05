@@ -19,26 +19,27 @@ function render(Area: ComponentType, base: string, path: string) {
   );
 }
 
+// With no exam and no settings, every old link lands on the one screen its area's state calls for.
 const screens: [ComponentType, string, string, string][] = [
-  [BoardArea, '/board', '', 'ExamRegistry: not connected'],
-  [BoardArea, '/board', '/blueprint', 'maxSetterPercent'],
-  [BoardArea, '/board', '/schedule', 'Resulting drand rounds'],
-  [BoardArea, '/board', '/publish', 'Not ready to publish'],
-  [BoardArea, '/board', '/onboarding', 'Read back by the TEE: not connected'],
-  [BoardArea, '/board', '/list', 'On-chain list: not connected'],
-  [BoardArea, '/board', '/outbox', 'Outbox: not connected'],
-  [SetterArea, '/setter', '', 'Sign-in unavailable'],
-  [SetterArea, '/setter', '/upload', 'Upload locked'],
-  [SetterArea, '/setter', '/receipt', 'No receipts yet'],
-  [CentreArea, '/centre', '', 'Nothing downloaded'],
-  [CentreArea, '/centre', '/countdown', 'Unlock round: not connected'],
-  [CentreArea, '/centre', '/register', 'Register'],
-  [CentreArea, '/centre', '/release', 'Release your share'],
-  [CentreArea, '/centre', '/unlock', 'Paper locked'],
-  [CentreArea, '/centre', '/log', 'Release log: not connected'],
-  [KeyholderArea, '/keyholder', '', 'TEE: not connected'],
-  [KeyholderArea, '/keyholder', '/register', 'Register'],
-  [KeyholderArea, '/keyholder', '/release', 'Release your share'],
+  [BoardArea, '/board', '', 'Create the exam'],
+  [BoardArea, '/board', '/blueprint', 'Create the exam'],
+  [BoardArea, '/board', '/schedule', 'Create the exam'],
+  [BoardArea, '/board', '/publish', 'Create the exam'],
+  [BoardArea, '/board', '/onboarding', 'Create the exam'],
+  [BoardArea, '/board', '/list', 'Create the exam'],
+  [BoardArea, '/board', '/outbox', 'Create the exam'],
+  [SetterArea, '/setter', '', 'This link isn’t ready yet'],
+  [SetterArea, '/setter', '/upload', 'This link isn’t ready yet'],
+  [SetterArea, '/setter', '/receipt', 'This link isn’t ready yet'],
+  [CentreArea, '/centre', '', 'This page is not connected to the exam'],
+  [CentreArea, '/centre', '/countdown', 'This page is not connected to the exam'],
+  [CentreArea, '/centre', '/register', 'This page is not connected to the exam'],
+  [CentreArea, '/centre', '/release', 'This page is not connected to the exam'],
+  [CentreArea, '/centre', '/unlock', 'This page is not connected to the exam'],
+  [CentreArea, '/centre', '/log', 'This page is not connected to the exam'],
+  [KeyholderArea, '/keyholder', '', 'This page is not connected to the exam'],
+  [KeyholderArea, '/keyholder', '/register', 'This page is not connected to the exam'],
+  [KeyholderArea, '/keyholder', '/release', 'This page is not connected to the exam'],
 ];
 
 describe('route areas', () => {

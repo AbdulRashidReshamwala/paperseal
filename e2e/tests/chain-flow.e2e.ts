@@ -36,7 +36,7 @@ beforeAll(async () => {
   browser = await launchChrome();
   // Warm Vite's dependency optimiser with an unrecorded visit, so a mid-recording reload cannot happen.
   const warm = await browser.newPage();
-  await warm.goto(`${web.url}/#/board/publish`);
+  await warm.goto(`${web.url}/#/board/blueprint`);
   await warm.waitForLoadState('networkidle');
   await warm.close();
 });
@@ -50,6 +50,13 @@ afterAll(async () => {
 });
 
 const value = (page: Page, label: string) => page.getByLabel(label).first();
+/** Opens a folded section. Evidence such as hashes lives there, out of the primary screen. */
+const unfold = async (page: Page, summary: string) => {
+  const fold = page.locator('summary', { hasText: summary }).first();
+  if ((await fold.locator('xpath=..').getAttribute('open')) === null) await fold.click();
+};
+/** A `Hash` shows a shortened value, and carries the whole value in its title. */
+const hashOf = async (page: Page, label: string) => (await page.getByRole('button', { name: `Copy ${label}: ` }).first().getAttribute('title')) ?? '';
 
 describe('exam on a local anvil chain', () => {
   it('board-publish', async () => {
@@ -61,142 +68,140 @@ describe('exam on a local anvil chain', () => {
     const client = publicClientFor(chain);
     try {
       await page.goto(`${web.url}/#/board/blueprint`);
-      await rec.say('Real apps/web at /board/blueprint. ExamRegistry deployed from contracts/out, board = anvil account 0');
+      await rec.say('Real apps/web, the guided board flow. ExamRegistry deployed from contracts/out, board = anvil account 0');
+      await page.getByRole('heading', { name: 'Create the exam' }).waitFor({ timeout: 15_000 });
       await rec.pause(2500);
 
-      await rec.say('Blueprint: typing the exam name');
+      await rec.say('Step 1: the exam name, its time and its length');
       await rec.type(value(page, 'Exam name'), EXAM_NAME);
-      await rec.say('Blueprint: first topic, Mechanics, 5 questions');
+      await value(page, 'Date and time of the exam').fill(`${stamp(dayOffset(30))}T09:30`);
+      await value(page, 'Length, in minutes').fill('180');
+      await rec.say('Step 1: released to centres 30 minutes before');
+      await value(page, 'Minutes before the exam to release the paper to centres').fill('30');
+      await rec.say('Step 1: first topic, Mechanics, 5 questions');
       await rec.type(value(page, 'Topic 1 name'), 'Mechanics');
       await rec.type(value(page, 'Topic 1 questions'), '5');
-      await rec.say('Blueprint: adding a second topic, Optics, 3 questions');
+      await rec.say('Step 1: adding a second topic, Optics, 3 questions');
       await page.getByRole('button', { name: 'Add topic' }).click();
       await rec.type(value(page, 'Topic 2 name'), 'Optics');
       await rec.type(value(page, 'Topic 2 questions'), '3');
-      await rec.say('Blueprint: setter limits');
-      await rec.type(value(page, 'maxSetterPercent'), '20');
-      await rec.type(value(page, 'minBankMultiple'), '4');
-      await page.locator('.ps-badge', { hasText: 'Criteria accepted' }).scrollIntoViewIfNeeded();
-      await rec.say('Blueprint: criteria accepted by the app');
+      await rec.say('Step 1: Advanced holds the setter limits and the public record provider');
+      await unfold(page, 'Advanced');
+      await value(page, 'Most of a topic one setter can write, in percent').fill('20');
+      await value(page, 'Question bank size, as a multiple of the questions used').fill('4');
+      await value(page, 'Public record provider').fill(RPC_HOST);
       await rec.pause(2000);
-      await rec.check('Blueprint accepts the criteria (8 questions selected)', async () => {
-        await page.locator('.ps-badge', { hasText: 'Criteria accepted' }).waitFor({ timeout: 5000 });
-        const text = await page.locator('li').filter({ hasText: 'selectedCount' }).first().innerText();
-        if (!/\b8\b/.test(text)) throw new Error(`selectedCount row: ${text}`);
-        return text.replace(/\s+/g, ' ');
-      });
-      await rec.check('The exam ID shown equals keccak256 of the name, computed independently', async () => {
-        const shown = (await page.locator('li').filter({ hasText: 'Exam ID' }).first().innerText()).toLowerCase();
-        if (!shown.includes(examId)) throw new Error(`UI shows ${shown}, expected ${examId}`);
-        return examId;
+      await rec.check('Create step works out the rest: 8 questions at a multiple of 4 and 20 percent need 32 questions from 5 setters', async () => {
+        const note = (await page.locator('.board-note').first().innerText()).replace(/\s+/g, ' ');
+        if (!note.includes('at least 32 questions from at least 5 setters')) throw new Error(note);
+        if (!note.includes('Questions close')) throw new Error(`no closing time: ${note}`);
+        return note;
       });
 
-      await page.getByRole('link', { name: 'Schedule' }).click();
-      await rec.say('Schedule: exam start 30 days ahead at 09:30, local time');
-      const day = stamp(dayOffset(30));
-      const lockDay = stamp(dayOffset(29));
-      await rec.type(value(page, 'Exam start'), `${day} 09:30`);
-      await rec.type(value(page, 'Δ'), '30');
-      await rec.say('Schedule: lock the bank the day before, 12:00');
-      await rec.type(value(page, 'Lock time'), `${lockDay} 12:00`);
-      await rec.say('Schedule: exam ends 12:30');
-      await rec.type(value(page, 'End time'), `${day} 12:30`);
-      await page.locator('.ps-badge', { hasText: 'Schedule accepted' }).scrollIntoViewIfNeeded();
-      await rec.pause(2000);
-      await rec.check('Schedule accepted, with drand rounds derived', async () => {
-        await page.locator('.ps-badge', { hasText: 'Schedule accepted' }).waitFor({ timeout: 5000 });
-        const text = await page.locator('li').filter({ hasText: 'Unlock round' }).first().innerText();
-        if (!/round \d+/.test(text)) throw new Error(`no round shown: ${text}`);
-        return text.replace(/\s+/g, ' ');
-      });
-
-      await page.getByRole('link', { name: 'Publish' }).click();
-      await rec.say('Publish: the TEE version list is fetched live from GitHub releases');
-      const dropdown = value(page, 'TEE version');
-      await dropdown.waitFor({ timeout: 60_000 }).catch(() => undefined);
-      const githubOk = await rec.check('The TEE version dropdown appeared from the live GitHub release list', async () => {
-        await dropdown.waitFor({ timeout: 5000 }).catch(async () => {
+      await page.getByRole('button', { name: 'Continue' }).click();
+      await rec.say('Step 2: the sealed machine version list is fetched live from GitHub releases');
+      await page.getByRole('heading', { name: 'Choose what the sealed machine runs' }).waitFor({ timeout: 15_000 });
+      const other = page.locator('summary', { hasText: 'Use a different version' });
+      const versions = page.locator('details', { has: other }).locator('select');
+      await other.waitFor({ timeout: 60_000 }).catch(() => undefined);
+      const githubOk = await rec.check('The version list appeared from the live GitHub releases', async () => {
+        await other.waitFor({ timeout: 5000 }).catch(async () => {
           const body = await rec.bodyText();
           const limited = /limiting requests/.test(body);
-          throw new Error(limited ? 'GitHub rate-limited this run, so the versions could not be listed' : `no TEE version dropdown: ${body.slice(0, 200)}`);
+          throw new Error(limited ? 'GitHub rate-limited this run, so the versions could not be listed' : `no version list: ${body.slice(0, 200)}`);
         });
-        return `options: ${(await dropdown.locator('option').allInnerTexts()).join(', ')}`;
+        await other.click();
+        return `options: ${(await versions.locator('option').allTextContents()).join(', ')}`;
       });
       if (!githubOk) throw new Error('cannot publish without the live GitHub release list');
+      await rec.say(`Step 2: choosing ${TAG}, an older version with a known commit and digest`);
+      await versions.selectOption({ label: TAG });
+      const useVersion = page.getByRole('button', { name: `Use ${TAG}` });
+      await useVersion.waitFor({ timeout: 30_000 }).catch(() => undefined);
       await rec.pause(2500);
-      await rec.say(`Publish: selecting ${TAG} in the TEE version dropdown`);
-      await dropdown.selectOption({ label: TAG });
-      await page.getByText(`The tag ${TAG} points at this commit.`).waitFor({ timeout: 30_000 }).catch(() => undefined);
-      await rec.pause(3500);
-      await rec.check(`The app says "The tag ${TAG} points at this commit.", with the real commit and digest shown`, async () => {
+      await rec.check(`The app says the tag ${TAG} points at this commit, with the real commit and digest in the record`, async () => {
+        await unfold(page, 'Exam record');
         const body = await rec.bodyText();
-        if (!body.includes(`The tag ${TAG} points at this commit.`)) throw new Error(/limiting requests/.test(body) ? 'GitHub rate-limited this run' : `no verified-tag message: ${body.slice(0, 300)}`);
-        if (!body.toLowerCase().includes(COMMIT) || !body.toLowerCase().includes(DIGEST)) throw new Error('the shown commit or digest differs from the release');
-        return `${COMMIT} / ${DIGEST}`;
+        if (!body.includes('The tag points at this commit')) throw new Error(/limiting requests/.test(body) ? 'GitHub rate-limited this run' : `no verified-tag message: ${body.slice(0, 300)}`);
+        const [commit, digest] = [await hashOf(page, 'commit'), await hashOf(page, 'image digest')];
+        if (commit.toLowerCase() !== COMMIT || digest.toLowerCase() !== DIGEST) throw new Error(`the record shows ${commit} and ${digest}`);
+        return `${commit} / ${digest}`;
       });
-      await rec.say('Publish: RPC operator host');
-      await rec.type(value(page, 'RPC operator host'), RPC_HOST);
-      await rec.pause(1500);
+      await useVersion.click();
+
+      await rec.say('Step 3: one summary of everything, before anything is written');
+      await page.getByRole('heading', { name: 'Review and publish' }).waitFor({ timeout: 15_000 });
+      await rec.pause(2500);
+      await rec.check('The review shows the topics, the bank and the version, and warns that it is final', async () => {
+        const body = await rec.bodyText();
+        for (const part of ['cannot be changed afterwards', 'Topic: Mechanics', 'Topic: Optics', 'At least 32 questions', TAG]) {
+          if (!body.includes(part)) throw new Error(`no "${part}" on the review`);
+        }
+        return 'topics, bank and version shown';
+      });
+      await unfold(page, 'Exam record');
+      await rec.pause(2000);
+      await rec.check('The exam ID in the record equals keccak256 of the name, computed independently', async () => {
+        const shown = await hashOf(page, 'exam ID');
+        if (shown.toLowerCase() !== examId) throw new Error(`UI shows ${shown}, expected ${examId}`);
+        return examId;
+      });
+      await rec.check('The record shows the rounds derived from the times', async () => {
+        const body = await rec.bodyText();
+        if (!/Unlock round\s*\d+/.test(body) || !/End round\s*\d+/.test(body)) throw new Error('no rounds in the record');
+        return (body.match(/Unlock round\s*\d+/)?.[0] ?? '').replace(/\s+/g, ' ');
+      });
 
       // Rejected case first: a wallet account that is not the board.
       await rec.say('Rejected case: test wallet switched to anvil account 1, which is not the board');
       await page.evaluate(() => {
         (window as unknown as { __testWalletIndex: number }).__testWalletIndex = 1;
       });
-      await page.getByRole('button', { name: 'Connect wallet' }).click();
-      await page.getByText('Board wallet').scrollIntoViewIfNeeded();
-      await rec.pause(2500);
       const blockBefore = (await rpcCall(chain.rpcUrl, 'eth_blockNumber')) as string;
-      await rec.check('The app shows the connected account is not the board', async () => {
-        const text = await page.locator('li').filter({ hasText: 'Account is the board' }).first().innerText();
-        if (!/No/.test(text)) throw new Error(text);
-        return `account ${chain.accounts[1] ?? ''} vs board ${chain.board}`;
-      });
-      await rec.say('Rejected case: Confirm and publish with the wrong account');
-      await page.getByRole('button', { name: 'Confirm and publish' }).click();
-      await page.getByText('Not published').first().waitFor({ timeout: 20_000 });
+      await rec.say('Rejected case: Publish the exam with the wrong account');
+      const publishButton = page.getByRole('button', { name: 'Publish the exam' });
+      await publishButton.click();
+      await page.getByText(/not the board address/i).first().waitFor({ timeout: 20_000 });
       await rec.pause(3500);
       await rec.check('Publishing as the wrong account is refused before anything is sent', async () => {
-        const panel = await page.locator('section, div').filter({ has: page.getByRole('heading', { name: 'Not published' }) }).last().innerText().catch(() => '');
         const body = await rec.bodyText();
-        if (!/not the board address/i.test(body)) throw new Error(`no refusal message in page text. Panel: ${panel}`);
+        if (!/not the board address/i.test(body)) throw new Error('no refusal message in page text');
         const blockAfter = (await rpcCall(chain.rpcUrl, 'eth_blockNumber')) as string;
         if (blockAfter !== blockBefore) throw new Error(`chain advanced from ${blockBefore} to ${blockAfter}`);
         const onChain = await client.readContract({ address: chain.registry, abi: chain.abi, functionName: 'getExam', args: [examId] });
         if ((onChain as { createdAt: bigint }).createdAt !== 0n) throw new Error('the exam exists on-chain');
-        return `refused, anvil still at block ${blockAfter}, exam not on-chain`;
+        return `refused for ${chain.accounts[1] ?? ''}, anvil still at block ${blockAfter}, exam not on-chain`;
       });
 
       await rec.say('Test wallet switched back to anvil account 0, the board');
       await page.evaluate(() => {
         (window as unknown as { __testWalletIndex: number }).__testWalletIndex = 0;
       });
-      await page.getByRole('button', { name: 'Refresh wallet' }).click();
-      await page.getByText('Board wallet').scrollIntoViewIfNeeded();
-      await rec.pause(2500);
-      await rec.check('The app shows the connected account is the board', async () => {
-        const text = await page.locator('li').filter({ hasText: 'Account is the board' }).first().innerText();
-        if (!/Yes/.test(text)) throw new Error(text);
-        return chain.board;
-      });
+      await rec.pause(1500);
 
-      await rec.say('Publish: Confirm and publish. The app dry-runs, sends createExam, mines, then reads back');
-      await page.getByRole('button', { name: 'Confirm and publish' }).click();
-      await page.getByText('Published and verified').waitFor({ timeout: 60_000 }).catch(() => undefined);
-      await page.getByText(/Published and verified|read-back differs/).first().scrollIntoViewIfNeeded();
-      await rec.say('The read-back screen: each row compares what ExamRegistry holds with what was entered');
+      await rec.say('Publish the exam. The app dry-runs, sends createExam, mines, then reads back');
+      await publishButton.click();
+      await page.getByRole('heading', { name: /The exam is published|the read-back differs/ }).waitFor({ timeout: 60_000 });
+      await unfold(page, 'Exam record').catch(() => undefined);
+      await rec.say('The receipt: each row compares what ExamRegistry holds with what was entered');
       await rec.pause(4000);
-      let txHash = '';
-      await rec.check('Read-back screen says "Published and verified" with every row matching', async () => {
+      await rec.check('The receipt says the exam is published, with every row matching', async () => {
         const body = await rec.bodyText();
-        if (!body.includes('Published and verified')) throw new Error('the read-back did not say Published and verified');
-        if (/Differs/.test(body)) throw new Error('a read-back row says Differs');
+        if (!body.includes('The exam is published')) throw new Error('the read-back did not match');
+        if (/Expected .* read /.test(body)) throw new Error('a read-back row differs');
         const matches = (body.match(/Matches/g) ?? []).length;
         if (matches < 5) throw new Error(`only ${String(matches)} Matches rows`);
-        txHash = (await page.locator('li').filter({ hasText: 'Transaction' }).first().innerText()).match(/0x[0-9a-fA-F]{64}/)?.[0] ?? '';
-        return `${String(matches)} rows match, transaction ${txHash}`;
+        return `${String(matches)} rows match`;
       });
       published = true;
+
+      await page.getByRole('button', { name: 'Bring people in' }).click();
+      await rec.say('Step 4: the board moves on by itself, and the record now reads from ExamRegistry');
+      await page.getByRole('heading', { name: 'Bring people in' }).waitFor({ timeout: 15_000 });
+      await unfold(page, 'Exam record');
+      await page.getByRole('button', { name: 'Copy transaction: ' }).first().waitFor({ timeout: 15_000 });
+      await rec.pause(2500);
+      const txHash = await hashOf(page, 'transaction');
 
       await rec.say('Independent check: reading ExamRegistry with viem and cast, not through the app');
       await rec.check('The transaction on anvil succeeded, sent from the board to ExamRegistry', async () => {
@@ -225,8 +230,8 @@ describe('exam on a local anvil chain', () => {
         const criteria = (logs.find((l) => (l.args as { examId?: Hex }).examId === examId)?.args as { criteria?: Hex } | undefined)?.criteria;
         const text = Buffer.from((criteria ?? '0x').slice(2), 'hex').toString('latin1');
         if (!text.includes('Mechanics') || !text.includes('Optics')) throw new Error('criteria event lacks the topics');
-        const shown = (await page.locator('li').filter({ hasText: 'criteriaHash' }).first().innerText()).toLowerCase();
-        if (!shown.includes(exam.settings.criteriaHash.toLowerCase())) throw new Error(`UI criteriaHash differs from chain ${exam.settings.criteriaHash}`);
+        const shown = await hashOf(page, 'criteria hash');
+        if (shown.toLowerCase() !== exam.settings.criteriaHash.toLowerCase()) throw new Error(`UI criteria hash ${shown} differs from chain ${exam.settings.criteriaHash}`);
         return `criteriaHash ${exam.settings.criteriaHash}`;
       });
       await rec.check('cast call: board() is the anvil account and getExam holds this exam', async () => {
@@ -239,18 +244,15 @@ describe('exam on a local anvil chain', () => {
         return `board() = ${boardOut}; getExam holds the v0.1.0 commit and digest`;
       });
 
-      await page.getByRole('link', { name: 'overview', exact: true }).click();
-      await rec.say('The app overview now reads the exam back from ExamRegistry');
-      await page.getByText('Exam ID').first().waitFor({ timeout: 15_000 });
-      await rec.pause(3500);
       await rec.check(`Source of the commit and digest: the live GitHub release ${TAG} of AbdulRashidReshamwala/paperseal, fetched by the app, not stubbed`, () => {
         if (!githubOk || rec.assertions.some((a) => !a.ok)) throw new Error('an earlier assertion failed, so the values are not confirmed');
         return `on-chain commit ${COMMIT}, image digest ${DIGEST}`;
       });
-      await rec.check('The app overview shows the published exam', async () => {
+      await rec.check('The exam record shows the published exam, read from ExamRegistry', async () => {
         const body = await rec.bodyText();
-        if (!body.toLowerCase().includes(examId) || !body.includes('Mechanics')) throw new Error('overview lacks the exam');
-        return 'overview lists exam ID, Mechanics and Optics';
+        const shown = await hashOf(page, 'exam ID');
+        if (shown.toLowerCase() !== examId || !body.includes('Topic: Mechanics') || !body.includes('Topic: Optics')) throw new Error('the record lacks the exam');
+        return 'the record lists the exam ID, Mechanics and Optics';
       });
     } catch (error) {
       rec.fail('Board flow completed', error);
