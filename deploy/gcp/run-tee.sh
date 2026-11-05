@@ -8,19 +8,23 @@
 #     --lock-round=<n> --unlock-round=<n> --end-round=<n> \
 #     --criteria-hash=0x<32 bytes> --rpc-host=<hostname> \
 #     --registry=0x<20 bytes> --chain-id=<n> \
-#     --image-digest=sha256:<64 hex> [--replace]
+#     --image-digest=sha256:<64 hex> [--replace | --reset]
 #
 # The ten exam settings become tee-cmd in the exact order of spec/api.md,
 # "Exam Settings". They are attested, so they must match the on-chain exam
 # byte for byte. --replace deletes an existing VM of the same name first.
+# --reset keeps the VM, writes the new settings and reboots it, which is faster.
+# A reboot clears memory, and the launcher attests the new settings as usual.
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 init_common
 
 replace=0
+reset=0
 for a in "$@"; do
   case "$a" in
     --replace) replace=1 ;;
+    --reset) reset=1 ;;
     --exam-id=*|--exam-start=*|--delta=*|--lock-round=*|--unlock-round=*|--end-round=*|\
     --criteria-hash=*|--rpc-host=*|--registry=*|--chain-id=*|--image-digest=*)
       k="${a%%=*}"; k="${k#--}"; printf -v "v_${k//-/_}" %s "${a#*=}" ;;
@@ -48,6 +52,22 @@ cmd="${cmd%,}]"
 image="${IMAGE_REPO}@$(val image-digest)"
 # "^~^" makes "~" the separator between metadata keys, because tee-cmd has commas.
 metadata="^~^tee-image-reference=${image}~tee-cmd=${cmd}~tee-env-STORAGE_BUCKET=${BUCKET}"
+
+[ "$replace$reset" != 11 ] || die "pass --replace or --reset, not both"
+if [ "$reset" = 1 ]; then
+  exists gcloud compute instances describe "$VM_NAME" --zone="$ZONE" --project="$PROJECT_ID" \
+    || die "VM $VM_NAME doesn't exist: start it once without --reset"
+  run gcloud compute instances add-metadata "$VM_NAME" --zone="$ZONE" --project="$PROJECT_ID" \
+    --metadata="$metadata"
+  status="$(gcloud compute instances describe "$VM_NAME" --zone="$ZONE" --project="$PROJECT_ID" --format='value(status)' 2>/dev/null || true)"
+  if [ "$status" = TERMINATED ]; then
+    run gcloud compute instances start "$VM_NAME" --zone="$ZONE" --project="$PROJECT_ID"
+  else
+    run gcloud compute instances reset "$VM_NAME" --zone="$ZONE" --project="$PROJECT_ID"
+  fi
+  echo "VM $VM_NAME is rebooting with the new settings."
+  exit 0
+fi
 
 if exists gcloud compute instances describe "$VM_NAME" --zone="$ZONE" --project="$PROJECT_ID"; then
   if [ "$replace" = 1 ]; then

@@ -132,7 +132,6 @@ async function signedBuild(overrides: Partial<Record<string, string | number>> =
   const instancePublicKey = toHex(new Uint8Array(await subtle.exportKey('raw', pair.publicKey)));
   const hash = (n: number): Hex => `0x${n.toString(16).padStart(2, '0').repeat(32)}`;
   const fields = {
-    examId,
     approvedListHash: hash(1),
     paperHash: hash(2),
     storageManifestHash: hash(3),
@@ -143,7 +142,7 @@ async function signedBuild(overrides: Partial<Record<string, string | number>> =
     ...overrides,
   };
   const message = encodeMessage('build', {
-    examId: fromHex(fields.examId as Hex),
+    examId: fromHex(examId),
     approvedListHash: fromHex(fields.approvedListHash as Hex),
     paperHash: fromHex(fields.paperHash as Hex),
     storageManifestHash: fromHex(fields.storageManifestHash as Hex),

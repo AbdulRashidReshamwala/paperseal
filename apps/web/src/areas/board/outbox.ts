@@ -11,7 +11,7 @@ export class OutboxError extends Error {
   }
 }
 
-const bytes32Fields = ['examId', 'approvedListHash', 'paperHash', 'storageManifestHash', 'saltedPaperHash', 'criteriaHash'] as const;
+const bytes32Fields = ['approvedListHash', 'paperHash', 'storageManifestHash', 'saltedPaperHash', 'criteriaHash'] as const;
 const countFields = ['selected', 'bankSize'] as const;
 
 function bytes32(value: unknown, name: string): Hex {
@@ -48,7 +48,7 @@ export async function verifyOutboxBuild(
     throw new OutboxError('The message does not carry exactly the fields of the build message.');
   }
   const build = {
-    examId: bytes32(fields.examId, 'examId'),
+    examId: bytes32(message.examId, 'examId'),
     approvedListHash: bytes32(fields.approvedListHash, 'approvedListHash'),
     paperHash: bytes32(fields.paperHash, 'paperHash'),
     storageManifestHash: bytes32(fields.storageManifestHash, 'storageManifestHash'),

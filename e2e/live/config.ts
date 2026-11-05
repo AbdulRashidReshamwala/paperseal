@@ -35,6 +35,6 @@ export const deployed = {
 export const rpcHost = new URL(deployed.rpcUrl).hostname;
 
 /** Gaps from the moment `publish` runs, in seconds. See the notes in schedule.ts. */
-export const gaps = { lock: 40 * 60, unlock: 52 * 60, examStart: 55 * 60, end: 65 * 60 } as const;
+export const gaps = { lock: 28 * 60, unlock: 31 * 60, examStart: 32 * 60, end: 36 * 60 } as const;
 
 export const participantCounts = { setters: 2, neutrals: 3, centreHolders: 7, centresWithoutShare: 1 } as const;

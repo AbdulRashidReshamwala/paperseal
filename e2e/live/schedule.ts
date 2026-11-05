@@ -18,10 +18,10 @@ import { gaps, rpcHost, deployed } from './config';
 import type { Schedule } from './state';
 
 /*
- * Why these gaps: the TEE reads the approved list at Sepolia's `finalized` block, about 13 to 15
- * minutes after the board posts it, and registration has to happen first. So Lock is 40 minutes
- * out, which leaves room to register, post, wait for finality and let the setters submit. T minus
- * delta is 52 minutes out, T is 55 and the end round is 65, so delta is 3 minutes.
+ * Why these gaps: the TEE reads the approved list at Sepolia's `finalized` block, which took about
+ * 17 minutes in a real run. So Lock is 28 minutes out, which leaves room to register, post, wait for
+ * finality and let the setters submit. Unlock is 3 minutes after Lock, T is 1 minute later and the
+ * end round is 4 minutes after that, so delta is 1 minute.
  */
 
 export const liveCriteria: Criteria = {
