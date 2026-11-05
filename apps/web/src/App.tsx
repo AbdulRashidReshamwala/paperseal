@@ -1,32 +1,77 @@
-import { Panel, Screen } from '@paperseal/ui';
-import { lazy, Suspense, type ComponentType, type LazyExoticComponent } from 'react';
-import { Link, Route, Routes } from 'react-router';
+import { Page, Row, Rows, RoleHeader, Seal, Stage } from '@paperseal/ui';
+import { lazy, Suspense, useEffect, type ComponentType, type LazyExoticComponent } from 'react';
+import { Link, Route, Routes, useLocation } from 'react-router';
 
 // Lazy, so each role downloads only its own code. Do not import an area statically.
-const areas: { path: string; label: string; Area: LazyExoticComponent<ComponentType> }[] = [
-  { path: '/board', label: 'Board', Area: lazy(() => import('./areas/board/BoardArea')) },
-  { path: '/setter', label: 'Setter', Area: lazy(() => import('./areas/setter/SetterArea')) },
-  { path: '/centre', label: 'Centre', Area: lazy(() => import('./areas/centre/CentreArea')) },
-  { path: '/keyholder', label: 'Key holder', Area: lazy(() => import('./areas/keyholder/KeyholderArea')) },
+const areas: { path: string; label: string; plain: string; Area: LazyExoticComponent<ComponentType> }[] = [
+  {
+    path: '/board',
+    label: 'Exam board',
+    plain: 'You set up the exam and see it through to exam day.',
+    Area: lazy(() => import('./areas/board/BoardArea')),
+  },
+  {
+    path: '/setter',
+    label: 'Question setter',
+    plain: 'You write questions for the exam.',
+    Area: lazy(() => import('./areas/setter/SetterArea')),
+  },
+  {
+    path: '/centre',
+    label: 'Exam centre',
+    plain: 'You receive the sealed paper and open it on exam day.',
+    Area: lazy(() => import('./areas/centre/CentreArea')),
+  },
+  {
+    path: '/keyholder',
+    label: 'Key holder',
+    plain: 'You hold part of the key and release it on exam day.',
+    Area: lazy(() => import('./areas/keyholder/KeyholderArea')),
+  },
 ];
 
 function Home() {
   return (
-    <div className="ps-shell">
-      <Screen title="Paper Seal" lede="Choose your role.">
-        {areas.map(({ path, label }) => (
-          <Panel key={path}>
-            <Link to={path}>{label}</Link>
-          </Panel>
-        ))}
-      </Screen>
-    </div>
+    <Page header={<RoleHeader role="Welcome" />}>
+      <Seal state="sealed" size={80} label="The Paper Seal" />
+      <Stage
+        title="What is your part in this exam?"
+        lede="Paper Seal keeps an exam paper sealed until it is due. No one person can open it."
+        action={
+          <Rows>
+            {areas.map(({ path, label, plain }) => (
+              <Row key={path} label={<Link to={path}>{label}</Link>}>
+                {plain}
+              </Row>
+            ))}
+          </Rows>
+        }
+        next="Your page shows you the one thing to do next."
+      />
+    </Page>
   );
+}
+
+/**
+ * A registration link names its exam, so it works in a browser that has never seen that exam. It is
+ * only the pointer, and all exam data is still read from ExamRegistry. Lazy, like the areas, because
+ * currentExam brings the chain client with it.
+ */
+function ExamFromLink() {
+  const exam = new URLSearchParams(useLocation().search).get('exam');
+  useEffect(() => {
+    if (!exam || !/^0x[0-9a-f]{64}$/.test(exam)) return;
+    void import('./shared/currentExam').then(({ setCurrentExamId }) => {
+      setCurrentExamId(exam as `0x${string}`);
+    });
+  }, [exam]);
+  return null;
 }
 
 export function App() {
   return (
     <Suspense fallback={<div className="ps-shell">Loading.</div>}>
+      <ExamFromLink />
       <Routes>
         <Route path="/" element={<Home />} />
         {areas.map(({ path, Area }) => (

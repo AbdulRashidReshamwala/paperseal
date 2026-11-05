@@ -1,171 +1,180 @@
-import { OnChainBytesError, type ExamRegistry } from '@paperseal/chain';
-import {
-  decodeApprovedList,
-  decodeCriteria,
-  fromHex,
-  selectedCount,
-  type ApprovedListEntry,
-  type Criteria,
-  type Hex,
-} from '@paperseal/protocol';
-import { Badge, Connected, Mono, Row, Rows, Screen } from '@paperseal/ui';
+import type { TeeClient } from '@paperseal/tee-client';
+import { Page, RoleHeader, Stage } from '@paperseal/ui';
+import { useEffect, useMemo, type ReactNode } from 'react';
+import { Link, useNavigate } from 'react-router';
 
 import { Area, type AreaScreen } from '../../shared/Area';
-import { useExamLoader } from '../../shared/currentExam';
-import { TeeStatus } from '../../shared/TeeStatus';
-import { Blueprint } from './Blueprint';
-import { EntryRows, Onboarding } from './Onboarding';
-import { Outbox } from './OutboxScreen';
-import { BoardFormProvider, useReader } from './BoardForm';
-import { formatClock } from './form';
-import { Publish } from './Publish';
-import { Schedule } from './Schedule';
+import { useCurrentExamId } from '../../shared/currentExam';
+import { TEE_STATUS_POLL_MS } from '../../shared/TeeStatus';
+import './board.css';
+import { BoardFormProvider, useBoardForm, useEvaluated, useReader } from './BoardForm';
+import { BuildStep } from './BuildStep';
+import { CreateStep } from './CreateStep';
+import { decideStep, readSnapshot, type Snapshot } from './examState';
+import { usePoll } from './hooks';
+import { PeopleStep } from './PeopleStep';
+import { draftScreen, plainWords } from './plan';
 import type { PublishEnvironment } from './publishFlow';
+import { evaluatePublish } from './form';
+import { ReceiptStep } from './ReceiptStep';
+import { useReleases } from './releases';
+import { ReviewStep } from './ReviewStep';
+import { StatusStep } from './StatusStep';
+import { VersionStep } from './VersionStep';
+import { WaitStep } from './WaitStep';
 
-/**
- * The on-chain list: its hash, and the posted bytes decoded. `getApprovedListEntries` hashes the
- * bytes against `listHash`, so a list whose bytes can't be read or don't match is reported as that,
- * which is not the same as no list being posted.
+const step = (n: number) => `Step ${String(n)} of 7`;
+
+/** Steps 1 to 3, before there is an exam. They live in the browser until the exam is published. */
+function Draft(props: { review: boolean; otherExam: boolean }) {
+  const { publish, setPublish, draftStep, setDraftStep } = useBoardForm();
+  const { blueprint, schedule } = useEvaluated();
+  const releases = useReleases(publish.version);
+  const { review } = props;
+
+  // `/board/publish` opens at the review, once the form is there to review.
+  useEffect(() => {
+    if (review) setDraftStep('review');
+  }, [review, setDraftStep]);
+
+  const created = Boolean(
+    blueprint.criteria && blueprint.examId && schedule.settings && !evaluatePublish(publish, null).errors.rpcHost,
+  );
+  const screen = draftScreen(draftStep, { create: created, version: releases.verified !== null });
+  return (
+    <>
+      {props.otherExam ? (
+        <p className="board-note">
+          Another exam is under way. <Link to="/board">Go back to it</Link>, or set up a new one here.
+        </p>
+      ) : null}
+      {screen === 'create' ? (
+        <CreateStep
+          eyebrow={step(1)}
+          onContinue={() => {
+            setDraftStep('version');
+          }}
+        />
+      ) : null}
+      {screen === 'version' ? (
+        <VersionStep
+          eyebrow={step(2)}
+          releases={releases}
+          chosen={publish.version}
+          onChoose={(version) => {
+            setPublish({ ...publish, version });
+          }}
+          onContinue={() => {
+            setDraftStep('review');
+          }}
+          onBack={() => {
+            setDraftStep('create');
+          }}
+        />
+      ) : null}
+      {screen === 'review' ? (
+        <ReviewStep
+          eyebrow={step(3)}
+          releases={releases}
+          onBack={() => {
+            setDraftStep('create');
+          }}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function useExamState() {
+  const examId = useCurrentExamId();
+  const reader = useReader();
+  const { tee } = useBoardForm();
+  const load = useMemo(
+    () => (reader && examId ? (previous: Snapshot | null) => readSnapshot({ registry: reader, tee, examId }, previous) : null),
+    [reader, tee, examId],
+  );
+  const poll = usePoll(load, TEE_STATUS_POLL_MS);
+  return { examId, reader, ...poll };
+}
+
+function Waiting(props: { title: string; lede?: string; next: string }) {
+  return <Stage title={props.title} {...(props.lede ? { lede: props.lede } : {})} next={props.next} />;
+}
+
+/** One screen, chosen by the exam's state. `route` only asks for a new exam, or for its review. */
+function BoardFlow(props: { route?: 'draft' | 'review' }) {
+  const navigate = useNavigate();
+  const form = useBoardForm();
+  const { examId, reader, value, problem, pending, reload } = useExamState();
+  const decided = value ? decideStep(value) : null;
+  const page = (children: ReactNode) => (
+    <Page header={<RoleHeader role="Exam board" {...(form.examName ? { exam: form.examName } : {})} />}>{children}</Page>
+  );
+
+  if (form.held) {
+    return page(
+      <ReceiptStep
+        eyebrow={step(form.held.kind === 'publish' ? 3 : form.held.kind === 'list' ? 4 : 6)}
+        receipt={form.held}
+        onContinue={() => {
+          if (form.held?.kind === 'publish') {
+            form.resetDraft();
+            void navigate('/board');
+          }
+          form.dismissHeld();
+        }}
+      />,
+    );
+  }
+  if (props.route || !examId || decided === 'draft') {
+    return page(<Draft review={props.route === 'review'} otherExam={Boolean(decided && decided !== 'draft')} />);
+  }
+  if (!reader) {
+    return page(
+      <Waiting
+        title="This page cannot read the public record"
+        lede="Set VITE_RPC_URL and VITE_REGISTRY_ADDRESS to connect it."
+        next="The exam shows here once the public record can be read."
+      />,
+    );
+  }
+  if (!value) {
+    return page(
+      pending ? (
+        <Waiting title="Reading the exam from the public record" next="The next step for this exam shows here." />
+      ) : (
+        <Waiting
+          title="The public record cannot be read right now"
+          {...(problem ? { lede: plainWords(problem) } : {})}
+          next="This page keeps trying, and moves on by itself."
+        />
+      ),
+    );
+  }
+  if (decided === 'people') return page(<PeopleStep eyebrow={step(4)} snapshot={value} onPosted={reload} />);
+  if (decided === 'wait') return page(<WaitStep eyebrow={step(5)} snapshot={value} />);
+  if (decided === 'post-build') return page(<BuildStep eyebrow={step(6)} snapshot={value} onPosted={reload} />);
+  return page(<StatusStep eyebrow={step(7)} snapshot={value} />);
+}
+
+/*
+ * Every route shows the same flow, so old links keep working. `blueprint` and `schedule` are how a
+ * new exam starts, because a board that already has an exam has no other way to ask for one.
  */
-async function readApprovedList(registry: ExamRegistry, id: Hex) {
-  const list = await registry.getApprovedList(id);
-  if (!list) return null;
-  let entries: ApprovedListEntry[] = [];
-  let problem: string | null = null;
-  try {
-    const encoded = await registry.getApprovedListEntries(id);
-    if (!encoded) {
-      problem = 'The list is posted on-chain, but its entries could not be read.';
-    } else {
-      entries = decodeApprovedList(fromHex(encoded));
-    }
-  } catch (error) {
-    problem =
-      error instanceof OnChainBytesError
-        ? error.kind === 'missing'
-          ? `The list hash is on-chain, but the list's bytes could not be read from the RPC. This is not an empty list: ${error.message} Try another RPC.`
-          : `The list's bytes read from the RPC do not match the hash on-chain, so they are not shown. ${error.message}`
-        : `The posted entries are malformed: ${(error as Error).message}`;
-  }
-  return { list, entries, problem };
-}
-
-/** The exam and its full criteria, both from ExamRegistry. `getCriteria` has checked them against `criteriaHash`. */
-async function readExam(registry: ExamRegistry, id: Hex) {
-  const exam = await registry.getExam(id);
-  if (!exam) return null;
-  let criteria: Criteria | null = null;
-  let criteriaProblem: string | null = null;
-  try {
-    const encoded = await registry.getCriteria(id);
-    if (encoded) criteria = decodeCriteria(fromHex(encoded));
-  } catch (error) {
-    criteriaProblem =
-      error instanceof OnChainBytesError
-        ? `The criteria could not be shown: ${error.message}`
-        : `The criteria on-chain are malformed: ${(error as Error).message}`;
-  }
-  return { exam, criteria, criteriaProblem };
-}
-
-const notConnected =
-  'Set VITE_RPC_URL and VITE_REGISTRY_ADDRESS to read ExamRegistry, then publish an exam or set VITE_EXAM_ID.';
-
-function Overview() {
-  const load = useExamLoader(readExam, useReader());
-  return (
-    <Screen title="Overview" lede="The exam's stage, from the TEE and ExamRegistry.">
-      <TeeStatus />
-      <Connected title="ExamRegistry" notConnected={notConnected} load={load}>
-        {(found) =>
-          found ? (
-            <Rows>
-              <Row label="Exam ID">
-                <Mono>{found.exam.settings.examId}</Mono>
-              </Row>
-              <Row label="Commit">
-                <Mono>{found.exam.commitHash}</Mono>
-              </Row>
-              <Row label="Image digest">
-                <Mono>{found.exam.imageDigest}</Mono>
-              </Row>
-              <Row label="Exam start, T">{formatClock(Number(found.exam.settings.examStart))}</Row>
-              <Row label="Δ">{Number(found.exam.settings.delta) / 60} minutes</Row>
-              <Row label="Lock round">{String(found.exam.settings.lockRound)}</Row>
-              <Row label="Unlock round">{String(found.exam.settings.unlockRound)}</Row>
-              <Row label="End round">{String(found.exam.settings.endRound)}</Row>
-              <Row label="RPC operator host">
-                <Mono>{found.exam.settings.rpcHost}</Mono>
-              </Row>
-              <Row label="criteriaHash">
-                <Mono>{found.exam.settings.criteriaHash}</Mono>
-              </Row>
-              {found.criteriaProblem ? (
-                <Row label="Criteria">
-                  <Badge tone="bad">{found.criteriaProblem}</Badge>
-                </Row>
-              ) : null}
-              {found.criteria ? (
-                <>
-                  <Row label="Selected">{selectedCount(found.criteria)} questions</Row>
-                  <Row label="Setter limit">{found.criteria.maxSetterPercent}% of a topic</Row>
-                  <Row label="Bank size">at least {found.criteria.minBankMultiple} times the questions per topic</Row>
-                  {found.criteria.topics.map((topic) => (
-                    <Row key={topic.name} label={`Topic: ${topic.name}`}>
-                      {topic.questions} questions
-                    </Row>
-                  ))}
-                </>
-              ) : null}
-            </Rows>
-          ) : (
-            'This exam has not been published. Use Publish to write it to ExamRegistry.'
-          )
-        }
-      </Connected>
-    </Screen>
-  );
-}
-
-function ApprovedList() {
-  const load = useExamLoader(readApprovedList, useReader());
-  return (
-    <Screen title="Approved list" lede="The final list, signed by the board and by the TEE.">
-      <Connected title="On-chain list" notConnected={notConnected} load={load}>
-        {(found) =>
-          found ? (
-            <>
-              <Rows>
-                <Row label="List hash">
-                  <Mono>{found.list.listHash}</Mono>
-                </Row>
-                <Row label="Entries">{found.entries.length}</Row>
-              </Rows>
-              {found.problem ? <Badge tone="bad">{found.problem}</Badge> : <EntryRows entries={found.entries} />}
-            </>
-          ) : (
-            'No list has been posted.'
-          )
-        }
-      </Connected>
-    </Screen>
-  );
-}
-
 export const screens: AreaScreen[] = [
-  { path: '', label: 'Overview', element: <Overview /> },
-  { path: 'blueprint', label: 'Blueprint', element: <Blueprint /> },
-  { path: 'schedule', label: 'Schedule', element: <Schedule /> },
-  { path: 'publish', label: 'Publish', element: <Publish /> },
-  { path: 'onboarding', label: 'Onboarding', element: <Onboarding /> },
-  { path: 'list', label: 'Approved list', element: <ApprovedList /> },
-  { path: 'outbox', label: 'Outbox', element: <Outbox /> },
+  { path: '', element: <BoardFlow /> },
+  { path: 'blueprint', element: <BoardFlow route="draft" /> },
+  { path: 'schedule', element: <BoardFlow route="draft" /> },
+  { path: 'publish', element: <BoardFlow route="review" /> },
+  { path: 'onboarding', element: <BoardFlow /> },
+  { path: 'list', element: <BoardFlow /> },
+  { path: 'outbox', element: <BoardFlow /> },
 ];
 
-export default function BoardArea(props: { environment?: PublishEnvironment }) {
+export default function BoardArea(props: { environment?: PublishEnvironment; tee?: TeeClient | null }) {
   return (
-    <BoardFormProvider environment={props.environment}>
-      <Area name="Board" base="/board" screens={screens} />
+    <BoardFormProvider environment={props.environment} tee={props.tee}>
+      <Area screens={screens} />
     </BoardFormProvider>
   );
 }

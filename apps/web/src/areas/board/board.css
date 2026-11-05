@@ -1,0 +1,119 @@
+/* Layout the shared system doesn't need anywhere else. Tokens only. */
+
+.board-form {
+  display: grid;
+  gap: var(--ps-space-2);
+}
+
+.board-sentence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-1);
+  align-items: center;
+  margin-bottom: var(--ps-space-1);
+}
+
+.board-sentence .ps-input {
+  width: 3.5em;
+  text-align: center;
+}
+
+.board-topic {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 9em;
+  gap: 0 var(--ps-space-3);
+  align-items: start;
+}
+
+.board-topic .ps-button {
+  grid-column: 1 / -1;
+  justify-self: start;
+  margin-bottom: var(--ps-space-4);
+}
+
+@media (min-width: 560px) {
+  .board-topic {
+    grid-template-columns: minmax(0, 1fr) 9em auto;
+  }
+
+  .board-topic .ps-button {
+    grid-column: auto;
+    margin-top: calc(var(--ps-space-5) + var(--ps-space-1));
+    margin-bottom: 0;
+  }
+}
+
+.board-blocked {
+  max-width: 34em;
+  margin: 0 0 var(--ps-space-3);
+  font-size: var(--ps-text-small);
+  color: var(--ps-ink-soft);
+}
+
+.board-problem {
+  max-width: 34em;
+  margin: 0 0 var(--ps-space-3);
+}
+
+.board-note {
+  max-width: 34em;
+  padding-block: var(--ps-space-2);
+  margin: 0 0 var(--ps-space-3);
+  font-size: var(--ps-text-small);
+  color: var(--ps-ink-soft);
+}
+
+.board-fold {
+  margin-top: var(--ps-space-4);
+}
+
+.board-section {
+  margin-bottom: var(--ps-space-6);
+}
+
+.board-link {
+  display: grid;
+  gap: var(--ps-space-1);
+}
+
+.board-link .ps-mono {
+  font-size: var(--ps-text-small);
+}
+
+.board-role {
+  width: auto;
+  min-width: 13em;
+  max-width: 100%;
+}
+
+.board-progress {
+  display: block;
+  width: 100%;
+  max-width: 34em;
+  height: 8px;
+  margin-top: var(--ps-space-2);
+  appearance: none;
+  background: var(--ps-paper-deep);
+  border: 0;
+}
+
+.board-progress::-webkit-progress-bar {
+  background: var(--ps-paper-deep);
+}
+
+.board-progress::-webkit-progress-value {
+  background: var(--ps-ink);
+}
+
+.board-progress::-moz-progress-bar {
+  background: var(--ps-ink);
+}
+
+.board-stamp {
+  margin-block: var(--ps-space-4);
+}
+
+.board-quiet {
+  margin: var(--ps-space-4) 0 0;
+  font-size: var(--ps-text-small);
+}

@@ -1,44 +1,93 @@
 import type { ExamRegistry } from '@paperseal/chain';
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
+import type { TeeClient } from '@paperseal/tee-client';
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 
-import {
-  emptyBlueprint,
-  emptyPublish,
-  emptySchedule,
-  evaluateBlueprint,
-  evaluateSchedule,
-  type BlueprintInput,
-  type PublishInput,
-  type ScheduleInput,
-} from './form';
-import { defaultEnvironment, type PublishEnvironment } from './publishFlow';
+import { tee as defaultTee } from '../../shared/tee';
+import { emptyPublish, type PublishInput } from './form';
+import { defaultPlan, defaultRpcHost, evaluatePlan, type DraftStep, type PlanInput } from './plan';
+import type { PostOutcome } from './postFlow';
+import { defaultEnvironment, type PublishEnvironment, type PublishOutcome } from './publishFlow';
 
 /*
- * The form lives here, in the board route area, so moving between Blueprint,
- * Schedule and Publish keeps what was typed. Nothing is stored anywhere else.
+ * The form lives here, in the board route area, so moving between steps keeps what was typed.
+ * Nothing is stored anywhere else. Receipts are this session's read-backs of what was posted.
  */
 
+export type Receipt =
+  | { kind: 'publish'; outcome: PublishOutcome; version: string; name: string }
+  | { kind: 'list' | 'build'; outcome: PostOutcome };
+
 interface BoardForm {
-  blueprint: BlueprintInput;
-  setBlueprint: (next: BlueprintInput) => void;
-  schedule: ScheduleInput;
-  setSchedule: (next: ScheduleInput) => void;
+  plan: PlanInput;
+  setPlan: (next: PlanInput) => void;
   publish: PublishInput;
   setPublish: (next: PublishInput) => void;
+  draftStep: DraftStep;
+  setDraftStep: (next: DraftStep) => void;
+  /** Forgets the draft, once it has become an exam. */
+  resetDraft: () => void;
+  /** The published exam's name. ExamRegistry stores only its hash, so this lasts for the session. */
+  examName: string | null;
+  receipts: readonly Receipt[];
+  /** A receipt the board has to see before the flow moves on. */
+  held: Receipt | null;
+  addReceipt: (receipt: Receipt) => void;
+  dismissHeld: () => void;
   environment: PublishEnvironment;
+  tee: TeeClient | null;
 }
 
 const BoardFormContext = createContext<BoardForm | null>(null);
 
-export function BoardFormProvider(props: { environment?: PublishEnvironment | undefined; children: ReactNode }) {
-  const [blueprint, setBlueprint] = useState(emptyBlueprint);
-  const [schedule, setSchedule] = useState(emptySchedule);
-  const [publish, setPublish] = useState(emptyPublish);
-  const { environment: given } = props;
+const mustBeSeen = (receipt: Receipt) => receipt.kind === 'publish' || !receipt.outcome.matches;
+
+export function BoardFormProvider(props: {
+  environment?: PublishEnvironment | undefined;
+  tee?: TeeClient | null | undefined;
+  children: ReactNode;
+}) {
+  const [plan, setPlan] = useState(defaultPlan);
+  const [publish, setPublish] = useState<PublishInput>(() => ({ ...emptyPublish, rpcHost: defaultRpcHost() }));
+  const [draftStep, setDraftStep] = useState<DraftStep>('create');
+  const [receipts, setReceipts] = useState<readonly Receipt[]>([]);
+  const [held, setHeld] = useState<Receipt | null>(null);
+  const [examName, setExamName] = useState<string | null>(null);
+  const { environment: given, tee: givenTee } = props;
   const environment = useMemo(() => given ?? defaultEnvironment(), [given]);
+  const tee = givenTee === undefined ? defaultTee : givenTee;
+
+  const resetDraft = useCallback(() => {
+    setPlan(defaultPlan);
+    setPublish((previous) => ({ ...previous, version: '' }));
+    setDraftStep('create');
+  }, []);
+  const addReceipt = useCallback((receipt: Receipt) => {
+    setReceipts((previous) => [...previous, receipt]);
+    if (mustBeSeen(receipt)) setHeld(receipt);
+    if (receipt.kind === 'publish' && receipt.outcome.matches) setExamName(receipt.name);
+  }, []);
+  const dismissHeld = useCallback(() => {
+    setHeld(null);
+  }, []);
+
   const value = useMemo(
-    () => ({ blueprint, setBlueprint, schedule, setSchedule, publish, setPublish, environment }),
-    [blueprint, schedule, publish, environment],
+    () => ({
+      plan,
+      setPlan,
+      publish,
+      setPublish,
+      draftStep,
+      setDraftStep,
+      resetDraft,
+      examName,
+      receipts,
+      held,
+      addReceipt,
+      dismissHeld,
+      environment,
+      tee,
+    }),
+    [plan, publish, draftStep, resetDraft, examName, receipts, held, addReceipt, dismissHeld, environment, tee],
   );
   return <BoardFormContext.Provider value={value}>{props.children}</BoardFormContext.Provider>;
 }
@@ -49,13 +98,10 @@ export function useBoardForm(): BoardForm {
   return form;
 }
 
-/** The blueprint and schedule, each evaluated by @paperseal/protocol. */
+/** The plan, evaluated again each time it changes. */
 export function useEvaluated() {
-  const { blueprint, schedule } = useBoardForm();
-  return {
-    blueprint: useMemo(() => evaluateBlueprint(blueprint), [blueprint]),
-    schedule: useMemo(() => evaluateSchedule(schedule), [schedule]),
-  };
+  const { plan } = useBoardForm();
+  return useMemo(() => evaluatePlan(plan), [plan]);
 }
 
 /** A read-only registry for the board area, from the same environment that publishing uses. */

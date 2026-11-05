@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { createExamRegistry, examRegistryAbi } from '@paperseal/chain';
 import { criteriaHash, encodeCriteria, examIdFromName, firstRoundAtOrAfter, toHex } from '@paperseal/protocol';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createPublicClient, decodeFunctionData, type Address, type Hex } from 'viem';
 import { sepolia } from 'viem/chains';
 import { MemoryRouter, Route, Routes } from 'react-router';
@@ -78,6 +78,7 @@ function local(days: number, hour: number, minute = 0): string {
 }
 
 const times = { examStart: local(30, 9, 30), delta: '30', lock: local(29, 12), end: local(30, 12, 30) };
+const picker = (text: string) => text.replace(' ', 'T');
 
 function request(): PublishRequest {
   const criteria = { maxSetterPercent: 20, minBankMultiple: 4, topics: [{ name: 'Mechanics', questions: 5 }] };
@@ -194,11 +195,11 @@ describe('publishExam with a stub wallet', () => {
   });
 });
 
-function renderBoard(env: PublishEnvironment, path = '/board/blueprint') {
+function renderBoard(env: PublishEnvironment, path = '/board') {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/board/*" element={<BoardArea environment={env} />} />
+        <Route path="/board/*" element={<BoardArea environment={env} tee={null} />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -210,156 +211,178 @@ const field = (label: string) =>
 const type = (label: string, value: string) => {
   fireEvent.change(field(label), { target: { value } });
 };
-const selectVersion = async (version: string) => {
-  const select = await screen.findByLabelText('TEE version');
-  await screen.findByRole('option', { name: version });
-  fireEvent.change(select, { target: { value: version } });
-};
-const go = (label: string) => {
-  fireEvent.click(within(screen.getByRole('navigation')).getByText(label));
-};
+const button = (name: string | RegExp) => screen.getByRole<HTMLButtonElement>('button', { name });
 
-describe('board screens', () => {
-  it('shows selectedCount and criteriaHash live and flags rule breaks', () => {
+/** The whole of Step 1, using the defaults for everything hidden under Advanced except the host. */
+function fillCreate(host: string | null = 'rpc.example.org') {
+  type('Exam name', name);
+  type('Date and time of the exam', picker(times.examStart));
+  type('Length, in minutes', '180');
+  type('Minutes before the exam', times.delta);
+  type('Topic 1 name', 'Mechanics');
+  type('Topic 1 questions', '5');
+  type('Questions close', picker(times.lock));
+  if (host !== null) type('Public record provider', host);
+}
+
+async function toVersion(env: PublishEnvironment) {
+  renderBoard(env);
+  fillCreate();
+  fireEvent.click(button('Continue'));
+  await screen.findByText('Choose what the sealed machine runs');
+}
+
+async function toReview(env: PublishEnvironment) {
+  await toVersion(env);
+  fireEvent.click(await screen.findByRole('button', { name: /^Use v/ }));
+  await screen.findByText('Review and publish');
+  return button('Publish the exam');
+}
+
+describe('step 1, create the exam', () => {
+  it('holds Continue until the page is complete, and needs no technical input', () => {
     const { env } = environment();
     renderBoard(env);
-    type('Exam name', name);
-    type('Topic 1 name', 'Mechanics');
-    type('Topic 1 questions', '5');
-    type('maxSetterPercent', '20');
-    type('minBankMultiple', '4');
-    const hash = toHex(
-      criteriaHash(encodeCriteria({ maxSetterPercent: 20, minBankMultiple: 4, topics: [{ name: 'Mechanics', questions: 5 }] })),
-    );
-    expect(screen.getByText(hash)).toBeTruthy();
-    expect(screen.getByText('Criteria accepted')).toBeTruthy();
-    expect(screen.getByText(examId)).toBeTruthy();
+    expect(screen.getByText('Create the exam')).toBeTruthy();
+    expect(screen.queryByRole('navigation')).toBeNull();
+    expect(button('Continue').disabled).toBe(true);
+    expect(screen.getByText(/Still needed: the exam name, the date and time, the topics/)).toBeTruthy();
+    fillCreate();
+    expect(button('Continue').disabled).toBe(false);
+  });
 
+  it('keeps the rules of form.ts, and opens Advanced when something in it is wrong', () => {
+    const { env } = environment();
+    renderBoard(env);
+    fillCreate();
     fireEvent.click(screen.getByText('Add topic'));
     type('Topic 2 name', 'Mechanics');
     type('Topic 2 questions', '3');
     expect(screen.getByText('Topic names must be unique.')).toBeTruthy();
-    expect(screen.queryByText('Criteria accepted')).toBeNull();
+    expect(button('Continue').disabled).toBe(true);
 
     type('Topic 2 name', 'Optics');
-    expect(screen.getByText('Criteria accepted')).toBeTruthy();
-    expect(field('Topic 2 name')).toBeTruthy();
-    type('maxSetterPercent', '101');
+    expect(button('Continue').disabled).toBe(false);
+    type('Most of a topic one setter can write', '101');
     expect(screen.getByText('Max setter percent must be from 1 to 100.')).toBeTruthy();
+    expect(button('Continue').disabled).toBe(true);
+    expect(screen.getByText('Advanced').closest('details')?.open).toBe(true);
   });
 
-  it('shows rounds next to clock times and says they are final', () => {
+  it('refuses a lock after the release, in plain words', () => {
     const { env } = environment();
-    renderBoard(env, '/board/schedule');
-    type('Exam start, T', times.examStart);
-    type('Δ, minutes before T that the paper unlocks', times.delta);
-    type('Lock time', times.lock);
-    type('End time', times.end);
-    const unlock = firstRoundAtOrAfter((parseLocalTime(times.examStart) ?? 0) - 1800);
-    expect(screen.getByText(`round ${String(unlock)}`)).toBeTruthy();
-    expect(screen.getByText('Schedule accepted')).toBeTruthy();
-    expect(screen.getByText(/cannot be changed afterwards/)).toBeTruthy();
-
-    type('Lock time', times.end);
-    expect(screen.getByText(/lock time must come before/)).toBeTruthy();
+    renderBoard(env);
+    fillCreate();
+    type('Questions close', picker(times.end));
+    expect(screen.getByText('Questions must close before the paper is released to centres.')).toBeTruthy();
+    expect(button('Continue').disabled).toBe(true);
   });
 
-  it('publishes from the summary, reads back, and points the overview at the new exam', async () => {
-    const { node, env } = environment();
+  it('works out when questions close, and shows no rounds', () => {
+    const { env } = environment();
     renderBoard(env);
     type('Exam name', name);
+    type('Date and time of the exam', picker(times.examStart));
     type('Topic 1 name', 'Mechanics');
     type('Topic 1 questions', '5');
-    type('maxSetterPercent', '20');
-    type('minBankMultiple', '4');
-    go('Schedule');
-    type('Exam start, T', times.examStart);
-    type('Δ, minutes before T that the paper unlocks', times.delta);
-    type('Lock time', times.lock);
-    type('End time', times.end);
-    go('Publish');
-
-    // The form survived the move between screens.
-    expect(screen.queryByText('Complete the blueprint')).toBeNull();
-    const confirm = screen.getByText('Confirm and publish') as HTMLButtonElement;
-    expect(confirm.disabled).toBe(true);
-    expect(screen.queryByLabelText(/^Commit hash/)).toBeNull();
-    expect(screen.queryByLabelText(/^Image digest/)).toBeNull();
-    type('RPC operator host', 'rpc.example.org');
-    await selectVersion('v1.0.0');
-    expect(screen.getByText(`0x${commit}`)).toBeTruthy();
-    expect(screen.getByText(`0x${digest}`)).toBeTruthy();
-    expect(screen.getByText(run).closest('a')?.getAttribute('href')).toBe(run);
-    await screen.findByText('What will be written to ExamRegistry');
-    expect(screen.getByText(/v1\.0\.0 \(not stored on-chain/)).toBeTruthy();
-    expect(screen.getByText(/cannot be changed afterwards, not even by the board/)).toBeTruthy();
-    await waitFor(() => {
-      expect(screen.getAllByText(board).length).toBeGreaterThan(0);
-    });
-    expect(confirm.disabled).toBe(false);
-
-    fireEvent.click(confirm);
-    await waitFor(() => {
-      expect(screen.getByText('Published and verified')).toBeTruthy();
-    });
-    expect(node.sent).toHaveLength(1);
-    expect(screen.getByText(/v1\.0\.0 \(the release you selected; the version is not stored on-chain/)).toBeTruthy();
-    expect(getCurrentExamId()).toBe(examId);
-    expect((screen.getByText('Confirm and publish') as HTMLButtonElement).disabled).toBe(true);
-
-    // The overview now reads the new exam from the registry, with no rebuild.
-    go('Overview');
-    await waitFor(() => {
-      expect(screen.getByText('Topic: Mechanics')).toBeTruthy();
-      expect(screen.getByText(examId)).toBeTruthy();
-    });
+    expect(screen.getByText(/^Questions close /)).toBeTruthy();
+    expect(screen.getByText(/at least 20 questions from at least 5 setters/)).toBeTruthy();
+    expect(screen.queryByText(/round/i)).toBeNull();
   });
 
-  it('keeps the confirm button disabled and shows the wrong-chain problem', async () => {
-    const { node, env } = environment({ chainId: 1 });
-    renderBoard(env, '/board/publish');
-    await waitFor(() => {
-      expect(screen.getByText('Chain 1, not Sepolia')).toBeTruthy();
+  it('asks for the host when none can be worked out', () => {
+    const { env } = environment();
+    renderBoard(env);
+    fillCreate(null);
+    expect(button('Continue').disabled).toBe(true);
+    expect(screen.getByText('Advanced').closest('details')?.open).toBe(true);
+    type('Public record provider', 'https://not-a-host/');
+    expect(screen.getByText(/Enter the hostname only/)).toBeTruthy();
+  });
+});
+
+describe('step 2, the version', () => {
+  it('preselects the newest verified release, so it is one click', async () => {
+    stubGithub({
+      releases: [releaseItem('v1.0.0', '2027-01-01T00:00:00Z'), releaseItem('v1.1.0', '2027-02-01T00:00:00Z')],
     });
-    expect((screen.getByText('Confirm and publish') as HTMLButtonElement).disabled).toBe(true);
+    const { env } = environment();
+    await toVersion(env);
+    expect(await screen.findByRole('button', { name: 'Use v1.1.0' })).toBeTruthy();
+    expect(screen.getByText(/v1\.1\.0 is the newest published version/)).toBeTruthy();
+    fireEvent.click(button('Use v1.1.0'));
+    expect(await screen.findByText('Review and publish')).toBeTruthy();
+  });
+
+  it('skips a newest release whose tag points elsewhere, and says so', async () => {
+    stubGithub({
+      releases: [releaseItem('v1.0.0', '2027-01-01T00:00:00Z'), releaseItem('v1.1.0', '2027-02-01T00:00:00Z')],
+      tagSha: { 'v1.1.0': 'c'.repeat(40) },
+    });
+    const { env } = environment();
+    await toVersion(env);
+    expect(await screen.findByRole('button', { name: 'Use v1.0.0' })).toBeTruthy();
+    expect(screen.getByText(/Release mismatch: the tag v1\.1\.0 points at commit/)).toBeTruthy();
+  });
+
+  it('blocks when no release matches its tag', async () => {
+    stubGithub({ tagSha: { 'v1.0.0': 'c'.repeat(40) } });
+    const { node, env } = environment();
+    await toVersion(env);
+    await screen.findByText(/Release mismatch/);
+    expect(screen.getByText(/Publishing is blocked/)).toBeTruthy();
+    expect(button('Use this version').disabled).toBe(true);
     expect(node.sent).toHaveLength(0);
   });
 
-  /** Fills blueprint and schedule, then opens Publish with a host typed. */
-  async function readyToPublish(env: PublishEnvironment) {
-    renderBoard(env);
-    type('Exam name', name);
-    type('Topic 1 name', 'Mechanics');
-    type('Topic 1 questions', '5');
-    type('maxSetterPercent', '20');
-    type('minBankMultiple', '4');
-    go('Schedule');
-    type('Exam start, T', times.examStart);
-    type('Δ, minutes before T that the paper unlocks', times.delta);
-    type('Lock time', times.lock);
-    type('End time', times.end);
-    go('Publish');
-    type('RPC operator host', 'rpc.example.org');
-    await waitFor(() => {
-      expect(screen.getAllByText(board).length).toBeGreaterThan(0);
+  it('blocks a chosen version that does not check out', async () => {
+    stubGithub({
+      releases: [releaseItem('v1.0.0', '2027-01-01T00:00:00Z'), releaseItem('v1.1.0', '2027-02-01T00:00:00Z')],
+      tagSha: { 'v1.0.0': 'c'.repeat(40) },
     });
-    return screen.getByText('Confirm and publish') as HTMLButtonElement;
-  }
+    const { env } = environment();
+    await toVersion(env);
+    await screen.findByRole('button', { name: 'Use v1.1.0' });
+    fireEvent.change(screen.getByLabelText('Version'), { target: { value: 'v1.0.0' } });
+    await screen.findByText(/Release mismatch: the tag v1\.0\.0/);
+    expect(button('Use this version').disabled).toBe(true);
+  });
 
-  it('leaves the exam pointer alone when the read-back differs', async () => {
-    const { env } = environment({ tamper: () => ({ rpcHost: 'evil.example.org' }) });
-    const confirm = await readyToPublish(env);
-    await selectVersion('v1.0.0');
-    await waitFor(() => {
-      expect(confirm.disabled).toBe(false);
-    });
-    expect(getCurrentExamId()).toBeNull();
-    fireEvent.click(confirm);
-    await waitFor(() => {
-      expect(screen.getByText('Published, but the read-back differs')).toBeTruthy();
-    });
-    expect(getCurrentExamId()).toBeNull();
-    expect(screen.getByText(/this exam was not selected/)).toBeTruthy();
+  it('blocks when the tag cannot be checked', async () => {
+    stubGithub({ tagStatus: 500 });
+    const { env } = environment();
+    await toVersion(env);
+    await screen.findByText(/GitHub could not be reached/);
+    expect(button('Use this version').disabled).toBe(true);
+  });
+
+  it('says plainly when GitHub is limiting, with retry and no manual entry', async () => {
+    stubGithub({ releasesStatus: 403 });
+    const { env } = environment();
+    await toVersion(env);
+    await screen.findByText(/GitHub is limiting requests/);
+    expect(screen.queryByLabelText(/^Commit/)).toBeNull();
+    expect(screen.queryByLabelText(/^Image digest/)).toBeNull();
+    expect(button('Use this version').disabled).toBe(true);
+
+    stubGithub();
+    fireEvent.click(screen.getByText('Try again'));
+    expect(await screen.findByRole('button', { name: 'Use v1.0.0' })).toBeTruthy();
+  });
+
+  it('shows a loading state, and explains that a version must be tagged when there are none', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
+    const { env: pending } = environment();
+    await toVersion(pending);
+    expect(screen.getByText(/Loading the published versions/)).toBeTruthy();
+    expect(button('Use this version').disabled).toBe(true);
+    cleanup();
+
+    stubGithub({ releases: [] });
+    const { env } = environment();
+    await toVersion(env);
+    await screen.findByText(/A version must be tagged first/);
+    expect(button('Use this version').disabled).toBe(true);
   });
 
   it('does not link a build run that is not an Actions run of the releases repository', async () => {
@@ -367,92 +390,90 @@ describe('board screens', () => {
     const item = releaseItem('v1.0.0', '2027-01-01T00:00:00Z');
     stubGithub({ releases: [{ ...item, body: item.body.replace(run, foreign) }] });
     const { env } = environment();
-    await readyToPublish(env);
-    await selectVersion('v1.0.0');
-    expect(await screen.findByText(foreign)).toBeTruthy();
-    expect(screen.getByText(foreign).closest('a')).toBeNull();
+    await toVersion(env);
+    expect((await screen.findByText(foreign)).closest('a')).toBeNull();
     expect(screen.getByText(/Not a workflow run of/)).toBeTruthy();
   });
+});
 
-  it('lists versions newest first, and keeps publishing blocked until a verified one is selected', async () => {
-    stubGithub({
-      releases: [releaseItem('v1.0.0', '2027-01-01T00:00:00Z'), releaseItem('v1.1.0', '2027-02-01T00:00:00Z')],
-    });
+describe('step 3, review and publish', () => {
+  it('publishes with one action, reads back, stamps it, and moves on to people', async () => {
     const { node, env } = environment();
-    const confirm = await readyToPublish(env);
-    const select = await screen.findByLabelText('TEE version');
-    await screen.findByRole('option', { name: 'v1.1.0' });
-    expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual(['Select a version', 'v1.1.0', 'v1.0.0']);
-    expect(confirm.disabled).toBe(true);
-    expect(screen.queryByText('What will be written to ExamRegistry')).toBeNull();
+    const publish = await toReview(env);
+    expect(screen.getByText(/cannot be changed afterwards, not even by the board/)).toBeTruthy();
+    expect(screen.getByText('Topic: Mechanics')).toBeTruthy();
+    fireEvent.click(publish);
 
-    fireEvent.change(select, { target: { value: 'v1.1.0' } });
-    await waitFor(() => {
-      expect(confirm.disabled).toBe(false);
-    });
-    fireEvent.change(select, { target: { value: '' } });
-    expect(confirm.disabled).toBe(true);
+    expect(await screen.findByText('The exam is published')).toBeTruthy();
+    expect(screen.getByText('Published')).toBeTruthy();
+    expect(node.sent).toHaveLength(1);
+    expect(getCurrentExamId()).toBe(examId);
+
+    fireEvent.click(button('Bring people in'));
+    expect(await screen.findByRole('heading', { name: 'Bring people in' })).toBeTruthy();
+  });
+
+  it('asks the wallet for an account as part of the same action', async () => {
+    const { node, env } = environment();
+    let shared = false;
+    const provider = {
+      request: ((args: { method: string }) => {
+        if (args.method === 'eth_accounts' && !shared) return Promise.resolve([]);
+        if (args.method === 'eth_requestAccounts') shared = true;
+        return (node.provider.request as (input: unknown) => Promise<unknown>)(args);
+      }) as typeof node.provider.request,
+    } as typeof node.provider;
+    const publish = await toReview({ ...env, getProvider: () => provider });
+    fireEvent.click(publish);
+    await screen.findByText('The exam is published');
+    expect(shared).toBe(true);
+  });
+
+  it('leaves the exam pointer alone when the read-back differs, and shows no stamp', async () => {
+    const { env } = environment({ tamper: () => ({ rpcHost: 'evil.example.org' }) });
+    const publish = await toReview(env);
+    expect(getCurrentExamId()).toBeNull();
+    fireEvent.click(publish);
+    expect(await screen.findByText('Published, but the read-back differs')).toBeTruthy();
+    expect(screen.queryByText('Published')).toBeNull();
+    expect(screen.getByText(/this exam was not selected/)).toBeTruthy();
+    expect(getCurrentExamId()).toBeNull();
+  });
+
+  it('warns about the wrong chain, and the flow still refuses to send', async () => {
+    const { node, env } = environment({ chainId: 1 });
+    const publish = await toReview(env);
+    await screen.findByText(/Your wallet is on chain 1\. Switch it to Sepolia/);
+    fireEvent.click(publish);
+    await screen.findByText(/Your wallet is on chain 1\. Switch it to Sepolia \(chain/);
     expect(node.sent).toHaveLength(0);
   });
 
-  it('blocks publishing and says so when the tag points at another commit', async () => {
-    stubGithub({ tagSha: { 'v1.0.0': 'c'.repeat(40) } });
-    const { node, env } = environment();
-    const confirm = await readyToPublish(env);
-    await selectVersion('v1.0.0');
-    await waitFor(() => {
-      expect(screen.getByText(/Release mismatch/)).toBeTruthy();
-    });
-    expect(screen.getByText(/Publishing is blocked/)).toBeTruthy();
-    expect(confirm.disabled).toBe(true);
+  it('refuses an account that is not the board', async () => {
+    const { node, env } = environment({ account: stranger });
+    const publish = await toReview(env);
+    await screen.findByText(/This wallet account is not the board address/);
+    fireEvent.click(publish);
+    await screen.findByText(/is not the board address\. the public record only accepts writes|is not the board address\. The public record/i);
     expect(node.sent).toHaveLength(0);
   });
 
-  it('blocks publishing when the tag cannot be checked', async () => {
-    stubGithub({ tagStatus: 500 });
+  it('goes back to the details without losing them', async () => {
     const { env } = environment();
-    const confirm = await readyToPublish(env);
-    await selectVersion('v1.0.0');
-    await waitFor(() => {
-      expect(screen.getByText(/GitHub could not be reached/)).toBeTruthy();
-    });
-    expect(confirm.disabled).toBe(true);
+    await toReview(env);
+    fireEvent.click(button('Change the details'));
+    expect((field('Exam name') as HTMLInputElement).value).toBe(name);
   });
 
-  it('says plainly when GitHub is unreachable or limiting, with retry and no manual entry', async () => {
-    stubGithub({ releasesStatus: 403 });
+  it('shows rounds and hashes only in the exam record', async () => {
     const { env } = environment();
-    const confirm = await readyToPublish(env);
+    await toReview(env);
+    const record = screen.getByText('Exam record').closest('details');
+    expect(record?.open).toBe(false);
+    expect(record?.textContent).toContain('Lock round');
+    expect(screen.getByRole('main').textContent?.replace(record?.textContent ?? '', '')).not.toMatch(/round|0x/i);
     await waitFor(() => {
-      expect(screen.getByText(/GitHub is limiting requests/)).toBeTruthy();
+      expect(record?.textContent).toContain(examId.slice(0, 8));
     });
-    expect(confirm.disabled).toBe(true);
-    expect(screen.queryByLabelText(/^Commit hash/)).toBeNull();
-    expect(screen.queryByLabelText(/^Image digest/)).toBeNull();
-
-    stubGithub();
-    fireEvent.click(screen.getByText('Try again'));
-    await selectVersion('v1.0.0');
-    await waitFor(() => {
-      expect(confirm.disabled).toBe(false);
-    });
-  });
-
-  it('shows a loading state, and explains that a version must be tagged when there are none', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
-    const { env: pending } = environment();
-    const blocked = await readyToPublish(pending);
-    expect(screen.getByText(/Loading the TEE versions/)).toBeTruthy();
-    expect(blocked.disabled).toBe(true);
-    cleanup();
-
-    stubGithub({ releases: [] });
-    const { env } = environment();
-    const confirm = await readyToPublish(env);
-    await waitFor(() => {
-      expect(screen.getByText(/A version must be tagged first/)).toBeTruthy();
-    });
-    expect(screen.queryByLabelText('TEE version')).toBeNull();
-    expect(confirm.disabled).toBe(true);
   });
 });
