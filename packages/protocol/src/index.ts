@@ -3,4 +3,5 @@ export * from './constants';
 export * from './drand';
 export * from './encoding';
 export * from './formats';
+export * from './invite';
 export * from './types';

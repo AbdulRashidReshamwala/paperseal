@@ -4,7 +4,7 @@ import {
   openKeyPriv,
   openShare,
 } from '@paperseal/crypto';
-import { hashMessage, setterOwner, toHex, utf8ToBytes, webauthn, type Hex } from '@paperseal/protocol';
+import { hashMessage, inviteSecretBytes, inviteTag, setterOwner, toHex, utf8ToBytes, webauthn, type Hex } from '@paperseal/protocol';
 
 import { assertDeviceBound } from './authenticator-data';
 import { KeyError } from './errors';
@@ -51,6 +51,8 @@ export interface HolderRegisterOptions {
   owner: string;
   /** From `POST /v1/register/challenge`. Any length: the TEE chooses it. */
   challenge: Uint8Array;
+  /** The invite's 32-byte secret. It never leaves this device: only `inviteTag` is sent. */
+  inviteSecret: Uint8Array;
 }
 
 /**
@@ -62,6 +64,8 @@ export interface SetterRegisterOptions {
   role: 'setter';
   /** From `POST /v1/register/challenge`. Any length: the TEE chooses it. */
   challenge: Uint8Array;
+  /** The invite's 32-byte secret. It never leaves this device: only `inviteTag` is sent. */
+  inviteSecret: Uint8Array;
 }
 
 export type RegisterOptions = HolderRegisterOptions | SetterRegisterOptions;
@@ -69,6 +73,8 @@ export type RegisterOptions = HolderRegisterOptions | SetterRegisterOptions;
 /** The body of `POST /v1/register`, as hex. It matches `RegisterRequest` in @paperseal/tee-client. */
 export interface RegisterRequestBody {
   owner: string;
+  /** `HMAC-SHA-256(inviteSecret, passkeyPublicKey)`. */
+  inviteTag: Hex;
   challenge: Hex;
   passkeyPublicKey: Hex;
   /** `0x` for setters. */
@@ -244,6 +250,8 @@ export function createWebAuthnKeys(options: WebAuthnKeysOptions): Keys {
 
     async register(options) {
       const { role, challenge } = options;
+      // Checked before the create, so a bad secret never costs a security key touch.
+      if (options.inviteSecret.length !== inviteSecretBytes) throw new RangeError('inviteSecret must be 32 bytes');
       const holder = role === 'holder';
       // A setter has no name to derive an id from, so its user handle is random.
       const userId = holder
@@ -261,10 +269,13 @@ export function createWebAuthnKeys(options: WebAuthnKeysOptions): Keys {
         derivedPublicKey = await hpkeSerializePublicKey(pair.publicKey);
       }
 
+      // The tag binds the invite to this passkey, so it can only be made after the create.
+      const tag = inviteTag(options.inviteSecret, created.passkeyPublicKey);
       const message = hashMessage('registration', {
         derivedPublicKey,
         holderId: utf8ToBytes(owner),
         challenge,
+        inviteTag: tag,
       });
       const { response } = await assertion(created.credentialId, copy(message), false);
       const signature = signatureOf(response);
@@ -273,6 +284,7 @@ export function createWebAuthnKeys(options: WebAuthnKeysOptions): Keys {
         owner,
         request: {
           owner,
+          inviteTag: toHex(tag),
           challenge: toHex(challenge),
           passkeyPublicKey: toHex(created.passkeyPublicKey),
           derivedPublicKey: toHex(derivedPublicKey),

@@ -1,7 +1,7 @@
 import { createPublicKey, createHash, verify } from 'node:crypto';
 
 import { hpkeContext, hpkeSeal } from '@paperseal/crypto';
-import { hashMessage, setterOwner, utf8ToBytes, webauthn } from '@paperseal/protocol';
+import { hashMessage, inviteTag, setterOwner, utf8ToBytes, webauthn } from '@paperseal/protocol';
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Page } from 'playwright-core';
 import { createServer, type ViteDevServer } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -245,18 +245,20 @@ function verifyPasskey(point: Uint8Array, authenticatorData: string, clientDataJ
 
 describe('register and keyPriv', () => {
   const challenge = new Uint8Array(32).fill(0x42);
+  const inviteSecret = new Uint8Array(32).fill(0x24);
 
   it('registers a key holder: the derived key matches getPublicKey and the passkey signs the registration message', async () => {
     const session = await openSession(browser);
-    const { credentialId, request } = ok(await session.ps('register', 'neutral-01', 'holder', toHex(challenge)));
+    const { credentialId, request } = ok(await session.ps('register', 'neutral-01', 'holder', toHex(challenge), toHex(inviteSecret)));
     const requests = await session.ps('requests');
     log('holder register ceremonies', requests.map((r) => r.kind));
     log('PRF at creation answered by Chrome virtual authenticator', requests.filter((r) => r.kind === 'get').length === 1);
 
     expect(Object.keys(request).sort()).toEqual(
-      ['attestationObject', 'authenticatorData', 'challenge', 'clientDataJSON', 'derivedPublicKey', 'owner', 'passkeyPublicKey', 'signature'],
+      ['attestationObject', 'authenticatorData', 'challenge', 'clientDataJSON', 'derivedPublicKey', 'inviteTag', 'owner', 'passkeyPublicKey', 'signature'],
     );
     expect(request.owner).toBe('neutral-01');
+    expect(wire(request.inviteTag)).toEqual(inviteTag(inviteSecret, wire(request.passkeyPublicKey)));
     expect(request.challenge).toBe(`0x${toHex(challenge)}`);
     expect(wire(request.derivedPublicKey)).toHaveLength(65);
     expect(wire(request.attestationObject).length).toBeGreaterThan(0);
@@ -267,6 +269,7 @@ describe('register and keyPriv', () => {
       derivedPublicKey: wire(request.derivedPublicKey),
       holderId: utf8ToBytes('neutral-01'),
       challenge,
+      inviteTag: wire(request.inviteTag),
     });
     const clientData = JSON.parse(Buffer.from(request.clientDataJSON.slice(2), 'hex').toString('utf8')) as { challenge: string; type: string };
     expect(Buffer.from(clientData.challenge, 'base64url').toString('hex')).toBe(toHex(message));
@@ -286,13 +289,13 @@ describe('register and keyPriv', () => {
         hasPrf: false, automaticPresenceSimulation: true, ...DEVICE_BOUND,
       },
     });
-    const holder = await session.ps('register', 'x', 'holder', toHex(challenge));
+    const holder = await session.ps('register', 'x', 'holder', toHex(challenge), toHex(inviteSecret));
     expect(holder).toMatchObject({ ok: false, code: 'prf_unavailable' });
 
-    const { request } = ok(await session.ps('register', null, 'setter', toHex(challenge)));
+    const { request } = ok(await session.ps('register', null, 'setter', toHex(challenge), toHex(inviteSecret)));
     expect(request.derivedPublicKey).toBe('0x');
     expect(request.owner).toBe(setterOwner(wire(request.passkeyPublicKey)));
-    const message = hashMessage('registration', { derivedPublicKey: new Uint8Array(), holderId: utf8ToBytes(request.owner), challenge });
+    const message = hashMessage('registration', { derivedPublicKey: new Uint8Array(), holderId: utf8ToBytes(request.owner), challenge, inviteTag: wire(request.inviteTag) });
     const clientData = JSON.parse(Buffer.from(request.clientDataJSON.slice(2), 'hex').toString('utf8')) as { challenge: string };
     expect(Buffer.from(clientData.challenge, 'base64url').toString('hex')).toBe(toHex(message));
     expect(verifyPasskey(wire(request.passkeyPublicKey), request.authenticatorData.slice(2), request.clientDataJSON.slice(2), request.signature.slice(2))).toBe(true);
@@ -301,7 +304,7 @@ describe('register and keyPriv', () => {
 
   it('openKeyPriv opens a centre K_priv sealed with the keyPriv purpose, and nothing else', async () => {
     const session = await openSession(browser);
-    const { credentialId, request } = ok(await session.ps('register', 'centre-01', 'holder', toHex(challenge)));
+    const { credentialId, request } = ok(await session.ps('register', 'centre-01', 'holder', toHex(challenge), toHex(inviteSecret)));
     const kPriv = crypto.getRandomValues(new Uint8Array(32));
     const sealed = await sealFor(wire(request.derivedPublicKey), kPriv, 'keyPriv');
     expect(ok(await session.ps('openKeyPriv', credentialId, toHex(EXAM_ID), toHex(sealed)))).toBe(toHex(kPriv));

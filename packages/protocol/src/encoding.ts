@@ -38,6 +38,7 @@ export const messageSchemas = {
     ['derivedPublicKey', 'bytes', 'optionalPublicKey'],
     ['holderId', 'bytes'],
     ['challenge', 'bytes'],
+    ['inviteTag', 'bytes32'],
   ],
   criteria: [['criteria', 'bytes']],
   approvedList: [

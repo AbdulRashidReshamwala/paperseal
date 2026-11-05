@@ -59,6 +59,8 @@ export interface PasskeySignatureWire {
 /** `POST /v1/register`. `signature` covers the `registration` message. */
 export interface RegisterRequest extends PasskeySignatureWire {
   owner: string;
+  /** `HMAC-SHA-256(inviteSecret, passkeyPublicKey)`, signed into the `registration` message. 32 bytes of lowercase hex. */
+  inviteTag: Hex;
   challenge: Hex;
   passkeyPublicKey: Hex;
   /** Empty (`0x`) for setters. */
@@ -66,11 +68,15 @@ export interface RegisterRequest extends PasskeySignatureWire {
   attestationObject: Hex;
 }
 
-/** One verified registration. `derivedPublicKey` is `0x` for a setter. */
+/**
+ * One verified registration. `derivedPublicKey` is `0x` for a setter. The TEE never sees the invite
+ * secret, so it can't check `inviteTag`: the board's app does.
+ */
 export interface RegistrationEntry {
   owner: string;
   passkeyPublicKey: Hex;
   derivedPublicKey: Hex;
+  inviteTag: Hex;
 }
 
 /** `GET /v1/registrations`. The role is the board's choice, so it is not here. */

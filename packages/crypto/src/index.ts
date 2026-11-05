@@ -10,6 +10,7 @@ export {
   encodeMessage,
   encryptedPaperHash,
   hashMessage,
+  inviteTag,
   questionHash,
   saltedPaperHash,
 } from '@paperseal/protocol';

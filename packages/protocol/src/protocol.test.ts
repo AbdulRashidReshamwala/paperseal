@@ -87,12 +87,13 @@ describe('abi.encode messages', () => {
   it('encodes registration with an empty derived key for setters', () => {
     const holderId = Buffer.from('holder-1');
     const challenge = fill(5, 3);
+    const inviteTag = fill(7, 32);
     const expected = abi(
-      ['string', 'bytes', 'bytes', 'bytes'],
-      ['paperseal/v1/registration', '0x', toHex(holderId), toHex(challenge)],
+      ['string', 'bytes', 'bytes', 'bytes', 'bytes32'],
+      ['paperseal/v1/registration', '0x', toHex(holderId), toHex(challenge), toHex(inviteTag)],
     );
     expect(
-      toHex(encodeMessage('registration', { derivedPublicKey: new Uint8Array(), holderId, challenge })),
+      toHex(encodeMessage('registration', { derivedPublicKey: new Uint8Array(), holderId, challenge, inviteTag })),
     ).toBe(toHex(expected));
   });
 
@@ -156,7 +157,7 @@ describe('abi.encode messages', () => {
     expect(() => encodeMessage('build', { ...build, selected: 2 ** 32 })).toThrow(RangeError);
     expect(() => encodeMessage('questionReceipt', { examId: fill(1), passkeyPublicKey: fill(4, 64), questionHash: fill(1) })).toThrow('65-byte');
     expect(() => encodeMessage('questionReceipt', { examId: fill(1), passkeyPublicKey: fill(2, 65), questionHash: fill(1) })).toThrow('0x04');
-    expect(() => encodeMessage('registration', { derivedPublicKey: fill(4, 64), holderId: fill(1, 1), challenge: fill(1, 1) })).toThrow('65-byte');
+    expect(() => encodeMessage('registration', { derivedPublicKey: fill(4, 64), holderId: fill(1, 1), challenge: fill(1, 1), inviteTag: fill(1, 32) })).toThrow('65-byte');
     expect(() => encodeMessage('approvedList', { examId: fill(1) } as never)).toThrow('missing entries');
   });
 

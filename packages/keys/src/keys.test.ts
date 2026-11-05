@@ -1,5 +1,5 @@
 import { hpkeContext, hpkeSeal } from '@paperseal/crypto';
-import { fromHex, hashMessage, setterOwner, utf8ToBytes, webauthn } from '@paperseal/protocol';
+import { fromHex, hashMessage, inviteTag, setterOwner, toHex, utf8ToBytes, webauthn } from '@paperseal/protocol';
 import { describe, expect, it, vi } from 'vitest';
 
 import { assertDeviceBound, createWebAuthnKeys, KeyError, readBackupFlags } from './index';
@@ -183,6 +183,7 @@ describe('derived key purposes', () => {
 
 describe('register', () => {
   const challenge = new Uint8Array(32).fill(0x77);
+  const inviteSecret = new Uint8Array(32).fill(0x33);
 
   const challengeOf = (call: unknown) =>
     (call as [{ publicKey: PublicKeyCredentialRequestOptions }])[0].publicKey.challenge;
@@ -190,7 +191,7 @@ describe('register', () => {
   it('returns the POST /v1/register body, with the passkey signing the registration message', async () => {
     const credentials = authenticator();
     const keys = keysFor(credentials);
-    const { credentialId: id, request } = await keys.register({ owner: 'centre-01', role: 'holder', challenge });
+    const { credentialId: id, request } = await keys.register({ owner: 'centre-01', role: 'holder', challenge, inviteSecret });
     expect(id).toEqual(credentialId);
 
     const derived = await keys.getPublicKey(credentialId);
@@ -199,21 +200,25 @@ describe('register', () => {
     expect(request.challenge).toBe(`0x${'77'.repeat(32)}`);
     expect(fromHex(request.passkeyPublicKey)).toHaveLength(65);
     expect(Object.keys(request).sort()).toEqual(
-      ['attestationObject', 'authenticatorData', 'challenge', 'clientDataJSON', 'derivedPublicKey', 'owner', 'passkeyPublicKey', 'signature'],
+      ['attestationObject', 'authenticatorData', 'challenge', 'clientDataJSON', 'derivedPublicKey', 'inviteTag', 'owner', 'passkeyPublicKey', 'signature'],
     );
+    // The tag is the HMAC of the invite secret over this passkey, and the secret itself is never sent.
+    expect(request.inviteTag).toBe(toHex(inviteTag(inviteSecret, fromHex(request.passkeyPublicKey))));
+    expect(JSON.stringify(request)).not.toContain(toHex(inviteSecret).slice(2));
 
     // The WebAuthn challenge of the signing get is the registration message hash.
     const expected = hashMessage('registration', {
       derivedPublicKey: derived,
       holderId: utf8ToBytes('centre-01'),
       challenge,
+      inviteTag: fromHex(request.inviteTag),
     });
     expect(challengeOf(credentials.get.mock.calls[0])).toEqual(expected);
   });
 
   it('asks for the PRF output at creation and takes one create and one get when it is returned', async () => {
     const credentials = authenticator();
-    await keysFor(credentials).register({ owner: 'n', role: 'holder', challenge });
+    await keysFor(credentials).register({ owner: 'n', role: 'holder', challenge, inviteSecret });
     const [request] = credentials.create.mock.calls[0] as unknown as [{ publicKey: PublicKeyCredentialCreationOptions }];
     expect(request.publicKey.extensions?.prf?.eval?.first).toEqual(utf8ToBytes(webauthn.prfSalt));
     expect(credentials.create).toHaveBeenCalledTimes(1);
@@ -223,7 +228,7 @@ describe('register', () => {
   it('derives the key with an extra get when the authenticator gives no PRF output at creation', async () => {
     const credentials = authenticator({ prfAtCreate: false });
     const keys = keysFor(credentials);
-    const { request } = await keys.register({ owner: 'n', role: 'holder', challenge });
+    const { request } = await keys.register({ owner: 'n', role: 'holder', challenge, inviteSecret });
     expect(credentials.get).toHaveBeenCalledTimes(2);
     expect(request.derivedPublicKey).toBe(`0x${Buffer.from(await keys.getPublicKey(credentialId)).toString('hex')}`);
   });
@@ -231,7 +236,7 @@ describe('register', () => {
   it('registers a setter with no PRF key and an empty derived key', async () => {
     const credentials = authenticator({ prfEnabled: false, prf: null });
     const keys = keysFor(credentials);
-    const { request, owner } = await keys.register({ role: 'setter', challenge });
+    const { request, owner } = await keys.register({ role: 'setter', challenge, inviteSecret });
     const [create] = credentials.create.mock.calls[0] as unknown as [{ publicKey: PublicKeyCredentialCreationOptions }];
     expect(create.publicKey.extensions).toBeUndefined();
     expect(request.derivedPublicKey).toBe('0x');
@@ -242,6 +247,7 @@ describe('register', () => {
       derivedPublicKey: new Uint8Array(),
       holderId: utf8ToBytes(owner),
       challenge,
+      inviteTag: fromHex(request.inviteTag),
     });
     expect(challengeOf(credentials.get.mock.calls[0])).toEqual(expected);
     const [get] = credentials.get.mock.calls[0] as unknown as [{ publicKey: PublicKeyCredentialRequestOptions }];
@@ -250,8 +256,8 @@ describe('register', () => {
   });
 
   it('refuses a holder whose authenticator has no PRF, and any synced passkey', async () => {
-    expect(await codeOf(keysFor(authenticator({ prfEnabled: false })).register({ owner: 'n', role: 'holder', challenge }))).toBe('prf_unavailable');
-    expect(await codeOf(keysFor(authenticator({ flags: UP | BE | BS })).register({ role: 'setter', challenge }))).toBe('synced_passkey');
+    expect(await codeOf(keysFor(authenticator({ prfEnabled: false })).register({ owner: 'n', role: 'holder', challenge, inviteSecret }))).toBe('prf_unavailable');
+    expect(await codeOf(keysFor(authenticator({ flags: UP | BE | BS })).register({ role: 'setter', challenge, inviteSecret }))).toBe('synced_passkey');
   });
 });
 
