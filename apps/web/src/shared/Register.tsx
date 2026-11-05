@@ -1,8 +1,8 @@
 import { createWebAuthnKeys, KeyError, type Keys, type Registration } from '@paperseal/keys';
-import { fromHex, NotImplementedError, toHex, type Hex } from '@paperseal/protocol';
+import { fromHex, NotImplementedError, requireHardwareAttestation, toHex, type Hex } from '@paperseal/protocol';
 import { TeeApiError, type TeeClient } from '@paperseal/tee-client';
-import { Button, EmptyState, Field, Mono, Panel, Row, Rows, Screen } from '@paperseal/ui';
-import { useState } from 'react';
+import { Button, Check, Field, KeyTouch, securityKeyProblem, Stage, type KeyTouchState } from '@paperseal/ui';
+import { useRef, useState, type ReactNode } from 'react';
 
 import { useCurrentExamId } from './currentExam';
 import { tee as defaultTee } from './tee';
@@ -94,30 +94,96 @@ export async function registerWithTee(input: RegisterFlowInput): Promise<Registr
   return registration;
 }
 
+/** True when the failure came from the security key, so `KeyTouch` can give the right guidance. */
+export function isSecurityKeyError(error: unknown): boolean {
+  return error instanceof KeyError || securityKeyProblem(error, true) !== 'other';
+}
+
+/** A failure that isn't the key's, in plain words for a primary surface. `describeError` has the detail. */
+export function plainFailure(error: unknown): string {
+  if (error instanceof TypeError) return 'Could not reach the sealed system. Check your internet connection, then try again.';
+  if (error instanceof TeeApiError) return 'The sealed system refused this. Contact your exam board.';
+  return 'Something went wrong. Try again, and contact your exam board if it keeps happening.';
+}
+
+/** A failure in words, with the technical reason folded away for the exam board. */
+export function Trouble(props: { children: ReactNode; detail?: readonly string[] }) {
+  return (
+    <div role="alert">
+      <Check status="fail">{props.children}</Check>
+      {props.detail && props.detail.length > 0 ? (
+        <details>
+          <summary>Details for your exam board</summary>
+          <ul>
+            {props.detail.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+const roleCopy: Record<RegisterRole, { lede: string; next: string }> = {
+  setter: {
+    lede: 'Your name is never published. The public list shows only a code made from your security key, so this page doesn’t ask who you are.',
+    next: 'Your exam board publishes the approved list. Then you can write your questions.',
+  },
+  keyholder: {
+    lede: 'Enter the name your exam board invited you under. It appears on the public approved list.',
+    next: 'Your exam board publishes the approved list. You have nothing else to do until release day.',
+  },
+  centre: {
+    lede: 'Enter your centre’s name as your exam board invited it. It appears on the public approved list.',
+    next: 'Your exam board publishes the approved list. You can then download the sealed paper.',
+  },
+};
+
 export interface RegisterProps {
   role: RegisterRole;
   keys?: Pick<Keys, 'register'>;
   tee?: Pick<TeeClient, 'registerChallenge' | 'register'> | null;
   examId?: Hex | null;
   onRegistered?: (credential: StoredCredential) => void;
+  /** Goes straight to the key touch, for someone replacing a key already stored here. */
+  again?: boolean;
+  /** Replaces the role's usual "what happens next", when the caller knows better. */
+  next?: string;
 }
 
+/**
+ * One screen for every role: one name field where the role needs a name, and one key touch. A
+ * Stage only, so the caller's page supplies the header.
+ */
 export function Register(props: RegisterProps) {
   const { role } = props;
   const currentExam = useCurrentExamId();
   const examId = props.examId === undefined ? currentExam : props.examId;
   const tee = props.tee === undefined ? defaultTee : props.tee;
   const [owner, setOwner] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<StoredCredential | null>(() => (examId ? loadCredential(examId, role) : null));
+  const [nameError, setNameError] = useState<string | undefined>();
+  const [touch, setTouch] = useState<KeyTouchState>('idle');
+  const [keyError, setKeyError] = useState<unknown>();
+  const [failure, setFailure] = useState<{ text: string; detail: string } | null>(null);
+  const [done, setDone] = useState<StoredCredential | null>(() =>
+    examId && !props.again ? loadCredential(examId, role) : null,
+  );
+  const nameField = useRef<HTMLDivElement>(null);
 
-  const isSetter = role === 'setter';
+  const needsName = role !== 'setter';
+  const copy = roleCopy[role];
 
   const submit = async () => {
     if (!examId || !tee) return;
-    setBusy(true);
-    setError(null);
+    if (needsName && owner.trim() === '') {
+      setNameError('Enter your name first.');
+      nameField.current?.querySelector('input')?.focus();
+      return;
+    }
+    setNameError(undefined);
+    setFailure(null);
+    setTouch('waiting');
     try {
       const registration = await registerWithTee({ keys: props.keys ?? browserKeys(), tee, owner: owner.trim(), role });
       const credential: StoredCredential = {
@@ -128,77 +194,89 @@ export function Register(props: RegisterProps) {
         passkeyPublicKey: registration.request.passkeyPublicKey,
       };
       saveCredential(examId, credential);
+      setTouch('success');
       setDone(credential);
       props.onRegistered?.(credential);
     } catch (cause) {
-      setError(describeError(cause));
-    } finally {
-      setBusy(false);
+      if (isSecurityKeyError(cause)) {
+        setKeyError(cause);
+        setTouch('failed');
+      } else {
+        setTouch('idle');
+        setFailure({ text: plainFailure(cause), detail: describeError(cause) });
+      }
     }
   };
 
+  if (!examId || !tee) {
+    return (
+      <Stage
+        title="Register your security key"
+        lede="This page isn’t connected to an exam yet. Check you opened the link your exam board sent."
+        next="Once the link is right, you can register here."
+      >
+        <details>
+          <summary>Details for your exam board</summary>
+          <p>
+            {!examId ? 'Set VITE_EXAM_ID, or publish an exam, to choose which exam to register for.' : 'Set VITE_TEE_URL to connect to the TEE.'}
+          </p>
+        </details>
+      </Stage>
+    );
+  }
+
+  if (done) {
+    return (
+      <Stage
+        title="Your security key is registered"
+        {...(needsName ? { lede: `Registered as ${done.owner}.` } : {})}
+        next={copy.next}
+      >
+        <Button
+          onClick={() => {
+            setDone(null);
+            setTouch('idle');
+          }}
+        >
+          Register a different key
+        </Button>
+      </Stage>
+    );
+  }
+
   return (
-    <Screen
-      title="Register"
-      lede={
-        isSetter
-          ? 'Create a device-bound passkey on your security key. Nothing is ever encrypted to a setter, so no derived key is made, and no name is published.'
-          : 'Create a device-bound passkey on your security key.'
-      }
-    >
-      <Panel title="Mocked key">
-        In this demo the security key is mocked by Chrome&apos;s virtual authenticator. It is software, and it only
-        lasts this browser session. When the session ends the key is gone and cannot be used again, so register again
-        in a new session.
-      </Panel>
-      {done ? (
-        <Panel title="Registered">
-          <Rows>
-            {done.role === 'setter' ? (
-              <Row label="Setter">
-                <Mono>{done.owner}</Mono>
-              </Row>
-            ) : (
-              <Row label="Name">{done.owner}</Row>
-            )}
-            <Row label="Role">{done.role}</Row>
-            <Row label="Passkey public key">
-              <Mono>{done.passkeyPublicKey}</Mono>
-            </Row>
-          </Rows>
-        </Panel>
-      ) : (
-        <EmptyState title="No key registered">
-          {isSetter
-            ? 'Registration needs a connection to the TEE. You register with no name.'
-            : 'Registration needs a connection to the TEE, and the name the board invited you under.'}
-        </EmptyState>
-      )}
-      {!examId ? (
-        <EmptyState title="No exam">Set VITE_EXAM_ID, or publish an exam, to choose which exam to register for.</EmptyState>
-      ) : !tee ? (
-        <EmptyState title="TEE not connected">Set VITE_TEE_URL to connect to the TEE.</EmptyState>
-      ) : (
-        <Panel title={done ? 'Register again' : 'Register'}>
-          {isSetter ? (
-            <p>
-              You register with no name. The public approved list shows only a hash of your passkey public key,
-              which this page computes after your passkey is created.
-            </p>
-          ) : (
-            <Field label="Name on the approved list" value={owner} onChange={setOwner} />
-          )}
-          <Button
-            disabled={busy || (!isSetter && owner.trim() === '')}
-            onClick={() => {
+    <Stage
+      title="Register your security key"
+      lede={copy.lede}
+      action={
+        <>
+          {needsName ? (
+            <div ref={nameField}>
+              <Field
+                label="Name on the approved list"
+                value={owner}
+                error={nameError}
+                onChange={(value) => {
+                  setOwner(value);
+                  setNameError(undefined);
+                }}
+              />
+            </div>
+          ) : null}
+          <KeyTouch
+            state={touch}
+            error={keyError}
+            actionLabel="Register your security key"
+            purpose="to register"
+            demo={!requireHardwareAttestation}
+            onUse={() => {
               void submit();
             }}
-          >
-            {busy ? 'Waiting for your security key' : 'Create passkey and register'}
-          </Button>
-          {error ? <p role="alert">{error}</p> : null}
-        </Panel>
-      )}
-    </Screen>
+          />
+          {failure ? <Trouble detail={[failure.detail]}>{failure.text}</Trouble> : null}
+        </>
+      }
+      next={props.next ?? copy.next}
+    />
   );
 }

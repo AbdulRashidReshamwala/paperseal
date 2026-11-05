@@ -10,6 +10,7 @@ import {
   fromHex,
   hashMessage,
   questionHash,
+  setterOwner,
   toHex,
   type Criteria,
   type Hex,
@@ -134,7 +135,13 @@ export async function makeWorld(options: WorldOptions = {}): Promise<World> {
   const fakeToken = `${b64url({ alg: 'ES256' })}.${b64url({})}.c2ln`;
   const verifyToken = vi.fn(() => Promise.resolve(trustedVerdict));
   const keys: Pick<Keys, 'register' | 'sign'> = {
-    register: vi.fn(() => Promise.reject(new Error('register is not used here'))),
+    register: vi.fn(() =>
+      Promise.resolve({
+        credentialId: fromHex(credentialId),
+        owner: setterOwner(fromHex(passkeyPublicKey)),
+        request: { passkeyPublicKey },
+      } as never),
+    ),
     sign: vi.fn((_id: Uint8Array, message: Uint8Array) => {
       signed.push(message);
       return Promise.resolve({
@@ -163,8 +170,8 @@ export async function makeWorld(options: WorldOptions = {}): Promise<World> {
           approvedList: { examId, entries, hash: listHash, teeSignature: approvedListSignature },
           release: { released: [], required: 8 },
         }),
-      registerChallenge: () => Promise.reject(new Error('unused')),
-      register: () => Promise.reject(new Error('unused')),
+      registerChallenge: () => Promise.resolve({ challenge: toHex(new Uint8Array(80).fill(6)) }),
+      register: () => Promise.resolve({}) as never,
       // Longer than 32 bytes, like the TEE's: nothing may assume a challenge width.
       questionChallenge: () => Promise.resolve({ challenge: toHex(new Uint8Array(80).fill(5)) }),
       question: teeQuestion as never,
@@ -195,9 +202,28 @@ export async function makeWorld(options: WorldOptions = {}): Promise<World> {
     } as unknown as NonNullable<SetterEnv['chain']>,
     keys: () => keys,
     policy: { storageBucket: 'test-bucket' },
+    statusPollMs: 10,
+    buildPollMs: 10,
     ...(options.realAttestation ? {} : { verifyToken: verifyToken as never }),
   };
   return { env, tee: env.tee as NonNullable<SetterEnv['tee']>, chain: env.chain as NonNullable<SetterEnv['chain']>, signer, encryption, encryptionPublicKey, signed, teeQuestion, stage, chainListHash, build, verifyToken };
+}
+
+/** A receipt the world's TEE really signed, as a past seal would have left in storage. */
+export async function signedReceipt(world: World, fill: number, signer: Signer = world.signer) {
+  const hash = new Uint8Array(32).fill(fill);
+  return {
+    questionHash: toHex(hash),
+    instancePublicKey: signer.publicKey,
+    teeSignature: await signer.sign(
+      encodeMessage('questionReceipt', {
+        examId: fromHex(examId),
+        passkeyPublicKey: fromHex(passkeyPublicKey),
+        questionHash: hash,
+      }),
+    ),
+    sealedAt: 0,
+  };
 }
 
 /** The hash a passkey must sign for a question submission. */

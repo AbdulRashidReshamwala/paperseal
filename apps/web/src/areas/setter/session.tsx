@@ -3,13 +3,14 @@ import type { ExamRegistry } from '@paperseal/chain';
 import type { Keys } from '@paperseal/keys';
 import type { Hex } from '@paperseal/protocol';
 import type { StatusResponse, TeeClient } from '@paperseal/tee-client';
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { browserKeys, describeError, loadCredential, type StoredCredential } from '../../shared/Register';
 import { teeStorageBucket } from '../../shared/config';
 import { useCurrentExamId } from '../../shared/currentExam';
 import { registry, registryAddress } from '../../shared/registry';
 import { tee as defaultTee } from '../../shared/tee';
+import { TEE_STATUS_POLL_MS } from '../../shared/TeeStatus';
 import { CONFIRMATION_TTL_MS, confirmTee, type ConfirmOutcome, type Confirmed, type TrustPolicy } from './confirm';
 
 /** Everything the setter flow talks to. The app wires the real ones, and a test can pass stubs. */
@@ -26,6 +27,10 @@ export interface SetterEnv {
   policy: TrustPolicy;
   /** The real `checkToken` unless a test swaps it. */
   verifyToken?: typeof checkToken;
+  /** Milliseconds between reads of the TEE stage. Tests shorten it. */
+  statusPollMs?: number;
+  /** Milliseconds between reads of the Build. Tests shorten it. */
+  buildPollMs?: number;
 }
 
 export function defaultEnv(): SetterEnv {
@@ -51,9 +56,13 @@ interface Session {
   confirmed: Confirmed | null;
   checking: boolean;
   runConfirm: () => Promise<void>;
-  /** Drops a confirmation that can't be relied on, with the reason, so uploading closes at once. */
+  /** Drops a confirmation that can't be relied on, with the reason, so sealing closes at once. */
   dropConfirmation: (reason: string) => void;
+  /** Forgets a confirmation that aged out, so sealing closes until the checks run again. */
+  expireConfirmation: () => void;
+  /** The last stage read, kept through a failed read so a network blip doesn't move the screen. */
   status: StatusResponse | null;
+  /** Why the latest read failed, or null if it worked. */
   statusError: string | null;
   refreshStatus: () => Promise<void>;
 }
@@ -103,29 +112,33 @@ export function SessionProvider(props: { env: SetterEnv; children: ReactNode }) 
       setStatus(await tee.status());
       setStatusError(null);
     } catch (error) {
-      setStatus(null);
       setStatusError(describeError(error));
     }
   }, [tee]);
 
+  // State decides the screen, so the stage is read for as long as the page is open.
+  const pollMs = env.statusPollMs ?? TEE_STATUS_POLL_MS;
   useEffect(() => {
     if (!tee) return;
     let live = true;
-    tee.status().then(
-      (value) => {
-        if (live) setStatus(value);
-      },
-      (error: unknown) => {
-        if (live) setStatusError(describeError(error));
-      },
-    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const read = () => {
+      void refreshStatus().finally(() => {
+        if (live) timer = setTimeout(read, pollMs);
+      });
+    };
+    read();
     return () => {
       live = false;
+      clearTimeout(timer);
     };
-  }, [tee]);
+  }, [tee, refreshStatus, pollMs]);
 
+  const running = useRef(false);
   const runConfirm = useCallback(async () => {
     if (!tee || !chain || !examId || !env.registryAddress) return;
+    if (running.current) return;
+    running.current = true;
     setChecking(true);
     // Any earlier pass is dropped first, so a failed re-check can never leave uploading open.
     setOutcome(null);
@@ -143,6 +156,7 @@ export function SessionProvider(props: { env: SetterEnv; children: ReactNode }) 
     } catch (error) {
       setOutcome({ ok: false, step: 'attestation', reasons: [describeError(error)] });
     } finally {
+      running.current = false;
       setChecking(false);
     }
     await refreshStatus();
@@ -155,18 +169,22 @@ export function SessionProvider(props: { env: SetterEnv; children: ReactNode }) 
     [setOutcome],
   );
 
-  // A confirmation is good for 5 minutes. Past that, uploading closes until the TEE is checked again.
+  const expireConfirmation = useCallback(() => {
+    setOutcome(null);
+  }, [setOutcome]);
+
+  // A confirmation is good for 5 minutes. Past that, sealing closes until the checks pass again.
   const confirmedAt = outcome?.ok ? outcome.confirmed.confirmedAt : null;
   useEffect(() => {
     if (confirmedAt === null) return;
     const left = Math.max(0, confirmedAt + CONFIRMATION_TTL_MS - Date.now());
     const timer = setTimeout(() => {
-      dropConfirmation('The TEE confirmation expired after 5 minutes. Check the TEE again before sending.');
+      expireConfirmation();
     }, left);
     return () => {
       clearTimeout(timer);
     };
-  }, [confirmedAt, dropConfirmation]);
+  }, [confirmedAt, expireConfirmation]);
 
   const session = useMemo<Session>(
     () => ({
@@ -180,29 +198,12 @@ export function SessionProvider(props: { env: SetterEnv; children: ReactNode }) 
       checking,
       runConfirm,
       dropConfirmation,
+      expireConfirmation,
       status,
       statusError,
       refreshStatus,
     }),
-    [env, examId, tee, chain, credential, credentialSaved, outcome, checking, runConfirm, dropConfirmation, status, statusError, refreshStatus],
+    [env, examId, tee, chain, credential, credentialSaved, outcome, checking, runConfirm, dropConfirmation, expireConfirmation, status, statusError, refreshStatus],
   );
   return <SessionContext.Provider value={session}>{props.children}</SessionContext.Provider>;
-}
-
-const stageText: Record<string, string> = {
-  publish: 'The exam is being published. Nothing can be submitted yet.',
-  onboard: 'Onboarding: registrations are open. Submitting has not started.',
-  submit: 'Submitting is open.',
-  lock: 'Submitting has closed. The TEE is checking the question bank.',
-  build: 'Submitting has closed. The paper is being built.',
-  split: 'Submitting has closed. The paper key is being split.',
-  distribute: 'Submitting has closed. Shares are being distributed.',
-  unlock: 'Submitting has closed. The exam is at unlock.',
-  verify: 'Submitting has closed.',
-  released: 'Submitting has closed. The paper has been released.',
-  failed: 'The exam failed at Lock and cannot go ahead. Submitting is closed.',
-};
-
-export function describeStage(stage: string): string {
-  return stageText[stage] ?? `The TEE is at the ${stage} stage.`;
 }

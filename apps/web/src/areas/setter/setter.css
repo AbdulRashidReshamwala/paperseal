@@ -1,0 +1,207 @@
+/* The setter's page. Only what packages/ui has no component for, and only with its tokens. */
+
+.ss-composer {
+  display: grid;
+  gap: var(--ps-space-3);
+  min-width: 0;
+}
+
+.ss-topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-2);
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+.ss-topics legend,
+.ss-sheet-label {
+  padding: 0;
+  margin-bottom: var(--ps-space-2);
+  font-size: var(--ps-text-small);
+  font-weight: 600;
+  color: var(--ps-ink-soft);
+}
+.ss-chip {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: auto auto;
+  gap: 0 var(--ps-space-3);
+  align-items: baseline;
+  min-height: 44px;
+  padding: var(--ps-space-2) var(--ps-space-3) var(--ps-space-3);
+  color: var(--ps-ink);
+  cursor: pointer;
+  border: 1px solid var(--ps-rule-strong);
+  border-radius: var(--ps-radius);
+  transition: background-color var(--ps-time-quick);
+}
+.ss-chip:hover {
+  background: var(--ps-paper-deep);
+}
+.ss-chip input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  cursor: inherit;
+  opacity: 0;
+}
+.ss-chip:has(input:checked) {
+  color: var(--ps-paper);
+  background: var(--ps-ink);
+  border-color: var(--ps-ink);
+}
+.ss-chip:has(input:focus-visible) {
+  outline: 2px solid var(--ps-ink);
+  outline-offset: 2px;
+}
+.ss-chip:has(input:disabled) {
+  cursor: default;
+  opacity: 0.6;
+}
+.ss-chip-name {
+  font-weight: 600;
+}
+.ss-chip-count {
+  font-size: var(--ps-text-small);
+}
+.ss-chip-bar {
+  position: absolute;
+  right: var(--ps-space-3);
+  bottom: var(--ps-space-2);
+  left: var(--ps-space-3);
+  height: 2px;
+  background: var(--ps-rule);
+}
+.ss-chip-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--ps-ink);
+  transition: width var(--ps-time-seal) var(--ps-ease-settle);
+}
+.ss-chip:has(input:checked) .ss-chip-bar {
+  background: var(--ps-rule-strong);
+}
+.ss-chip:has(input:checked) .ss-chip-bar > span {
+  background: var(--ps-paper);
+}
+.ss-topic-note {
+  max-width: 44em;
+  margin: 0;
+  font-size: var(--ps-text-small);
+  color: var(--ps-ink-soft);
+}
+
+.ss-sheet {
+  display: block;
+  margin-top: var(--ps-space-2);
+}
+.ss-sheet-label {
+  display: block;
+}
+.ss-sheet-page {
+  position: relative;
+  display: block;
+  overflow: hidden;
+}
+.ss-text {
+  display: block;
+  width: 100%;
+  min-height: 14em;
+  font-size: var(--ps-text-body);
+  line-height: 1.55;
+  resize: vertical;
+}
+.ss-text[readonly] {
+  background: var(--ps-paper-deep);
+}
+
+/* The question folding away under the stamp. Without motion it simply shows, then goes. */
+.ss-leaving {
+  position: absolute;
+  inset: 0;
+  display: block;
+  padding: var(--ps-space-3);
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--ps-field);
+  animation: ss-away var(--ps-time-seal) ease-in 280ms both;
+}
+.ss-leaving-text {
+  display: block;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--ps-ink-soft);
+}
+.ss-leaving-stamp {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  translate: -50% -50%;
+  font-size: var(--ps-text-section);
+}
+@keyframes ss-away {
+  to {
+    opacity: 0;
+    transform: translateY(-8px) scaleY(0.82);
+    transform-origin: top;
+  }
+}
+
+.ss-size {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-1) var(--ps-space-4);
+  justify-content: space-between;
+  margin: 0;
+  font-size: var(--ps-text-small);
+  color: var(--ps-ink-soft);
+}
+.ss-size[data-over='true'] {
+  font-weight: 600;
+  color: var(--ps-fail);
+}
+.ss-shortcut {
+  font-family: var(--ps-code);
+  font-size: var(--ps-text-code);
+}
+.ss-action {
+  margin-top: var(--ps-space-2);
+}
+.ss-checking,
+.ss-notice {
+  margin: 0;
+  color: var(--ps-ink-soft);
+}
+
+.ss-blocked {
+  display: grid;
+  gap: var(--ps-space-3);
+  justify-items: start;
+  padding-top: var(--ps-space-3);
+  border-top: 3px solid var(--ps-fail);
+}
+
+.ss-receipt {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-1) var(--ps-space-2);
+  align-items: baseline;
+}
+
+.ss-alarm {
+  padding-top: var(--ps-space-2);
+  border-top: 6px solid var(--ps-fail);
+}
+.ss-alarm .ps-stage-title {
+  color: var(--ps-fail);
+}
+.ss-receipts,
+.ss-unsealed {
+  margin-top: var(--ps-space-5);
+}
+.ss-unsealed-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
