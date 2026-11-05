@@ -23,6 +23,7 @@ const src = import.meta.dirname;
 const custom: Settings = {
   rpcUrl: 'https://my-rpc.example/v1',
   teeUrl: 'https://tee.example',
+  storageUrl: 'https://files.example/bucket',
   registryAddress: `0x${'ab'.repeat(20)}`,
   examId: `0x${'11'.repeat(32)}`,
 };
@@ -48,10 +49,10 @@ const render = (path: string, initial = defaultSettings) =>
 describe('routes', () => {
   it.each([
     ['/', 'Chain checks: not connected'],
-    ['/attestation', 'Fresh attestation: optional'],
-    ['/commitments', 'ExamRegistry: not connected'],
-    ['/unlock', 'Release log: optional'],
-    ['/proof', 'No proof yet'],
+    ['/attestation', 'Fresh token: optional'],
+    ['/commitments', 'Storage manifest: not connected'],
+    ['/unlock', 'Live TEE release: optional'],
+    ['/proof', 'Proof: not connected'],
     ['/settings', 'Sepolia RPC URL'],
   ])('%s shows %s with no sign-in', (path, text) => {
     const html = render(path);
@@ -79,6 +80,7 @@ describe('routes', () => {
     const html = render('/settings');
     expect(html).toContain('TEE URL (optional)');
     expect(html).toContain('fresh attestation and live release progress');
+    expect(html).toContain('Storage URL');
   });
 
   it('lists every route in the navigation', () => {
@@ -130,12 +132,18 @@ describe('runtime settings', () => {
 
   it('validates each field and allows empty', () => {
     expect(validateSettings(custom)).toEqual({});
-    expect(validateSettings({ rpcUrl: '', teeUrl: '', registryAddress: '', examId: '' })).toEqual({});
+    expect(validateSettings({ rpcUrl: '', teeUrl: '', storageUrl: '', registryAddress: '', examId: '' })).toEqual({});
     expect(
       Object.keys(
-        validateSettings({ rpcUrl: 'ftp://x', teeUrl: 'nope', registryAddress: '0x1', examId: '0x2' }),
+        validateSettings({
+          rpcUrl: 'ftp://x',
+          teeUrl: 'nope',
+          storageUrl: 'file:///x',
+          registryAddress: '0x1',
+          examId: '0x2',
+        }),
       ).sort(),
-    ).toEqual(['examId', 'registryAddress', 'rpcUrl', 'teeUrl']);
+    ).toEqual(['examId', 'registryAddress', 'rpcUrl', 'storageUrl', 'teeUrl']);
   });
 
   it('calls the endpoints the viewer chose', async () => {
@@ -153,11 +161,8 @@ describe('runtime settings', () => {
   });
 
   it('connects to nothing until settings exist', () => {
-    expect(connect({ rpcUrl: '', teeUrl: '', registryAddress: '', examId: '' })).toEqual({
-      tee: null,
-      registry: null,
-      examId: null,
-    });
+    const nothing = connect({ rpcUrl: '', teeUrl: '', storageUrl: '', registryAddress: '', examId: '' });
+    expect([nothing.tee, nothing.registry, nothing.examId, nothing.storage]).toEqual([null, null, null, null]);
   });
 });
 
@@ -174,7 +179,6 @@ describe('independent hosting', () => {
     const names = Object.keys(manifest.dependencies);
     expect(names).not.toContain('@paperseal/keys');
     expect(names).not.toContain('@paperseal/web');
-    expect(names).not.toContain('@paperseal/crypto');
     expect(sources).not.toMatch(/@paperseal\/keys|apps\/web|navigator\.credentials/);
   });
 

@@ -26,12 +26,19 @@
     "hpke": {
       "kem": "DHKEM(P-256, HKDF-SHA256)",
       "kdf": "HKDF-SHA256",
-      "aead": "AES-256-GCM"
+      "aead": "AES-256-GCM",
+      "info": {
+        "question": "paperseal/v1/hpke-question",
+        "share": "paperseal/v1/hpke-share",
+        "release": "paperseal/v1/hpke-release",
+        "keyPriv": "paperseal/v1/hpke-key-priv"
+      }
     }
   },
   "webauthn": {
     "prfSalt": "paperseal/v1/prf-salt",
-    "userVerification": "required"
+    "userVerification": "required",
+    "requireHardwareAttestation": false
   },
   "padding": {
     "questionBytes": 4096,
@@ -42,10 +49,12 @@
     "audience": "paperseal",
     "swname": "CONFIDENTIAL_SPACE",
     "dbgstat": "disabled-since-boot",
-    "supportAttribute": "STABLE"
+    "supportAttribute": "STABLE",
+    "hwModels": ["GCP_AMD_SEV", "GCP_AMD_SEV_ES", "GCP_INTEL_TDX"]
   },
   "domainTags": {
     "attestationNonce": "paperseal/v1/attestation-nonce",
+    "instanceKey": "paperseal/v1/instance-key",
     "registration": "paperseal/v1/registration",
     "criteria": "paperseal/v1/criteria",
     "approvedList": "paperseal/v1/approved-list",

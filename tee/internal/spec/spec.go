@@ -42,25 +42,34 @@ type Constants struct {
 			KEM  string `json:"kem"`
 			KDF  string `json:"kdf"`
 			AEAD string `json:"aead"`
+			Info struct {
+				Question string `json:"question"`
+				Share    string `json:"share"`
+				Release  string `json:"release"`
+				KeyPriv  string `json:"keyPriv"`
+			} `json:"info"`
 		} `json:"hpke"`
 	} `json:"crypto"`
 	WebAuthn struct {
-		PRFSalt          string `json:"prfSalt"`
-		UserVerification string `json:"userVerification"`
+		PRFSalt                    string `json:"prfSalt"`
+		UserVerification           string `json:"userVerification"`
+		RequireHardwareAttestation bool   `json:"requireHardwareAttestation"`
 	} `json:"webauthn"`
 	Padding struct {
 		QuestionBytes int `json:"questionBytes"`
 		PaperBytes    int `json:"paperBytes"`
 	} `json:"padding"`
 	Attestation struct {
-		Issuer           string `json:"issuer"`
-		Audience         string `json:"audience"`
-		SWName           string `json:"swname"`
-		DbgStat          string `json:"dbgstat"`
-		SupportAttribute string `json:"supportAttribute"`
+		Issuer           string   `json:"issuer"`
+		Audience         string   `json:"audience"`
+		SWName           string   `json:"swname"`
+		DbgStat          string   `json:"dbgstat"`
+		SupportAttribute string   `json:"supportAttribute"`
+		HWModels         []string `json:"hwModels"`
 	} `json:"attestation"`
 	DomainTags struct {
 		AttestationNonce   string `json:"attestationNonce"`
+		InstanceKey        string `json:"instanceKey"`
 		Registration       string `json:"registration"`
 		Criteria           string `json:"criteria"`
 		ApprovedList       string `json:"approvedList"`

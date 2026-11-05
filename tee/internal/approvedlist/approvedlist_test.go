@@ -2,15 +2,12 @@ package approvedlist
 
 import (
 	"bytes"
-	"context"
 	"crypto/ecdh"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"strings"
 	"testing"
-
-	"paperseal/tee/internal/notimpl"
 )
 
 // key returns scalar times the P-256 base point.
@@ -378,9 +375,50 @@ func TestOtherRolesAreNotCounted(t *testing.T) {
 	}
 }
 
-func TestCheckRegisteredIsNotImplemented(t *testing.T) {
-	if err := CheckRegistered(context.Background(), fullList(t)); !notimpl.Is(err) {
-		t.Fatalf("got %v", err)
+type registered map[string]bool
+
+func regKey(passkey, derived []byte, owner string) string {
+	return string(passkey) + "|" + string(derived) + "|" + owner
+}
+
+func (r registered) Verified(passkey, derived []byte, owner string) bool {
+	return r[regKey(passkey, derived, owner)]
+}
+
+func TestCheckRegistered(t *testing.T) {
+	list := fullList(t)
+	reg := registered{}
+	for _, e := range list {
+		reg[regKey(e.PasskeyPublicKey, e.DerivedPublicKey, e.Owner)] = true
+	}
+	if err := CheckRegistered(list, reg); err != nil {
+		t.Fatal(err)
+	}
+	// Each field of an entry must match its registration.
+	edits := map[string]func(e *Entry){
+		"owner":   func(e *Entry) { e.Owner = "someone else" },
+		"passkey": func(e *Entry) { e.PasskeyPublicKey = key(t, 250) },
+		"derived": func(e *Entry) { e.DerivedPublicKey = key(t, 251) },
+	}
+	for name, edit := range edits {
+		l := fullList(t)
+		edit(&l[1])
+		if err := CheckRegistered(l, reg); !errors.Is(err, ErrNotRegistered) {
+			t.Errorf("%s: got %v", name, err)
+		}
+	}
+	// A setter listed with a derived key was registered without one.
+	l := fullList(t)
+	for i := range l {
+		if l[i].Role == RoleSetter {
+			l[i].DerivedPublicKey = key(t, 252)
+		}
+	}
+	if err := CheckRegistered(l, reg); !errors.Is(err, ErrNotRegistered) {
+		t.Errorf("setter with a derived key: got %v", err)
+	}
+	if err := CheckRegistered(list, registered{}); !errors.Is(err, ErrNotRegistered) {
+		t.Errorf("nothing registered: got %v", err)
 	}
 }
 

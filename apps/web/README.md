@@ -11,3 +11,11 @@ The release flow in `src/release` is shared by `/centre` and `/keyholder`, so it
 Tests: `pnpm test` runs everything except the anvil test. `pnpm test:integration` starts `anvil --chain-id 11155111`, deploys `contracts/out/ExamRegistry.sol/ExamRegistry.json` (run `forge build` in `contracts/` first) and publishes through `packages/chain`. It uses anvil's public dev key, only in `src/integration/anvil.integration.ts`.
 
 To try it by hand against anvil, deploy with `BOARD_ADDRESS=<anvil account 0> forge script script/Deploy.s.sol --broadcast --rpc-url http://127.0.0.1:8545` from `contracts/`, add anvil's account to a wallet on a chain with ID 11155111 and RPC `http://127.0.0.1:8545`, and run the app with `VITE_RPC_URL=http://127.0.0.1:8545 VITE_REGISTRY_ADDRESS=<deployed address> pnpm dev`. For Sepolia, use the board's deployed `ExamRegistry` address and a Sepolia RPC URL.
+
+## Key holder and centre
+
+`VITE_STORAGE_URL` is the public storage base (files are read from `<base>/<examId>/<name>`), and `VITE_TEE_STORAGE_BUCKET` is the only environment variable the attestation check allows in the token. The release flow checks the TEE with `checkToken` and seals the share to `encryptionPublicKey` only when `trusted` is true. The share is HPKE-encrypted to its holder alone, so there is no time seal on it: the file is checked against the manifest, and the manifest against the Build. Centres download and check `paper.bin`, `key-pub.tlock` and the manifest ahead of time, and at unlock fetch K_pub from drand, open `key-priv/<derivedPublicKey>.bin`, and show the paper only if its salted hash equals the Build's. Both roles take their passkey from `shared/Register.tsx` and their derived key from the on-chain approved list.
+
+## Board: onboarding and outbox
+
+The TEE has no route that lists registrations, so `/board/onboarding` takes registration records pasted by the board, composes the list with `encodeApprovedList` after `checkApprovedList`, and posts it with `postApprovedList` from the wallet. `/board/outbox` verifies the Build's TEE signature against an attested instance key before `postBuild`.

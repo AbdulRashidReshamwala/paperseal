@@ -57,7 +57,7 @@ The README names separate setter and centre apps. One app is simpler to host and
 
 ## TEE HTTP API
 
-The TEE has no long-term state, and clients treat it as untrusted until the attestation check passes. Request and response bodies are not specified yet. Until they are in `spec/api.md`, the types in `packages/tee-client` are provisional and every route returns 501.
+The TEE has no long-term state, and clients treat it as untrusted until the attestation check passes. It runs each stage by itself, so it has no board login. Request and response bodies are in `spec/api.md`.
 
 | Route | Purpose |
 | --- | --- |
@@ -65,10 +65,9 @@ The TEE has no long-term state, and clients treat it as untrusted until the atte
 | `GET /v1/status` | Current stage and release progress |
 | `POST /v1/register/challenge` | Fresh registration challenge |
 | `POST /v1/register` | Passkey registration with attestation |
-| `POST /v1/onboard/list` | Read and check the approved list from chain |
+| `GET /v1/registrations` | Registrations for the board to build the approved list |
+| `POST /v1/questions/challenge` | Fresh question submission challenge |
 | `POST /v1/questions` | Encrypted, padded question upload |
-| `POST /v1/lock` | Run the lock checks |
-| `POST /v1/build` | Run Build, Split and Distribute |
 | `GET /v1/outbox` | TEE-signed messages waiting for the board to post |
 | `POST /v1/release/challenge` | Fresh share release challenge |
 | `POST /v1/release/share` | Encrypted share and signature |
@@ -91,25 +90,16 @@ The README leaves these open. They are defaults for the build and can change.
 
 ## Open Questions
 
-- How does the TEE authenticate board admin calls such as `/v1/lock` and `/v1/build`? The default is a signature from the board's Ethereum address, checked against `board` in `ExamRegistry`, because the board key is gone.
 - Which approved authenticator AAGUIDs does the attestation check accept?
 - Where are published artefacts found? The verifier needs a PKI token per instance key, and the TEE keeps no state to serve them later. The default is to list them in a storage manifest.
 - Who hosts the official copy of `apps/verifier`? The default is a static host outside the board's control, with a published build digest so people can compare it.
 - Which RPC operator does the exam use, and how is its API key handled? Attested settings are public, so a key in `rpcHost` or the startup arguments would be exposed.
 
-## Spec Gaps Before Implementation
+## Spec Gaps
 
-Found while scaffolding. Each one blocks real implementation, because Go and TypeScript must agree on the answer.
-
-- Request and response bodies for all 12 TEE routes, including setter sign-in and board admin authentication
-- Preimages for `storageManifestHash` and `entriesHash`
-- Width of `challenge`, and whether `paper` means the padded form
-- How passkey signatures map onto WebAuthn challenges
-- One TEE instance key or two. HPKE and ECDSA currently share one, and `eat_nonce` binds only one
-- HPKE `info` and AAD, ciphertext framing, AES-GCM framing and AAD, and key derivation from PRF output
-- Padding format, and whether the padded sizes apply before or after encryption
-- How the settings are encoded as startup arguments, which the attestation check compares, plus approved `hwmodel` values and expected `env`
-- TLS for the TEE, which serves plain HTTP on port 8080, so HTTPS-hosted apps can't call it yet, and CORS rules for POST routes
+- Expected `env` in a real Google token
+- Where startup arguments appear in a real Google token
+- Size limits for the ABI decoders
 
 ## Not Set Up Yet
 

@@ -1,20 +1,49 @@
 import type { ExamRegistry } from '@paperseal/chain';
-import { decodeCriteria, fromHex, selectedCount, type Criteria, type Hex } from '@paperseal/protocol';
-import { Badge, Connected, EmptyState, Mono, Row, Rows, Screen } from '@paperseal/ui';
+import {
+  approvedListHash,
+  decodeApprovedList,
+  decodeCriteria,
+  fromHex,
+  selectedCount,
+  toHex,
+  type ApprovedListEntry,
+  type Criteria,
+  type Hex,
+} from '@paperseal/protocol';
+import { Badge, Connected, Mono, Row, Rows, Screen } from '@paperseal/ui';
 
 import { Area, type AreaScreen } from '../../shared/Area';
 import { useExamLoader } from '../../shared/currentExam';
-import { fromTee, notConnectedToTee } from '../../shared/tee';
 import { TeeStatus } from '../../shared/TeeStatus';
 import { Blueprint } from './Blueprint';
+import { EntryRows, Onboarding } from './Onboarding';
+import { Outbox } from './OutboxScreen';
 import { BoardFormProvider, useReader } from './BoardForm';
 import { formatClock } from './form';
 import { Publish } from './Publish';
 import { Schedule } from './Schedule';
 import type { PublishEnvironment } from './publishFlow';
 
-const loadOutbox = fromTee((tee) => tee.outbox());
-const readApprovedList = (registry: ExamRegistry, id: Hex) => registry.getApprovedList(id);
+/** The on-chain list: its hash, and the posted bytes decoded and checked against that hash. */
+async function readApprovedList(registry: ExamRegistry, id: Hex) {
+  const list = await registry.getApprovedList(id);
+  if (!list) return null;
+  const encoded = await registry.getApprovedListEntries(id);
+  let entries: ApprovedListEntry[] = [];
+  let problem: string | null = null;
+  if (!encoded) {
+    problem = 'The posted entries could not be read from the chain.';
+  } else if (toHex(approvedListHash(fromHex(id), fromHex(encoded))) !== list.listHash.toLowerCase()) {
+    problem = 'The posted entries do not hash to the list hash stored on-chain.';
+  } else {
+    try {
+      entries = decodeApprovedList(fromHex(encoded));
+    } catch (error) {
+      problem = `The posted entries are malformed: ${(error as Error).message}`;
+    }
+  }
+  return { list, entries, problem };
+}
 
 /** The exam and its full criteria, both from ExamRegistry. */
 async function readExam(registry: ExamRegistry, id: Hex) {
@@ -86,59 +115,27 @@ function Overview() {
   );
 }
 
-function Onboarding() {
-  return (
-    <Screen title="Onboarding" lede="Key holders and approved centres registered through the TEE.">
-      <TeeStatus />
-      <EmptyState title="No registrations">
-        Centres and neutral parties register their own security keys in their areas.
-      </EmptyState>
-    </Screen>
-  );
-}
-
 function ApprovedList() {
   const load = useExamLoader(readApprovedList, useReader());
   return (
     <Screen title="Approved list" lede="The final list, signed by the board and by the TEE.">
       <Connected title="On-chain list" notConnected={notConnected} load={load}>
-        {(list) =>
-          list ? (
-            <Rows>
-              <Row label="List hash">
-                <Mono>{list.listHash}</Mono>
-              </Row>
-            </Rows>
+        {(found) =>
+          found ? (
+            <>
+              <Rows>
+                <Row label="List hash">
+                  <Mono>{found.list.listHash}</Mono>
+                </Row>
+                <Row label="Entries">{found.entries.length}</Row>
+              </Rows>
+              {found.problem ? <Badge tone="bad">{found.problem}</Badge> : <EntryRows entries={found.entries} />}
+            </>
           ) : (
             'No list has been posted.'
           )
         }
       </Connected>
-    </Screen>
-  );
-}
-
-function Outbox() {
-  return (
-    <Screen title="Outbox" lede="TEE-signed messages waiting for the board wallet to post.">
-      <Connected title="Outbox" notConnected={notConnectedToTee} load={loadOutbox}>
-        {({ messages }) =>
-          messages.length === 0 ? (
-            'Nothing waiting to post.'
-          ) : (
-            <Rows>
-              {messages.map((message) => (
-                <Row key={message.kind} label={message.kind}>
-                  <Badge tone="warn">Waiting</Badge>
-                </Row>
-              ))}
-            </Rows>
-          )
-        }
-      </Connected>
-      <EmptyState title="Posting">
-        Wallet connection is not built, so nothing can be sent to ExamRegistry from here yet.
-      </EmptyState>
     </Screen>
   );
 }

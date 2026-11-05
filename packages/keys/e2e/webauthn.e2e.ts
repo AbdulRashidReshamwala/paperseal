@@ -1,7 +1,7 @@
 import { createPublicKey, createHash, verify } from 'node:crypto';
 
-import { hpkeSeal } from '@paperseal/crypto';
-import { utf8ToBytes, webauthn } from '@paperseal/protocol';
+import { hpkeContext, hpkeSeal } from '@paperseal/crypto';
+import { hashMessage, utf8ToBytes, webauthn } from '@paperseal/protocol';
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Page } from 'playwright-core';
 import { createServer, type ViteDevServer } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -85,6 +85,11 @@ async function openSession(
   return { context: ctx, page, cdp, authenticatorId, ps };
 }
 
+/** Reads a 0x-prefixed wire field, the form of the POST /v1/register body. */
+const wire = (hex: string) => fromHex(hex.slice(2));
+const EXAM_ID = new Uint8Array(32).fill(0xe1);
+const sealFor = (key: Uint8Array, plaintext: Uint8Array, purpose: 'share' | 'keyPriv' = 'share') =>
+  hpkeSeal(key, plaintext, hpkeContext(purpose, EXAM_ID));
 const USER = { id: toHex(utf8ToBytes('holder-1')), name: 'holder-1@example.test' };
 const log = (finding: string, data: unknown) => console.info(`FINDING ${finding}: ${JSON.stringify(data)}`);
 
@@ -161,8 +166,8 @@ describe('createWebAuthnKeys against Chrome virtual authenticator', () => {
 
   it('decryptShare opens a value sealed with hpkeSeal to that key', async () => {
     const share = crypto.getRandomValues(new Uint8Array(33));
-    const sealed = await hpkeSeal(fromHex(publicKey), share);
-    const opened = ok(await session.ps('decryptShare', credentialId, toHex(sealed)));
+    const sealed = await sealFor(fromHex(publicKey), share);
+    const opened = ok(await session.ps('decryptShare', credentialId, toHex(EXAM_ID), toHex(sealed)));
     expect(opened).toBe(toHex(share));
   });
 
@@ -171,8 +176,8 @@ describe('createWebAuthnKeys against Chrome virtual authenticator', () => {
       const pair = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
       return Array.from(new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey)));
     });
-    const sealed = await hpkeSeal(Uint8Array.from(other), utf8ToBytes('not for you'));
-    const result = await session.ps('decryptShare', credentialId, toHex(sealed));
+    const sealed = await sealFor(Uint8Array.from(other), utf8ToBytes('not for you'));
+    const result = await session.ps('decryptShare', credentialId, toHex(EXAM_ID), toHex(sealed));
     expect(result.ok).toBe(false);
   });
 
@@ -204,10 +209,10 @@ describe('createWebAuthnKeys against Chrome virtual authenticator', () => {
 
   it('releaseShare does one request: the share opens and the signature verifies', async () => {
     const share = crypto.getRandomValues(new Uint8Array(33));
-    const sealed = await hpkeSeal(fromHex(publicKey), share);
+    const sealed = await sealFor(fromHex(publicKey), share);
     const message = utf8ToBytes('exam-1|tee-challenge');
     await session.ps('clearRequests');
-    const released = ok(await session.ps('releaseShare', credentialId, toHex(message), toHex(sealed)));
+    const released = ok(await session.ps('releaseShare', credentialId, toHex(EXAM_ID), toHex(message), toHex(sealed)));
 
     const requests = await session.ps('requests');
     expect(requests).toHaveLength(1);
@@ -225,6 +230,84 @@ describe('createWebAuthnKeys against Chrome virtual authenticator', () => {
     const signedData = Buffer.concat([fromHex(released.authenticatorData), createHash('sha256').update(fromHex(released.clientDataJSON)).digest()]);
     expect(verify('sha256', signedData, key, fromHex(released.signature))).toBe(true);
     console.info(`FINDING releaseShare signature: ${released.signature}`);
+  });
+});
+
+/** Verifies an ES256 WebAuthn signature in DER form under a 65-byte P-256 point. */
+function verifyPasskey(point: Uint8Array, authenticatorData: string, clientDataJSON: string, signature: string): boolean {
+  const key = createPublicKey({
+    key: { kty: 'EC', crv: 'P-256', x: Buffer.from(point.slice(1, 33)).toString('base64url'), y: Buffer.from(point.slice(33)).toString('base64url') },
+    format: 'jwk',
+  });
+  const signedData = Buffer.concat([fromHex(authenticatorData), createHash('sha256').update(fromHex(clientDataJSON)).digest()]);
+  return verify('sha256', signedData, key, fromHex(signature));
+}
+
+describe('register and keyPriv', () => {
+  const challenge = new Uint8Array(32).fill(0x42);
+
+  it('registers a key holder: the derived key matches getPublicKey and the passkey signs the registration message', async () => {
+    const session = await openSession(browser);
+    const { credentialId, request } = ok(await session.ps('register', 'neutral-01', 'holder', toHex(challenge)));
+    const requests = await session.ps('requests');
+    log('holder register ceremonies', requests.map((r) => r.kind));
+    log('PRF at creation answered by Chrome virtual authenticator', requests.filter((r) => r.kind === 'get').length === 1);
+
+    expect(Object.keys(request).sort()).toEqual(
+      ['attestationObject', 'authenticatorData', 'challenge', 'clientDataJSON', 'derivedPublicKey', 'owner', 'passkeyPublicKey', 'signature'],
+    );
+    expect(request.owner).toBe('neutral-01');
+    expect(request.challenge).toBe(`0x${toHex(challenge)}`);
+    expect(wire(request.derivedPublicKey)).toHaveLength(65);
+    expect(wire(request.attestationObject).length).toBeGreaterThan(0);
+    // Same key as the one a later get derives, so the registered key can open a share.
+    expect(request.derivedPublicKey).toBe(`0x${ok(await session.ps('getPublicKey', credentialId))}`);
+
+    const message = hashMessage('registration', {
+      derivedPublicKey: wire(request.derivedPublicKey),
+      holderId: utf8ToBytes('neutral-01'),
+      challenge,
+    });
+    const clientData = JSON.parse(Buffer.from(request.clientDataJSON.slice(2), 'hex').toString('utf8')) as { challenge: string; type: string };
+    expect(Buffer.from(clientData.challenge, 'base64url').toString('hex')).toBe(toHex(message));
+    expect(clientData.type).toBe('webauthn.get');
+    expect(verifyPasskey(wire(request.passkeyPublicKey), request.authenticatorData.slice(2), request.clientDataJSON.slice(2), request.signature.slice(2))).toBe(true);
+    for (const r of requests) expect(r.userVerification).toBe('required');
+    await session.context.close();
+  });
+
+  it('registers a setter on an authenticator without PRF', async () => {
+    const session = await openSession(browser);
+    // A second virtual authenticator replaces the PRF-capable one, so only it can answer.
+    await session.cdp.send('WebAuthn.removeVirtualAuthenticator', { authenticatorId: session.authenticatorId });
+    await session.cdp.send('WebAuthn.addVirtualAuthenticator', {
+      options: {
+        protocol: 'ctap2', ctap2Version: 'ctap2_1', transport: 'usb', hasResidentKey: true, hasUserVerification: true,
+        hasPrf: false, automaticPresenceSimulation: true, ...DEVICE_BOUND,
+      },
+    });
+    const holder = await session.ps('register', 'x', 'holder', toHex(challenge));
+    expect(holder).toMatchObject({ ok: false, code: 'prf_unavailable' });
+
+    const { request } = ok(await session.ps('register', 'setter-1', 'setter', toHex(challenge)));
+    expect(request.derivedPublicKey).toBe('0x');
+    const message = hashMessage('registration', { derivedPublicKey: new Uint8Array(), holderId: utf8ToBytes('setter-1'), challenge });
+    const clientData = JSON.parse(Buffer.from(request.clientDataJSON.slice(2), 'hex').toString('utf8')) as { challenge: string };
+    expect(Buffer.from(clientData.challenge, 'base64url').toString('hex')).toBe(toHex(message));
+    expect(verifyPasskey(wire(request.passkeyPublicKey), request.authenticatorData.slice(2), request.clientDataJSON.slice(2), request.signature.slice(2))).toBe(true);
+    await session.context.close();
+  });
+
+  it('openKeyPriv opens a centre K_priv sealed with the keyPriv purpose, and nothing else', async () => {
+    const session = await openSession(browser);
+    const { credentialId, request } = ok(await session.ps('register', 'centre-01', 'holder', toHex(challenge)));
+    const kPriv = crypto.getRandomValues(new Uint8Array(32));
+    const sealed = await sealFor(wire(request.derivedPublicKey), kPriv, 'keyPriv');
+    expect(ok(await session.ps('openKeyPriv', credentialId, toHex(EXAM_ID), toHex(sealed)))).toBe(toHex(kPriv));
+    expect((await session.ps('openKeyPriv', credentialId, toHex(new Uint8Array(32)), toHex(sealed))).ok).toBe(false);
+    const share = await sealFor(wire(request.derivedPublicKey), kPriv, 'share');
+    expect((await session.ps('openKeyPriv', credentialId, toHex(EXAM_ID), toHex(share))).ok).toBe(false);
+    await session.context.close();
   });
 });
 

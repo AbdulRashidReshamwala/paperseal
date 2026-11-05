@@ -49,7 +49,8 @@
     "audience": "paperseal",
     "swname": "CONFIDENTIAL_SPACE",
     "dbgstat": "disabled-since-boot",
-    "supportAttribute": "STABLE"
+    "supportAttribute": "STABLE",
+    "hwModels": ["GCP_AMD_SEV", "GCP_AMD_SEV_ES", "GCP_INTEL_TDX"]
   },
   "domainTags": {
     "attestationNonce": "paperseal/v1/attestation-nonce",

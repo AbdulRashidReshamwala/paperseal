@@ -16,6 +16,9 @@ RUN go build -trimpath -buildvcs=false -ldflags "-s -w -buildid=" -o /out/tee ./
 FROM gcr.io/distroless/static-debian12@sha256:6d635b323e6ab633016668144d38e368e2894bd824500369151573225078ee03
 ARG SOURCE_DATE_EPOCH
 LABEL tee.launch_policy.allow_cmd_override="true"
+# The TLS roots for chain reads. They come from the pinned build image, so they
+# are part of the attested image, and the TEE loads only this file.
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/paperseal/roots.pem
 COPY --from=build /out/tee /tee
 EXPOSE 8080
 # No CMD: the exam settings arrive through tee-cmd, which overrides CMD.

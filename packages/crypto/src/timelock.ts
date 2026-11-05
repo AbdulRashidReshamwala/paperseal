@@ -1,10 +1,8 @@
 import { drand } from '@paperseal/protocol';
 import {
-  Buffer,
   HttpCachingChain,
   HttpChainClient,
   timelockDecrypt as tlockDecrypt,
-  timelockEncrypt as tlockEncrypt,
   type ChainClient,
 } from 'tlock-js';
 
@@ -23,19 +21,13 @@ export function quicknetClient(host: string = DRAND_HOST): ChainClient {
   return new HttpChainClient(chain, options);
 }
 
-/** Opens an age-armoured tlock ciphertext. Fails until the round has been published. */
+/**
+ * Opens an age-armoured tlock ciphertext. Fails until the round has been published.
+ * Nothing in the browser seals: only the TEE does, so there is no encrypt here.
+ */
 export async function timelockDecrypt(
   ciphertext: string,
   client: ChainClient = quicknetClient(),
 ): Promise<Uint8Array> {
   return new Uint8Array(await tlockDecrypt(ciphertext, client));
-}
-
-/** The TEE does the sealing in production. This exists for tests and tooling. */
-export function timelockEncrypt(
-  round: number,
-  plaintext: Uint8Array,
-  client: ChainClient = quicknetClient(),
-): Promise<string> {
-  return tlockEncrypt(round, Buffer.from(plaintext), client);
 }

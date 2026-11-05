@@ -1,6 +1,7 @@
-// Package attestation binds this instance to its code. The eat_nonce encoding
-// is real. Fetching a Google token and holding the instance key are not done
-// yet, and their stubs return a not-implemented error.
+// Package attestation binds this instance to its code. It holds the instance
+// keys, asks the Confidential Space launcher for Google-signed tokens, and
+// verifies published tokens. Outside Confidential Space there is no launcher, so
+// the instance is unattested and no token is ever made up.
 package attestation
 
 import (
@@ -8,7 +9,6 @@ import (
 	"encoding/hex"
 
 	"paperseal/tee/internal/hashing"
-	"paperseal/tee/internal/notimpl"
 )
 
 // Nonce returns eat_nonce: the lowercase hex, with no 0x prefix, of the tagged
@@ -46,24 +46,5 @@ type TokenSource interface {
 // Signer is the instance key. It signs outputs as 64-byte r || s with low s.
 type Signer interface {
 	PublicKey() []byte
-	Sign(ctx context.Context, m hashing.Message) ([64]byte, error)
-}
-
-// Launcher is the stub TokenSource.
-type Launcher struct{}
-
-// Token is not implemented.
-func (Launcher) Token(context.Context, TokenType, string, string) (Token, error) {
-	return Token{}, notimpl.New("attestation.Launcher.Token")
-}
-
-// InstanceKey is the stub Signer. It holds no key.
-type InstanceKey struct{}
-
-// PublicKey returns nil, because no key exists yet.
-func (InstanceKey) PublicKey() []byte { return nil }
-
-// Sign is not implemented.
-func (InstanceKey) Sign(context.Context, hashing.Message) ([64]byte, error) {
-	return [64]byte{}, notimpl.New("attestation.InstanceKey.Sign")
+	Sign(m hashing.Message) ([64]byte, error)
 }

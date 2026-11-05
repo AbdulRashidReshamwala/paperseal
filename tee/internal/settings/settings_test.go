@@ -257,3 +257,15 @@ func TestParseRequiresTheExactList(t *testing.T) {
 func clone(s []string) []string { return append([]string(nil), s...) }
 
 func fmtUint(n uint64) string { return strconv.FormatUint(n, 10) }
+
+func TestArgsRoundTrip(t *testing.T) {
+	want := args(valid())
+	e, err := Parse(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := e.Args()
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("Args() = %v, want %v", got, want)
+	}
+}

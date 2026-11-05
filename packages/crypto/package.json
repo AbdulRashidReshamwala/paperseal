@@ -9,7 +9,8 @@
   "scripts": {
     "test": "vitest run",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:live": "vitest run --config vitest.live.config.mjs"
   },
   "dependencies": {
     "@paperseal/protocol": "workspace:*",

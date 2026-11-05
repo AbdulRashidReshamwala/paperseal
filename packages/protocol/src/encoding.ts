@@ -29,6 +29,10 @@ export const messageSchemas = {
     ['instancePublicKey', 'bytes', 'publicKey'],
     ['examId', 'bytes32'],
   ],
+  instanceKey: [
+    ['examId', 'bytes32'],
+    ['encryptionPublicKey', 'bytes', 'publicKey'],
+  ],
   registration: [
     ['derivedPublicKey', 'bytes', 'optionalPublicKey'],
     ['holderId', 'bytes'],

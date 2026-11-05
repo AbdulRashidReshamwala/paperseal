@@ -69,8 +69,15 @@ const api = {
       };
     }),
   getPublicKey: (credentialIdHex: string) => attempt(async () => toHex(await keys.getPublicKey(fromHex(credentialIdHex)))),
-  decryptShare: (credentialIdHex: string, sealedHex: string) =>
-    attempt(async () => toHex(await keys.decryptShare(fromHex(credentialIdHex), fromHex(sealedHex)))),
+  decryptShare: (credentialIdHex: string, examIdHex: string, sealedHex: string) =>
+    attempt(async () => toHex(await keys.decryptShare(fromHex(credentialIdHex), fromHex(examIdHex), fromHex(sealedHex)))),
+  openKeyPriv: (credentialIdHex: string, examIdHex: string, sealedHex: string) =>
+    attempt(async () => toHex(await keys.openKeyPriv(fromHex(credentialIdHex), fromHex(examIdHex), fromHex(sealedHex)))),
+  register: (owner: string, role: 'holder' | 'setter', challengeHex: string) =>
+    attempt(async () => {
+      const r = await keys.register({ owner, role, challenge: fromHex(challengeHex) });
+      return { credentialId: toHex(r.credentialId), request: r.request };
+    }),
   sign: (credentialIdHex: string, messageHex: string) =>
     attempt(async () => {
       const s = await keys.sign(fromHex(credentialIdHex), fromHex(messageHex));
@@ -81,9 +88,9 @@ const api = {
         flags: readBackupFlags(s.authenticatorData),
       };
     }),
-  releaseShare: (credentialIdHex: string, messageHex: string, sealedHex: string) =>
+  releaseShare: (credentialIdHex: string, examIdHex: string, messageHex: string, sealedHex: string) =>
     attempt(async () => {
-      const r = await keys.releaseShare(fromHex(credentialIdHex), fromHex(messageHex), fromHex(sealedHex));
+      const r = await keys.releaseShare(fromHex(credentialIdHex), fromHex(examIdHex), fromHex(messageHex), fromHex(sealedHex));
       return {
         share: toHex(r.share),
         signature: toHex(r.signature.signature),

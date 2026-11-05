@@ -3,14 +3,12 @@ import type { ApiErrorBody } from '@paperseal/protocol';
 import type {
   AttestationResponse,
   ChallengeResponse,
-  OnboardListRequest,
-  OnboardListResponse,
+  EmptyResponse,
   OutboxResponse,
   QuestionReceipt,
   QuestionRequest,
-  RegisterChallengeRequest,
   RegisterRequest,
-  ReleaseChallengeRequest,
+  RegistrationsResponse,
   ReleaseLogResponse,
   ReleaseShareRequest,
   StatusResponse,
@@ -64,20 +62,18 @@ export function createTeeClient(options: TeeClientOptions) {
     return parsed as T;
   }
 
+  // The eleven routes of "TEE API" in spec/api.md.
   return {
     attestation: () => call<AttestationResponse>('GET', '/v1/attestation'),
     status: () => call<StatusResponse>('GET', '/v1/status'),
-    registerChallenge: (body: RegisterChallengeRequest) =>
-      call<ChallengeResponse>('POST', '/v1/register/challenge', body),
-    register: (body: RegisterRequest) => call<unknown>('POST', '/v1/register', body),
-    onboardList: (body: OnboardListRequest) => call<OnboardListResponse>('POST', '/v1/onboard/list', body),
+    registerChallenge: () => call<ChallengeResponse>('POST', '/v1/register/challenge', {}),
+    registrations: () => call<RegistrationsResponse>('GET', '/v1/registrations'),
+    register: (body: RegisterRequest) => call<EmptyResponse>('POST', '/v1/register', body),
+    questionChallenge: () => call<ChallengeResponse>('POST', '/v1/questions/challenge', {}),
     question: (body: QuestionRequest) => call<QuestionReceipt>('POST', '/v1/questions', body),
-    lock: () => call<unknown>('POST', '/v1/lock', {}),
-    build: () => call<unknown>('POST', '/v1/build', {}),
     outbox: () => call<OutboxResponse>('GET', '/v1/outbox'),
-    releaseChallenge: (body: ReleaseChallengeRequest) =>
-      call<ChallengeResponse>('POST', '/v1/release/challenge', body),
-    releaseShare: (body: ReleaseShareRequest) => call<unknown>('POST', '/v1/release/share', body),
+    releaseChallenge: () => call<ChallengeResponse>('POST', '/v1/release/challenge', {}),
+    releaseShare: (body: ReleaseShareRequest) => call<EmptyResponse>('POST', '/v1/release/share', body),
     releaseLog: () => call<ReleaseLogResponse>('GET', '/v1/release/log'),
   };
 }

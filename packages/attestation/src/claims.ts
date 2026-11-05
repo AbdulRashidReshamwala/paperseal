@@ -29,6 +29,9 @@ export function settingsBindingError(settings: ExamSettings, registry: Hex): str
 export interface ExpectedClaims {
   /** The instance key the TEE presented, and the exam it claims to serve. */
   instancePublicKey: Uint8Array;
+  /** The key the TEE says opens HPKE messages, and its signature over the `instanceKey` message. */
+  encryptionPublicKey: Uint8Array;
+  instanceKeySignature: Uint8Array;
   examId: Uint8Array;
   /** `imageDigest` from ExamRegistry: raw bytes32, without `sha256:`. */
   imageDigest: Hex;
@@ -49,6 +52,8 @@ export interface CheckOptions {
   now: number;
   /** Tolerated clock difference for live checks. */
   skewSeconds?: number;
+  /** A DER root to trust in place of Google's pinned one. Tests only. */
+  trustedRoot?: Uint8Array;
 }
 
 export const claimNames = [

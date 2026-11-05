@@ -39,8 +39,8 @@ func TestDomainTagsAreDistinctAndPrefixed(t *testing.T) {
 	if err := json.Unmarshal(b, &tags); err != nil {
 		t.Fatal(err)
 	}
-	if len(tags) != 11 {
-		t.Fatalf("got %d tags, want 11", len(tags))
+	if len(tags) != 12 {
+		t.Fatalf("got %d tags, want 12", len(tags))
 	}
 	seen := map[string]bool{}
 	for name, tag := range tags {

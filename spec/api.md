@@ -173,6 +173,8 @@ A challenge is 32 random bytes, single use, and expires after 5 minutes.
 
 Files live under `<examId>/` in a public bucket, named by the `STORAGE_BUCKET` environment variable. `STORAGE_DIR` writes to a local folder instead, for local runs. Apps read from their configured base URL, and hashes protect the content.
 
+In file names, `<derivedPublicKey>` is the key's lowercase hex with its `0x` prefix.
+
 Written before the Build:
 
 | File | Content |
@@ -192,8 +194,9 @@ Written at unlock, each covered by the signed release log:
 | `key-priv/<derivedPublicKey>.bin` | One HPKE `keyPriv` per approved centre (roles 3 and 4) |
 | `key-priv.tlock` | `K_priv` timelocked to `endRound` |
 | `release-log.json` | The `GET /v1/release/log` body |
+| `release-token.jwt` | The PKI attestation token of the instance that ran Unlock |
 
-`entriesHash` is the plain SHA-256 of `abi.encode(ReleaseEntry[])`, with `ReleaseEntry` being `(bytes passkeyPublicKey, bytes32 shareHash, uint64 round)`, in the order received.
+Unlock may run on a different instance from the Build, so the log names its signer in `instancePublicKey`, and `release-token.jwt` attests that key. `entriesHash` is the plain SHA-256 of `abi.encode(ReleaseEntry[])`, with `ReleaseEntry` being `(bytes passkeyPublicKey, bytes32 shareHash, uint64 round)`, in the order received.
 
 ## TEE Lifecycle
 
@@ -217,14 +220,15 @@ All bodies are JSON. Every route allows any origin, without credentials. Bytes f
 | `GET /v1/status` | None | `{stage, questionCount, approvedList?: {examId, entries, hash, teeSignature}, release: {released: hex[], required}}` |
 | `POST /v1/register/challenge` | `{}` | `{challenge}` |
 | `POST /v1/register` | `{owner, challenge, passkeyPublicKey, derivedPublicKey, attestationObject, clientDataJSON, signature, authenticatorData}` | `{}` |
+| `GET /v1/registrations` | None | `{registrations: [{owner, passkeyPublicKey, derivedPublicKey}]}` |
 | `POST /v1/questions/challenge` | `{}` | `{challenge}` |
 | `POST /v1/questions` | `{passkeyPublicKey, ciphertext, challenge, signature, authenticatorData, clientDataJSON}` | `{questionHash, teeSignature}` |
 | `GET /v1/outbox` | None | `{messages: [{kind: "build", examId, fields, teeSignature, instancePublicKey}]}` |
 | `POST /v1/release/challenge` | `{}` | `{challenge}` |
 | `POST /v1/release/share` | `{passkeyPublicKey, challenge, sealed}` | `{}` |
-| `GET /v1/release/log` | None | `{examId, entries, entriesHash, teeSignature}` |
+| `GET /v1/release/log` | None | `{examId, entries, entriesHash, teeSignature, instancePublicKey}` |
 
-`stage` is one of `onboard`, `submit`, `lock`, `build`, `distribute`, `unlock`, `released`, `failed`. `register`'s passkey signature covers the `registration` message.
+`release.released` lists the passkey public keys of holders whose shares were accepted. `stage` is one of `onboard`, `submit`, `lock`, `build`, `distribute`, `unlock`, `released`, `failed`. `register`'s passkey signature covers the `registration` message.
 
 ## Unlock Instance
 

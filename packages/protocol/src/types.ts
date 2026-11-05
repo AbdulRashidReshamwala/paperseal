@@ -31,7 +31,7 @@ export interface ExamPublication {
   imageDigest: Hex;
 }
 
-/** Lifecycle stages from docs/ARCHITECTURE.md. */
+/** Lifecycle stages from docs/ARCHITECTURE.md, plus the TEE's `released` and `failed` from "TEE API" in spec/api.md. */
 export const stages = [
   'publish',
   'onboard',
@@ -42,6 +42,8 @@ export const stages = [
   'distribute',
   'unlock',
   'verify',
+  'released',
+  'failed',
 ] as const;
 export type Stage = (typeof stages)[number];
 

@@ -5,8 +5,12 @@ import { describe, expect, it } from 'vitest';
 
 const src = import.meta.dirname;
 
-/** Paper and K_priv handling. timelockDecrypt stays allowed: holders need it to open their own share. */
-const bannedNames = /\b(aesGcmDecrypt|aesGcmEncrypt|xorCombine|decryptPaper)\b/;
+/**
+ * Paper and K_priv handling. A share is HPKE-encrypted to its holder with no time seal, so holders
+ * need no timelock either: K_pub and everything that opens the paper stay with the centre.
+ */
+const bannedNames =
+  /\b(aesGcmDecrypt|aesGcmEncrypt|xorCombine|openPaperFile|openKeyPriv|parsePaper|saltedPaperHash|timelockDecrypt|unlockPaper)\b/;
 
 function resolveLocal(from: string, specifier: string): string | null {
   const base = resolve(dirname(from), specifier);
@@ -52,6 +56,7 @@ describe('keyholder import boundary', () => {
 
   it('would catch a violation: the centre area does reach this code', () => {
     const centre = graph(join(src, 'areas/centre/CentreArea.tsx'), true);
+    expect(files(centre)).toContain('areas/centre/unlock.ts');
     const withUnlock = graph(join(src, 'areas/centre/unlock.ts'), true);
     expect(files(centre)).toContain('release/flow.ts');
     expect([...withUnlock.values()].some((code) => bannedNames.test(code))).toBe(true);

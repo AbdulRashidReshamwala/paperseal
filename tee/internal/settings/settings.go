@@ -223,3 +223,23 @@ func checkLabel(label string) error {
 	}
 	return nil
 }
+
+// Args returns the startup arguments for these settings, in the order and form
+// Parse requires. The attestation check compares the token's arguments to this
+// exact list.
+func (e Exam) Args() []string {
+	hexOf := func(b []byte) string { return "0x" + hex.EncodeToString(b) }
+	dec := func(n uint64) string { return strconv.FormatUint(n, 10) }
+	return []string{
+		"--exam-id=" + hexOf(e.ExamID[:]),
+		"--exam-start=" + dec(e.ExamStart),
+		"--delta=" + dec(e.Delta),
+		"--lock-round=" + dec(e.LockRound),
+		"--unlock-round=" + dec(e.UnlockRound),
+		"--end-round=" + dec(e.EndRound),
+		"--criteria-hash=" + hexOf(e.CriteriaHash[:]),
+		"--rpc-host=" + e.RPCHost,
+		"--registry=" + hexOf(e.Registry[:]),
+		"--chain-id=" + dec(e.ChainID),
+	}
+}

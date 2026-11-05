@@ -11,7 +11,7 @@ export function TeeStatus() {
         <Rows>
           <Row label="Stage">{status.stage}</Row>
           <Row label="Shares released">
-            {status.release.holders.length} of {status.release.required}
+            {status.release.released.length} of {status.release.required}
           </Row>
         </Rows>
       )}

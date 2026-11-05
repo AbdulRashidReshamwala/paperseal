@@ -3,12 +3,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   checkClaims,
-  checkToken,
   claimNames,
   decodeToken,
   MalformedTokenError,
-  TokenSignatureNotImplementedError,
-  verifyTokenSignature,
   settingsBindingError,
   type CheckOptions,
   type ClaimCheck,
@@ -37,6 +34,8 @@ const settings: ExamSettings = {
 
 const expected: ExpectedClaims = {
   instancePublicKey,
+  encryptionPublicKey: new Uint8Array(65).fill(4),
+  instanceKeySignature: new Uint8Array(64),
   examId,
   imageDigest,
   approvedHwModels: ['GCP_AMD_SEV', 'GCP_INTEL_TDX'],
@@ -213,17 +212,5 @@ describe('token', () => {
 
   it.each(['', 'a.b', 'a.!!!.c', `a.${encode([1])}.c`])('rejects malformed token %j', (token) => {
     expect(() => decodeToken(token)).toThrow(MalformedTokenError);
-  });
-
-  it('returns a typed not-implemented error for the signature', async () => {
-    const result = await verifyTokenSignature(tokenFor({}));
-    expect(result.ok).toBe(false);
-    expect(!result.ok && result.error).toBeInstanceOf(TokenSignatureNotImplementedError);
-  });
-
-  it('never trusts a token whose signature was not checked', async () => {
-    const verdict = await checkToken(tokenFor(goodClaims()), expected, live);
-    expect(verdict.claims.filter((claim) => !claim.ok).map((claim) => claim.claim)).toEqual([]);
-    expect(verdict.trusted).toBe(false);
   });
 });

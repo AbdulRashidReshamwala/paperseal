@@ -1,12 +1,17 @@
 import { createExamRegistry } from '@paperseal/chain';
+import { quicknetClient, type ChainClient } from '@paperseal/crypto';
 import type { Hex } from '@paperseal/protocol';
 import { createTeeClient } from '@paperseal/tee-client';
 import { createContext, use, useMemo, useState, type ReactNode } from 'react';
+
+import { createStorage } from './storage';
 
 /** Who this viewer trusts. Stored in their browser, so the board can't choose for them. */
 export interface Settings {
   rpcUrl: string;
   teeUrl: string;
+  /** Base URL of the public bucket. Files live under `<examId>/` there. */
+  storageUrl: string;
   registryAddress: string;
   examId: string;
 }
@@ -19,6 +24,7 @@ const env = import.meta.env as Record<string, string | undefined>;
 export const defaultSettings: Settings = {
   rpcUrl: env.VITE_RPC_URL ?? '',
   teeUrl: env.VITE_TEE_URL ?? '',
+  storageUrl: env.VITE_STORAGE_URL ?? '',
   registryAddress: env.VITE_REGISTRY_ADDRESS ?? '',
   examId: env.VITE_EXAM_ID ?? '',
 };
@@ -38,6 +44,7 @@ export function validateSettings(settings: Settings): SettingsErrors {
   const errors: SettingsErrors = {};
   if (settings.rpcUrl && !isHttpUrl(settings.rpcUrl)) errors.rpcUrl = 'Enter an http or https URL.';
   if (settings.teeUrl && !isHttpUrl(settings.teeUrl)) errors.teeUrl = 'Enter an http or https URL.';
+  if (settings.storageUrl && !isHttpUrl(settings.storageUrl)) errors.storageUrl = 'Enter an http or https URL.';
   if (settings.registryAddress && !/^0x[0-9a-fA-F]{40}$/.test(settings.registryAddress)) {
     errors.registryAddress = 'Enter a 20-byte address starting with 0x.';
   }
@@ -86,8 +93,12 @@ export function clearSettings(storage = browserStorage()): void {
 
 /** Clients for the viewer's own endpoints. Each is null until its settings are present. */
 export function connect(settings: Settings) {
-  const { rpcUrl, teeUrl, registryAddress, examId } = settings;
+  const { rpcUrl, teeUrl, storageUrl, registryAddress, examId } = settings;
   return {
+    /** The public files. Needs the exam ID too, because they live under it. */
+    storage: storageUrl && examId ? createStorage(storageUrl, examId as Hex) : null,
+    /** drand quicknet, pinned to the chain hash and public key in spec/constants.json. */
+    drand: quicknetClient(),
     tee: teeUrl ? createTeeClient({ baseUrl: teeUrl }) : null,
     registry:
       rpcUrl && registryAddress
@@ -107,11 +118,17 @@ interface SettingsContextValue extends Connections {
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
 
-export function SettingsProvider(props: { children: ReactNode; initial?: Settings }) {
+export function SettingsProvider(props: {
+  children: ReactNode;
+  initial?: Settings;
+  /** Replaces the live drand client. For tests. */
+  drand?: ChainClient;
+}) {
   const [settings, setSettings] = useState<Settings>(() => props.initial ?? loadSettings());
   const value = useMemo<SettingsContextValue>(
     () => ({
       ...connect(settings),
+      ...(props.drand ? { drand: props.drand } : {}),
       settings,
       apply: (next) => {
         saveSettings(next);
@@ -122,7 +139,7 @@ export function SettingsProvider(props: { children: ReactNode; initial?: Setting
         setSettings(defaultSettings);
       },
     }),
-    [settings],
+    [settings, props.drand],
   );
   return <SettingsContext value={value}>{props.children}</SettingsContext>;
 }

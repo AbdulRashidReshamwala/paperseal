@@ -13,6 +13,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
+    "@paperseal/attestation": "workspace:*",
     "@paperseal/chain": "workspace:*",
     "@paperseal/crypto": "workspace:*",
     "@paperseal/keys": "workspace:*",

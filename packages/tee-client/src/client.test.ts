@@ -14,19 +14,17 @@ function client(response: () => Response) {
   return { fetch, tee: createTeeClient({ baseUrl: 'http://tee.test/', fetch }) };
 }
 
-const hex = '0x00' as const;
 const calls: [string, string, (tee: TeeClient) => Promise<unknown>][] = [
   ['GET', '/v1/attestation', (t) => t.attestation()],
   ['GET', '/v1/status', (t) => t.status()],
-  ['POST', '/v1/register/challenge', (t) => t.registerChallenge({ holderId: 'h' })],
-  ['POST', '/v1/register', (t) => t.register({ holderId: 'h' } as never)],
-  ['POST', '/v1/onboard/list', (t) => t.onboardList({ examId: hex } as never)],
-  ['POST', '/v1/questions', (t) => t.question({ examId: hex } as never)],
-  ['POST', '/v1/lock', (t) => t.lock()],
-  ['POST', '/v1/build', (t) => t.build()],
+  ['GET', '/v1/registrations', (t) => t.registrations()],
+  ['POST', '/v1/register/challenge', (t) => t.registerChallenge()],
+  ['POST', '/v1/register', (t) => t.register({ owner: 'o' } as never)],
+  ['POST', '/v1/questions/challenge', (t) => t.questionChallenge()],
+  ['POST', '/v1/questions', (t) => t.question({ ciphertext: '0x00' } as never)],
   ['GET', '/v1/outbox', (t) => t.outbox()],
-  ['POST', '/v1/release/challenge', (t) => t.releaseChallenge({ holderId: 'h' })],
-  ['POST', '/v1/release/share', (t) => t.releaseShare({ examId: hex, holderId: 'h', sealed: hex })],
+  ['POST', '/v1/release/challenge', (t) => t.releaseChallenge()],
+  ['POST', '/v1/release/share', (t) => t.releaseShare({ sealed: '0x00' } as never)],
   ['GET', '/v1/release/log', (t) => t.releaseLog()],
 ];
 
@@ -39,10 +37,27 @@ describe('routes', () => {
     if (method === 'POST') expect(fetch.mock.calls[0]?.[1]?.body).toBeTypeOf('string');
   });
 
-  it('covers every route in docs/ARCHITECTURE.md', () => {
-    const doc = readFileSync(resolve(import.meta.dirname, '../../../docs/ARCHITECTURE.md'), 'utf8');
-    const routes = [...doc.matchAll(/`(GET|POST) (\/v1\/[^`]+)`/g)].map((m) => `${String(m[1])} ${String(m[2])}`);
-    expect(routes.length).toBeGreaterThan(0);
+  it('sends an empty object to the challenge routes', async () => {
+    for (const route of ['registerChallenge', 'questionChallenge', 'releaseChallenge'] as const) {
+      const { fetch, tee } = client(() => ok({ challenge: '0x00' }));
+      await tee[route]();
+      expect(fetch.mock.calls[0]?.[1]?.body).toBe('{}');
+    }
+  });
+
+  it('sends request bodies as given', async () => {
+    const { fetch, tee } = client(() => ok({}));
+    const body = { passkeyPublicKey: '0x04', challenge: '0x01', sealed: '0x02' } as const;
+    await tee.releaseShare(body);
+    expect(JSON.parse(fetch.mock.calls[0]?.[1]?.body as string)).toEqual(body);
+  });
+
+  // docs/ARCHITECTURE.md is not this package's to edit. Its route list is out of date, see the report.
+  it('covers exactly the routes in the TEE API table of spec/api.md', () => {
+    const spec = readFileSync(resolve(import.meta.dirname, '../../../spec/api.md'), 'utf8');
+    const table = spec.slice(spec.indexOf('## TEE API\n'), spec.indexOf('## Unlock Instance'));
+    const routes = [...table.matchAll(/^\| `(GET|POST) (\/v1\/[^`]+)`/gm)].map((m) => `${String(m[1])} ${String(m[2])}`);
+    expect(routes).toHaveLength(11);
     expect(calls.map(([method, path]) => `${method} ${path}`).sort()).toEqual(routes.sort());
   });
 });

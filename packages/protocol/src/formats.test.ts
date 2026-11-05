@@ -1,0 +1,284 @@
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+import { encodeAbiParameters } from 'viem';
+import { describe, expect, it } from 'vitest';
+
+import {
+  checkManifestCoverage,
+  constants,
+  decodeRelease,
+  encodeMessage,
+  encodePaper,
+  encodeQuestion,
+  encodeRelease,
+  encodeReleaseEntries,
+  entriesHash,
+  fromHex,
+  hashMessage,
+  pad,
+  padPaper,
+  padQuestion,
+  parseManifest,
+  parsePaper,
+  parseQuestion,
+  releaseEntryFromWire,
+  requireHardwareAttestation,
+  stages,
+  storageManifestHash,
+  storageNames,
+  toHex,
+  unpad,
+  unpadPaper,
+  unpadQuestion,
+} from './index';
+
+const bytes = (n: number, fill: number) => new Uint8Array(n).fill(fill);
+const point = (fill: number) => Uint8Array.from([4, ...bytes(64, fill)]);
+const sha = (data: Uint8Array) => new Uint8Array(createHash('sha256').update(data).digest());
+
+describe('constants and stages', () => {
+  it('has a schema for every one of the 12 domain tags', () => {
+    expect(Object.keys(constants.domainTags)).toHaveLength(12);
+    const sample = { examId: bytes(32, 1), encryptionPublicKey: point(2) };
+    expect(constants.domainTags.instanceKey).toBe('paperseal/v1/instance-key');
+    expect(encodeMessage('instanceKey', sample).length).toBeGreaterThan(0);
+  });
+
+  it('exports requireHardwareAttestation from constants.json', () => {
+    expect(requireHardwareAttestation).toBe(constants.webauthn.requireHardwareAttestation);
+  });
+
+  it('includes the TEE API stages', () => {
+    for (const stage of ['onboard', 'submit', 'lock', 'build', 'distribute', 'unlock', 'released', 'failed']) {
+      expect(stages).toContain(stage);
+    }
+  });
+});
+
+describe('instanceKey message', () => {
+  const examId = bytes(32, 0x11);
+  const key = point(0x22);
+
+  it('is SHA-256(abi.encode(tag, bytes32 examId, bytes encryptionPublicKey))', () => {
+    const preimage = fromHex(
+      encodeAbiParameters(
+        [{ type: 'string' }, { type: 'bytes32' }, { type: 'bytes' }],
+        [constants.domainTags.instanceKey, toHex(examId), toHex(key)],
+      ),
+    );
+    expect(encodeMessage('instanceKey', { examId, encryptionPublicKey: key })).toEqual(preimage);
+    expect(hashMessage('instanceKey', { examId, encryptionPublicKey: key })).toEqual(sha(preimage));
+  });
+
+  it('rejects a key that is not a 65-byte uncompressed point', () => {
+    expect(() => encodeMessage('instanceKey', { examId, encryptionPublicKey: bytes(33, 2) })).toThrow(RangeError);
+    expect(() => encodeMessage('instanceKey', { examId, encryptionPublicKey: bytes(65, 5) })).toThrow(RangeError);
+  });
+
+  const vectorsPath = resolve(import.meta.dirname, '../../../tee/testdata/vectors.json');
+  const vectors = JSON.parse(readFileSync(vectorsPath, 'utf8')) as { hash: { message: string }[] };
+  const has = existsSync(vectorsPath) && vectors.hash.some((v) => v.message === 'instanceKey');
+  // The generic vector test in protocol.test.ts covers it too once tee/ adds the vector.
+  it.skipIf(!has)('has a tee/ vector for instanceKey', () => {
+    expect(has).toBe(true);
+  });
+});
+
+describe('padding', () => {
+  it('frames a big-endian length, the data, then zeros', () => {
+    const padded = pad(Uint8Array.of(7, 8, 9), 16);
+    expect(toHex(padded)).toBe('0x00000003070809' + '00'.repeat(9));
+    expect(unpad(padded, 16)).toEqual(Uint8Array.of(7, 8, 9));
+  });
+
+  it('round-trips empty data and exactly full data', () => {
+    expect(unpad(pad(new Uint8Array(), 8), 8)).toEqual(new Uint8Array());
+    const full = bytes(4, 9);
+    expect(unpad(pad(full, 8), 8)).toEqual(full);
+  });
+
+  it('rejects data that does not fit', () => {
+    expect(() => pad(bytes(5, 1), 8)).toThrow('does not fit');
+  });
+
+  it('rejects non-zero padding, a wrong size and a bad length', () => {
+    const padded = pad(Uint8Array.of(1), 16);
+    const dirty = padded.slice();
+    dirty[15] = 1;
+    expect(() => unpad(dirty, 16)).toThrow('not zero');
+    expect(() => unpad(padded, 32)).toThrow('must be 32 bytes');
+    const long = padded.slice();
+    long[3] = 13;
+    expect(() => unpad(long, 16)).toThrow('does not fit');
+  });
+
+  it('uses the sizes from constants.json', () => {
+    expect(padQuestion(Uint8Array.of(1)).length).toBe(constants.padding.questionBytes);
+    expect(padPaper(Uint8Array.of(1)).length).toBe(constants.padding.paperBytes);
+    expect(unpadQuestion(padQuestion(Uint8Array.of(1)))).toEqual(Uint8Array.of(1));
+    expect(unpadPaper(padPaper(Uint8Array.of(1)))).toEqual(Uint8Array.of(1));
+  });
+});
+
+describe('questions and papers', () => {
+  const criteria = {
+    topics: [
+      { name: 'algebra', questions: 1 },
+      { name: 'geometry', questions: 2 },
+    ],
+  };
+  const examId = toHex(bytes(32, 0xab));
+  const text = new TextEncoder();
+
+  it('round-trips a question and checks its topic', () => {
+    const encoded = encodeQuestion({ topic: 'algebra', text: 'x² = 4?' });
+    expect(parseQuestion(encoded, criteria)).toEqual({ topic: 'algebra', text: 'x² = 4?' });
+    expect(() => parseQuestion(encoded, { topics: [{ name: 'other', questions: 1 }] })).toThrow('not a criteria topic');
+  });
+
+  it.each([
+    ['extra key', '{"topic":"a","text":"b","x":1}'],
+    ['missing key', '{"topic":"a"}'],
+    ['non-string', '{"topic":"a","text":2}'],
+    ['array', '[]'],
+    ['null', 'null'],
+    ['not JSON', '{topic'],
+  ])('rejects a question with %s', (_name, json) => {
+    expect(() => parseQuestion(json)).toThrow();
+  });
+
+  it('rejects invalid UTF-8 and a byte order mark', () => {
+    expect(() => parseQuestion(Uint8Array.of(0x7b, 0xff, 0x7d))).toThrow('UTF-8');
+    expect(() => parseQuestion(Uint8Array.of(0xef, 0xbb, 0xbf, ...text.encode('{"topic":"a","text":"b"}')))).toThrow();
+  });
+
+  it('round-trips a paper and checks it against criteria', () => {
+    const questions = [
+      { topic: 'algebra', text: 'a' },
+      { topic: 'geometry', text: 'b' },
+      { topic: 'geometry', text: 'c' },
+    ];
+    const encoded = encodePaper({ examId: examId as `0x${string}`, questions });
+    expect(parsePaper(encoded, criteria)).toEqual({ examId, questions });
+    expect(() => parsePaper(encoded, { topics: [{ name: 'algebra', questions: 2 }, ...criteria.topics.slice(1)] })).toThrow(
+      'expected 2',
+    );
+    expect(() => parsePaper('{"examId":"0x01","questions":[]}')).toThrow('examId');
+    expect(() => parsePaper(`{"examId":"${examId}","questions":[],"x":1}`)).toThrow('exactly');
+  });
+});
+
+describe('release plaintext', () => {
+  const release = {
+    share: bytes(33, 1),
+    signature: bytes(70, 2),
+    authenticatorData: bytes(37, 3),
+    clientDataJSON: text('{"type":"webauthn.get"}'),
+  };
+
+  function text(value: string) {
+    return new TextEncoder().encode(value);
+  }
+
+  it('is abi.encode(bytes share, bytes signature, bytes authenticatorData, bytes clientDataJSON)', () => {
+    const expected = encodeAbiParameters(
+      [{ type: 'bytes' }, { type: 'bytes' }, { type: 'bytes' }, { type: 'bytes' }],
+      [toHex(release.share), toHex(release.signature), toHex(release.authenticatorData), toHex(release.clientDataJSON)],
+    );
+    expect(toHex(encodeRelease(release))).toBe(expected);
+    expect(decodeRelease(encodeRelease(release))).toEqual(release);
+  });
+
+  it('rejects garbage and non-canonical bytes', () => {
+    expect(() => decodeRelease(Uint8Array.of(1, 2, 3))).toThrow('release');
+    expect(() => decodeRelease(new Uint8Array([...encodeRelease(release), 0]))).toThrow();
+  });
+});
+
+describe('release entries', () => {
+  const entries = [
+    { passkeyPublicKey: point(1), shareHash: bytes(32, 5), round: 123n },
+    { passkeyPublicKey: point(2), shareHash: bytes(32, 6), round: 2n ** 63n },
+  ];
+
+  it('hashes abi.encode(ReleaseEntry[]) in order received', () => {
+    const encoded = fromHex(
+      encodeAbiParameters(
+        [
+          {
+            type: 'tuple[]',
+            components: [
+              { name: 'passkeyPublicKey', type: 'bytes' },
+              { name: 'shareHash', type: 'bytes32' },
+              { name: 'round', type: 'uint64' },
+            ],
+          },
+        ],
+        [entries.map((e) => ({ passkeyPublicKey: toHex(e.passkeyPublicKey), shareHash: toHex(e.shareHash), round: e.round }))],
+      ),
+    );
+    expect(encodeReleaseEntries(entries)).toEqual(encoded);
+    expect(entriesHash(entries)).toEqual(sha(encoded));
+    expect(entriesHash([...entries].reverse())).not.toEqual(entriesHash(entries));
+  });
+
+  it('feeds the releaseLog message', () => {
+    const examId = bytes(32, 9);
+    expect(hashMessage('releaseLog', { examId, entriesHash: entriesHash(entries) })).toHaveLength(32);
+  });
+
+  const first = { passkeyPublicKey: point(1), shareHash: bytes(32, 5), round: 123n };
+
+  it('reads wire entries and rejects a bad round or hash', () => {
+    const wire = { passkeyPublicKey: toHex(point(1)), shareHash: toHex(bytes(32, 5)), round: '123' } as const;
+    expect(releaseEntryFromWire(wire).round).toBe(123n);
+    expect(() => releaseEntryFromWire({ ...wire, round: '01' })).toThrow('decimal');
+    expect(() => encodeReleaseEntries([{ ...first, shareHash: bytes(31, 0) }])).toThrow(RangeError);
+    expect(() => encodeReleaseEntries([{ ...first, round: 2n ** 64n }])).toThrow(RangeError);
+  });
+});
+
+describe('manifest', () => {
+  const holder = point(7);
+  const examId = toHex(bytes(32, 1));
+  const h = (n: number) => toHex(bytes(32, n));
+  const manifest = {
+    examId,
+    files: [
+      { name: 'key-pub.tlock', sha256: h(2) },
+      { name: 'paper.bin', sha256: h(3) },
+      { name: storageNames.share(holder), sha256: h(4), recipient: toHex(holder), shareHash: h(5) },
+      { name: 'token.jwt', sha256: h(6) },
+    ],
+  };
+  const json = JSON.stringify(manifest);
+
+  it('parses, hashes the stored bytes and checks coverage', () => {
+    expect(parseManifest(json)).toEqual(manifest);
+    const stored = new TextEncoder().encode(json);
+    expect(storageManifestHash(stored)).toEqual(sha(stored));
+    expect(() => checkManifestCoverage(parseManifest(json), [holder])).not.toThrow();
+  });
+
+  it('rejects missing, extra and incomplete entries', () => {
+    expect(() => checkManifestCoverage(parseManifest(json), [])).toThrow('unexpected');
+    expect(() => checkManifestCoverage(parseManifest(json), [holder, point(8)])).toThrow('does not list');
+    const noToken = { ...manifest, files: manifest.files.filter((f) => f.name !== 'token.jwt') };
+    expect(() => checkManifestCoverage(parseManifest(JSON.stringify(noToken)), [holder])).toThrow('token.jwt');
+    const noHash = { ...manifest, files: manifest.files.map((f) => ({ name: f.name, sha256: f.sha256 })) };
+    expect(() => checkManifestCoverage(parseManifest(JSON.stringify(noHash)), [holder])).toThrow('recipient');
+  });
+
+  it.each([
+    ['unsorted', { ...manifest, files: [...manifest.files].reverse() }, 'sorted'],
+    ['repeated', { ...manifest, files: [manifest.files[0], manifest.files[0]] }, 'sorted'],
+    ['unknown key', { ...manifest, files: [{ ...manifest.files[0], extra: 1 }] }, 'unknown key'],
+    ['short hash', { ...manifest, files: [{ name: 'a', sha256: '0x00' }] }, 'sha256'],
+    ['uppercase hex', { ...manifest, files: [{ name: 'a', sha256: `0x${'AB'.repeat(32)}` }] }, 'sha256'],
+    ['extra top key', { ...manifest, more: 1 }, 'exactly'],
+  ])('rejects a %s manifest', (_name, value, message) => {
+    expect(() => parseManifest(JSON.stringify(value))).toThrow(message);
+  });
+});

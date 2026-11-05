@@ -6,7 +6,6 @@ package approvedlist
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"unicode/utf8"
@@ -14,7 +13,6 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 
 	"paperseal/tee/internal/hashing"
-	"paperseal/tee/internal/notimpl"
 	"paperseal/tee/internal/spec"
 )
 
@@ -133,10 +131,28 @@ func Decode(b []byte) ([]Entry, error) {
 
 func pack(entries []Entry) ([]byte, error) { return listArgs.Pack(entries) }
 
-// CheckRegistered must reject an entry the TEE didn't verify at registration.
-// It is not implemented, because registration isn't, so no list can pass yet.
-func CheckRegistered(context.Context, []Entry) error {
-	return notimpl.New("approvedlist.CheckRegistered")
+// Registrations answers whether the TEE verified a registration at Onboard.
+type Registrations interface {
+	// Verified reports whether a registration with exactly these values passed
+	// the passkey signature check. derivedPublicKey is empty for a setter.
+	Verified(passkeyPublicKey, derivedPublicKey []byte, owner string) bool
+}
+
+// ErrNotRegistered is returned for an entry the TEE didn't verify.
+var ErrNotRegistered = errors.New("approvedlist: entry was not verified at registration")
+
+// CheckRegistered rejects the list if any entry wasn't verified at
+// registration, with the same passkey, derived key and owner. A setter must
+// have registered without a derived key, because role follows from the key.
+// It applies at Onboard alone: only the instance that ran Onboard holds
+// registrations.
+func CheckRegistered(entries []Entry, registered Registrations) error {
+	for i, e := range entries {
+		if !registered.Verified(e.PasskeyPublicKey, e.DerivedPublicKey, e.Owner) {
+			return fmt.Errorf("entry %d (%s): %w", i, e.Owner, ErrNotRegistered)
+		}
+	}
+	return nil
 }
 
 func checkList(entries []Entry) error {

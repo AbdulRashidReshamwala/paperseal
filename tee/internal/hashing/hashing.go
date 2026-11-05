@@ -110,6 +110,17 @@ func AttestationNonce(instancePublicKey []byte, examID [32]byte) (Message, error
 		Bytes32("examId", examID))
 }
 
+// InstanceKey is the message the TEE's signing key signs over its separate
+// encryption key. Apps verify it before encrypting anything to the TEE.
+func InstanceKey(examID [32]byte, encryptionPublicKey []byte) (Message, error) {
+	if err := checkKeys("instanceKey", encryptionPublicKey); err != nil {
+		return Message{}, err
+	}
+	return New("instanceKey", spec.C.DomainTags.InstanceKey,
+		Bytes32("examId", examID),
+		Bytes("encryptionPublicKey", encryptionPublicKey))
+}
+
 // Registration is the message a passkey signs at registration. A setter
 // registers a passkey only, so derivedPublicKey is empty for setters and a
 // valid public key for everyone else.

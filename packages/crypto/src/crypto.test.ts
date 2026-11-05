@@ -1,44 +1,68 @@
-import { drand, roundTimeSeconds } from '@paperseal/protocol';
-import { defaultChainInfo, type ChainClient, type ChainInfo } from 'tlock-js';
+import {
+  concatBytes,
+  constants,
+  decodeRelease,
+  drand,
+  padPaper,
+  parseQuestion,
+  roundTimeSeconds,
+  unpadQuestion,
+} from '@paperseal/protocol';
+import { Buffer as TlockBuffer, defaultChainInfo, timelockEncrypt, type ChainClient, type ChainInfo } from 'tlock-js';
 import { describe, expect, it, vi } from 'vitest';
 
 import {
   aesGcmDecrypt,
   aesGcmEncrypt,
   HPKE_ENC_BYTES,
+  hpkeContext,
   hpkeDeriveKeyPair,
   hpkeOpen,
   hpkeSeal,
   hpkeSerializePublicKey,
+  openKeyPriv,
+  openPaperFile,
+  openShare,
   quicknetClient,
+  sealQuestion,
+  sealRelease,
   timelockDecrypt,
-  timelockEncrypt,
   verifyTeeSignature,
   xorCombine,
 } from './index';
 
 const bytes = (text: string) => new TextEncoder().encode(text);
+const examId = new Uint8Array(32).fill(0xe1);
 const key = () => globalThis.crypto.getRandomValues(new Uint8Array(32));
 
 describe('AES-256-GCM', () => {
-  it('round-trips with and without AAD', async () => {
+  it('round-trips with the examId as aad and frames nonce, ciphertext, tag', async () => {
     const k = key();
-    expect(await aesGcmDecrypt(k, await aesGcmEncrypt(k, bytes('paper')))).toEqual(bytes('paper'));
-    const sealed = await aesGcmEncrypt(k, bytes('paper'), bytes('aad'));
-    expect(await aesGcmDecrypt(k, sealed, bytes('aad'))).toEqual(bytes('paper'));
-    await expect(aesGcmDecrypt(k, sealed, bytes('other'))).rejects.toThrow();
+    const sealed = await aesGcmEncrypt(k, bytes('paper'), examId);
+    expect(sealed).toHaveLength(12 + 5 + 16);
+    expect(await aesGcmDecrypt(k, sealed, examId)).toEqual(bytes('paper'));
+    await expect(aesGcmDecrypt(k, sealed, new Uint8Array(32))).rejects.toThrow();
   });
 
-  it('rejects tampering, a wrong key and a short key', async () => {
+  it('uses a fresh nonce each time', async () => {
     const k = key();
-    const sealed = await aesGcmEncrypt(k, bytes('paper'));
+    const [a, b] = await Promise.all([aesGcmEncrypt(k, bytes('x'), examId), aesGcmEncrypt(k, bytes('x'), examId)]);
+    expect(a.subarray(0, 12)).not.toEqual(b.subarray(0, 12));
+  });
+
+  it('rejects tampering, a wrong key, a short key and a short message', async () => {
+    const k = key();
+    const sealed = await aesGcmEncrypt(k, bytes('paper'), examId);
     const tampered = sealed.slice();
     tampered[tampered.length - 1] = (tampered[tampered.length - 1] as number) ^ 1;
-    await expect(aesGcmDecrypt(k, tampered)).rejects.toThrow();
-    await expect(aesGcmDecrypt(key(), sealed)).rejects.toThrow();
-    await expect(aesGcmEncrypt(new Uint8Array(16), bytes('x'))).rejects.toThrow(RangeError);
+    await expect(aesGcmDecrypt(k, tampered, examId)).rejects.toThrow();
+    await expect(aesGcmDecrypt(key(), sealed, examId)).rejects.toThrow();
+    await expect(aesGcmEncrypt(new Uint8Array(16), bytes('x'), examId)).rejects.toThrow(RangeError);
+    await expect(aesGcmDecrypt(k, sealed.subarray(0, 20), examId)).rejects.toThrow(RangeError);
   });
 });
+
+const ctx = hpkeContext('share', examId);
 
 describe('HPKE', () => {
   it('round-trips to an uncompressed P-256 key', async () => {
@@ -53,7 +77,7 @@ describe('HPKE', () => {
 
   it('frames the encapsulated key first', async () => {
     const pair = await hpkeDeriveKeyPair(key());
-    const sealed = await hpkeSeal(await hpkeSerializePublicKey(pair.publicKey), bytes('share'));
+    const sealed = await hpkeSeal(await hpkeSerializePublicKey(pair.publicKey), bytes('share'), ctx);
     expect(sealed).toHaveLength(HPKE_ENC_BYTES + 5 + 16);
     expect(sealed[0]).toBe(4);
   });
@@ -67,9 +91,9 @@ describe('HPKE', () => {
     ]);
     const publicKey = await hpkeSerializePublicKey(a.publicKey);
     expect(await hpkeSerializePublicKey(b.publicKey)).toEqual(publicKey);
-    const sealed = await hpkeSeal(publicKey, bytes('share'));
-    expect(await hpkeOpen(b, sealed)).toEqual(bytes('share'));
-    await expect(hpkeOpen(other, sealed)).rejects.toThrow();
+    const sealed = await hpkeSeal(publicKey, bytes('share'), ctx);
+    expect(await hpkeOpen(b, sealed, ctx)).toEqual(bytes('share'));
+    await expect(hpkeOpen(other, sealed, ctx)).rejects.toThrow();
   });
 });
 
@@ -107,6 +131,10 @@ function offlineQuicknet(): ChainClient {
   };
 }
 
+/** Sealing is the TEE's job, so the package has no encrypt. Tests seal with tlock-js directly. */
+const seal = (round: number, plaintext: Uint8Array, client: ChainClient) =>
+  timelockEncrypt(round, TlockBuffer.from(plaintext), client);
+
 describe('timelock', () => {
   it('uses the chain tlock-js knows as quicknet', () => {
     expect(defaultChainInfo.hash).toBe(drand.chainHash);
@@ -121,7 +149,7 @@ describe('timelock', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const client = offlineQuicknet();
     const k = key();
-    const armoured = await timelockEncrypt(beacon.round, k, client);
+    const armoured = await seal(beacon.round, k, client);
     expect(armoured).toContain('BEGIN AGE ENCRYPTED FILE');
     expect(await timelockDecrypt(armoured, client)).toEqual(k);
     log.mockRestore();
@@ -130,14 +158,14 @@ describe('timelock', () => {
   it('fails before the round is due', async () => {
     const client = offlineQuicknet();
     const future = Math.ceil((Date.now() / 1000 - roundTimeSeconds(1)) / drand.periodSeconds) + 10_000;
-    const armoured = await timelockEncrypt(future, key(), client);
+    const armoured = await seal(future, key(), client);
     await expect(timelockDecrypt(armoured, client)).rejects.toThrow('too early');
   });
 
   it('rejects a forged beacon', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     const client = offlineQuicknet();
-    const armoured = await timelockEncrypt(beacon.round, key(), client);
+    const armoured = await seal(beacon.round, key(), client);
     const forged = { ...client, get: () => Promise.resolve({ ...beacon, signature: `a4${beacon.signature.slice(2)}` }) };
     await expect(timelockDecrypt(armoured, forged)).rejects.toThrow();
     log.mockRestore();
@@ -176,5 +204,71 @@ describe('TEE signatures', () => {
     const { publicKey, low } = await signed(bytes('message'));
     expect(await verifyTeeSignature(publicKey, low, bytes('other'))).toBe(false);
     expect(await verifyTeeSignature(publicKey, low.subarray(1), bytes('message'))).toBe(false);
+  });
+});
+
+describe('purpose helpers', () => {
+  const kem = async () => {
+    const pair = await hpkeDeriveKeyPair(key());
+    return { pair, publicKey: await hpkeSerializePublicKey(pair.publicKey) };
+  };
+
+  it('takes info from constants.json and aad from the examId', () => {
+    for (const purpose of ['question', 'share', 'release', 'keyPriv'] as const) {
+      const { info, aad } = hpkeContext(purpose, examId);
+      expect(new TextDecoder().decode(info)).toBe(constants.crypto.hpke.info[purpose]);
+      expect(aad).toEqual(examId);
+    }
+    expect(() => hpkeContext('share', new Uint8Array(31))).toThrow(RangeError);
+  });
+
+  it('seals a question padded to questionBytes, and only the question purpose opens it', async () => {
+    const { pair, publicKey } = await kem();
+    const sealed = await sealQuestion(publicKey, examId, { topic: 'algebra', text: 'x?' });
+    expect(sealed).toHaveLength(HPKE_ENC_BYTES + constants.padding.questionBytes + 16);
+    const padded = await hpkeOpen(pair, sealed, hpkeContext('question', examId));
+    expect(parseQuestion(unpadQuestion(padded))).toEqual({ topic: 'algebra', text: 'x?' });
+    await expect(hpkeOpen(pair, sealed, hpkeContext('share', examId))).rejects.toThrow();
+    await expect(hpkeOpen(pair, sealed, hpkeContext('question', new Uint8Array(32)))).rejects.toThrow();
+  });
+
+  it('seals the release plaintext for the TEE', async () => {
+    const { pair, publicKey } = await kem();
+    const release = {
+      share: bytes('share'),
+      signature: bytes('sig'),
+      authenticatorData: bytes('auth'),
+      clientDataJSON: bytes('{}'),
+    };
+    const sealed = await sealRelease(publicKey, examId, release);
+    const plaintext = await hpkeOpen(pair, sealed, hpkeContext('release', examId));
+    expect(decodeRelease(plaintext)).toEqual(release);
+  });
+
+  it('opens a share only with the share purpose and the right exam', async () => {
+    const { pair, publicKey } = await kem();
+    const sealed = await hpkeSeal(publicKey, bytes('share'), hpkeContext('share', examId));
+    expect(await openShare(pair, examId, sealed)).toEqual(bytes('share'));
+    await expect(openShare(pair, new Uint8Array(32), sealed)).rejects.toThrow();
+    await expect(openKeyPriv(pair, examId, sealed)).rejects.toThrow();
+  });
+
+  it('opens keyPriv and insists on 32 bytes', async () => {
+    const { pair, publicKey } = await kem();
+    const kPriv = key();
+    expect(await openKeyPriv(pair, examId, await hpkeSeal(publicKey, kPriv, hpkeContext('keyPriv', examId)))).toEqual(kPriv);
+    const short = await hpkeSeal(publicKey, new Uint8Array(16), hpkeContext('keyPriv', examId));
+    await expect(openKeyPriv(pair, examId, short)).rejects.toThrow('32 bytes');
+  });
+
+  it('opens the paper file: K over the seed then the padded paper, aad the examId', async () => {
+    const k = key();
+    const seed = key();
+    const paper = bytes('{"examId":"0x","questions":[]}');
+    const file = await aesGcmEncrypt(k, concatBytes(seed, padPaper(paper)), examId);
+    expect(await openPaperFile(k, examId, file)).toEqual({ seed, paper });
+    await expect(openPaperFile(k, new Uint8Array(32), file)).rejects.toThrow();
+    const short = await aesGcmEncrypt(k, seed, examId);
+    await expect(openPaperFile(k, examId, short)).rejects.toThrow('padded paper');
   });
 });
