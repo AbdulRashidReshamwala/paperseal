@@ -1,0 +1,94 @@
+# Deploying Paper Seal
+
+Order of steps for a Sepolia demo with the TEE on Google Confidential Space. Nothing here needs a secret in a file: `gcloud` and `forge` use your own login and keystore.
+
+Every GCP script takes `PROJECT_ID`, `REGION` and `ZONE` from the environment and prints its commands instead of running them when `DRY_RUN=1`.
+
+```sh
+export PROJECT_ID=<your project> REGION=us-central1 ZONE=us-central1-a
+export DRY_RUN=1   # unset it to run for real
+```
+
+## Before you start
+
+The image must be able to run on Confidential Space. Two things must be true in `tee/Dockerfile` before the first tag (see the report that came with this change):
+
+- `LABEL tee.launch_policy.allow_env_override="STORAGE_BUCKET"` is present. Without it the launcher refuses `tee-env-STORAGE_BUCKET` and the workload does not start. The label changes the image digest, so add it before tagging.
+- `tee.launch_policy.allow_cmd_override="true"` and `EXPOSE 8080` are already there.
+
+## 1. Deploy `ExamRegistry` to Sepolia
+
+From `contracts/`, with `.env` filled in from `.env.example` (`BOARD_ADDRESS`, `SEPOLIA_RPC_URL`):
+
+```sh
+forge script script/Deploy.s.sol --rpc-url sepolia --broadcast --account <keystore-name>
+```
+
+Keep the printed address as `REGISTRY`. A new board address needs a new deployment.
+
+## 2. Tag a version
+
+```sh
+git tag v0.1.0 && git push origin v0.1.0
+```
+
+`.github/workflows/repro.yml` builds the image twice on clean runners. If the digests match, the release job pushes the image by digest to `ghcr.io/abdulrashidreshamwala/paperseal-tee` (no tag), checks the registry holds the same digest, checks an anonymous pull works, then publishes the GitHub release.
+
+A new GHCR package starts private and Actions cannot change that. The first time, open the package's settings on GitHub, set visibility to public, and re-run the release job. Then read the release notes: they hold `commit` and `imageDigest` for `createExam`, and the image reference as `ghcr.io/abdulrashidreshamwala/paperseal-tee@sha256:<digest>`.
+
+## 3. Google Cloud
+
+Run in this order. Each is safe to run again.
+
+```sh
+cd deploy/gcp
+./enable-apis.sh
+./create-bucket.sh            # public-read, uniform access, CORS GET from any origin
+./create-service-account.sh   # workloadUser, logWriter, and objectCreator on the bucket only
+```
+
+The bucket is `${PROJECT_ID}-paperseal-exams` unless you set `BUCKET`. If an organisation policy blocks public buckets, allow them for this project first.
+
+Publish the exam in the board app first, so the on-chain settings exist. Then start the TEE with the same settings and the release's image digest:
+
+```sh
+./run-tee.sh \
+  --exam-id=0x... --exam-start=<secs> --delta=<secs> \
+  --lock-round=<n> --unlock-round=<n> --end-round=<n> \
+  --criteria-hash=0x... --rpc-host=<host> \
+  --registry=0x... --chain-id=11155111 \
+  --image-digest=sha256:<digest>
+```
+
+It reserves a static IP, opens port 8080 to Cloudflare's published IPv4 ranges only (read from `https://www.cloudflare.com/ips-v4` each run), and starts one `n2d-standard-2` Confidential VM (AMD SEV) on the production `confidential-space` image family, not debug. `tee-cmd` carries the ten arguments in the order of `spec/api.md`, "Exam Settings". Check with `DRY_RUN=1` first and compare the arguments with the chain. It prints the IP.
+
+Wait a minute or two, then check `curl http://<ip>:8080/v1/status` from an allowed source (or through Cloudflare once step 4 is done). Logs go to Cloud Logging.
+
+### Cost, and stopping it
+
+Estimated cost of one `n2d-standard-2` Confidential VM in `us-central1` running all month: roughly 75 to 100 US dollars, plus a few dollars for the static IP and disk. This is **not verified against Google's pricing page**: the page is rendered by script and could not be read when this was written. Check the [pricing calculator](https://cloud.google.com/products/calculator) (Compute Engine, N2D, Confidential VM, 2 vCPU, 8 GB) before you rely on the number.
+
+**Stop the VM after a demo:** `./stop-tee.sh`. Stopping ends the instance, so its in-memory question bank and keys are gone. Only stop it once the exam is released. The static IP is billed while reserved. `./teardown.sh` removes everything (VM, firewall rule, IP, bucket with all its files, service account). It prints the list and needs you to type the project ID.
+
+## 4. DNS: `tee.abdulrashid.dev`
+
+In Cloudflare, add an `A` record `tee` pointing to the static IP, with the proxy on (orange cloud). Cloudflare serves HTTPS to browsers and connects to the origin over plain HTTP on port 8080. Set the origin port with a Cloudflare Origin Rule (rewrite destination port to 8080) because Cloudflare otherwise uses 80 for HTTP.
+
+Plain HTTP between Cloudflare and the TEE is acceptable here. Apps do not trust the transport: they verify the TEE's attestation token against Google's root and the on-chain settings, and encrypt to the key that token binds. Anything an observer on that hop sees is already encrypted to the TEE or public. Cloudflare can block the TEE but cannot make an app trust a fake one.
+
+## 5. App environment values
+
+Set at build time for `apps/web` and `apps/verifier` (viewers can change them in the verifier under Connection):
+
+| Variable | Value |
+| --- | --- |
+| `VITE_TEE_URL` | `https://tee.abdulrashid.dev` |
+| `VITE_RPC_URL` | your Sepolia RPC URL (a public one, because it is not secret here) |
+| `VITE_REGISTRY_ADDRESS` | `REGISTRY` from step 1 |
+| `VITE_EXAM_ID` | the published exam ID, as a fallback |
+| `VITE_STORAGE_URL` | `https://storage.googleapis.com/<BUCKET>` |
+| `VITE_TEE_STORAGE_BUCKET` | `<BUCKET>`, the one environment value the token check allows |
+| `VITE_APPROVED_HW_MODELS` | `GCP_AMD_SEV` for this machine type |
+| `VITE_RELEASES_REPO` | only if you use a fork |
+
+`VITE_EXPECTED_TEE_ENV` is optional; the token's `env` claim should hold only `STORAGE_BUCKET`.

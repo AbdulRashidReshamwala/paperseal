@@ -92,13 +92,98 @@ jobs:
           echo "digest=$bare" >> "$GITHUB_OUTPUT"
 
   # Only a tag publishes a release, and only after both builds matched.
+  # Only this job can write packages. It pushes the image by digest, checks the
+  # registry holds exactly the digest the two builds agreed on, then publishes.
   release:
     needs: repro
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     permissions:
       contents: write
+      packages: write
+    env:
+      IMAGE: ghcr.io/abdulrashidreshamwala/paperseal-tee
     steps:
+      # actions/checkout v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ needs.repro.outputs.commit }}
+          persist-credentials: false
+
+      # tee/scripts/build-image.sh writes its OCI tar to a temp folder it deletes
+      # on exit, so the tar can't be pushed. It is run once more here, which
+      # creates the pinned BuildKit builder, and proves a third time that the
+      # digest is the verified one. The push below then repeats the script's
+      # build with the same flags and the same builder, with only the output
+      # changed to a registry push by digest. Its digest is checked before
+      # anything is published.
+      - name: Third build, must equal the verified digest
+        env:
+          DIGEST: ${{ needs.repro.outputs.digest }}
+        run: |
+          got="$(tee/scripts/build-image.sh)"
+          if [ "$got" != "sha256:$DIGEST" ]; then
+            echo "::error::release build gave $got, expected sha256:$DIGEST"
+            exit 1
+          fi
+
+      - name: Log in to ghcr.io
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+
+      - name: Push the image by digest
+        env:
+          DIGEST: ${{ needs.repro.outputs.digest }}
+        run: |
+          SOURCE_DATE_EPOCH="$(git -C tee log -1 --format=%ct)"
+          export SOURCE_DATE_EPOCH
+          meta="$(mktemp)"
+          # Same flags as tee/scripts/build-image.sh. type=image with
+          # oci-mediatypes matches that script's type=oci output, and
+          # push-by-digest leaves no tag.
+          docker buildx build \
+            --builder paperseal-repro \
+            --no-cache \
+            --platform linux/amd64 \
+            --provenance=false \
+            --sbom=false \
+            --build-arg SOURCE_DATE_EPOCH \
+            --metadata-file "$meta" \
+            --output "type=image,name=$IMAGE,push=true,push-by-digest=true,name-canonical=true,oci-mediatypes=true,rewrite-timestamp=true" \
+            tee
+          pushed="$(sed -n 's/.*"containerimage.digest": *"\(sha256:[0-9a-f]\{64\}\)".*/\1/p' "$meta")"
+          if [ "$pushed" != "sha256:$DIGEST" ]; then
+            echo "::error::pushed digest $pushed differs from the verified sha256:$DIGEST"
+            exit 1
+          fi
+          # Ask the registry itself, not the local build.
+          remote="$(docker buildx imagetools inspect "$IMAGE@sha256:$DIGEST" --format '{{.Manifest.Digest}}')"
+          if [ "$remote" != "sha256:$DIGEST" ]; then
+            echo "::error::registry reports $remote for sha256:$DIGEST"
+            exit 1
+          fi
+          echo "::notice::pushed $IMAGE@sha256:$DIGEST"
+
+      # A new GHCR package starts private, and Actions can't change that. If
+      # this fails, make the package public once in its settings, then re-run.
+      - name: Check the image is public
+        env:
+          DIGEST: ${{ needs.repro.outputs.digest }}
+        run: |
+          repo="${IMAGE#ghcr.io/}"
+          tok="$(curl -fsS "https://ghcr.io/token?scope=repository:$repo:pull" | jq -r .token)"
+          code="$(curl -s -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $tok" \
+            -H 'Accept: application/vnd.oci.image.manifest.v1+json' \
+            "https://ghcr.io/v2/$repo/manifests/sha256:$DIGEST")"
+          if [ "$code" != 200 ]; then
+            echo "::error::anonymous pull of $IMAGE@sha256:$DIGEST gave HTTP $code. Set the package to public in its GitHub settings, then re-run this job."
+            exit 1
+          fi
+
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -108,6 +193,8 @@ jobs:
         run: |
           {
             echo "Reproducible TEE image for this version. Spec: \`spec/api.md\`, TEE Releases."
+            echo
+            echo "Image: \`$IMAGE@sha256:$DIGEST\`"
             echo
             echo '```json'
             jq -n --arg version "$GITHUB_REF_NAME" --arg commit "0x$COMMIT" \
