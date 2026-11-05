@@ -30,12 +30,15 @@ describe('LogView', () => {
     render(<LogView log={log} owners={owners} problem={null} verdict={verdict(true)} />);
     expect(screen.getByText('Centre One').closest('li')?.getAttribute('data-muted')).toBeNull();
     expect(screen.queryByText(/not shown as fact/)).toBeNull();
+    expect(screen.getAllByText('Pass')).toHaveLength(4);
+    expect(screen.queryByText('Fail')).toBeNull();
   });
 
   it('mutes entries and says why when the verdict fails', () => {
     render(<LogView log={log} owners={owners} problem={null} verdict={verdict(false)} />);
     expect(screen.getByText('Centre One').closest('li')?.getAttribute('data-muted')).toBe('true');
     expect(screen.getByText(/not shown as fact/)).toBeTruthy();
+    expect(screen.getAllByText('Fail').length).toBeGreaterThan(0);
   });
 
   it('shows a passkey, not a name, when the on-chain list could not be trusted', () => {

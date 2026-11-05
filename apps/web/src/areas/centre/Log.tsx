@@ -1,7 +1,7 @@
 import { OnChainBytesError, type ExamRegistry } from '@paperseal/chain';
 import { decodeApprovedList, fromHex, toHex, type Hex } from '@paperseal/protocol';
-import { Badge, Connected, Row, Rows, Screen } from '@paperseal/ui';
 import type { ReleaseLogResponse } from '@paperseal/tee-client';
+import { Check, Row, Rows } from '@paperseal/ui';
 import { useMemo } from 'react';
 
 import { publishedTokenChecker } from '../../shared/attest';
@@ -10,9 +10,13 @@ import { useCurrentExamId } from '../../shared/currentExam';
 import { registry } from '../../shared/registry';
 import { storageFetcher } from '../../shared/storage';
 import { tee } from '../../shared/tee';
+import { usePoll } from '../../shared/usePoll';
 import { verifyReleaseLog, type LogVerdict } from './logCheck';
 
-const pass = (ok: boolean) => <Badge tone={ok ? 'ok' : 'bad'}>{ok ? 'Pass' : 'Fail'}</Badge>;
+/** How long to wait before reading a log that could not be read. */
+const LOG_RETRY_MS = 15000;
+
+const result = (ok: boolean) => <Check status={ok ? 'pass' : 'fail'} />;
 
 /**
  * Names for passkeys, from the on-chain approved list. `getApprovedListEntries` has already
@@ -43,26 +47,14 @@ export interface LogViewProps {
   verdict: LogVerdict;
 }
 
-/** The verdict, then the entries, which are muted unless the whole verdict passes. */
+/** Who released, then each check, with entries muted unless the whole verdict passes. */
 export function LogView({ log, owners, problem, verdict }: LogViewProps) {
   return (
     <>
-      <Rows>
-        <Row label="Log verification">{pass(verdict.pass)}</Row>
-        <Row label="Entries hash">{pass(verdict.entriesHash)}</Row>
-        <Row label="TEE signature under the log's key">{pass(verdict.signature)}</Row>
-        <Row label="release-token.jwt attests that key">
-          {pass(verdict.token.passed)}
-          {verdict.token.failures.length > 0 ? ` ${verdict.token.failures.join('; ')}` : ''}
-        </Row>
-        <Row label="Log is for this exam">{pass(verdict.exam)}</Row>
-      </Rows>
-      {problem ? <Badge tone="warn">{problem}</Badge> : null}
-      {verdict.pass ? null : (
-        <Badge tone="bad">The log did not verify, so the entries below are not shown as fact.</Badge>
-      )}
+      {problem ? <p className="centre-log-note">{problem}</p> : null}
+      {verdict.pass ? null : <p className="centre-log-note">The log did not verify, so the entries below are not shown as fact.</p>}
       {log.entries.length === 0 ? (
-        'No releases yet.'
+        <p className="centre-log-note">No releases yet.</p>
       ) : (
         <Rows>
           {log.entries.map((entry) => (
@@ -71,16 +63,27 @@ export function LogView({ log, owners, problem, verdict }: LogViewProps) {
               label={owners.get(entry.passkeyPublicKey.toLowerCase()) ?? entry.passkeyPublicKey}
               muted={!verdict.pass}
             >
-              round {entry.round}
+              Public clock round {entry.round}
             </Row>
           ))}
         </Rows>
       )}
+      <Rows>
+        <Row label="The list of releases is complete">{result(verdict.entriesHash)}</Row>
+        <Row label="Signed by the sealed machine">{result(verdict.signature)}</Row>
+        <Row label="Proof it's running the published code">
+          {result(verdict.token.passed)}
+          {verdict.token.failures.length > 0 ? ` ${verdict.token.failures.join('; ')}` : ''}
+        </Row>
+        <Row label="The log is for this exam">{result(verdict.exam)}</Row>
+      </Rows>
     </>
   );
 }
 
-/** The signed release log, checked, with each entry named by the on-chain list's owner for its passkey. */
+const logRead = (loaded: { verdict: LogVerdict }) => loaded.verdict.pass;
+
+/** The sealed machine's signed release log, folded away, with one clear result on the fold. */
 export function UnlockLog() {
   const exam = useCurrentExamId();
   const load = useMemo(() => {
@@ -101,16 +104,17 @@ export function UnlockLog() {
       return { log, ...named, verdict };
     };
   }, [exam]);
+  const { value: loaded, error, settled } = usePoll(load, LOG_RETRY_MS, logRead);
 
   return (
-    <Screen title="Unlock log" lede="The TEE's signed release log, checked against the attested key that signed it.">
-      <Connected
-        title="Release log"
-        notConnected="Set VITE_TEE_URL, VITE_RPC_URL and VITE_REGISTRY_ADDRESS, and select an exam, to read the release log."
-        load={load}
-      >
-        {(loaded) => <LogView {...loaded} />}
-      </Connected>
-    </Screen>
+    <details className="centre-log">
+      <summary>
+        Unlock log
+        {loaded ? <Check status={loaded.verdict.pass ? 'pass' : 'fail'} /> : <Check status={settled ? 'not-checked' : 'pending'} />}
+      </summary>
+      {loaded ? <LogView {...loaded} /> : null}
+      {!loaded && error ? <p className="centre-log-note">The log can't be read right now. This page keeps trying.</p> : null}
+      {!load ? <p className="centre-log-note">This page is not connected to the sealed machine, so the log can't be read.</p> : null}
+    </details>
   );
 }

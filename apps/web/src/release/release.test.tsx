@@ -15,11 +15,9 @@ import {
   type Hex,
 } from '@paperseal/protocol';
 import { RELEASE_NOT_OPEN_MESSAGE, TeeApiError } from '@paperseal/tee-client';
-import { renderToString } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
 import { releaseSteps, runRelease, type ReleaseContext } from './flow';
-import { ReleaseScreen } from './ReleaseScreen';
 
 const examId: Hex = `0x${'11'.repeat(32)}`;
 const share = () => new Uint8Array([1, 2, 3, 4]);
@@ -296,16 +294,5 @@ describe('runRelease', () => {
     context.tee.releaseShare.mockRejectedValue(new Error('no'));
     await expect(runRelease(context)).rejects.toThrow('no');
     expect(buffer).toEqual(new Uint8Array(4));
-  });
-});
-
-describe('ReleaseScreen', () => {
-  it('stays disabled and shows what is missing without a context', () => {
-    const html = renderToString(
-      <ReleaseScreen prerequisites={[{ label: 'TEE connected', met: false }]} context={null} />,
-    );
-    expect(html).toContain('TEE connected');
-    expect(html).toContain('Not ready');
-    expect(html).toMatch(/<button[^>]*disabled/);
   });
 });

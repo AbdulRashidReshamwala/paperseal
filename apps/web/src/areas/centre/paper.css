@@ -1,0 +1,138 @@
+/* The centre page: the seal in the middle, and the opened paper, large on screen and clean in print. */
+
+.centre-seal {
+  display: flex;
+  justify-content: center;
+  padding-block: var(--ps-space-6) var(--ps-space-2);
+}
+
+.centre-stage .ps-stage {
+  justify-items: center;
+  text-align: center;
+}
+
+.centre-stage .ps-stage-lede,
+.centre-stage .ps-stage-next {
+  margin-inline: auto;
+}
+
+.centre-stage .ps-stage-detail {
+  display: grid;
+  gap: var(--ps-space-5);
+  justify-items: center;
+}
+
+.centre-stage .ps-key {
+  text-align: left;
+}
+
+.centre-stage .ps-check {
+  justify-content: center;
+}
+
+.centre-stage .ps-countdown-when {
+  justify-content: center;
+}
+
+.centre-log {
+  max-width: 44em;
+  padding-top: var(--ps-space-3);
+  margin: var(--ps-space-6) auto 0;
+  font-size: var(--ps-text-small);
+  border-top: 1px solid var(--ps-rule);
+}
+
+.centre-log > summary {
+  display: flex;
+  gap: var(--ps-space-3);
+  align-items: center;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.centre-log-note {
+  margin: var(--ps-space-3) 0;
+  color: var(--ps-ink-soft);
+}
+
+.paper-sheet {
+  max-width: 44rem;
+  padding-top: var(--ps-space-5);
+  margin: var(--ps-space-6) auto 0;
+  font-size: 1.25rem;
+  line-height: 1.6;
+  border-top: 3px double var(--ps-ink);
+}
+
+.paper-sheet-title {
+  margin: 0 0 var(--ps-space-5);
+  font-size: var(--ps-text-title);
+}
+
+.paper-sheet-topic h3 {
+  margin: var(--ps-space-6) 0 var(--ps-space-3);
+  font-size: var(--ps-text-section);
+}
+
+.paper-sheet ol {
+  display: grid;
+  gap: var(--ps-space-4);
+  padding-left: 2em;
+  margin: 0;
+}
+
+.paper-sheet li {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+@media print {
+  @page {
+    margin: 18mm;
+  }
+
+  /* Black on white whatever the screen's theme, because carbon paper's ink would print pale. */
+  :root {
+    color-scheme: light !important;
+  }
+
+  html,
+  body {
+    color: black;
+    background: white;
+  }
+
+  .ps-role,
+  .centre-noprint {
+    display: none;
+  }
+
+  .ps-shell {
+    max-width: none;
+    min-height: 0;
+    padding: 0;
+  }
+
+  .paper-sheet {
+    max-width: none;
+    padding: 0;
+    margin: 0;
+    font-size: 12pt;
+    line-height: 1.5;
+    color: black;
+    border: 0;
+  }
+
+  .paper-sheet-title {
+    font-size: 18pt;
+  }
+
+  .paper-sheet-topic h3 {
+    font-size: 14pt;
+    break-after: avoid;
+  }
+
+  .paper-sheet li {
+    break-inside: avoid;
+  }
+}

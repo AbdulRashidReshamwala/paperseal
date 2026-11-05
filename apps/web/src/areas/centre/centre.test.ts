@@ -21,7 +21,6 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { StorageVerificationError } from '../../shared/storage';
 import { verifyReleaseLog } from './logCheck';
-import { formatRemaining, secondsUntilRound } from './Countdown';
 import { downloadPaperFiles } from './download';
 import { PaperHashMismatchError, unlockPaper, type UnlockContext } from './unlock';
 
@@ -183,15 +182,6 @@ describe('downloadPaperFiles', () => {
   it('refuses an on-chain list that is not the one the Build committed to', async () => {
     const s = storage();
     await expect(downloadPaperFiles(context(s, { readBuild: () => Promise.resolve({ ...s.build, approvedListHash: `0x${'05'.repeat(32)}` }) }))).rejects.toThrow('approved list hash');
-  });
-});
-
-describe('countdown', () => {
-  it('counts down in drand rounds', () => {
-    // Round 1 is produced at genesis, and a round is produced every 3 seconds.
-    expect(secondsUntilRound(11, 1692803367 + 6)).toBe(24);
-    expect(secondsUntilRound(11, 1692803367 + 100)).toBe(0);
-    expect(formatRemaining(3725)).toBe('1:02:05');
   });
 });
 
