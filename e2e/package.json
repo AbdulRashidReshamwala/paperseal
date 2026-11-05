@@ -1,0 +1,22 @@
+{
+  "name": "@paperseal/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Recorded end-to-end runs against the real apps, contract and test suites. No test script on purpose: `pnpm test` at the root must not start browsers.",
+  "scripts": {
+    "record": "node scripts/record.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@paperseal/crypto": "workspace:*",
+    "@paperseal/keys": "workspace:*",
+    "@paperseal/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "playwright-core": "1.64.1",
+    "viem": "2.57.16",
+    "vite": "8.3.6",
+    "vitest": "5.1.0"
+  }
+}

@@ -1,0 +1,23 @@
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+.env
+.env.*
+!.env.example
+.DS_Store
+
+# Foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+
+# Go
+tee/bin/
+
+# Recorded videos from e2e/
+e2e/videos/
+e2e/.browsers/
+
+# Local research notes, not published
+research/

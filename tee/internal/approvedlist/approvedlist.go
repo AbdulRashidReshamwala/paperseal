@@ -1,0 +1,171 @@
+// Package approvedlist encodes and decodes the `entries` bytes in spec/api.md
+// "Approved List", which are abi.encode(Entry[]). The bytes come from the chain
+// and the board wrote them, so Decode trusts nothing and accepts one encoding
+// only. go-ethereum reads and writes the bytes, so none of that is by hand here.
+package approvedlist
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"unicode/utf8"
+
+	"github.com/ethereum/go-ethereum/accounts/abi"
+
+	"paperseal/tee/internal/hashing"
+	"paperseal/tee/internal/notimpl"
+	"paperseal/tee/internal/spec"
+)
+
+// Role is the `role` byte of an entry. It is an alias because the ABI decoder
+// can only copy a uint8 into a plain uint8.
+type Role = uint8
+
+const (
+	RoleSetter       Role = 1 // Has no derived key.
+	RoleNeutral      Role = 2 // A neutral party, a key holder.
+	RoleCentreHolder Role = 3 // A centre that is a key holder.
+	RoleCentre       Role = 4 // An approved centre without a share.
+)
+
+// Reasons Decode refuses a list. Wrapped errors add where and why.
+var (
+	ErrMalformed          = errors.New("approvedlist: not a valid abi.encode(Entry[])")
+	ErrNonCanonical       = errors.New("approvedlist: bytes differ from the canonical encoding")
+	ErrUnknownRole        = errors.New("approvedlist: unknown role")
+	ErrPasskey            = errors.New("approvedlist: bad passkey public key")
+	ErrDerivedKey         = errors.New("approvedlist: bad derived public key for the role")
+	ErrOwner              = errors.New("approvedlist: owner must be non-empty UTF-8")
+	ErrRepeatedPasskey    = errors.New("approvedlist: repeated passkey")
+	ErrRepeatedDerivedKey = errors.New("approvedlist: repeated derived key")
+	ErrHolderCount        = errors.New("approvedlist: wrong number of key holders")
+)
+
+// listArgs is the ABI shape of `entries`: one Entry[] argument.
+var listArgs = func() abi.Arguments {
+	t, err := abi.NewType("tuple[]", "", []abi.ArgumentMarshaling{
+		{Name: "role", Type: "uint8"},
+		{Name: "passkeyPublicKey", Type: "bytes"},
+		{Name: "derivedPublicKey", Type: "bytes"},
+		{Name: "owner", Type: "string"},
+	})
+	if err != nil {
+		panic("approvedlist: " + err.Error())
+	}
+	return abi.Arguments{{Type: t}}
+}()
+
+// Entry is one person or centre on the list.
+type Entry struct {
+	Role             Role
+	PasskeyPublicKey []byte
+	DerivedPublicKey []byte // Empty for setters, a public key for every other role.
+	Owner            string
+}
+
+func (e Entry) check() error {
+	if e.Role < RoleSetter || e.Role > RoleCentre {
+		return fmt.Errorf("%w: %d", ErrUnknownRole, e.Role)
+	}
+	if err := hashing.CheckPublicKey(e.PasskeyPublicKey); err != nil {
+		return fmt.Errorf("%w: %v", ErrPasskey, err)
+	}
+	if e.Role == RoleSetter {
+		if len(e.DerivedPublicKey) != 0 {
+			return fmt.Errorf("%w: a setter has none", ErrDerivedKey)
+		}
+	} else if err := hashing.CheckPublicKey(e.DerivedPublicKey); err != nil {
+		return fmt.Errorf("%w: %v", ErrDerivedKey, err)
+	}
+	if e.Owner == "" || !utf8.ValidString(e.Owner) {
+		return ErrOwner
+	}
+	return nil
+}
+
+// Encode writes entries in the given order, because the hash covers the posted
+// bytes and order is free. It checks each entry but not the list rules, so it
+// can write the partial lists that test vectors need. Only Decode decides
+// whether a list is acceptable.
+func Encode(entries []Entry) ([]byte, error) {
+	for i, e := range entries {
+		if err := e.check(); err != nil {
+			return nil, fmt.Errorf("entry %d: %w", i, err)
+		}
+	}
+	return pack(entries)
+}
+
+// Decode parses entries and applies every list rule that needs only the list
+// itself. ABI decoding tolerates trailing bytes, gaps, shared offsets and dirty
+// padding, so it re-encodes what it read and refuses any difference: one list
+// has one encoding. The caller must still run CheckRegistered.
+func Decode(b []byte) ([]Entry, error) {
+	values, err := listArgs.Unpack(b)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrMalformed, err)
+	}
+	var entries []Entry
+	if err := listArgs.Copy(&entries, values); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrMalformed, err)
+	}
+	again, err := pack(entries)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrMalformed, err)
+	}
+	if !bytes.Equal(again, b) {
+		return nil, ErrNonCanonical
+	}
+	for i := range entries {
+		// The decoder's byte slices alias b.
+		entries[i].PasskeyPublicKey = bytes.Clone(entries[i].PasskeyPublicKey)
+		entries[i].DerivedPublicKey = bytes.Clone(entries[i].DerivedPublicKey)
+		if err := entries[i].check(); err != nil {
+			return nil, fmt.Errorf("entry %d: %w", i, err)
+		}
+	}
+	if err := checkList(entries); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func pack(entries []Entry) ([]byte, error) { return listArgs.Pack(entries) }
+
+// CheckRegistered must reject an entry the TEE didn't verify at registration.
+// It is not implemented, because registration isn't, so no list can pass yet.
+func CheckRegistered(context.Context, []Entry) error {
+	return notimpl.New("approvedlist.CheckRegistered")
+}
+
+func checkList(entries []Entry) error {
+	passkeys := make(map[string]bool, len(entries))
+	derived := make(map[string]bool, len(entries))
+	neutrals, centres := 0, 0
+	for i, e := range entries {
+		if passkeys[string(e.PasskeyPublicKey)] {
+			return fmt.Errorf("entry %d: %w", i, ErrRepeatedPasskey)
+		}
+		passkeys[string(e.PasskeyPublicKey)] = true
+		// Setters all have the same empty key.
+		if len(e.DerivedPublicKey) != 0 {
+			if derived[string(e.DerivedPublicKey)] {
+				return fmt.Errorf("entry %d: %w", i, ErrRepeatedDerivedKey)
+			}
+			derived[string(e.DerivedPublicKey)] = true
+		}
+		switch e.Role {
+		case RoleNeutral:
+			neutrals++
+		case RoleCentreHolder:
+			centres++
+		}
+	}
+	t := spec.C.Threshold
+	if neutrals != t.Neutrals || centres != t.Centres {
+		return fmt.Errorf("%w: %d neutrals and %d centres, need %d and %d",
+			ErrHolderCount, neutrals, centres, t.Neutrals, t.Centres)
+	}
+	return nil
+}

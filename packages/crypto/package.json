@@ -1,0 +1,19 @@
+{
+  "name": "@paperseal/crypto",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@paperseal/protocol": "workspace:*",
+    "@hpke/core": "1.10.0",
+    "tlock-js": "0.9.0"
+  }
+}

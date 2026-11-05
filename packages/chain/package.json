@@ -1,0 +1,19 @@
+{
+  "name": "@paperseal/chain",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test:live": "vitest run --config vitest.live.config.mjs"
+  },
+  "dependencies": {
+    "@paperseal/protocol": "workspace:*",
+    "viem": "2.57.16"
+  }
+}

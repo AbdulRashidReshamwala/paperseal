@@ -1,0 +1,85 @@
+name: Reproducible build
+
+# Rebuilds the TEE image twice from clean builders and fails if the digests
+# differ. Run it by hand to check any commit:
+#   gh workflow run repro.yml -f commit=<40-char sha> -f expected_digest=sha256:<digest>
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Full 40-character commit SHA. Leave empty for the selected branch.
+        required: false
+      expected_digest:
+        description: Digest to compare with, such as the one on-chain (sha256:...).
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  repro:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check inputs
+        env:
+          COMMIT: ${{ inputs.commit }}
+          EXPECTED: ${{ inputs.expected_digest }}
+        run: |
+          if [ -n "$COMMIT" ] && ! printf '%s' "$COMMIT" | grep -Eq '^[0-9a-f]{40}$'; then
+            echo "::error::commit must be a full 40-character lowercase SHA"
+            exit 1
+          fi
+          if [ -n "$EXPECTED" ] && ! printf '%s' "$EXPECTED" | grep -Eq '^(sha256:)?[0-9a-f]{64}$'; then
+            echo "::error::expected_digest must be 64 hex characters, with or without sha256:"
+            exit 1
+          fi
+
+      # actions/checkout v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ inputs.commit || github.sha }}
+          persist-credentials: false
+
+      - name: First build
+        id: first
+        run: echo "digest=$(tee/scripts/build-image.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Second build, from a new builder
+        id: second
+        run: |
+          docker buildx rm paperseal-repro
+          echo "digest=$(tee/scripts/build-image.sh)" >> "$GITHUB_OUTPUT"
+
+      - name: Compare digests
+        env:
+          FIRST: ${{ steps.first.outputs.digest }}
+          SECOND: ${{ steps.second.outputs.digest }}
+          EXPECTED: ${{ inputs.expected_digest }}
+        run: |
+          commit="$(git rev-parse HEAD)"
+          bare="${FIRST#sha256:}"
+          {
+            echo "### Reproducible build"
+            echo
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| Commit (\`commitHash\`) | \`0x$commit\` |"
+            echo "| Image digest | \`$FIRST\` |"
+            echo "| Image digest (\`imageDigest\`) | \`0x$bare\` |"
+            echo "| Second build | \`$SECOND\` |"
+            if [ -n "$EXPECTED" ]; then echo "| Expected | \`$EXPECTED\` |"; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -z "$FIRST" ] || [ "$FIRST" != "$SECOND" ]; then
+            echo "::error::the two builds gave different digests"
+            exit 1
+          fi
+          if [ -n "$EXPECTED" ] && [ "${EXPECTED#sha256:}" != "$bare" ]; then
+            echo "::error::digest $FIRST does not match the expected $EXPECTED"
+            exit 1
+          fi
+          echo "::notice::commit $commit builds to $FIRST"

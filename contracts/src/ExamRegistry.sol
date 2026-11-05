@@ -1,0 +1,310 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.30;
+
+/// @title ExamRegistry
+/// @notice Public, write-once record of each exam. Only the board's address can write. Nothing here can be
+///         changed once written, including the exam's start time, `delta` and drand rounds, which set its date.
+/// @dev The approved list and selection criteria are each kept as a hash and emitted in full. Neither is
+///      decoded here, because the board app and the TEE check their content. TEE signatures are stored but not verified. The attested key only exists
+///      off-chain, so apps verify them against the attestation token. The length and format checks here only
+///      stop a mistyped value from filling a write-once slot. They prove nothing about who signed.
+///      Rounds are checked against quicknet's published timing, but never against block time or drand output.
+contract ExamRegistry {
+    /// @notice The stored values in "Exam Settings" in spec/api.md.
+    /// @dev `registry` and `chainId` are also exam settings, but they are this contract and its chain.
+    struct ExamSettings {
+        bytes32 examId;
+        uint64 examStart;
+        uint64 delta;
+        uint64 lockRound;
+        uint64 unlockRound;
+        uint64 endRound;
+        bytes32 criteriaHash;
+        string rpcHost;
+    }
+
+    /// @dev `createdAt` and each record's `postedAt` are block timestamps, and zero means not written yet.
+    ///      They are a record of the transaction only. drand remains the only clock.
+    ///      `createdBlock` is the block holding ExamCreated, so clients can read `criteria` with a log query
+    ///      over that one block. Public RPC operators reject wide block ranges.
+    struct Exam {
+        bytes20 commitHash;
+        bytes32 imageDigest;
+        uint64 createdAt;
+        uint64 createdBlock;
+        ExamSettings settings;
+    }
+
+    /// @dev `postedBlock` is the block holding ApprovedListPosted, so clients can read `entries` the same way.
+    struct ApprovedList {
+        bytes32 listHash;
+        uint64 postedAt;
+        uint64 postedBlock;
+    }
+
+    struct Build {
+        bytes32 approvedListHash;
+        bytes32 paperHash;
+        bytes32 storageManifestHash;
+        bytes32 saltedPaperHash;
+        uint32 selected;
+        uint32 bankSize;
+        uint64 postedAt;
+        bytes32 criteriaHash;
+        bytes teeSignature;
+        bytes instancePublicKey;
+    }
+
+    event ExamCreated(
+        bytes32 indexed examId,
+        bytes20 commitHash,
+        bytes32 imageDigest,
+        uint64 examStart,
+        uint64 delta,
+        uint64 lockRound,
+        uint64 unlockRound,
+        uint64 endRound,
+        bytes32 criteriaHash,
+        string rpcHost,
+        bytes criteria
+    );
+    event ApprovedListPosted(bytes32 indexed examId, bytes32 listHash, bytes entries);
+    event BuildPosted(
+        bytes32 indexed examId,
+        bytes32 approvedListHash,
+        bytes32 paperHash,
+        bytes32 storageManifestHash,
+        bytes32 saltedPaperHash,
+        uint32 selected,
+        uint32 bankSize,
+        bytes32 criteriaHash,
+        bytes teeSignature,
+        bytes instancePublicKey
+    );
+
+    error NotBoard(address caller);
+    error ZeroBoardAddress();
+    error ZeroValue();
+    error InvalidRounds();
+    error InvalidExamStart();
+    error InvalidEndRound();
+    error InvalidPublicKey();
+    error InvalidSignatureLength();
+    error InvalidSelection();
+    error ExamNotFound(bytes32 examId);
+    error ExamAlreadyExists(bytes32 examId);
+    error ApprovedListNotPosted(bytes32 examId);
+    error ApprovedListAlreadyPosted(bytes32 examId);
+    error BuildAlreadyPosted(bytes32 examId);
+    error UnlockRoundMismatch(uint256 expected, uint256 actual);
+    error ApprovedListHashMismatch(bytes32 expected, bytes32 actual);
+    error CriteriaHashMismatch(bytes32 expected, bytes32 actual);
+
+    /// @notice `drand.genesisTime` in spec/constants.json, the Unix time of quicknet round 1.
+    uint64 public constant QUICKNET_GENESIS_TIME = 1692803367;
+    /// @notice `drand.periodSeconds` in spec/constants.json.
+    uint64 public constant QUICKNET_PERIOD_SECONDS = 3;
+
+    /// @dev `domainTags.criteria` in spec/constants.json.
+    string private constant CRITERIA_TAG = "paperseal/v1/criteria";
+    /// @dev `domainTags.approvedList` in spec/constants.json.
+    string private constant APPROVED_LIST_TAG = "paperseal/v1/approved-list";
+    /// @dev An uncompressed P-256 public key: 0x04, then x and y.
+    uint256 private constant PUBLIC_KEY_LENGTH = 65;
+    /// @dev A TEE signature: r || s.
+    uint256 private constant SIGNATURE_LENGTH = 64;
+
+    /// @notice The only address that can write. Set at construction and never changes.
+    address public immutable board;
+
+    mapping(bytes32 examId => Exam) private _exams;
+    mapping(bytes32 examId => ApprovedList) private _approvedLists;
+    mapping(bytes32 examId => Build) private _builds;
+
+    modifier onlyBoard() {
+        if (msg.sender != board) revert NotBoard(msg.sender);
+        _;
+    }
+
+    constructor(address board_) {
+        if (board_ == address(0)) revert ZeroBoardAddress();
+        board = board_;
+    }
+
+    /// @notice Publishes the commit, image digest and exam settings before Onboard.
+    /// @param commitHash The git commit the image is built from.
+    /// @param imageDigest The SHA-256 digest of the container image.
+    /// @param settings The attested exam settings.
+    /// @param criteria The selection criteria as `abi.encode(Criteria)`, from "Selection Criteria" in spec/api.md.
+    ///        Emitted but not stored, and must hash to `settings.criteriaHash`.
+    function createExam(
+        bytes20 commitHash,
+        bytes32 imageDigest,
+        ExamSettings calldata settings,
+        bytes calldata criteria
+    ) external onlyBoard {
+        bytes32 examId = settings.examId;
+        if (_exams[examId].createdAt != 0) revert ExamAlreadyExists(examId);
+        if (
+            examId == bytes32(0) || commitHash == bytes20(0) || imageDigest == bytes32(0)
+                || settings.criteriaHash == bytes32(0) || settings.delta == 0 || bytes(settings.rpcHost).length == 0
+                || criteria.length == 0
+        ) revert ZeroValue();
+        _checkSchedule(settings);
+        _checkCriteria(settings.criteriaHash, criteria);
+
+        _exams[examId] = Exam({
+            commitHash: commitHash,
+            imageDigest: imageDigest,
+            createdAt: _now(),
+            createdBlock: _blockNumber(),
+            settings: settings
+        });
+
+        emit ExamCreated(
+            examId,
+            commitHash,
+            imageDigest,
+            settings.examStart,
+            settings.delta,
+            settings.lockRound,
+            settings.unlockRound,
+            settings.endRound,
+            settings.criteriaHash,
+            settings.rpcHost,
+            criteria
+        );
+    }
+
+    /// @notice Posts the encoded approved list. Stores its hash and emits the full bytes.
+    /// @dev The hash is the `approvedList` message in spec/api.md, which the TEE signs into the Build. It covers
+    ///      the posted bytes as they are.
+    /// @param entries The list as `abi.encode(Entry[])`, from "Approved List" in spec/api.md.
+    function postApprovedList(bytes32 examId, bytes calldata entries) external onlyBoard {
+        if (_exams[examId].createdAt == 0) revert ExamNotFound(examId);
+        if (_approvedLists[examId].postedAt != 0) revert ApprovedListAlreadyPosted(examId);
+        if (entries.length == 0) revert ZeroValue();
+
+        bytes32 listHash = sha256(abi.encode(APPROVED_LIST_TAG, examId, entries));
+        _approvedLists[examId] = ApprovedList({listHash: listHash, postedAt: _now(), postedBlock: _blockNumber()});
+
+        emit ApprovedListPosted(examId, listHash, entries);
+    }
+
+    /// @notice Posts the one Build for this exam, after the files are on public storage. Needs the approved list.
+    /// @dev `approvedListHash` and `criteriaHash` must match the on-chain values, so a mistyped Build can't fill
+    ///      the write-once slot with one the verifier page would then have to reject forever.
+    function postBuild(
+        bytes32 examId,
+        bytes32 approvedListHash,
+        bytes32 paperHash,
+        bytes32 storageManifestHash,
+        bytes32 saltedPaperHash,
+        uint32 selected,
+        uint32 bankSize,
+        bytes32 criteriaHash,
+        bytes calldata teeSignature,
+        bytes calldata instancePublicKey
+    ) external onlyBoard {
+        _checkBuild(examId, approvedListHash, criteriaHash);
+        if (paperHash == bytes32(0) || storageManifestHash == bytes32(0) || saltedPaperHash == bytes32(0)) {
+            revert ZeroValue();
+        }
+        if (selected == 0 || selected > bankSize) revert InvalidSelection();
+        _checkTeeOutput(teeSignature, instancePublicKey);
+
+        // Written field by field because a struct literal of this size is too deep for the legacy code generator.
+        Build storage build = _builds[examId];
+        build.approvedListHash = approvedListHash;
+        build.paperHash = paperHash;
+        build.storageManifestHash = storageManifestHash;
+        build.saltedPaperHash = saltedPaperHash;
+        build.selected = selected;
+        build.bankSize = bankSize;
+        build.postedAt = _now();
+        build.criteriaHash = criteriaHash;
+        build.teeSignature = teeSignature;
+        build.instancePublicKey = instancePublicKey;
+
+        emit BuildPosted(
+            examId,
+            approvedListHash,
+            paperHash,
+            storageManifestHash,
+            saltedPaperHash,
+            selected,
+            bankSize,
+            criteriaHash,
+            teeSignature,
+            instancePublicKey
+        );
+    }
+
+    /// @notice Returns the exam, with `createdAt` and `createdBlock` zero if it doesn't exist.
+    function getExam(bytes32 examId) external view returns (Exam memory) {
+        return _exams[examId];
+    }
+
+    /// @notice Returns the approved list record, with `postedAt` and `postedBlock` zero if it isn't posted.
+    function getApprovedList(bytes32 examId) external view returns (ApprovedList memory) {
+        return _approvedLists[examId];
+    }
+
+    /// @notice Returns the Build record, with `postedAt` zero if it isn't posted.
+    function getBuild(bytes32 examId) external view returns (Build memory) {
+        return _builds[examId];
+    }
+
+    function _now() private view returns (uint64) {
+        // casting to 'uint64' is safe because block timestamps won't reach 2^64 seconds
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint64(block.timestamp);
+    }
+
+    function _blockNumber() private view returns (uint64) {
+        // casting to 'uint64' is safe because block numbers won't reach 2^64
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint64(block.number);
+    }
+
+    /// @dev Round r is produced at genesis + (r - 1) * period. The maths is in uint256, so extreme settings
+    ///      revert with these errors, not an arithmetic panic. Round order is checked first, so `endRound` is
+    ///      at least 3 here.
+    function _checkSchedule(ExamSettings calldata settings) private pure {
+        if (
+            settings.lockRound == 0 || settings.unlockRound <= settings.lockRound
+                || settings.endRound <= settings.unlockRound
+        ) revert InvalidRounds();
+        if (settings.examStart <= uint256(settings.delta) + QUICKNET_GENESIS_TIME) revert InvalidExamStart();
+
+        uint256 unlockOffset = uint256(settings.examStart) - settings.delta - QUICKNET_GENESIS_TIME;
+        uint256 expectedUnlock = (unlockOffset + QUICKNET_PERIOD_SECONDS - 1) / QUICKNET_PERIOD_SECONDS + 1;
+        if (settings.unlockRound != expectedUnlock) revert UnlockRoundMismatch(expectedUnlock, settings.unlockRound);
+
+        uint256 endTime = QUICKNET_GENESIS_TIME + (uint256(settings.endRound) - 1) * QUICKNET_PERIOD_SECONDS;
+        if (endTime <= settings.examStart) revert InvalidEndRound();
+    }
+
+    function _checkCriteria(bytes32 criteriaHash, bytes calldata criteria) private pure {
+        bytes32 actual = sha256(abi.encode(CRITERIA_TAG, criteria));
+        if (actual != criteriaHash) revert CriteriaHashMismatch(criteriaHash, actual);
+    }
+
+    function _checkBuild(bytes32 examId, bytes32 approvedListHash, bytes32 criteriaHash) private view {
+        ApprovedList storage list = _approvedLists[examId];
+        if (list.postedAt == 0) revert ApprovedListNotPosted(examId);
+        if (_builds[examId].postedAt != 0) revert BuildAlreadyPosted(examId);
+        if (approvedListHash != list.listHash) revert ApprovedListHashMismatch(list.listHash, approvedListHash);
+        bytes32 expectedCriteria = _exams[examId].settings.criteriaHash;
+        if (criteriaHash != expectedCriteria) revert CriteriaHashMismatch(expectedCriteria, criteriaHash);
+    }
+
+    function _checkTeeOutput(bytes calldata teeSignature, bytes calldata instancePublicKey) private pure {
+        if (teeSignature.length != SIGNATURE_LENGTH) revert InvalidSignatureLength();
+        _checkPublicKey(instancePublicKey);
+    }
+
+    function _checkPublicKey(bytes calldata publicKey) private pure {
+        if (publicKey.length != PUBLIC_KEY_LENGTH || publicKey[0] != 0x04) revert InvalidPublicKey();
+    }
+}

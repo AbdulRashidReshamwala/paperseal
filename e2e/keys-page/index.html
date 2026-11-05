@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>packages/keys on Chrome virtual authenticator</title>
+    <style>
+      body { margin: 0; background: #0b1220; color: #e2e8f0; font: 16px/1.45 ui-monospace, Menlo, monospace; padding: 22px 30px 90px; }
+      h1 { font: 700 22px system-ui, sans-serif; margin: 0 0 4px; }
+      p.note { margin: 0 0 14px; color: #94a3b8; font: 14px system-ui, sans-serif; }
+      #log div { padding: 3px 0; white-space: pre-wrap; word-break: break-all; }
+      .step { color: #7dd3fc; margin-top: 10px; font-weight: 700; }
+      .ok { color: #4ade80; }
+      .bad { color: #f87171; }
+      .dim { color: #94a3b8; }
+    </style>
+  </head>
+  <body>
+    <h1>packages/keys, real createWebAuthnKeys</h1>
+    <p class="note">Chrome virtual authenticator (CTAP2.1, PRF, user verification) over CDP. Origin <span id="origin"></span></p>
+    <div id="log"></div>
+    <script type="module" src="./page.ts"></script>
+  </body>
+</html>

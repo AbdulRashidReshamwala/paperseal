@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@paperseal/web", "dev"],
+      "port": 5171
+    },
+    {
+      "name": "verifier",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@paperseal/verifier", "dev"],
+      "port": 5172
+    }
+  ]
+}
