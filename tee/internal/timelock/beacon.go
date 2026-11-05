@@ -72,41 +72,52 @@ type fetched struct {
 	randomness []byte
 }
 
-// fetch asks each relay in turn. wantRound is zero for "latest".
+// fetch asks each relay in turn. wantRound is zero for "latest". Each relay's
+// outcome is one of: a verified round, not yet (404/425), transient (network
+// error, timeout, any other status, an undecodable body) or misbehaving (the
+// wrong round, a bad signature). A verified round wins. Otherwise a misbehaving
+// relay is an error, then not yet is ErrNotPublished, and all-transient is
+// ErrUnavailable.
 func (b *HTTPBeacon) fetch(ctx context.Context, which string, wantRound uint64) (fetched, error) {
 	var errs []error
-	allMissing := true
+	var notYet, transient, misbehaved int
 	for _, relay := range b.relays {
 		url := strings.TrimRight(relay, "/") + "/" + b.chain.Hash + "/public/" + which
 		beacon, status, err := b.get(ctx, url)
 		switch {
 		case err != nil:
-			allMissing = false
-			errs = append(errs, err)
+			transient++
+			errs = append(errs, fmt.Errorf("%s: %w", relay, err))
 			continue
 		case status == http.StatusNotFound || status == http.StatusTooEarly:
+			notYet++
 			errs = append(errs, fmt.Errorf("timelock: %s: round not available (%d)", relay, status))
 			continue
 		case status != http.StatusOK:
-			allMissing = false
+			transient++
 			errs = append(errs, fmt.Errorf("timelock: %s: status %d", relay, status))
 			continue
 		}
 		if wantRound != 0 && beacon.Round != wantRound {
-			allMissing = false
+			misbehaved++
 			errs = append(errs, fmt.Errorf("timelock: %s served round %d, asked for %d", relay, beacon.Round, wantRound))
 			continue
 		}
 		rnd, err := b.chain.verify(beacon)
 		if err != nil {
-			allMissing = false
+			misbehaved++
 			errs = append(errs, fmt.Errorf("%s: %w", relay, err))
 			continue
 		}
 		return fetched{beacon.Round, rnd}, nil
 	}
-	if allMissing && len(errs) > 0 && wantRound != 0 {
+	switch {
+	case misbehaved > 0:
+		return fetched{}, errors.Join(errs...)
+	case notYet > 0 && wantRound != 0:
 		return fetched{}, ErrNotPublished
+	case notYet+transient > 0:
+		return fetched{}, fmt.Errorf("%w: %w", ErrUnavailable, errors.Join(errs...))
 	}
 	return fetched{}, errors.Join(errs...)
 }

@@ -204,6 +204,9 @@ func (m *Machine) submitOpen(ctx context.Context) error {
 		m.mu.Unlock()
 		return nil
 	}
+	if errors.Is(err, timelock.ErrUnavailable) {
+		return releaseError(err)
+	}
 	if err != nil {
 		return err
 	}
@@ -334,6 +337,8 @@ func releaseError(err error) error {
 		return badRequest("invalid_release", err.Error())
 	case errors.Is(err, release.ErrStale):
 		return api.Errorf(http.StatusServiceUnavailable, "stale_beacon", "drand's newest round is not current, try again")
+	case errors.Is(err, timelock.ErrUnavailable):
+		return api.Errorf(http.StatusServiceUnavailable, "stale_beacon", "drand could not be reached, try again")
 	case errors.Is(err, challenge.ErrBusy):
 		return challengeError(err)
 	}

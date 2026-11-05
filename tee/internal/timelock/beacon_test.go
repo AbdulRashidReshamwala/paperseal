@@ -151,3 +151,65 @@ func TestFakeBeacon(t *testing.T) {
 		t.Fatal("future round returned")
 	}
 }
+
+// status serves a fixed HTTP status, like a relay that is down or behind.
+func status(t *testing.T, code int) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "x", code)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestBeaconRelayOutcomes(t *testing.T) {
+	c := timelocktest.New(t)
+	var limit atomic.Uint64
+	limit.Store(100)
+	badSig := func(r *timelocktest.Round) { *r = timelocktest.New(t).Sign(t, r.Round) }
+	cases := []struct {
+		name      string
+		relays    func() []string
+		round     uint64 // zero asks for latest
+		want      error  // nil means success
+		neither   bool   // an error that is neither sentinel
+		wantRound uint64
+	}{
+		{"500 then 404", func() []string { return []string{status(t, 500).URL, status(t, 404).URL} }, 50, timelock.ErrNotPublished, false, 0},
+		{"500 then 425", func() []string { return []string{status(t, 500).URL, status(t, 425).URL} }, 50, timelock.ErrNotPublished, false, 0},
+		{"500 then 200", func() []string { return []string{status(t, 500).URL, relay(t, c, &limit, nil).URL} }, 50, nil, false, 50},
+		{"500 and 500", func() []string { return []string{status(t, 500).URL, status(t, 500).URL} }, 50, timelock.ErrUnavailable, false, 0},
+		{"429 and 500", func() []string { return []string{status(t, 429).URL, status(t, 503).URL} }, 50, timelock.ErrUnavailable, false, 0},
+		{"bad signature then 404", func() []string { return []string{relay(t, c, &limit, badSig).URL, status(t, 404).URL} }, 50, nil, true, 0},
+		{"404 then bad signature", func() []string { return []string{status(t, 404).URL, relay(t, c, &limit, badSig).URL} }, 50, nil, true, 0},
+		{"latest 500 and 500", func() []string { return []string{status(t, 500).URL, status(t, 500).URL} }, 0, timelock.ErrUnavailable, false, 0},
+		{"latest 500 then 200", func() []string { return []string{status(t, 500).URL, relay(t, c, &limit, nil).URL} }, 0, nil, false, 100},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			b := timelock.NewHTTPBeacon(c.Chain, tc.relays(), nil)
+			var got uint64
+			var err error
+			if tc.round == 0 {
+				got, err = b.Latest(context.Background())
+			} else {
+				_, err = b.Randomness(context.Background(), tc.round)
+				got = tc.wantRound
+			}
+			switch {
+			case tc.neither:
+				if err == nil || errors.Is(err, timelock.ErrNotPublished) || errors.Is(err, timelock.ErrUnavailable) {
+					t.Fatalf("want a hard error, got %v", err)
+				}
+			case tc.want != nil:
+				if !errors.Is(err, tc.want) {
+					t.Fatalf("want %v, got %v", tc.want, err)
+				}
+			default:
+				if err != nil || got != tc.wantRound {
+					t.Fatalf("want round %d, got %d %v", tc.wantRound, got, err)
+				}
+			}
+		})
+	}
+}

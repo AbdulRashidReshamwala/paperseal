@@ -24,6 +24,11 @@ import (
 // "not yet", never as failure.
 var ErrNotPublished = errors.New("timelock: round is not published yet")
 
+// ErrUnavailable means no relay could say either way: every one failed in a way
+// that may pass (network error, timeout, 5xx, 429, an unreadable body). It is
+// retryable and never a reason to fail an exam.
+var ErrUnavailable = errors.New("timelock: no relay could be reached")
+
 // Sealer timelocks data to a drand round on quicknet. The output is the
 // armoured age format shared by drand/tlock and tlock-js.
 type Sealer interface {
@@ -35,7 +40,7 @@ type Sealer interface {
 // network.
 type Beacon interface {
 	// Randomness returns a verified round's randomness, or ErrNotPublished if
-	// the round isn't available yet.
+	// the round isn't available yet, or ErrUnavailable if no relay could say.
 	Randomness(ctx context.Context, round uint64) ([]byte, error)
 	// Latest returns the newest verified round.
 	Latest(ctx context.Context) (uint64, error)
