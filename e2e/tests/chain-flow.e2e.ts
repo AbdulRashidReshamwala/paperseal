@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, it } from 'vitest';
 import { keccak256, toBytes, type Hex } from 'viem';
 import type { Browser, Page } from 'playwright-core';
 
-import { cast, publicClientFor, rpcCall, startApp, startChain, type Chain } from '../src/chain';
+import { cast, castSignature, publicClientFor, rpcCall, startApp, startChain, type Chain } from '../src/chain';
 import { stopAll } from '../src/procs';
 import { launchChrome, Recording } from '../src/recorder';
 import { testWalletScript } from '../src/wallet';
@@ -34,7 +34,7 @@ beforeAll(async () => {
   browser = await launchChrome();
   // Warm Vite's dependency optimiser with an unrecorded visit, so a mid-recording reload cannot happen.
   const warm = await browser.newPage();
-  await warm.goto(`${web.url}/board/publish`);
+  await warm.goto(`${web.url}/#/board/publish`);
   await warm.waitForLoadState('networkidle');
   await warm.close();
 });
@@ -58,7 +58,7 @@ describe('exam on a local anvil chain', () => {
     const page = await rec.open(browser, [testWalletScript(chain.rpcUrl)]);
     const client = publicClientFor(chain);
     try {
-      await page.goto(`${web.url}/board/blueprint`);
+      await page.goto(`${web.url}/#/board/blueprint`);
       await rec.say('Real apps/web at /board/blueprint. ExamRegistry deployed from contracts/out, board = anvil account 0');
       await rec.pause(2500);
 
@@ -74,11 +74,11 @@ describe('exam on a local anvil chain', () => {
       await rec.say('Blueprint: setter limits');
       await rec.type(value(page, 'maxSetterPercent'), '20');
       await rec.type(value(page, 'minBankMultiple'), '4');
-      await page.getByText('Criteria accepted').scrollIntoViewIfNeeded();
+      await page.locator('.ps-badge', { hasText: 'Criteria accepted' }).scrollIntoViewIfNeeded();
       await rec.say('Blueprint: criteria accepted by the app');
       await rec.pause(2000);
       await rec.check('Blueprint accepts the criteria (8 questions selected)', async () => {
-        await page.getByText('Criteria accepted').waitFor({ timeout: 5000 });
+        await page.locator('.ps-badge', { hasText: 'Criteria accepted' }).waitFor({ timeout: 5000 });
         const text = await page.locator('li').filter({ hasText: 'selectedCount' }).first().innerText();
         if (!/\b8\b/.test(text)) throw new Error(`selectedCount row: ${text}`);
         return text.replace(/\s+/g, ' ');
@@ -99,10 +99,10 @@ describe('exam on a local anvil chain', () => {
       await rec.type(value(page, 'Lock time'), `${lockDay} 12:00`);
       await rec.say('Schedule: exam ends 12:30');
       await rec.type(value(page, 'End time'), `${day} 12:30`);
-      await page.getByText('Schedule accepted').scrollIntoViewIfNeeded();
+      await page.locator('.ps-badge', { hasText: 'Schedule accepted' }).scrollIntoViewIfNeeded();
       await rec.pause(2000);
       await rec.check('Schedule accepted, with drand rounds derived', async () => {
-        await page.getByText('Schedule accepted').waitFor({ timeout: 5000 });
+        await page.locator('.ps-badge', { hasText: 'Schedule accepted' }).waitFor({ timeout: 5000 });
         const text = await page.locator('li').filter({ hasText: 'Unlock round' }).first().innerText();
         if (!/round \d+/.test(text)) throw new Error(`no round shown: ${text}`);
         return text.replace(/\s+/g, ' ');
@@ -137,7 +137,7 @@ describe('exam on a local anvil chain', () => {
       await rec.pause(3500);
       await rec.check('Publishing as the wrong account is refused before anything is sent', async () => {
         const panel = await page.locator('section, div').filter({ has: page.getByRole('heading', { name: 'Not published' }) }).last().innerText().catch(() => '');
-        const body = await page.locator('body').innerText();
+        const body = await rec.bodyText();
         if (!/not the board address/i.test(body)) throw new Error(`no refusal message in page text. Panel: ${panel}`);
         const blockAfter = (await rpcCall(chain.rpcUrl, 'eth_blockNumber')) as string;
         if (blockAfter !== blockBefore) throw new Error(`chain advanced from ${blockBefore} to ${blockAfter}`);
@@ -167,7 +167,7 @@ describe('exam on a local anvil chain', () => {
       await rec.pause(4000);
       let txHash = '';
       await rec.check('Read-back screen says "Published and verified" with every row matching', async () => {
-        const body = await page.locator('body').innerText();
+        const body = await rec.bodyText();
         if (!body.includes('Published and verified')) throw new Error('the read-back did not say Published and verified');
         if (/Differs/.test(body)) throw new Error('a read-back row says Differs');
         const matches = (body.match(/Matches/g) ?? []).length;
@@ -211,17 +211,17 @@ describe('exam on a local anvil chain', () => {
       await rec.check('cast call: board() is the anvil account and getExam holds this exam', async () => {
         const boardOut = cast(chain, 'board()(address)');
         if (boardOut.toLowerCase() !== chain.board.toLowerCase()) throw new Error(`board() = ${boardOut}`);
-        const exam = cast(chain, 'getExam(bytes32)((bytes20,bytes32,uint64,(bytes32,uint64,uint64,uint64,uint64,uint64,bytes32,string)))', examId);
+        const exam = cast(chain, castSignature(chain, 'getExam'), examId);
         if (!exam.toLowerCase().includes(examId) || !exam.includes(RPC_HOST)) throw new Error(exam);
         return `board() = ${boardOut}`;
       });
 
-      await page.getByRole('link', { name: 'overview' }).click();
+      await page.getByRole('link', { name: 'overview', exact: true }).click();
       await rec.say('The app overview now reads the exam back from ExamRegistry');
       await page.getByText('Exam ID').first().waitFor({ timeout: 15_000 });
       await rec.pause(3500);
       await rec.check('The app overview shows the published exam', async () => {
-        const body = await page.locator('body').innerText();
+        const body = await rec.bodyText();
         if (!body.toLowerCase().includes(examId) || !body.includes('Mechanics')) throw new Error('overview lacks the exam');
         return 'overview lists exam ID, Mechanics and Optics';
       });
@@ -241,16 +241,16 @@ describe('exam on a local anvil chain', () => {
       if (!published) throw new Error('board-publish did not publish the exam, so there is nothing to verify');
       verifier = await startApp('apps/verifier', { VITE_RPC_URL: chain.rpcUrl, VITE_REGISTRY_ADDRESS: chain.registry });
       const warm = await browser.newPage();
-      await warm.goto(`${verifier.url}/settings`);
+      await warm.goto(`${verifier.url}/#/settings`);
       await warm.waitForLoadState('networkidle');
       await warm.close();
 
       const page = await rec.open(browser);
-      await page.goto(`${verifier.url}/`);
+      await page.goto(`${verifier.url}/#/`);
       await rec.say('Real apps/verifier. RPC URL and registry address are set, no TEE URL, no exam ID yet');
       await rec.pause(2500);
       await rec.check('With no exam ID the verifier shows not connected instead of passing', async () => {
-        const body = await page.locator('body').innerText();
+        const body = await rec.bodyText();
         if (!/not connected/i.test(body)) throw new Error(body.slice(0, 300));
         if (/\bPass\b/.test(body)) throw new Error('a Pass appeared with no exam ID');
         return 'Chain checks: not connected';
@@ -279,7 +279,7 @@ describe('exam on a local anvil chain', () => {
         return `${published.replace(/\s+/g, ' ')} | ${crit.replace(/\s+/g, ' ')}`;
       });
       await rec.check('Overview: TEE is optional, in neutral wording and not a failure', async () => {
-        const body = await page.locator('body').innerText();
+        const body = await rec.bodyText();
         if (!body.includes('Live TEE status: optional')) throw new Error('no optional TEE panel');
         if (!body.includes('Every chain check works without it')) throw new Error('no neutral TEE wording');
         if (/\bFail\b/.test(body)) throw new Error('a Fail badge is on the overview');
@@ -298,7 +298,7 @@ describe('exam on a local anvil chain', () => {
       await page.getByText('Topic: Mechanics').waitFor({ timeout: 20_000 });
       await rec.pause(4500);
       await rec.check('Commitments: decoded criteria and the hash check Pass', async () => {
-        const body = await page.locator('body').innerText();
+        const body = await rec.bodyText();
         if (!/Topic: Mechanics\s*5 questions/.test(body) || !/Topic: Optics\s*3 questions/.test(body)) throw new Error('topics not decoded');
         if (!/20%/.test(body) || !/4x/.test(body)) throw new Error('limits not decoded');
         const crit = await page.locator('li').filter({ hasText: 'Criteria hash matches the exam' }).first().innerText();
@@ -313,7 +313,7 @@ describe('exam on a local anvil chain', () => {
       await rec.pause(3500);
       await rec.check('A tampered exam ID is not published and nothing passes', async () => {
         const published = await page.locator('li').filter({ hasText: 'Exam published' }).first().innerText();
-        const body = await page.locator('body').innerText();
+        const body = await rec.bodyText();
         if (!/Not published/.test(published)) throw new Error(published);
         if (/\bPass\b/.test(body)) throw new Error('a Pass appeared for a tampered ID');
         return published.replace(/\s+/g, ' ');
@@ -325,7 +325,7 @@ describe('exam on a local anvil chain', () => {
       await page.getByText('Exam settings').waitFor({ timeout: 20_000 });
       await rec.pause(3500);
       await rec.check('A wrong exam shows Not posted and nothing passes', async () => {
-        const body = await page.locator('body').innerText();
+        const body = await rec.bodyText();
         const settings = await page.locator('li').filter({ hasText: 'Exam settings' }).first().innerText();
         if (!/Not posted/.test(settings)) throw new Error(settings);
         if (/\bPass\b/.test(body)) throw new Error('a Pass appeared for a wrong exam');

@@ -7,6 +7,7 @@ name: Reproducible build
 on:
   push:
     branches: [main]
+    tags: ['v*.*.*']
   workflow_dispatch:
     inputs:
       commit:
@@ -23,6 +24,9 @@ jobs:
   repro:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    outputs:
+      commit: ${{ steps.compare.outputs.commit }}
+      digest: ${{ steps.compare.outputs.digest }}
     steps:
       - name: Check inputs
         env:
@@ -55,6 +59,7 @@ jobs:
           echo "digest=$(tee/scripts/build-image.sh)" >> "$GITHUB_OUTPUT"
 
       - name: Compare digests
+        id: compare
         env:
           FIRST: ${{ steps.first.outputs.digest }}
           SECOND: ${{ steps.second.outputs.digest }}
@@ -83,3 +88,32 @@ jobs:
             exit 1
           fi
           echo "::notice::commit $commit builds to $FIRST"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "digest=$bare" >> "$GITHUB_OUTPUT"
+
+  # Only a tag publishes a release, and only after both builds matched.
+  release:
+    needs: repro
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ needs.repro.outputs.commit }}
+          DIGEST: ${{ needs.repro.outputs.digest }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            echo "Reproducible TEE image for this version. Spec: \`spec/api.md\`, TEE Releases."
+            echo
+            echo '```json'
+            jq -n --arg version "$GITHUB_REF_NAME" --arg commit "0x$COMMIT" \
+              --arg imageDigest "0x$DIGEST" --arg run "$RUN_URL" \
+              '{version: $version, commit: $commit, imageDigest: $imageDigest, run: $run}'
+            echo '```'
+          } > notes.md
+          gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" \
+            --title "TEE $GITHUB_REF_NAME" --notes-file notes.md --verify-tag

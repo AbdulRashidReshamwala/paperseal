@@ -113,6 +113,15 @@ export class Recording {
     await this.page.evaluate(([t, s]) => (window as unknown as { __caption?: (a: string, b: string) => void }).__caption?.(t as string, s as string), [text, this.options.subtitle ?? ''] as const);
   }
 
+  /** The page text without the caption overlay, so assertions never read the narration. */
+  async bodyText(): Promise<string> {
+    return this.page.evaluate(() => {
+      const clone = document.body.cloneNode(true) as HTMLElement;
+      clone.querySelector('#__ps_caption')?.remove();
+      return clone.innerText || document.body.innerText.replace(document.getElementById('__ps_caption')?.innerText ?? '', '');
+    });
+  }
+
   async pause(ms: number): Promise<void> {
     await this.page.waitForTimeout(ms);
   }
@@ -150,8 +159,8 @@ export class Recording {
       body{margin:0;background:#0f172a;color:#e2e8f0;font:16px/1.4 system-ui,sans-serif;padding:28px 44px;height:100vh;box-sizing:border-box;overflow:hidden}
       h1{margin:0 0 4px;font-size:26px} .sub{color:#94a3b8;margin-bottom:14px}
       .verdict{display:inline-block;font-size:46px;font-weight:800;padding:4px 26px;border-radius:12px;margin:6px 0 14px;color:#0f172a;background:${passed ? '#4ade80' : '#f87171'}}
-      ul{list-style:none;margin:0;padding:0;display:grid;gap:6px} li{display:flex;gap:14px;background:#1e293b;border-radius:8px;padding:7px 12px;align-items:flex-start}
-      li b{min-width:48px;font-family:ui-monospace,monospace} li.ok b{color:#4ade80} li.bad b{color:#f87171} li.bad{outline:2px solid #f87171}
+      ul{list-style:none;margin:0;padding:0;display:grid;gap:6px;grid-template-columns:${this.assertions.length > 6 ? '1fr 1fr' : '1fr'}} li{display:flex;gap:14px;background:#1e293b;border-radius:8px;padding:7px 12px;align-items:flex-start}
+      li b{min-width:44px;font-size:14px;font-family:ui-monospace,monospace} li.ok b{color:#4ade80} li.bad b{color:#f87171} li.bad{outline:2px solid #f87171}
       small{display:block;color:#94a3b8;font-family:ui-monospace,monospace;font-size:12px;word-break:break-all}
     </style><h1>${escapeHtml(this.options.title)}</h1><div class="sub">Result of the assertions that ran in this recording, ${this.assertions.length} in all</div>
     <div class="verdict">${passed ? 'PASS' : 'FAIL'}</div><ul>${rows}</ul>`;
@@ -167,6 +176,11 @@ export class Recording {
     try {
       if (this.page_ && !this.page_.isClosed()) {
         await this.page_.setContent(this.resultHtml(passed));
+        // The result screen is not a step, so the caption goes.
+        await this.page_.evaluate(() => {
+          (window as unknown as { __captionText: string }).__captionText = '';
+          document.getElementById('__ps_caption')?.remove();
+        });
         await this.page_.waitForTimeout(7000);
       }
     } catch (error) {

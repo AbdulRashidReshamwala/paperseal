@@ -47,6 +47,21 @@ The startup arguments are one `--<name>=<value>` each, in the order of this tabl
 
 The TEE has no board key. Its settings name `ExamRegistry`, and that contract's immutable `board` address is the only writer.
 
+## TEE Releases
+
+A tag `v<major>.<minor>.<patch>` on the repository makes `.github/workflows/repro.yml` build the image twice. If the digests match, it publishes a GitHub release for that tag. The release notes hold one fenced `json` block:
+
+| Field | Type |
+| --- | --- |
+| `version` | `string`, the tag |
+| `commit` | `0x`-prefixed git SHA-1, the `commitHash` in `createExam` |
+| `imageDigest` | `0x`-prefixed digest with no `sha256:` prefix, the `imageDigest` in `createExam` |
+| `run` | `string`, the URL of the workflow run that built it |
+
+The metadata sits in the notes because browsers can read them through the GitHub API, but can't fetch release assets across origins. The board app lists these releases, ignores drafts, prereleases and any release that doesn't parse, and rejects a release whose `commit` differs from what its tag points at.
+
+This only fills in the board's form. The on-chain values are what count, and anyone can rebuild them.
+
 ## Selection Criteria
 
 `createExam` takes the encoded criteria as `criteria`. `ExamRegistry` checks them against `settings.criteriaHash`, reverts on a mismatch and emits the full bytes in `ExamCreated`, so anyone can read them and recompute the hash. It doesn't decode them.
@@ -112,6 +127,18 @@ Every client reads `entries` and `criteria` this way. `getExam` returns `created
 - `saltedPaperHash` uses the `paperHash` domain tag, with fields `bytes32 seed`, `bytes paper`. It never hashes the plaintext unsalted, because that would let people test guesses at the paper.
 - `shareRelease` doesn't cover a share hash. One WebAuthn request gives both the signature and the PRF output, so the share isn't decrypted yet when the passkey signs.
 - `shareHash` uses the `shareHash` domain tag, with the field `bytes share`.
+
+## Unlock Instance
+
+Unlock can run on a new TEE instance that shares no state with the one that ran the Build. Only the instance that ran Onboard holds registrations, so `CheckRegistered` applies at Onboard alone. Before accepting a share, an Unlock instance must:
+
+1. Read `getBuild` and `getApprovedList` from `ExamRegistry`, as in "Approved List", and read `entries`.
+2. Fetch the Build instance's PKI attestation token. It is listed in the storage manifest, so `storageManifestHash` commits to it.
+3. Check that token against Google's root in the attested image and the on-chain exam settings, as in the README's claim table. Its `eat_nonce` must bind `build.instancePublicKey`. The token is a record, so check its signature as of its `iat` and skip the expiry check.
+4. Verify `build.teeSignature` over the `build` message with `build.instancePublicKey`.
+5. Check that `build.approvedListHash` equals the on-chain list hash and the hash of `entries`.
+
+If any step fails, the instance refuses every share. After these checks it trusts the on-chain list without re-checking registrations, because the attested Build instance already committed to that list.
 
 ## Attestation Nonce
 

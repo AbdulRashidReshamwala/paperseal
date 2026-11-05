@@ -64,6 +64,15 @@ export function publicClientFor(chain: Chain) {
   return createPublicClient({ chain: sepolia, transport: http(chain.rpcUrl) });
 }
 
+/** The `name(inputs)(outputs)` signature for cast, built from the compiled ABI so it follows the contract. */
+export function castSignature(chain: Chain, name: string): string {
+  const item = chain.abi.find((entry) => entry.type === 'function' && entry.name === name);
+  if (!item || item.type !== 'function') throw new Error(`no function ${name} in the ABI`);
+  type Param = { type: string; components?: readonly Param[] };
+  const type = (p: Param): string => (p.type.startsWith('tuple') ? `(${(p.components ?? []).map(type).join(',')})${p.type.slice(5)}` : p.type);
+  return `${name}(${item.inputs.map(type).join(',')})(${item.outputs.map(type).join(',')})`;
+}
+
 /** `cast call`, the Foundry CLI, as a second reader that shares no code with the app. */
 export function cast(chain: Chain, signature: string, ...args: string[]): string {
   const run = spawnSync('cast', ['call', chain.registry, signature, ...args, '--rpc-url', chain.rpcUrl], { encoding: 'utf8' });

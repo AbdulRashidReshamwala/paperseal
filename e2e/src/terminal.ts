@@ -12,7 +12,7 @@ import { Recording } from './recorder';
  */
 
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
-const EXIT_MARK = '\u0000EXIT:';
+const EXIT_MARK = '@@PAPERSEAL-EXIT:';
 
 const html = (title: string) => `<!doctype html><meta charset="utf-8"><title>terminal</title><style>
   body{margin:0;background:#0b0f14;color:#d6e2ee;font:14px/1.35 ui-monospace,Menlo,monospace}
@@ -109,7 +109,7 @@ export async function recordSuite(browser: Browser, spec: SuiteSpec): Promise<vo
     await finished;
     await page.waitForFunction(() => (window as unknown as { __done: boolean }).__done, undefined, { timeout: 30_000 });
     await rec.say(`Finished: exit code ${String(exitCode)}`);
-    await rec.pause(2500);
+    await rec.pause(5000);
 
     await rec.check(`\`${spec.display}\` exits with code 0`, () => {
       if (exitCode !== 0) throw new Error(`exit code ${String(exitCode)}`);
