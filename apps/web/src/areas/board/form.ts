@@ -17,6 +17,11 @@ import {
   type Topic,
 } from '@paperseal/protocol';
 
+import type { TeeRelease } from '../../shared/teeReleases';
+
+/** A release whose commit was checked against its tag on GitHub. */
+type VerifiedRelease = TeeRelease;
+
 /*
  * Pure logic for the Blueprint, Schedule and Publish screens. Every rule comes
  * from @paperseal/protocol, so what the board sees here is what ExamRegistry
@@ -305,40 +310,51 @@ function scheduleMessage(error: ScheduleError): string {
 /* ------------------------------------------------------------------ Publish */
 
 export interface PublishInput {
-  commitHash: string;
-  imageDigest: string;
+  /** The selected TEE version, a release tag. Empty until one is chosen. */
+  version: string;
   rpcHost: string;
 }
 
-export const emptyPublish: PublishInput = { commitHash: '', imageDigest: '', rpcHost: '' };
+export const emptyPublish: PublishInput = { version: '', rpcHost: '' };
 
 export interface PublishFields {
   commitHash: Hex;
   imageDigest: Hex;
   rpcHost: string;
+  /** The release tag. Shown to the board; not stored on-chain. */
+  version: string;
+  /** The workflow run that built the release. Shown to the board; not stored on-chain. */
+  run: string;
 }
 
 export interface PublishResult {
-  errors: { commitHash?: string; imageDigest?: string; rpcHost?: string };
+  errors: { release?: string; rpcHost?: string };
   fields: PublishFields | null;
 }
 
 const hostname = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/i;
 
-export function evaluatePublish(input: PublishInput): PublishResult {
+/**
+ * `release` is a release whose commit has been checked against its tag, or null.
+ * Without one there are no fields, so nothing can be published.
+ */
+export function evaluatePublish(input: Pick<PublishInput, 'rpcHost'>, release: VerifiedRelease | null): PublishResult {
   const errors: PublishResult['errors'] = {};
-  const commit = input.commitHash.trim().toLowerCase().replace(/^0x/, '');
-  if (!/^[0-9a-f]{40}$/.test(commit)) errors.commitHash = 'The commit hash is the 40-character git SHA-1 of the tagged commit.';
-  const digest = input.imageDigest.trim().toLowerCase().replace(/^sha256:/, '').replace(/^0x/, '');
-  if (!/^[0-9a-f]{64}$/.test(digest)) errors.imageDigest = 'The image digest is 64 hex characters. The sha256: prefix is dropped.';
+  if (!release) errors.release = 'Select a version whose commit matches its tag.';
   const host = input.rpcHost.trim();
   if (!hostname.test(host)) {
     errors.rpcHost = 'Enter the hostname only, with no scheme, port or path, such as sepolia.example.org.';
   }
-  if (errors.commitHash ?? errors.imageDigest ?? errors.rpcHost) return { errors, fields: null };
+  if (!release || errors.rpcHost) return { errors, fields: null };
   return {
     errors,
-    fields: { commitHash: `0x${commit}`, imageDigest: `0x${digest}`, rpcHost: host },
+    fields: {
+      commitHash: release.commit,
+      imageDigest: release.imageDigest,
+      rpcHost: host,
+      version: release.version,
+      run: release.run,
+    },
   };
 }
 

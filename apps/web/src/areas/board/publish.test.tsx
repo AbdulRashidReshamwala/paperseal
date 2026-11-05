@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { createPublicClient, decodeFunctionData, type Address, type Hex } from 'viem';
 import { sepolia } from 'viem/chains';
 import { MemoryRouter, Route, Routes } from 'react-router';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getCurrentExamId } from '../../shared/currentExam';
 import { fakeChain, type FakeChainOptions } from '../../test/fakeChain';
@@ -19,6 +19,43 @@ const name = 'Physics 2027';
 const examId = examIdFromName(name);
 const commit = 'a'.repeat(40);
 const digest = 'b'.repeat(64);
+const run = 'https://github.com/example/paperseal/actions/runs/1';
+
+const releaseItem = (tag: string, published: string, commitHex = commit) => ({
+  tag_name: tag,
+  draft: false,
+  prerelease: false,
+  published_at: published,
+  body: `\`\`\`json\n${JSON.stringify({ version: tag, commit: `0x${commitHex}`, imageDigest: `0x${digest}`, run })}\n\`\`\``,
+});
+
+interface GithubOptions {
+  releases?: unknown;
+  /** Status for the releases listing. */
+  releasesStatus?: number;
+  /** What `/commits/<tag>` answers with, per tag. Defaults to the release commit. */
+  tagSha?: Record<string, string>;
+  tagStatus?: number;
+}
+
+/** Stubs fetch for the GitHub API; the chain stub does not use fetch. */
+function stubGithub(options: GithubOptions = {}) {
+  const calls: string[] = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn((input: unknown) => {
+      const url = String(input);
+      calls.push(url);
+      const json = (data: unknown, status = 200) => Promise.resolve(new Response(JSON.stringify(data), { status }));
+      if (url.includes('/releases')) {
+        return json(options.releases ?? [releaseItem('v1.0.0', '2027-01-01T00:00:00Z')], options.releasesStatus ?? 200);
+      }
+      const tag = decodeURIComponent(url.split('/commits/')[1] ?? '');
+      return json({ sha: options.tagSha?.[tag] ?? commit }, options.tagStatus ?? 200);
+    }),
+  );
+  return calls;
+}
 
 function environment(options: Partial<FakeChainOptions> = {}) {
   const node = fakeChain({ board, ...options });
@@ -48,7 +85,7 @@ function request(): PublishRequest {
   const start = parseLocalTime(times.examStart) ?? 0;
   return {
     examId,
-    fields: { commitHash: `0x${commit}`, imageDigest: `0x${digest}`, rpcHost: 'rpc.example.org' },
+    fields: { commitHash: `0x${commit}`, imageDigest: `0x${digest}`, rpcHost: 'rpc.example.org', version: 'v1.0.0', run },
     schedule: {
       examStart: start,
       delta: 1800,
@@ -62,8 +99,12 @@ function request(): PublishRequest {
 
 beforeEach(() => {
   localStorage.clear();
+  stubGithub();
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe('publishExam with a stub wallet', () => {
   it('sends createExam from the board, then reads back a matching exam', async () => {
@@ -169,6 +210,11 @@ const field = (label: string) =>
 const type = (label: string, value: string) => {
   fireEvent.change(field(label), { target: { value } });
 };
+const selectVersion = async (version: string) => {
+  const select = await screen.findByLabelText('TEE version');
+  await screen.findByRole('option', { name: version });
+  fireEvent.change(select, { target: { value: version } });
+};
 const go = (label: string) => {
   fireEvent.click(within(screen.getByRole('navigation')).getByText(label));
 };
@@ -237,10 +283,15 @@ describe('board screens', () => {
     expect(screen.queryByText('Complete the blueprint')).toBeNull();
     const confirm = screen.getByText('Confirm and publish') as HTMLButtonElement;
     expect(confirm.disabled).toBe(true);
-    type('Commit hash', commit);
-    type('Image digest', `sha256:${digest}`);
+    expect(screen.queryByLabelText(/^Commit hash/)).toBeNull();
+    expect(screen.queryByLabelText(/^Image digest/)).toBeNull();
     type('RPC operator host', 'rpc.example.org');
-    expect(screen.getByText('What will be written to ExamRegistry')).toBeTruthy();
+    await selectVersion('v1.0.0');
+    expect(screen.getByText(`0x${commit}`)).toBeTruthy();
+    expect(screen.getByText(`0x${digest}`)).toBeTruthy();
+    expect(screen.getByText(run).closest('a')?.getAttribute('href')).toBe(run);
+    await screen.findByText('What will be written to ExamRegistry');
+    expect(screen.getByText(/v1\.0\.0 \(not stored on-chain/)).toBeTruthy();
     expect(screen.getByText(/cannot be changed afterwards, not even by the board/)).toBeTruthy();
     await waitFor(() => {
       expect(screen.getAllByText(board).length).toBeGreaterThan(0);
@@ -252,6 +303,7 @@ describe('board screens', () => {
       expect(screen.getByText('Published and verified')).toBeTruthy();
     });
     expect(node.sent).toHaveLength(1);
+    expect(screen.getByText(/v1\.0\.0 \(the release you selected; the version is not stored on-chain/)).toBeTruthy();
     expect(getCurrentExamId()).toBe(examId);
     expect((screen.getByText('Confirm and publish') as HTMLButtonElement).disabled).toBe(true);
 
@@ -271,5 +323,108 @@ describe('board screens', () => {
     });
     expect((screen.getByText('Confirm and publish') as HTMLButtonElement).disabled).toBe(true);
     expect(node.sent).toHaveLength(0);
+  });
+
+  /** Fills blueprint and schedule, then opens Publish with a host typed. */
+  async function readyToPublish(env: PublishEnvironment) {
+    renderBoard(env);
+    type('Exam name', name);
+    type('Topic 1 name', 'Mechanics');
+    type('Topic 1 questions', '5');
+    type('maxSetterPercent', '20');
+    type('minBankMultiple', '4');
+    go('Schedule');
+    type('Exam start, T', times.examStart);
+    type('Δ, minutes before T that the paper unlocks', times.delta);
+    type('Lock time', times.lock);
+    type('End time', times.end);
+    go('Publish');
+    type('RPC operator host', 'rpc.example.org');
+    await waitFor(() => {
+      expect(screen.getAllByText(board).length).toBeGreaterThan(0);
+    });
+    return screen.getByText('Confirm and publish') as HTMLButtonElement;
+  }
+
+  it('lists versions newest first, and keeps publishing blocked until a verified one is selected', async () => {
+    stubGithub({
+      releases: [releaseItem('v1.0.0', '2027-01-01T00:00:00Z'), releaseItem('v1.1.0', '2027-02-01T00:00:00Z')],
+    });
+    const { node, env } = environment();
+    const confirm = await readyToPublish(env);
+    const select = await screen.findByLabelText('TEE version');
+    await screen.findByRole('option', { name: 'v1.1.0' });
+    expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual(['Select a version', 'v1.1.0', 'v1.0.0']);
+    expect(confirm.disabled).toBe(true);
+    expect(screen.queryByText('What will be written to ExamRegistry')).toBeNull();
+
+    fireEvent.change(select, { target: { value: 'v1.1.0' } });
+    await waitFor(() => {
+      expect(confirm.disabled).toBe(false);
+    });
+    fireEvent.change(select, { target: { value: '' } });
+    expect(confirm.disabled).toBe(true);
+    expect(node.sent).toHaveLength(0);
+  });
+
+  it('blocks publishing and says so when the tag points at another commit', async () => {
+    stubGithub({ tagSha: { 'v1.0.0': 'c'.repeat(40) } });
+    const { node, env } = environment();
+    const confirm = await readyToPublish(env);
+    await selectVersion('v1.0.0');
+    await waitFor(() => {
+      expect(screen.getByText(/Release mismatch/)).toBeTruthy();
+    });
+    expect(screen.getByText(/Publishing is blocked/)).toBeTruthy();
+    expect(confirm.disabled).toBe(true);
+    expect(node.sent).toHaveLength(0);
+  });
+
+  it('blocks publishing when the tag cannot be checked', async () => {
+    stubGithub({ tagStatus: 500 });
+    const { env } = environment();
+    const confirm = await readyToPublish(env);
+    await selectVersion('v1.0.0');
+    await waitFor(() => {
+      expect(screen.getByText(/GitHub could not be reached/)).toBeTruthy();
+    });
+    expect(confirm.disabled).toBe(true);
+  });
+
+  it('says plainly when GitHub is unreachable or limiting, with retry and no manual entry', async () => {
+    stubGithub({ releasesStatus: 403 });
+    const { env } = environment();
+    const confirm = await readyToPublish(env);
+    await waitFor(() => {
+      expect(screen.getByText(/GitHub is limiting requests/)).toBeTruthy();
+    });
+    expect(confirm.disabled).toBe(true);
+    expect(screen.queryByLabelText(/^Commit hash/)).toBeNull();
+    expect(screen.queryByLabelText(/^Image digest/)).toBeNull();
+
+    stubGithub();
+    fireEvent.click(screen.getByText('Try again'));
+    await selectVersion('v1.0.0');
+    await waitFor(() => {
+      expect(confirm.disabled).toBe(false);
+    });
+  });
+
+  it('shows a loading state, and explains that a version must be tagged when there are none', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
+    const { env: pending } = environment();
+    const blocked = await readyToPublish(pending);
+    expect(screen.getByText(/Loading the TEE versions/)).toBeTruthy();
+    expect(blocked.disabled).toBe(true);
+    cleanup();
+
+    stubGithub({ releases: [] });
+    const { env } = environment();
+    const confirm = await readyToPublish(env);
+    await waitFor(() => {
+      expect(screen.getByText(/A version must be tagged first/)).toBeTruthy();
+    });
+    expect(screen.queryByLabelText('TEE version')).toBeNull();
+    expect(confirm.disabled).toBe(true);
   });
 });

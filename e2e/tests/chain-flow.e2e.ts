@@ -18,8 +18,10 @@ let web: { url: string; stop: () => Promise<void> };
 let verifier: { url: string; stop: () => Promise<void> } | null = null;
 
 const EXAM_NAME = 'Paper Seal e2e Physics Final';
-const COMMIT = '1234567890abcdef1234567890abcdef12345678';
-const DIGEST = 'ab'.repeat(32);
+// The real release v0.1.0 of AbdulRashidReshamwala/paperseal on GitHub. The app fetches it live.
+const TAG = 'v0.1.0';
+const COMMIT = '0x00b6fd1d0e9862677e316f58f772668624d034c1';
+const DIGEST = '0x83b4623539655ed0df9b640f3f2a7e55997ec5966fafb882fc3483b1e6172842';
 const RPC_HOST = 'sepolia.example.org';
 const examId = keccak256(toBytes(EXAM_NAME));
 let published = false;
@@ -109,10 +111,29 @@ describe('exam on a local anvil chain', () => {
       });
 
       await page.getByRole('link', { name: 'Publish' }).click();
-      await rec.say('Publish: commit hash of the tagged TEE build');
-      await rec.type(value(page, 'Commit hash'), COMMIT, 25);
-      await rec.say('Publish: image digest');
-      await rec.type(value(page, 'Image digest'), DIGEST, 20);
+      await rec.say('Publish: the TEE version list is fetched live from GitHub releases');
+      const dropdown = value(page, 'TEE version');
+      await dropdown.waitFor({ timeout: 60_000 }).catch(() => undefined);
+      const githubOk = await rec.check('The TEE version dropdown appeared from the live GitHub release list', async () => {
+        await dropdown.waitFor({ timeout: 5000 }).catch(async () => {
+          const body = await rec.bodyText();
+          const limited = /limiting requests/.test(body);
+          throw new Error(limited ? 'GitHub rate-limited this run, so the versions could not be listed' : `no TEE version dropdown: ${body.slice(0, 200)}`);
+        });
+        return `options: ${(await dropdown.locator('option').allInnerTexts()).join(', ')}`;
+      });
+      if (!githubOk) throw new Error('cannot publish without the live GitHub release list');
+      await rec.pause(2500);
+      await rec.say(`Publish: selecting ${TAG} in the TEE version dropdown`);
+      await dropdown.selectOption({ label: TAG });
+      await page.getByText(`The tag ${TAG} points at this commit.`).waitFor({ timeout: 30_000 }).catch(() => undefined);
+      await rec.pause(3500);
+      await rec.check(`The app says "The tag ${TAG} points at this commit.", with the real commit and digest shown`, async () => {
+        const body = await rec.bodyText();
+        if (!body.includes(`The tag ${TAG} points at this commit.`)) throw new Error(/limiting requests/.test(body) ? 'GitHub rate-limited this run' : `no verified-tag message: ${body.slice(0, 300)}`);
+        if (!body.toLowerCase().includes(COMMIT) || !body.toLowerCase().includes(DIGEST)) throw new Error('the shown commit or digest differs from the release');
+        return `${COMMIT} / ${DIGEST}`;
+      });
       await rec.say('Publish: RPC operator host');
       await rec.type(value(page, 'RPC operator host'), RPC_HOST);
       await rec.pause(1500);
@@ -194,8 +215,8 @@ describe('exam on a local anvil chain', () => {
         };
         if (exam.createdAt === 0n) throw new Error('the exam is not on-chain');
         if (exam.settings.examId !== examId) throw new Error('examId differs');
-        if (exam.commitHash !== `0x${COMMIT}`) throw new Error(`commit ${exam.commitHash}`);
-        if (exam.imageDigest !== `0x${DIGEST}`) throw new Error(`digest ${exam.imageDigest}`);
+        if (exam.commitHash.toLowerCase() !== COMMIT) throw new Error(`commit ${exam.commitHash}`);
+        if (exam.imageDigest.toLowerCase() !== DIGEST) throw new Error(`digest ${exam.imageDigest}`);
         if (exam.settings.rpcHost !== RPC_HOST) throw new Error(`host ${exam.settings.rpcHost}`);
         if (exam.settings.delta !== 1800n) throw new Error(`delta ${String(exam.settings.delta)}`);
         const start = new Date(dayOffset(30).getFullYear(), dayOffset(30).getMonth(), dayOffset(30).getDate(), 9, 30).getTime() / 1000;
@@ -212,14 +233,20 @@ describe('exam on a local anvil chain', () => {
         const boardOut = cast(chain, 'board()(address)');
         if (boardOut.toLowerCase() !== chain.board.toLowerCase()) throw new Error(`board() = ${boardOut}`);
         const exam = cast(chain, castSignature(chain, 'getExam'), examId);
-        if (!exam.toLowerCase().includes(examId) || !exam.includes(RPC_HOST)) throw new Error(exam);
-        return `board() = ${boardOut}`;
+        const lower = exam.toLowerCase();
+        if (!lower.includes(examId) || !exam.includes(RPC_HOST)) throw new Error(exam);
+        if (!lower.includes(COMMIT) || !lower.includes(DIGEST)) throw new Error(`cast getExam lacks the release values: ${exam}`);
+        return `board() = ${boardOut}; getExam holds the v0.1.0 commit and digest`;
       });
 
       await page.getByRole('link', { name: 'overview', exact: true }).click();
       await rec.say('The app overview now reads the exam back from ExamRegistry');
       await page.getByText('Exam ID').first().waitFor({ timeout: 15_000 });
       await rec.pause(3500);
+      await rec.check(`Source of the commit and digest: the live GitHub release ${TAG} of AbdulRashidReshamwala/paperseal, fetched by the app, not stubbed`, () => {
+        if (!githubOk || rec.assertions.some((a) => !a.ok)) throw new Error('an earlier assertion failed, so the values are not confirmed');
+        return `on-chain commit ${COMMIT}, image digest ${DIGEST}`;
+      });
       await rec.check('The app overview shows the published exam', async () => {
         const body = await rec.bodyText();
         if (!body.toLowerCase().includes(examId) || !body.includes('Mechanics')) throw new Error('overview lacks the exam');

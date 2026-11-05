@@ -6,7 +6,6 @@ import {
   emptyPublish,
   emptySchedule,
   evaluateBlueprint,
-  evaluatePublish,
   evaluateSchedule,
   type BlueprintInput,
   type PublishInput,
@@ -50,13 +49,12 @@ export function useBoardForm(): BoardForm {
   return form;
 }
 
-/** The blueprint, schedule and publish fields, each evaluated by @paperseal/protocol. */
+/** The blueprint and schedule, each evaluated by @paperseal/protocol. */
 export function useEvaluated() {
-  const { blueprint, schedule, publish } = useBoardForm();
+  const { blueprint, schedule } = useBoardForm();
   return {
     blueprint: useMemo(() => evaluateBlueprint(blueprint), [blueprint]),
     schedule: useMemo(() => evaluateSchedule(schedule), [schedule]),
-    publish: useMemo(() => evaluatePublish(publish), [publish]),
   };
 }
 

@@ -1,12 +1,13 @@
 import { chain } from '@paperseal/protocol';
 import { Badge, Button, Field, Mono, Panel, Row, Rows, Screen } from '@paperseal/ui';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 
 import { setCurrentExamId } from '../../shared/currentExam';
 import { currentAccount, requestAccount, walletChainId } from '../../shared/wallet';
 import { useBoardForm, useEvaluated } from './BoardForm';
-import { evaluateSchedule, formatClock, whenTyped, type ScheduleResult } from './form';
+import { checkTag, fetchReleases, releasesRepo, TeeReleasesError, type TeeRelease } from '../../shared/teeReleases';
+import { evaluatePublish, evaluateSchedule, formatClock, whenTyped, type ScheduleResult } from './form';
 import { explainError, publishExam, type PublishOutcome, type PublishRequest, type PublishStage } from './publishFlow';
 
 const stageLabels: Record<PublishStage, string> = {
@@ -21,13 +22,156 @@ type Progress =
   | { state: 'idle' }
   | { state: 'running'; stage: PublishStage }
   | { state: 'failed'; message: string }
-  | { state: 'done'; outcome: PublishOutcome };
+  | { state: 'done'; outcome: PublishOutcome; version: string };
 
 interface WalletState {
   account: string | null;
   chainId: number | null;
   board: string | null;
   error: string | null;
+}
+
+type ReleaseList =
+  | { state: 'loading' }
+  | { state: 'failed'; error: TeeReleasesError }
+  | { state: 'ready'; releases: TeeRelease[] };
+
+type TagStatus =
+  | { state: 'checking' }
+  | { state: 'verified' }
+  | { state: 'mismatch'; tagCommit: string }
+  | { state: 'failed'; error: TeeReleasesError };
+
+const asReleasesError = (error: unknown): TeeReleasesError =>
+  error instanceof TeeReleasesError ? error : new TeeReleasesError('unreachable', 'GitHub could not be reached.');
+
+function useReleases(version: string) {
+  const [attempt, setAttempt] = useState(0);
+  const [loaded, setLoaded] = useState<{ attempt: number; list: Exclude<ReleaseList, { state: 'loading' }> } | null>(null);
+  const [checked, setChecked] = useState<{ key: string; status: Exclude<TagStatus, { state: 'checking' }> } | null>(null);
+  const repo = useMemo(() => releasesRepo(), []);
+
+  useEffect(() => {
+    let current = true;
+    fetchReleases(repo).then(
+      (releases) => {
+        if (current) setLoaded({ attempt, list: { state: 'ready', releases } });
+      },
+      (error: unknown) => {
+        if (current) setLoaded({ attempt, list: { state: 'failed', error: asReleasesError(error) } });
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [repo, attempt]);
+
+  const list: ReleaseList = loaded?.attempt === attempt ? loaded.list : { state: 'loading' };
+  const selected = list.state === 'ready' ? (list.releases.find((r) => r.version === version) ?? null) : null;
+  const key = selected ? `${String(attempt)}:${selected.version}` : '';
+  useEffect(() => {
+    if (!selected) return;
+    let current = true;
+    checkTag(repo, selected).then(
+      (result) => {
+        if (!current) return;
+        setChecked({
+          key,
+          status: result.kind === 'verified' ? { state: 'verified' } : { state: 'mismatch', tagCommit: result.tagCommit },
+        });
+      },
+      (error: unknown) => {
+        if (current) setChecked({ key, status: { state: 'failed', error: asReleasesError(error) } });
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [repo, selected, key]);
+
+  const status: TagStatus | null = selected ? (checked?.key === key ? checked.status : { state: 'checking' }) : null;
+  return {
+    list,
+    selected,
+    status,
+    /** Only a release whose commit matches its tag. */
+    verified: selected && status?.state === 'verified' ? selected : null,
+    retry: () => {
+      setAttempt((n) => n + 1);
+    },
+  };
+}
+
+function ReleasePanel(props: { releases: ReturnType<typeof useReleases>; version: string; onSelect: (version: string) => void }) {
+  const { list, selected, status } = props.releases;
+  const unreachable = (error: TeeReleasesError) => (
+    <>
+      <Badge tone="bad">
+        {error.kind === 'rate_limited'
+          ? 'GitHub is limiting requests from this browser, so the versions could not be checked.'
+          : 'GitHub could not be reached, so the versions could not be checked.'}
+      </Badge>
+      <p>Publishing is blocked until GitHub answers. Wait a moment and try again.</p>
+      <Button onClick={props.releases.retry}>Try again</Button>
+    </>
+  );
+  return (
+    <Panel title="What the TEE will run">
+      {list.state === 'loading' ? <p>Loading the TEE versions from GitHub.</p> : null}
+      {list.state === 'failed' ? unreachable(list.error) : null}
+      {list.state === 'ready' && list.releases.length === 0 ? (
+        <p>
+          There are no TEE versions yet. A version must be tagged first: push a tag like v1.0.0 and wait for the build
+          workflow to publish its release.
+        </p>
+      ) : null}
+      {list.state === 'ready' && list.releases.length > 0 ? (
+        <label className="ps-field">
+          <span>TEE version</span>
+          <select
+            value={props.version}
+            onChange={(event) => {
+              props.onSelect(event.target.value);
+            }}
+          >
+            <option value="">Select a version</option>
+            {list.releases.map((release) => (
+              <option key={release.version} value={release.version}>
+                {release.version}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      {selected ? (
+        <Rows>
+          <Row label="Commit hash">
+            <Mono>{selected.commit}</Mono>
+          </Row>
+          <Row label="Image digest">
+            <Mono>{selected.imageDigest}</Mono>
+          </Row>
+          <Row label="Build run">
+            <a href={selected.run} target="_blank" rel="noreferrer">
+              {selected.run}
+            </a>
+          </Row>
+        </Rows>
+      ) : null}
+      {status?.state === 'checking' ? <p>Checking that the tag points at this commit.</p> : null}
+      {status?.state === 'verified' ? <Badge tone="ok">The tag {selected?.version} points at this commit.</Badge> : null}
+      {status?.state === 'mismatch' ? (
+        <>
+          <Badge tone="bad">
+            Release mismatch: the tag {selected?.version} points at commit {status.tagCommit}, but the release notes say{' '}
+            {selected?.commit.slice(2)}.
+          </Badge>
+          <p>Publishing is blocked. Do not use this version; choose another.</p>
+        </>
+      ) : null}
+      {status?.state === 'failed' ? unreachable(status.error) : null}
+    </Panel>
+  );
 }
 
 function WalletPanel(props: { wallet: WalletState; connected: boolean; onConnect: () => void }) {
@@ -74,6 +218,9 @@ function Summary(props: { request: PublishRequest; name: string; schedule: Sched
         <Row label="Exam ID">
           <Mono>{request.examId}</Mono>
         </Row>
+        <Row label="TEE version">
+          {request.fields.version} (not stored on-chain; only the commit hash and image digest below are)
+        </Row>
         <Row label="Commit hash">
           <Mono>{request.fields.commitHash}</Mono>
         </Row>
@@ -110,7 +257,7 @@ function Summary(props: { request: PublishRequest; name: string; schedule: Sched
       </Rows>
       <p>
         <strong>Everything above is written once and cannot be changed afterwards, not even by the board.</strong> That
-        includes the drand rounds, the commit and the image digest. The criteria are published in full.
+        includes the drand rounds, the commit and the image digest. The version name is only a label for them. The criteria are published in full.
       </p>
     </Panel>
   );
@@ -119,6 +266,7 @@ function Summary(props: { request: PublishRequest; name: string; schedule: Sched
 export function Publish() {
   const { blueprint: blueprintInput, schedule: scheduleInput, publish, setPublish, environment } = useBoardForm();
   const evaluated = useEvaluated();
+  const releases = useReleases(publish.version);
   const [wallet, setWallet] = useState<WalletState>({ account: null, chainId: null, board: null, error: null });
   const [connected, setConnected] = useState(false);
   const [progress, setProgress] = useState<Progress>({ state: 'idle' });
@@ -148,7 +296,8 @@ export function Publish() {
     void refresh(false);
   }, [refresh]);
 
-  const { blueprint, schedule, publish: fieldsResult } = evaluated;
+  const { blueprint, schedule } = evaluated;
+  const fieldsResult = evaluatePublish(publish, releases.verified);
   const missing: { label: string; to: string }[] = [];
   if (!blueprint.criteria || !blueprint.examId) missing.push({ label: 'Complete the blueprint', to: '/board/blueprint' });
   if (!schedule.settings) missing.push({ label: 'Complete the schedule', to: '/board/schedule' });
@@ -176,7 +325,7 @@ export function Publish() {
         setProgress({ state: 'running', stage });
       });
       setCurrentExamId(request.examId);
-      setProgress({ state: 'done', outcome });
+      setProgress({ state: 'done', outcome, version: request.fields.version });
     } catch (error) {
       setProgress({ state: 'failed', message: explainError(error) });
     }
@@ -192,25 +341,14 @@ export function Publish() {
           void refresh(true);
         }}
       />
-      <Panel title="What the TEE will run">
-        <Field
-          label="Commit hash"
-          hint="The 40-character git SHA-1 of the tagged commit."
-          error={whenTyped(publish.commitHash, fieldsResult.errors.commitHash)}
-          value={publish.commitHash}
-          onChange={(commitHash) => {
-            setPublish({ ...publish, commitHash });
-          }}
-        />
-        <Field
-          label="Image digest"
-          hint="The 64-character SHA-256 digest of the image, without the sha256: prefix."
-          error={whenTyped(publish.imageDigest, fieldsResult.errors.imageDigest)}
-          value={publish.imageDigest}
-          onChange={(imageDigest) => {
-            setPublish({ ...publish, imageDigest });
-          }}
-        />
+      <ReleasePanel
+        releases={releases}
+        version={publish.version}
+        onSelect={(version) => {
+          setPublish({ ...publish, version });
+        }}
+      />
+      <Panel title="Where the TEE reads the chain">
         <Field
           label="RPC operator host"
           hint="The hostname the TEE reads the chain from, with no scheme, port or path."
@@ -251,6 +389,9 @@ export function Publish() {
               <Mono>{progress.outcome.transactionHash}</Mono>
             </Row>
             <Row label="Block">{String(progress.outcome.blockNumber)}</Row>
+            <Row label="TEE version">
+              {progress.version} (the release you selected; the version is not stored on-chain, only its commit hash and image digest)
+            </Row>
             {progress.outcome.rows.map((row) => (
               <Row key={row.label} label={row.label}>
                 <Badge tone={row.match ? 'ok' : 'bad'}>{row.match ? 'Matches' : 'Differs'}</Badge>{' '}

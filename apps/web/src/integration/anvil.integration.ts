@@ -132,11 +132,16 @@ function requestFor(name: string, unlockOffset = 0): PublishRequest {
     lockTime: `${lockDate} 12:00`,
     endTime: `${date} 12:30`,
   });
-  const fields = evaluatePublish({
-    commitHash: '1234567890abcdef1234567890abcdef12345678',
-    imageDigest: `sha256:${'ab'.repeat(32)}`,
-    rpcHost: 'sepolia.example.org',
-  });
+  const fields = evaluatePublish(
+    { rpcHost: 'sepolia.example.org' },
+    {
+      version: 'v1.0.0',
+      commit: '0x1234567890abcdef1234567890abcdef12345678',
+      imageDigest: `0x${'ab'.repeat(32)}`,
+      run: 'https://github.com/example/paperseal/actions/runs/1',
+      publishedAt: 0,
+    },
+  );
   if (!blueprint.examId || !blueprint.encoded || !blueprint.criteriaHash || !schedule.settings || !fields.fields) {
     throw new Error('the test inputs are invalid');
   }

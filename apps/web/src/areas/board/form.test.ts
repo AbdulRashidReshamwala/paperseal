@@ -110,25 +110,37 @@ describe('evaluateSchedule', () => {
 });
 
 describe('evaluatePublish', () => {
-  const good = { commitHash: 'a'.repeat(40), imageDigest: `sha256:${'B'.repeat(64)}`, rpcHost: 'rpc.example.org' };
+  const release = {
+    version: 'v1.2.3',
+    commit: `0x${'a'.repeat(40)}` as const,
+    imageDigest: `0x${'b'.repeat(64)}` as const,
+    run: 'https://github.com/example/paperseal/actions/runs/9',
+    publishedAt: 0,
+  };
 
-  it('normalises hex and drops the sha256 prefix', () => {
-    expect(evaluatePublish(good).fields).toEqual({
-      commitHash: `0x${'a'.repeat(40)}`,
-      imageDigest: `0x${'b'.repeat(64)}`,
+  it('takes the commit and digest from the verified release, unchanged', () => {
+    expect(evaluatePublish({ rpcHost: ' rpc.example.org ' }, release).fields).toEqual({
+      commitHash: release.commit,
+      imageDigest: release.imageDigest,
       rpcHost: 'rpc.example.org',
+      version: 'v1.2.3',
+      run: release.run,
     });
   });
 
+  it('has no fields until a verified version is selected', () => {
+    const result = evaluatePublish({ rpcHost: 'rpc.example.org' }, null);
+    expect(result.errors.release).toBeTruthy();
+    expect(result.fields).toBeNull();
+  });
+
   it.each([
-    [{ commitHash: 'abc' }, 'commitHash'],
-    [{ imageDigest: 'zz' }, 'imageDigest'],
-    [{ rpcHost: 'https://rpc.example.org' }, 'rpcHost'],
-    [{ rpcHost: 'rpc.example.org:8545' }, 'rpcHost'],
-    [{ rpcHost: 'rpc.example.org/path' }, 'rpcHost'],
-  ] as const)('rejects %j', (patch, field) => {
-    const result = evaluatePublish({ ...good, ...patch });
-    expect(result.errors[field]).toBeTruthy();
+    ['https://rpc.example.org'],
+    ['rpc.example.org:8545'],
+    ['rpc.example.org/path'],
+  ] as const)('rejects the host %s', (rpcHost) => {
+    const result = evaluatePublish({ rpcHost }, release);
+    expect(result.errors.rpcHost).toBeTruthy();
     expect(result.fields).toBeNull();
   });
 });
