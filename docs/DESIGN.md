@@ -290,7 +290,7 @@ Seven steps, each with its number in the `Stage` eyebrow. The wallet is not a st
 1. **Create the exam:** one form for the name, time, length, topics and release time. Rounds and hashes are worked out, and setter limits, the closing time and the public record provider are folded under Advanced.
 2. **Choose what the sealed machine runs:** the newest version whose tag checks out is already selected, so this is one click. Other versions are folded.
 3. **Review and publish:** one summary and one action, "Publish the exam". A `Stamp` receipt follows, with the read-back folded.
-4. **Bring people in:** a link for each role, and `Rows` of who has registered, with a count. Primary action: post the approved list.
+4. **Bring people in:** one invite per person. The board picks a role, types the name for the approved list (a setter needs none, only an optional private note) and presses "Add invite", and a "Copy link" button appears on that row. The `Rows` then show each invite in one of four states, each with a word and a `Check` shape, never colour alone: waiting ("Waiting for them to register", with Copy link), registered ("Registered"), two keys on one invite ("Two security keys used this invite. Neither is on the list.", with "Reissue invite"), and a registration that fits no invite ("Not invited", with the key's `Hash`). The list composes itself from the registered ones. The only choice left is a centre's place, a select of "Centre with a key" or "Centre without a key". Counts sit under "On the list". Primary action: post the approved list. Adding an invite is a plain `Button`, so the screen still has one red thing to press.
 5. **Questions are coming in:** a wait screen with a `Countdown` to lock.
 6. **Record the sealed paper:** the Build from the outbox, with one action to post it. Nothing else competes with it.
 7. **Status:** `seal` follows the unlock and end rounds, with `stampSeal` once the Build is posted, and the count of key holders released. It links the public verifier when `VITE_VERIFIER_URL` is set.
@@ -299,7 +299,7 @@ Seven steps, each with its number in the `Stage` eyebrow. The wallet is not a st
 
 `RoleHeader role="Setter"`. Phone-friendly, and quick to repeat.
 
-1. **Register:** `KeyTouch` to register the security key. No name is asked for. Next: wait for the board's list.
+1. **Register:** opens from the invite link. The role is in the link, so nothing is typed, and the only control is `KeyTouch` to register the security key. Next: wait for the board's list. Without a valid link it shows a plain explanation and no form.
 2. **Waiting for the board:** a wait screen. The page opens for writing by itself.
 3. **Check the machine:** runs by itself, with nothing to press. If it fails, sealing stops and the writing stays on the page.
 4. **Add a question:** the form, with a `PrimaryAction` to seal it. Each question needs one touch, and receipts build up on the same page.
@@ -309,7 +309,7 @@ Seven steps, each with its number in the `Stage` eyebrow. The wallet is not a st
 
 `RoleHeader role="Exam centre" note={centreName}`. Used under pressure on exam day, so this is the simplest of all.
 
-1. **Register:** `KeyTouch`.
+1. **Register:** opens from the invite link, which holds the centre's name, so there is no form field. It shows the name and `KeyTouch`, and reads left-aligned, because it is the one centre screen that is a form. Once the exam has ended, the page shows "This exam has ended" and offers no registration.
 2. **Ready:** a wait screen, `seal="sealed"`, with a `Countdown` to unlock. The paper downloads and is checked against the Build by itself, and the result shows as one `Check`. A `PrimaryAction` appears only if that check fails.
 3. **Release, for centres holding a part of the key:** `KeyTouch` with `purpose="to release your part of the key"`, `seal="opening"`. Centres without one skip this.
 4. **Waiting for key holders:** a wait screen with the release count, for a centre with nothing to release.
@@ -320,7 +320,7 @@ Seven steps, each with its number in the `Stage` eyebrow. The wallet is not a st
 
 `RoleHeader role="Key holder"`. Nearly always a wait, then one touch.
 
-1. **Register:** `KeyTouch`.
+1. **Register:** opens from the invite link, which holds the name, so nothing is typed. `KeyTouch` only. Once the exam has ended, the page shows "This exam has ended" and offers no registration.
 2. **Waiting:** "Nothing to do until 09:59", with a `Countdown`.
 3. **Release:** `KeyTouch` with `purpose="to release your part of the key"`, `seal="opening"`.
 4. **Done:** `Stamp` "Released". Next: the paper reaches centres once enough key holders have released. Never say a neutral key holder receives or can see the paper.

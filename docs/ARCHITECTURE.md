@@ -55,6 +55,21 @@ The README names separate setter and centre apps. One app is simpler to host and
 | Unlock | Collects shares, rebuilds and delivers `K_priv` | None | Centre, keyholder, verifier |
 | Verify | None | Read only | Verifier |
 
+## Invites
+
+Invites keep a name from being enough to register. The board makes one per person, holding a random 32-byte `inviteSecret`, a role and, for key holders and centres, the `owner` name. It goes out as a link whose URL fragment holds all of it (`#/join?exam=..&role=..&owner=..&secret=..`), so no server sees it. The invite code is in `packages/protocol/src/invite.ts`, which both the board and the e2e driver use.
+
+| Where | What it does |
+| --- | --- |
+| `packages/protocol` | `inviteTag` (HMAC-SHA-256 of the secret over the passkey public key), strict link encoding and decoding, `matchInvites`, `listRolesFor` and `entriesFor`. The `registration` message ends with `bytes32 inviteTag` |
+| `packages/keys` | `register` takes the `inviteSecret`, makes the tag after the passkey exists and signs it into `registration`. The secret never leaves the device |
+| `packages/tee-client` | `inviteTag` on `RegisterRequest` and on each `RegistrationEntry` |
+| `tee/` | Stores and returns the tag. It can't check it, because it never sees the secret |
+| `apps/web` board | Creates the secrets and links, keeps them in the board's browser, recomputes every tag and lists only matches. Two passkeys on one invite are both left off until the board reissues it |
+| `apps/web` Register | Reads the invite from the fragment at `/join`, clears the address bar and keeps the invite in memory. Role and name come from the link, so nothing is typed. No valid link means an explanation and no form |
+
+The invite secrets and setters' notes stay in the board's browser and are never published, so the list still shows a setter only as its `setterOwner` hash.
+
 ## TEE HTTP API
 
 The TEE has no long-term state, and clients treat it as untrusted until the attestation check passes. It runs each stage by itself, so it has no board login. Request and response bodies are in `spec/api.md`.
@@ -64,8 +79,8 @@ The TEE has no long-term state, and clients treat it as untrusted until the atte
 | `GET /v1/attestation` | Fresh token and the instance public key |
 | `GET /v1/status` | Current stage and release progress |
 | `POST /v1/register/challenge` | Fresh registration challenge |
-| `POST /v1/register` | Passkey registration with attestation |
-| `GET /v1/registrations` | Registrations for the board to build the approved list |
+| `POST /v1/register` | Passkey registration with attestation, signing the invite tag |
+| `GET /v1/registrations` | Registrations, each with its `inviteTag`, for the board to build the approved list |
 | `POST /v1/questions/challenge` | Fresh question submission challenge |
 | `POST /v1/questions` | Encrypted, padded question upload |
 | `GET /v1/outbox` | TEE-signed messages waiting for the board to post |
