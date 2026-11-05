@@ -37,7 +37,7 @@ import { Page, PrimaryAction, RoleHeader, Stage } from '@paperseal/ui';
 </Page>;
 ```
 
-Every screen is this shape. Pick which `Stage` to show from state, with one component per state. `AppShell`, its nav and `Screen` remain for unmigrated screens. Migrated screens should not use them.
+Every screen is this shape. Pick which `Stage` to show from state, with one component per state. `AppShell`, its nav and `Screen` are still exported, but no role's screen should use them.
 
 ## Tokens
 
@@ -279,39 +279,40 @@ Write as a careful exam officer would. Use short sentences and active verbs. Ins
 
 ## Per-role flows
 
-Each flow is a list of states. Each state is one `Stage`, and only the first unfinished one shows. The screen comes from the exam's state and this browser's stored credential, so a reload returns to the same place. Everything that exists today, such as blueprint forms or the unlock log, stays available, but as the content of a state rather than a tab.
+Each flow is a list of states. Each state is one `Stage`, and only the first unfinished one shows. The screen comes from the exam's state and this browser's stored credential, so a reload returns to the same place. The old paths still work as deep links, and land on the screen the state calls for. Detail such as hashes and rounds sits in a folded exam record.
 
 ### Board admin
 
 `RoleHeader role="Exam board"`. The most steps, and the one role that handles forms.
 
-1. **Connect:** connect the wallet. Next: set up the exam.
-2. **Set up the exam:** blueprint, then schedule. Each is one form with one primary action, and `Field`s are grouped in ruled sections.
-3. **Bring people on:** share the sign-up links. The `Rows` list who has registered, with a count. Primary action: "Publish the approved list".
-4. **Post what the machine signed:** each outbox message is one `Stage` with "Post to the public record". Nothing else competes with it.
+Seven steps, each with its number in the `Stage` eyebrow. The wallet is not a step: the action that needs it asks for it.
+
+1. **Create the exam:** one form for the name, time, length, topics and release time. Rounds and hashes are worked out, and setter limits, the closing time and the public record provider are folded under Advanced.
+2. **Choose what the sealed machine runs:** the newest version whose tag checks out is already selected, so this is one click. Other versions are folded.
+3. **Review and publish:** one summary and one action, "Publish the exam". A `Stamp` receipt follows, with the read-back folded.
+4. **Bring people in:** a link for each role, and `Rows` of who has registered, with a count. Primary action: post the approved list.
 5. **Questions are coming in:** a wait screen with a `Countdown` to lock.
-6. **Sealed:** `seal="sealed"` with `stampSeal` once the Build is posted.
-7. **Unlock day:** a wait screen with `Countdown`, then a `Stepper` of what's happening.
+6. **Record the sealed paper:** the Build from the outbox, with one action to post it. Nothing else competes with it.
+7. **Status:** `seal` follows the unlock and end rounds, with `stampSeal` once the Build is posted, and the count of key holders released. It links the public verifier when `VITE_VERIFIER_URL` is set.
 
 ### Setter
 
 `RoleHeader role="Setter"`. Phone-friendly, and quick to repeat.
 
-1. **Register:** `KeyTouch` to register the security key. Next: wait for the board's list.
-2. **Waiting to be approved:** a wait screen.
-3. **Sign in:** `KeyTouch`.
-4. **Add a question:** the form, with `PrimaryAction` "Seal this question". Each question needs one touch.
-5. **Sealed:** `seal="sealed"` with `stampSeal` and the receipt. The receipt's `Hash` can sit in `children`, because it is something a setter may need to quote. The action is "Add another question".
-6. **Closed:** a wait screen. After the Build, the check that the same machine built the paper appears as one `Check`.
+1. **Register:** `KeyTouch` to register the security key. No name is asked for. Next: wait for the board's list.
+2. **Waiting for the board:** a wait screen. The page opens for writing by itself.
+3. **Check the machine:** runs by itself, with nothing to press. If it fails, sealing stops and the writing stays on the page.
+4. **Add a question:** the form, with a `PrimaryAction` to seal it. Each question needs one touch, and receipts build up on the same page.
+5. **Closed:** a wait screen. After the Build, the check that the same machine built the paper appears as one `Check`.
 
 ### Centre
 
 `RoleHeader role="Exam centre" note={centreName}`. Used under pressure on exam day, so this is the simplest of all.
 
 1. **Register:** `KeyTouch`.
-2. **Download:** `PrimaryAction` "Download the sealed paper". The check against the Build happens by itself and shows as one `Check`.
-3. **Ready:** a wait screen, `seal="sealed"`, with a `Countdown` to unlock.
-4. **Release, for centres holding a part of the key:** `KeyTouch` with `purpose="to release your part of the key"`, `seal="opening"`. Centres without one skip this.
+2. **Ready:** a wait screen, `seal="sealed"`, with a `Countdown` to unlock. The paper downloads and is checked against the Build by itself, and the result shows as one `Check`. A `PrimaryAction` appears only if that check fails.
+3. **Release, for centres holding a part of the key:** `KeyTouch` with `purpose="to release your part of the key"`, `seal="opening"`. Centres without one skip this.
+4. **Waiting for key holders:** a wait screen with the release count, for a centre with nothing to release.
 5. **Unlock:** `KeyTouch` with `purpose="to open the paper"`, `seal="opening"`.
 6. **Open:** `seal="open"`. The action is to view or print the paper. The unlock log is in `children`.
 
