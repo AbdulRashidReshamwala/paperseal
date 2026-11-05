@@ -28,7 +28,7 @@ import type { Schedule } from './state';
  *
  * `latest`: the TEE sees the list as soon as it is mined, so a whole exam fits in under 5 minutes.
  * Lock is at 3:30, unlock 30 seconds later, T 15 seconds after that, so delta is 15 seconds, and the
- * end round is at 4:45. That leaves 45 seconds for all 8 shares, which took 31 seconds in a real run,
+ * end round is at 4:55. That leaves 55 seconds for all 8 shares, which took 31 seconds in a real run,
  * because the TEE refuses a share once the end round is out.
  */
 
