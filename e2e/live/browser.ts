@@ -3,6 +3,8 @@ import { chromium, type Browser, type BrowserContext, type CDPSession, type Page
 
 import type { Hex } from '@paperseal/protocol';
 
+import type { IssuedInvite } from './invites';
+
 import type { Attempt, PageApi } from './page/page';
 import { liveDir } from './config';
 import { freePort } from '../src/procs';
@@ -22,10 +24,14 @@ export interface Participant {
   page: Page;
   cdp: CDPSession;
   authenticatorId: string;
+  /** Made by the board before registration. A participant registers only from this invite's link. */
+  invite?: IssuedInvite;
   /** Set by registration. */
   credentialId?: Hex;
   passkeyPublicKey?: Hex;
   derivedPublicKey?: Hex;
+  /** The `inviteTag` this participant registered with: HMAC-SHA-256 of its invite secret over its passkey. */
+  inviteTag?: Hex;
   /**
    * What the TEE and the list call this participant. For a setter it is `setterOwner(passkeyPublicKey)`,
    * known only once its passkey exists. No setter has a name on the list.

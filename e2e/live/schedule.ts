@@ -32,6 +32,14 @@ import type { Schedule } from './state';
  * refuses a share once the end round is out, and a real run spent 36 seconds downloading and 31 on shares.
  */
 
+/**
+ * The text of one question. It is numbered per topic across all setters, so no two questions read the
+ * same, and it carries nothing about who wrote it: a paper must never show a setter's identity.
+ */
+export function questionText(topic: string, numberInTopic: number): string {
+  return `${topic} question ${String(numberInTopic)}: explain a result and show the working.`;
+}
+
 export const liveCriteria: Criteria = {
   maxSetterPercent: 50,
   minBankMultiple: 2,

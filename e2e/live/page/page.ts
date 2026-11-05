@@ -38,12 +38,16 @@ const api = {
   },
   /**
    * Everything POST /v1/register needs. A setter passes no owner: `keys.register` makes it from the new
-   * passkey. The challenge is passed on as the TEE gave it, whatever its width.
+   * passkey. The challenge is passed on as the TEE gave it, whatever its width. The invite secret comes
+   * from the invite link and stays in this page: only the tag made from it is in the request.
    */
-  register: (owner: string | null, role: 'holder' | 'setter', challengeHex: string) =>
+  register: (owner: string | null, role: 'holder' | 'setter', challengeHex: string, inviteSecretHex: string) =>
     attempt(async () => {
       const challenge = fromHex(challengeHex);
-      const r = await keys.register(role === 'setter' || owner === null ? { role: 'setter', challenge } : { role: 'holder', owner, challenge });
+      const inviteSecret = fromHex(inviteSecretHex);
+      const r = await keys.register(
+        role === 'setter' || owner === null ? { role: 'setter', challenge, inviteSecret } : { role: 'holder', owner, challenge, inviteSecret },
+      );
       return { credentialId: toHex(r.credentialId), owner: r.owner, request: r.request };
     }),
   getPublicKey: (credentialIdHex: string) => attempt(async () => toHex(await keys.getPublicKey(fromHex(credentialIdHex)))),
