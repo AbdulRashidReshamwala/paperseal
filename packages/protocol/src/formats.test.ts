@@ -77,12 +77,11 @@ describe('instanceKey message', () => {
     expect(() => encodeMessage('instanceKey', { examId, encryptionPublicKey: bytes(65, 5) })).toThrow(RangeError);
   });
 
-  const vectorsPath = resolve(import.meta.dirname, '../../../tee/testdata/vectors.json');
-  const vectors = JSON.parse(readFileSync(vectorsPath, 'utf8')) as { hash: { message: string }[] };
-  const has = existsSync(vectorsPath) && vectors.hash.some((v) => v.message === 'instanceKey');
-  // The generic vector test in protocol.test.ts covers it too once tee/ adds the vector.
-  it.skipIf(!has)('has a tee/ vector for instanceKey', () => {
-    expect(has).toBe(true);
+  it('has a tee/ vector for instanceKey', () => {
+    const vectorsPath = resolve(import.meta.dirname, '../../../tee/testdata/vectors.json');
+    expect(existsSync(vectorsPath), `${vectorsPath} is missing`).toBe(true);
+    const vectors = JSON.parse(readFileSync(vectorsPath, 'utf8')) as { hash: { message: string }[] };
+    expect(vectors.hash.some((v) => v.message === 'instanceKey')).toBe(true);
   });
 });
 

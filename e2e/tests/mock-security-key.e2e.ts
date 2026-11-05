@@ -1,7 +1,7 @@
 import { createHash, createPublicKey, verify } from 'node:crypto';
 import { resolve } from 'node:path';
 
-import { hpkeSeal } from '@paperseal/crypto';
+import { hpkeContext, hpkeSeal } from '@paperseal/crypto';
 import { utf8ToBytes, webauthn } from '@paperseal/protocol';
 import type { Browser, CDPSession } from 'playwright-core';
 import { createServer, type ViteDevServer } from 'vite';
@@ -148,12 +148,13 @@ describe('packages/keys on a virtual authenticator', () => {
       await rec.say('Step 4: one-touch releaseShare. A share is sealed to the derived key, then released');
       await say('step 4  sealing a 33-byte share to the derived public key with hpkeSeal (packages/crypto) ...', 'step');
       const share = crypto.getRandomValues(new Uint8Array(33));
-      const sealed = await hpkeSeal(fromHex(derived), share);
+      const examId = new Uint8Array(createHash('sha256').update('exam-1').digest());
+      const sealed = await hpkeSeal(fromHex(derived), share, hpkeContext('share', examId));
       await say(`        sealed share    ${toHex(sealed).slice(0, 96)}... (${String(sealed.length)} bytes)`, 'dim');
       await ps('clearRequests');
       const message = utf8ToBytes('exam-1|tee-challenge');
-      await say('        releaseShare(credential, "exam-1|tee-challenge", sealed) ...', 'step');
-      const released = await ps('releaseShare', credentialId, toHex(message), toHex(sealed));
+      await say('        releaseShare(credential, examId, "exam-1|tee-challenge", sealed) ...', 'step');
+      const released = await ps('releaseShare', credentialId, toHex(examId), toHex(message), toHex(sealed));
       await rec.check('releaseShare made exactly one authenticator request (one touch)', async () => {
         ok(released);
         const requests = await ps('requests');
