@@ -50,7 +50,7 @@ Paper Seal currently covers electronic distribution only. Printed papers, TEE re
 
 1. **Onboard:** the TEE starts, and setters, key holders and approved centres register through it. The board posts the final list on-chain, where anyone can see it, and the TEE reads it back over TLS and checks it.
 2. **Submit:** setters on the list send questions directly to the TEE, encrypted to its key. The TEE holds the bank in memory, rejects questions in the wrong format and returns a signed receipt.
-3. **Lock:** at the lock round, the TEE locks the bank if it meets the attested selection criteria: no setter above a set percentage of a topic, and a bank for each topic several times larger than its question count.
+3. **Lock:** at the lock round, the TEE locks the bank by itself if it meets the attested selection criteria: no setter above a set percentage of a topic, and a bank for each topic several times larger than its question count.
 4. **Build:** the attested, open-source TEE builder generates a private seed after Lock and uses it to pick a set number of questions per topic at random, so no setter can influence or work out the selection. It assembles the one identical paper, pads it to a fixed size and encrypts the paper and seed with `K`.
 5. **Split:** the TEE splits `K` into `K_pub` and `K_priv`. It timelocks `K_pub` and cuts `K_priv` into shares.
 6. **Distribute:** the TEE stores the encrypted paper, timelocked `K_pub` and encrypted shares on public storage. Only then does the signed Build go on-chain, listing the approved list hash and the hash of each file, so a crash can't leave a committed paper that nobody can open. `ExamRegistry` accepts only one Build per exam. Centres download the files days ahead and check them against the Build.
@@ -85,7 +85,7 @@ Synced passkeys are not accepted, because they copy the secret to a cloud accoun
 
 Keys sit behind one small interface (`generateKey`, `getPublicKey`, `decryptShare`, `sign`) and the same WebAuthn code runs in both modes:
 
-- **Dev and demo mode:** Chrome's virtual authenticator with PRF enabled mocks the security key. It is software, so the hardware attestation check is skipped, and the demo is simulated. This is the only mode in the hackathon build.
+- **Dev and demo mode:** Chrome's virtual authenticator with PRF enabled mocks the security key. It is software, so the hardware attestation check is skipped by an attested setting the verifier page shows, and the demo is simulated. This is the only mode in the hackathon build.
 - **Production mode:** a hardware security key through WebAuthn PRF.
 
 ### Approved List
@@ -142,7 +142,7 @@ Anyone can check that the TEE runs the exact open-source code, unchanged. The TE
 3. **Deploy:** the image is deployed by digest, never by tag, on the production Confidential Space image. Its startup arguments carry the exam settings: the exam ID, `T`, `Δ`, lock round, unlock round, end round, selection criteria hash, `ExamRegistry` address, chain ID and RPC operator host. They are passed with `tee-cmd`, so the image sets the `tee.launch_policy.allow_cmd_override=true` label.
 4. **Attest:** the TEE generates a keypair and requests a Google-signed attestation token, with a hash of its public key and the exam ID as the nonce. Tokens last about an hour, so apps ask for a fresh one when they connect, and anything published uses the PKI token type so it can be checked later.
 5. **Verify:** the setter app, centre app and verifier page each check the token before trusting the TEE. Setter apps encrypt questions to the TEE's key only after this check passes.
-6. **Bind:** each TEE instance generates its own attested key and signs its outputs with it, so each output traces back to the published code.
+6. **Bind:** each TEE instance generates an attested signing key and signs its outputs with it, so each output traces back to the published code. The signing key also signs the instance's separate encryption key, and apps check that before encrypting anything.
 
 | Token claim | Expected value |
 | --- | --- |

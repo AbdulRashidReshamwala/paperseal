@@ -112,6 +112,7 @@ Every client reads `entries` and `criteria` this way. `getExam` returns `created
 | Message | Signed by | Fields, in hash order |
 | --- | --- | --- |
 | `registration` | Passkey | `bytes derivedPublicKey`, `bytes holderId`, `bytes challenge` |
+| `instanceKey` | TEE | `bytes32 examId`, `bytes encryptionPublicKey` |
 | `criteria` | None, a public hash | `bytes criteria` |
 | `approvedList` | TEE | `bytes32 examId`, `bytes entries` |
 | `questionSubmission` | Passkey | `bytes32 examId`, `bytes challenge`, `bytes32 questionHash` |
@@ -120,13 +121,110 @@ Every client reads `entries` and `criteria` this way. `getExam` returns `created
 | `shareRelease` | Passkey | `bytes32 examId`, `bytes challenge` |
 | `releaseLog` | TEE | `bytes32 examId`, `bytes32 entriesHash` |
 
-- `registration.derivedPublicKey` is empty for setters.
+- `registration.derivedPublicKey` is empty for setters. `holderId` is the UTF-8 bytes of `owner`.
 - `approvedListHash` is the hash of the `approvedList` message. `ExamRegistry` computes the same hash from the posted bytes, and `postBuild` rejects a Build whose hash differs. The TEE signature on `approvedList` isn't posted. Apps fetch it from the TEE and compare the hash with the chain.
 - `questionHash` is the plain SHA-256 of the question ciphertext. It is never a hash of the plaintext, because that would let people test guesses at a question.
 - `paperHash` is the plain SHA-256 of the encrypted paper file.
 - `saltedPaperHash` uses the `paperHash` domain tag, with fields `bytes32 seed`, `bytes paper`. It never hashes the plaintext unsalted, because that would let people test guesses at the paper.
 - `shareRelease` doesn't cover a share hash. One WebAuthn request gives both the signature and the PRF output, so the share isn't decrypted yet when the passkey signs.
 - `shareHash` uses the `shareHash` domain tag, with the field `bytes share`.
+
+## Instance Keys
+
+Each TEE instance generates two P-256 keys in memory at start and never stores them.
+
+- The signing key is `instancePublicKey`. It signs every TEE message, and `eat_nonce` binds it.
+- The encryption key is `encryptionPublicKey`. It opens HPKE messages sent to the TEE. The signing key signs it through the `instanceKey` message, and apps verify that before encrypting anything.
+
+## Encryption
+
+- **HPKE:** base mode, framed as `enc || ciphertext`. `info` is the UTF-8 bytes of the purpose's `crypto.hpke.info` value, and `aad` is `examId`.
+- **AES-256-GCM:** framed as a random 12-byte nonce, then ciphertext and tag. `aad` is `examId`.
+- **Padding:** a big-endian `uint32` length, the data, then zero bytes up to the target size from `padding`. Reject data that doesn't fit, and reject non-zero padding when removing it.
+- **Derived keys:** RFC 9180 `DeriveKeyPair` for the HPKE suite, with the 32-byte PRF output as the input keying material.
+- **Timelock:** the armoured age format shared by `drand/tlock` and `tlock-js`, on quicknet. `K_pub` is sealed to `unlockRound`, and the `K_priv` copy to `endRound`. The TEE verifies every drand round against `drand.publicKey`.
+
+| Purpose | Sender | Recipient | Plaintext |
+| --- | --- | --- | --- |
+| `question` | Setter app | `encryptionPublicKey` | A padded question, to `padding.questionBytes` |
+| `share` | TEE | Holder's derived key | The Shamir share |
+| `release` | Key holder app | `encryptionPublicKey` | `abi.encode(bytes share, bytes signature, bytes authenticatorData, bytes clientDataJSON)` |
+| `keyPriv` | TEE | Centre's derived key | The 32-byte `K_priv` |
+
+## Paper Format
+
+A question is the JSON `{"topic": string, "text": string}`. `topic` must name a criteria topic.
+
+The paper is the JSON `{"examId": hex, "questions": [{"topic": string, "text": string}]}`. `paper` in `saltedPaperHash` means these bytes, before padding.
+
+The encrypted paper file is AES-256-GCM under `K` over the 32-byte `seed`, then the paper padded to `padding.paperBytes`.
+
+## Passkey Signatures
+
+The message hash is the WebAuthn `challenge`. The signature is ES256 in DER form, over `authenticatorData || SHA-256(clientDataJSON)`.
+
+The TEE checks the signature, that `clientDataJSON.challenge` is the base64url message hash, that `type` matches the ceremony, that user present and user verified are set, and that both backup flags are clear. It doesn't check `origin` or `rpIdHash`, because the passkey public key identifies the holder and the board serves the app anyway.
+
+A challenge is 32 random bytes, single use, and expires after 5 minutes.
+
+`webauthn.requireHardwareAttestation` is `false` for the demo, so the TEE doesn't check the attestation chain. The value is in the attested image, and the verifier page shows it. When it's `true`, an attestation check that isn't implemented rejects the registration.
+
+## Storage
+
+Files live under `<examId>/` in a public bucket, named by the `STORAGE_BUCKET` environment variable. `STORAGE_DIR` writes to a local folder instead, for local runs. Apps read from their configured base URL, and hashes protect the content.
+
+Written before the Build:
+
+| File | Content |
+| --- | --- |
+| `paper.bin` | The encrypted paper |
+| `key-pub.tlock` | Timelocked `K_pub` |
+| `shares/<derivedPublicKey>.bin` | One HPKE `share` per key holder |
+| `token.jwt` | The PKI attestation token |
+| `manifest.json` | `{"examId": hex, "files": [{"name": string, "sha256": hex, "recipient"?: hex, "shareHash"?: hex}]}`, sorted by `name`, listing every file above |
+
+`storageManifestHash` is the plain SHA-256 of `manifest.json`.
+
+Written at unlock, each covered by the signed release log:
+
+| File | Content |
+| --- | --- |
+| `key-priv/<derivedPublicKey>.bin` | One HPKE `keyPriv` per approved centre (roles 3 and 4) |
+| `key-priv.tlock` | `K_priv` timelocked to `endRound` |
+| `release-log.json` | The `GET /v1/release/log` body |
+
+`entriesHash` is the plain SHA-256 of `abi.encode(ReleaseEntry[])`, with `ReleaseEntry` being `(bytes passkeyPublicKey, bytes32 shareHash, uint64 round)`, in the order received.
+
+## TEE Lifecycle
+
+The TEE runs each stage by itself, with no board calls, so it needs no board login. It serves plain HTTP on port 8080, and the Cloudflare proxy adds HTTPS.
+
+1. **Onboard:** register until the list appears on-chain, then check it.
+2. **Submit:** accept questions from setters on the list until the lock round is published.
+3. **Lock:** check the bank against the criteria. On failure the stage becomes `failed`, and the exam can't go ahead.
+4. **Build and Distribute:** run straight after Lock, ending with the Build in the outbox for the board to post.
+5. **Unlock:** accept shares once `unlockRound` is published, as in "Unlock Instance" on a new instance.
+
+`maxSetterPercent` limits each setter's share of a topic's bank. `seed` is 32 random bytes generated after Lock. `selected` questions are picked at random per topic, using randomness that never leaves the TEE.
+
+## TEE API
+
+All bodies are JSON. Every route allows any origin, without credentials. Bytes follow the conventions above.
+
+| Route | Request | Response |
+| --- | --- | --- |
+| `GET /v1/attestation` | None | `{token, instancePublicKey, encryptionPublicKey, instanceKeySignature}` |
+| `GET /v1/status` | None | `{stage, questionCount, approvedList?: {examId, entries, hash, teeSignature}, release: {released: hex[], required}}` |
+| `POST /v1/register/challenge` | `{}` | `{challenge}` |
+| `POST /v1/register` | `{owner, challenge, passkeyPublicKey, derivedPublicKey, attestationObject, clientDataJSON, signature, authenticatorData}` | `{}` |
+| `POST /v1/questions/challenge` | `{}` | `{challenge}` |
+| `POST /v1/questions` | `{passkeyPublicKey, ciphertext, challenge, signature, authenticatorData, clientDataJSON}` | `{questionHash, teeSignature}` |
+| `GET /v1/outbox` | None | `{messages: [{kind: "build", examId, fields, teeSignature, instancePublicKey}]}` |
+| `POST /v1/release/challenge` | `{}` | `{challenge}` |
+| `POST /v1/release/share` | `{passkeyPublicKey, challenge, sealed}` | `{}` |
+| `GET /v1/release/log` | None | `{examId, entries, entriesHash, teeSignature}` |
+
+`stage` is one of `onboard`, `submit`, `lock`, `build`, `distribute`, `unlock`, `released`, `failed`. `register`'s passkey signature covers the `registration` message.
 
 ## Unlock Instance
 
