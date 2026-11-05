@@ -2,6 +2,7 @@ import type { Criteria, Hex, Stage as ExamStage } from '@paperseal/protocol';
 import { Button, Page, RoleHeader, Stage } from '@paperseal/ui';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
+import { credentialIsForInvite, useInvite } from '../../shared/invite';
 import { Register, Trouble } from '../../shared/Register';
 import { Closed } from './Closed';
 import { Composer, type Draft } from './Composer';
@@ -123,7 +124,6 @@ export function SetterFlow() {
   const pending = useRef<PendingSubmission | null>(null);
   const draft: Draft = { text, setText, topic, setTopic, pending, unsure, setUnsure };
 
-  const [replacingKey, setReplacingKey] = useState(false);
   const [receipts, setReceipts] = useState<StoredReceipt[]>(() => (examId ? loadReceipts(examId) : []));
   const [topics, setTopics] = useState<Record<string, string>>(() => (examId ? loadTopics(examId) : {}));
   const reloadReceipts = () => {
@@ -136,11 +136,15 @@ export function SetterFlow() {
   const stage = status?.stage ?? null;
   const build = useBuild(stage === null || !stillOpen.includes(stage));
 
+  // A new invitation link means a new key, so the stored one stops counting once a different link is open.
+  const invite = useInvite('setter');
+  const registered = credential !== null && !(invite && !credentialIsForInvite(credential, invite));
+
   const screen = setterScreen({
     configured: session.configured,
     stage,
     statusFailed: statusError !== null,
-    registered: credential !== null,
+    registered,
     buildPosted: build.state === 'posted',
   });
 
@@ -155,21 +159,6 @@ export function SetterFlow() {
   }, [screen, outcome, checking, runConfirm]);
 
   const body = (): ReactNode => {
-    if (replacingKey && examId && env.tee) {
-      return (
-        <Register
-          role="setter"
-          examId={examId}
-          tee={env.tee}
-          keys={env.keys()}
-          again
-          onRegistered={(registered) => {
-            session.credentialSaved(registered);
-            setReplacingKey(false);
-          }}
-        />
-      );
-    }
     switch (screen) {
       case 'not-set-up':
         return (
@@ -216,18 +205,8 @@ export function SetterFlow() {
           <Quiet
             title="Waiting for your exam board"
             lede="Your security key is registered. The board still has to publish the approved list."
-            next="This page opens for writing by itself, so you can leave it open or come back to this link."
-          >
-            {stage === 'onboard' ? (
-              <Button
-                onClick={() => {
-                  setReplacingKey(true);
-                }}
-              >
-                Use a different security key
-              </Button>
-            ) : null}
-          </Quiet>
+            next="This page opens for writing by itself, so you can leave it open or come back to this link. To use a different security key, ask your exam board for a new invitation link."
+          />
         );
       case 'write': {
         const failed = outcome && !outcome.ok ? outcome : null;

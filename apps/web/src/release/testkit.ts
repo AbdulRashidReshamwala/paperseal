@@ -17,6 +17,7 @@ const entry = (role: number): ApprovedListEntry => ({
 
 export const facts = (role: number = roles.neutral, overrides: Partial<ChainFacts> = {}): ChainFacts => ({
   unlockRound: 33_700_743,
+  endRound: 33_701_000,
   listPosted: true,
   entry: entry(role),
   buildPosted: true,
@@ -39,6 +40,7 @@ export function progress(overrides: Partial<HolderProgress> = {}): HolderProgres
     chain: { value: facts(), error: null, settled: true },
     status: { value: status('distribute'), error: null, settled: true },
     reached: false,
+    ended: false,
     ...overrides,
   };
 }
@@ -46,4 +48,4 @@ export function progress(overrides: Partial<HolderProgress> = {}): HolderProgres
 export const chain = (value: ChainFacts) => ({ value, error: null, settled: true });
 export const tee = (value: StatusResponse) => ({ value, error: null, settled: true });
 
-export const actions = (): ProgressActions => ({ refresh: vi.fn(), registered: vi.fn(), registerAgain: vi.fn() });
+export const actions = (): ProgressActions => ({ refresh: vi.fn(), registered: vi.fn() });

@@ -1,4 +1,4 @@
-import { Button, Stage } from '@paperseal/ui';
+import { Stage } from '@paperseal/ui';
 import type { ReactNode } from 'react';
 
 import { Register, type RegisterRole } from '../shared/Register';
@@ -30,6 +30,14 @@ export function Gate(props: { stage: GateStage; role: RegisterRole; progress: Ho
       );
     case 'register':
       return <Register role={props.role} onRegistered={actions.registered} />;
+    case 'ended':
+      return (
+        <Stage
+          title="This exam has ended"
+          lede="Registration is closed, so there is nothing to do on this page."
+          next="If you think you should have been able to register, contact your exam board."
+        />
+      );
     case 'loading':
       return <Stage title="Checking the exam" next="This takes a few seconds, then this page shows what to do." />;
     case 'unreachable':
@@ -54,10 +62,8 @@ export function Gate(props: { stage: GateStage; role: RegisterRole; progress: Ho
         <Stage
           title="You are registered. Nothing to do yet."
           lede="Your exam board is still finishing the approved list."
-          next="This page moves on by itself once the list is published."
-        >
-          <Button onClick={actions.registerAgain}>Register a different security key</Button>
-        </Stage>
+          next="This page moves on by itself once the list is published. To use a different security key, ask your exam board for a new invitation link."
+        />
       );
     case 'not-on-list':
       return (

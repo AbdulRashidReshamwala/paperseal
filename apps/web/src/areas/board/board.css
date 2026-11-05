@@ -117,3 +117,20 @@
   margin: var(--ps-space-4) 0 0;
   font-size: var(--ps-text-small);
 }
+
+.board-invite-form {
+  display: grid;
+  gap: var(--ps-space-2) var(--ps-space-3);
+  align-items: start;
+  margin-bottom: var(--ps-space-4);
+}
+
+@media (min-width: 560px) {
+  .board-invite-form {
+    grid-template-columns: 11em minmax(0, 1fr) auto;
+  }
+
+  .board-invite-form .ps-button {
+    margin-top: calc(var(--ps-space-5) + var(--ps-space-1));
+  }
+}

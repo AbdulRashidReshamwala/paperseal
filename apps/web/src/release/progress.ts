@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { storageUrl } from '../shared/config';
 import { useCurrentExamId } from '../shared/currentExam';
+import { useInvite, credentialIsForInvite } from '../shared/invite';
 import { listEntryFor, useHolderCredential, type HolderRole } from '../shared/holder';
 import type { StoredCredential } from '../shared/Register';
 import { registry } from '../shared/registry';
@@ -24,6 +25,8 @@ export const CHAIN_POLL_MS = 15000;
 export interface ChainFacts {
   /** Null until the exam is published. */
   unlockRound: number | null;
+  /** The drand round at the end of the exam. Null until the exam is published. */
+  endRound: number | null;
   listPosted: boolean;
   /** This key's entry on the on-chain approved list, or null if it has none. */
   entry: ApprovedListEntry | null;
@@ -35,22 +38,26 @@ export interface HolderProgress {
   missing: readonly string[];
   examId: Hex | null;
   credential: StoredCredential | null;
-  /** True while someone has asked to register a different key. */
+  /** True while a new invitation link is open that this browser's stored key was not registered under. */
   registering: boolean;
   chain: Pick<Polled<ChainFacts>, 'value' | 'error' | 'settled'>;
   status: Pick<Polled<StatusResponse>, 'value' | 'error' | 'settled'>;
   /** The public clock has reached the unlock round, by this computer's time. The sealed machine has the last word. */
   reached: boolean;
+  /**
+   * The exam is over: the sealed machine says it released or failed, or the end round has passed. Nobody
+   * can usefully register by then, so registration is not offered.
+   */
+  ended: boolean;
 }
 
 export interface ProgressActions {
   refresh: () => void;
   registered: (credential: StoredCredential) => void;
-  registerAgain: () => void;
 }
 
 /** The screens every holder shares until its own flow can start. */
-export type GateStage = 'setup' | 'register' | 'loading' | 'unreachable' | 'no-exam' | 'awaiting-list' | 'not-on-list';
+export type GateStage = 'setup' | 'register' | 'ended' | 'loading' | 'unreachable' | 'no-exam' | 'awaiting-list' | 'not-on-list';
 
 export const holderRoles: readonly number[] = [roles.neutral, roles.centreKeyHolder];
 export const centreRoles: readonly number[] = [roles.centre, roles.centreKeyHolder];
@@ -59,7 +66,12 @@ export const centreRoles: readonly number[] = [roles.centre, roles.centreKeyHold
 export function holderGate(progress: HolderProgress, allowedRoles: readonly number[]): GateStage | null {
   const { chain } = progress;
   if (progress.missing.length > 0) return 'setup';
-  if (!progress.credential || progress.registering) return 'register';
+  if (!progress.credential || progress.registering) {
+    if (progress.ended) return 'ended';
+    // Registration is offered only once the exam is known not to be over, so it never flashes up and goes.
+    if (chain.settled === false && !chain.value && !chain.error) return 'loading';
+    return 'register';
+  }
   if (!chain.value) return chain.error ? 'unreachable' : 'loading';
   if (chain.value.unlockRound === null) return 'no-exam';
   if (!chain.value.listPosted) return 'awaiting-list';
@@ -82,12 +94,13 @@ function missingSettings(examId: Hex | null): string[] {
   ];
 }
 
-async function readChainFacts(reader: ExamRegistry, exam: Hex, passkeyPublicKey: Hex): Promise<ChainFacts> {
+async function readChainFacts(reader: ExamRegistry, exam: Hex, passkeyPublicKey: Hex | null): Promise<ChainFacts> {
   const [published, list, build] = await Promise.all([reader.getExam(exam), reader.getApprovedList(exam), reader.getBuild(exam)]);
   return {
     unlockRound: published ? Number(published.settings.unlockRound) : null,
+    endRound: published ? Number(published.settings.endRound) : null,
     listPosted: list !== null,
-    entry: list ? await listEntryFor(reader, exam, passkeyPublicKey) : null,
+    entry: list && passkeyPublicKey ? await listEntryFor(reader, exam, passkeyPublicKey) : null,
     buildPosted: build !== null,
   };
 }
@@ -100,20 +113,20 @@ const readStatus = () => {
   return tee.status();
 };
 
-function useRoundReached(unlockRound: number | null): boolean {
+function useRoundReached(round: number | null): boolean {
   const [reached, setReached] = useState(false);
   useEffect(() => {
-    if (unlockRound === null) return;
+    if (round === null) return;
     const check = () => {
-      setReached(roundAtSeconds(Math.floor(Date.now() / 1000)) >= unlockRound);
+      setReached(roundAtSeconds(Math.floor(Date.now() / 1000)) >= round);
     };
     check();
     const id = setInterval(check, 1000);
     return () => {
       clearInterval(id);
     };
-  }, [unlockRound]);
-  return unlockRound !== null && reached;
+  }, [round]);
+  return round !== null && reached;
 }
 
 /** Reads the exam for this browser's key, and keeps reading it, so the page moves on by itself. */
@@ -121,17 +134,20 @@ export function useHolderProgress(role: HolderRole): { progress: HolderProgress;
   const examId = useCurrentExamId();
   const stored = useHolderCredential(role);
   const [fresh, setFresh] = useState<StoredCredential | null>(null);
-  const [registering, setRegistering] = useState(false);
+  const invite = useInvite(role);
   const credential = fresh ?? stored;
+  const registering = Boolean(credential && invite && !credentialIsForInvite(credential, invite));
   const passkey = credential?.passkeyPublicKey ?? null;
 
   const loadChain = useMemo(() => {
     const reader = registry;
-    return reader && examId && passkey ? () => readChainFacts(reader, examId, passkey) : null;
+    return reader && examId ? () => readChainFacts(reader, examId, passkey) : null;
   }, [examId, passkey]);
   const chain = usePoll(loadChain, CHAIN_POLL_MS, chainFinished);
   const status = usePoll(tee ? readStatus : null, STATUS_POLL_MS);
   const reached = useRoundReached(chain.value?.unlockRound ?? null);
+  const endReached = useRoundReached(chain.value?.endRound ?? null);
+  const ended = endReached || status.value?.stage === 'released' || status.value?.stage === 'failed';
   const missing = missingSettings(examId);
 
   const { refresh: refreshChain } = chain;
@@ -144,14 +160,10 @@ export function useHolderProgress(role: HolderRole): { progress: HolderProgress;
       },
       registered: (next) => {
         setFresh(next);
-        setRegistering(false);
-      },
-      registerAgain: () => {
-        setRegistering(true);
       },
     }),
     [refreshChain, refreshStatus],
   );
 
-  return { progress: { missing, examId, credential, registering, chain, status, reached }, actions };
+  return { progress: { missing, examId, credential, registering, chain, status, reached, ended }, actions };
 }

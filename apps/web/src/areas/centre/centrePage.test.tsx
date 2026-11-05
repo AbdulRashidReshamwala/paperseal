@@ -53,6 +53,7 @@ const asCentre = chain(facts(roles.centre));
 describe('centreStage', () => {
   const cases: [string, Partial<HolderProgress>, Partial<CentreInputs>, string][] = [
     ['no key is registered here', { credential: null }, {}, 'register'],
+    ['no key is registered here and the exam has ended', { credential: null, ended: true }, {}, 'ended'],
     ['this key is a neutral party', { chain: chain(facts(roles.neutral)) }, {}, 'not-on-list'],
     ['no paper is sealed', { chain: chain(facts(roles.centre, { buildPosted: false })) }, {}, 'awaiting-build'],
     ['before unlock', { chain: asCentre }, {}, 'waiting'],
@@ -103,6 +104,22 @@ describe('CentreView', () => {
       />,
     );
   const atRelease = { reached: true, status: tee(status('released')) };
+
+  it('left-aligns the registration screen, and centres the others under the seal', () => {
+    const { container, unmount } = view({ credential: null });
+    expect(container.querySelector('.centre-form')).toBeTruthy();
+    expect(container.querySelector('.centre-stage')).toBeNull();
+    unmount();
+    const waiting = view({});
+    expect(waiting.container.querySelector('.centre-stage')).toBeTruthy();
+    expect(waiting.container.querySelector('.centre-form')).toBeNull();
+  });
+
+  it('offers no registration once the exam has ended', () => {
+    view({ credential: null, ended: true });
+    expect(screen.getByRole('heading', { name: 'This exam has ended' })).toBeTruthy();
+    expect(screen.queryByRole('button')).toBeNull();
+  });
 
   it('checks the files by itself: one line, one check, and no download button', () => {
     view({});

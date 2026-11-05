@@ -19,7 +19,7 @@ import { fakeChain, type FakeChainOptions } from '../../test/fakeChain';
 import { OutboxError, verifyOutboxBuild } from './outbox';
 import { explainPostError, postApprovedListFlow, postBuildFlow, type BuildPost } from './postFlow';
 import { PublishBlockedError, type PublishEnvironment } from './publishFlow';
-import { composeApprovedList, rolesFor, tryCompose, withRoles } from './registrations';
+import { composeApprovedList, tryCompose, withRoles } from './registrations';
 
 const board = '0x70997970c51812dc3a010c7d01b50e0d17dc79c8' as Address;
 const stranger = '0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc' as Address;
@@ -72,11 +72,6 @@ describe('registrations', () => {
     expect(result.ok ? '' : result.reason).toContain('expected 3 neutral and 7 centre key holders');
     const repeated = [...entries(), ...entries().slice(0, 1)];
     expect(tryCompose(examId, repeated)).toMatchObject({ ok: false });
-  });
-
-  it('offers a setter only the setter role and a holder the three holder roles', () => {
-    expect(rolesFor('0x')).toEqual([roles.setter]);
-    expect(rolesFor(key(1))).toEqual([roles.neutral, roles.centreKeyHolder, roles.centre]);
   });
 
   it('leaves out registrations without a role', () => {

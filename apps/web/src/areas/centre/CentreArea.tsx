@@ -209,7 +209,8 @@ export function CentreView(props: {
             <Seal state={seal} size={stage === 'paper-open' ? 112 : 168} caption />
           </div>
         ) : null}
-        <div className="centre-stage">{body()}</div>
+        {/* A form reads left-aligned. Every other centre screen is centred under the seal. */}
+        <div className={stage === 'register' ? 'centre-form' : 'centre-stage'}>{body()}</div>
       </div>
       {open.paper ? <PaperSheet paper={open.paper} /> : null}
       {released ? <div className="centre-noprint">{props.log ?? <UnlockLog />}</div> : null}

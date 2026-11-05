@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { clearHeldInvites, holdInvite } from '../../shared/invite';
 import { saveCredential } from '../../shared/Register';
 import { CONFIRMATION_TTL_MS } from './confirm';
 import { loadReceipts, saveReceipt } from './receipts';
@@ -50,6 +51,12 @@ afterEach(() => {
 });
 
 describe('a first visit', () => {
+  // The setter opened its invitation link, which holds an invite for this exam and no name.
+  beforeEach(() => {
+    holdInvite({ examId, role: 'setter', inviteSecret: `0x${'a5'.repeat(32)}` });
+  });
+  afterEach(clearHeldInvites);
+
   it('asks only for one key touch, says the name is never published, then checks by itself', async () => {
     const world = await makeWorld();
     mount(world);
@@ -84,6 +91,29 @@ describe('a first visit', () => {
     world.stage.current = 'submit';
     await ready();
     expect(world.verifyToken).toHaveBeenCalled();
+  });
+
+  it('explains instead of showing a form when there is no invitation link', async () => {
+    clearHeldInvites();
+    const world = await makeWorld();
+    mount(world);
+    expect(await screen.findByRole('heading', { name: 'Open your invitation link' })).toBeTruthy();
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.queryByRole('textbox')).toBeNull();
+  });
+
+  it('asks for a new registration when a different invitation link is opened, and offers no other way to change key', async () => {
+    registered();
+    clearHeldInvites();
+    const world = await makeWorld();
+    world.stage.current = 'onboard';
+    mount(world);
+    expect(await screen.findByText('Waiting for your exam board')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Use a different security key' })).toBeNull();
+    cleanup();
+    holdInvite({ examId, role: 'setter', inviteSecret: `0x${'5a'.repeat(32)}` });
+    mount(world);
+    expect(await screen.findByRole('button', { name: 'Register your security key' })).toBeTruthy();
   });
 
   it('shows no name field and no tabs anywhere', async () => {

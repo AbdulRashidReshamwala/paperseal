@@ -1,4 +1,4 @@
-import type { Criteria, Hex } from '@paperseal/protocol';
+import type { Criteria } from '@paperseal/protocol';
 
 import { evaluateBlueprint, evaluateSchedule, parseLocalTime, type BlueprintInput, type ScheduleInput, type TopicInput } from './form';
 
@@ -166,16 +166,6 @@ export function verifierUrl(
   } catch {
     return null;
   }
-}
-
-/** Each role's registration page, carrying the exam so it works in a browser that has never seen it. */
-export function registrationLinks(examId: Hex, base: string): { role: string; note: string; url: string }[] {
-  const link = (path: string) => `${base}#${path}?exam=${examId}`;
-  return [
-    { role: 'Setters', note: 'People who write questions', url: link('/setter') },
-    { role: 'Neutral parties', note: 'Key holders outside the exam centres', url: link('/keyholder') },
-    { role: 'Centres', note: 'Exam centres, with or without a key', url: link('/centre') },
-  ];
 }
 
 export type DraftStep = 'create' | 'version' | 'review';

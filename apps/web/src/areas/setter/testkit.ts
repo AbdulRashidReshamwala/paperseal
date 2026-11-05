@@ -9,6 +9,7 @@ import {
   examIdFromName,
   fromHex,
   hashMessage,
+  inviteTag,
   questionHash,
   setterOwner,
   toHex,
@@ -135,11 +136,11 @@ export async function makeWorld(options: WorldOptions = {}): Promise<World> {
   const fakeToken = `${b64url({ alg: 'ES256' })}.${b64url({})}.c2ln`;
   const verifyToken = vi.fn(() => Promise.resolve(trustedVerdict));
   const keys: Pick<Keys, 'register' | 'sign'> = {
-    register: vi.fn(() =>
+    register: vi.fn((options: { inviteSecret: Uint8Array }) =>
       Promise.resolve({
         credentialId: fromHex(credentialId),
         owner: setterOwner(fromHex(passkeyPublicKey)),
-        request: { passkeyPublicKey },
+        request: { passkeyPublicKey, inviteTag: toHex(inviteTag(options.inviteSecret, fromHex(passkeyPublicKey))) },
       } as never),
     ),
     sign: vi.fn((_id: Uint8Array, message: Uint8Array) => {

@@ -1,4 +1,3 @@
-import { roles } from '@paperseal/protocol';
 import { describe, expect, it } from 'vitest';
 
 import { evaluateSchedule, parseLocalTime } from './form';
@@ -9,12 +8,10 @@ import {
   defaultRpcHost,
   draftScreen,
   plainWords,
-  registrationLinks,
   toLocalInput,
   toSchedule,
   verifierUrl,
 } from './plan';
-import { defaultRoles } from './registrations';
 
 const DAY = 86400;
 const now = 1_900_000_000;
@@ -82,18 +79,6 @@ describe('configuration', () => {
   });
 });
 
-describe('registrationLinks', () => {
-  it('gives each role a link that names the exam', () => {
-    const examId = `0x${'11'.repeat(32)}` as const;
-    const links = registrationLinks(examId, 'https://exam.example.org/');
-    expect(links.map((link) => link.url)).toEqual([
-      `https://exam.example.org/#/setter?exam=${examId}`,
-      `https://exam.example.org/#/keyholder?exam=${examId}`,
-      `https://exam.example.org/#/centre?exam=${examId}`,
-    ]);
-  });
-});
-
 describe('draftScreen', () => {
   const ready = { create: true, version: true };
   it('sends the board back to the first unfinished step', () => {
@@ -102,40 +87,5 @@ describe('draftScreen', () => {
     expect(draftScreen('review', ready)).toBe('review');
     expect(draftScreen('version', ready)).toBe('version');
     expect(draftScreen('create', ready)).toBe('create');
-  });
-});
-
-describe('defaultRoles', () => {
-  const holder = (n: number, owner: string) => ({
-    owner,
-    passkeyPublicKey: `0x${String(n).padStart(2, '0')}` as const,
-    derivedPublicKey: `0x04${String(n).padStart(2, '0')}` as const,
-  });
-  const setter = { owner: `0x${'ab'.repeat(32)}`, passkeyPublicKey: '0xee', derivedPublicKey: '0x' } as const;
-
-  it('makes a setter a setter, and a centre a centre by its name', () => {
-    const picked = defaultRoles([setter, holder(1, 'Delhi Exam Centre'), holder(2, 'Mumbai Center'), holder(3, 'Asha')]);
-    expect(picked).toEqual({
-      '0xee': roles.setter,
-      '0x01': roles.centreKeyHolder,
-      '0x02': roles.centreKeyHolder,
-      '0x03': roles.neutral,
-    });
-  });
-
-  it('keeps neutral places for people whose names say nothing, whatever the order', () => {
-    const named = Array.from({ length: 7 }, (_, i) => holder(i + 4, `Centre ${String(i)}`));
-    const picked = defaultRoles([holder(1, 'Asha'), holder(2, 'Ben'), holder(3, 'Chen'), ...named]);
-    expect(Object.values(picked).filter((role) => role === roles.neutral)).toHaveLength(3);
-    expect(Object.values(picked).filter((role) => role === roles.centreKeyHolder)).toHaveLength(7);
-  });
-
-  it('fills the neutral places, then the centres, and leaves out the rest', () => {
-    const everyone = Array.from({ length: 11 }, (_, i) => holder(i + 1, `Person ${String(i)}`));
-    const picked = defaultRoles(everyone);
-    expect(picked['0x03']).toBe(roles.neutral);
-    expect(picked['0x04']).toBe(roles.centreKeyHolder);
-    expect(picked['0x10']).toBe(roles.centreKeyHolder);
-    expect(picked['0x11']).toBeUndefined();
   });
 });

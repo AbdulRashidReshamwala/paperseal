@@ -6,6 +6,12 @@
   padding-block: var(--ps-space-6) var(--ps-space-2);
 }
 
+/* The registration screen is a form, so it reads left-aligned, like every other form in the app. */
+.centre-form .ps-stage {
+  justify-items: start;
+  text-align: left;
+}
+
 .centre-stage .ps-stage {
   justify-items: center;
   text-align: center;

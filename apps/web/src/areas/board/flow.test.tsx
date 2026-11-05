@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createExamRegistry } from '@paperseal/chain';
-import { encodeMessage, examIdFromName, firstRoundAtOrAfter, encodeCriteria, criteriaHash, fromHex, setterOwner, toHex, type Hex } from '@paperseal/protocol';
+import { encodeMessage, examIdFromName, firstRoundAtOrAfter, encodeCriteria, criteriaHash, fromHex, inviteTag, roles, setterOwner, toHex, type Hex, type InviteRole } from '@paperseal/protocol';
 import type { OutboxMessage, RegistrationEntry, StatusResponse, TeeClient } from '@paperseal/tee-client';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createPublicClient, type Address } from 'viem';
@@ -15,7 +15,8 @@ import BoardArea from './BoardArea';
 import { decideStep, type Snapshot } from './examState';
 import { postApprovedListFlow, postBuildFlow } from './postFlow';
 import { publishExam, type PublishEnvironment, type PublishRequest } from './publishFlow';
-import { composeApprovedList, withRoles, defaultRoles } from './registrations';
+import { saveInvites, type BoardInvite } from './invites';
+import { composeApprovedList, withRoles } from './registrations';
 import { verifyOutboxBuild } from './outbox';
 import { sealStateAt } from './StatusStep';
 
@@ -31,11 +32,36 @@ const examId = examIdFromName(name);
 const key = (seed: number): Hex => toHex(new Uint8Array([4, ...new Uint8Array(64).fill(seed)]));
 const noWait = { wait: () => Promise.resolve() };
 
-const holder = (i: number, owner: string): RegistrationEntry => ({ owner, passkeyPublicKey: key(10 + i), derivedPublicKey: key(50 + i) });
+const secretOf = (seed: number): Hex => toHex(new Uint8Array(32).fill(seed));
+const tagFor = (secret: Hex, passkeyPublicKey: Hex): Hex => toHex(inviteTag(fromHex(secret), fromHex(passkeyPublicKey)));
+
+/** A person the board invited, and the registration the TEE lists once they have used the invite. */
+interface Person {
+  invite: BoardInvite;
+  registration: RegistrationEntry;
+}
+const person = (role: InviteRole, label: string, passkeyPublicKey: Hex, derivedPublicKey: Hex, seed: number): Person => {
+  const inviteSecret = secretOf(seed);
+  return {
+    invite: { id: `invite-${String(seed)}`, role, label, ...(role === 'setter' ? {} : { owner: label }), inviteSecret },
+    registration: {
+      owner: role === 'setter' ? setterOwner(fromHex(passkeyPublicKey)) : label,
+      passkeyPublicKey,
+      derivedPublicKey,
+      inviteTag: tagFor(inviteSecret, passkeyPublicKey),
+    },
+  };
+};
+const holder = (i: number, owner: string, role: InviteRole = 'keyholder') => person(role, owner, key(10 + i), key(50 + i), 100 + i);
 const neutrals = [holder(0, 'Asha'), holder(1, 'Ben'), holder(2, 'Chen')];
-const centres = Array.from({ length: 7 }, (_, i) => holder(3 + i, `Centre ${String(i + 1)}`));
-const setter: RegistrationEntry = { owner: setterOwner(fromHex(key(90))), passkeyPublicKey: key(90), derivedPublicKey: '0x' };
+const centres = Array.from({ length: 7 }, (_, i) => holder(3 + i, `Centre ${String(i + 1)}`, 'centre'));
+const setter = person('setter', 'Setter 1', key(90), '0x', 190);
 const everyone = [...neutrals, ...centres, setter];
+const registrationsOf = (people: readonly Person[]) => people.map((p) => p.registration);
+/** The invites are in the board's browser, as they are once it has made them. */
+const stock = (people: readonly Person[]) => {
+  saveInvites(examId, people.map((p) => p.invite));
+};
 
 function environment(options: Partial<FakeChainOptions> = {}) {
   const node = fakeChain({ board, ...options });
@@ -68,7 +94,10 @@ function request(times: { lock: number; start: number; end: number } = { lock: 3
   };
 }
 
-const list = () => composeApprovedList(examId, withRoles(everyone, defaultRoles(everyone)));
+const listRoles: Record<string, number> = Object.fromEntries(
+  everyone.map((p) => [p.registration.passkeyPublicKey, p.invite.role === 'setter' ? roles.setter : p.invite.role === 'keyholder' ? roles.neutral : roles.centreKeyHolder]),
+);
+const list = () => composeApprovedList(examId, withRoles(registrationsOf(everyone), listRoles));
 
 function fakeTee(overrides: { status?: Partial<StatusResponse>; registrations?: RegistrationEntry[]; outbox?: OutboxMessage[] } = {}) {
   return {
@@ -178,32 +207,78 @@ describe('sealStateAt', () => {
 });
 
 describe('step 4, bring people in', () => {
-  it('gives a link per role that names the exam', async () => {
+  const addInvite = (role: string, text: string) => {
+    fireEvent.change(screen.getByLabelText('Role'), { target: { value: role } });
+    fireEvent.change(screen.getByLabelText(/^(Name for the approved list|Your own note)/), { target: { value: text } });
+    fireEvent.click(button('Add invite'));
+  };
+
+  it('makes an invite per person, keeps it in the browser and copies a link with the secret in the fragment', async () => {
     const { env } = await seeded('exam');
     renderBoard(env, fakeTee());
     await screen.findByRole('heading', { name: 'Bring people in' });
+    addInvite('keyholder', 'Asha');
+    await screen.findByText('Waiting for them to register');
     const writeText = vi.fn(() => Promise.resolve());
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
-    fireEvent.click(button('Copy the link for Neutral parties'));
+    fireEvent.click(button('Copy the link for Asha (Neutral party)'));
     await screen.findByText('Copied');
-    expect(writeText).toHaveBeenCalledWith(expect.stringContaining(`#/keyholder?exam=${examId}`));
+    const link = (writeText.mock.calls[0] as unknown as [string])[0];
+    const url = new URL(link);
+    expect(url.search).toBe('');
+    const stored = JSON.parse(localStorage.getItem(`paperseal.invites.${examId}`) ?? '[]') as BoardInvite[];
+    expect(stored).toHaveLength(1);
+    const fragment = new URLSearchParams(url.hash.slice('#/join?'.length));
+    expect(fragment.get('exam')).toBe(examId);
+    expect(fragment.get('role')).toBe('keyholder');
+    expect(fragment.get('owner')).toBe('Asha');
+    expect(fragment.get('secret')).toBe(stored[0]?.inviteSecret);
+  });
+
+  it('asks for a name for a key holder, refuses a repeat, and needs none for a setter', async () => {
+    const { env } = await seeded('exam');
+    renderBoard(env, fakeTee());
+    await screen.findByRole('heading', { name: 'Bring people in' });
+    addInvite('keyholder', '  ');
+    expect(await screen.findByText('Enter the name to put on the approved list.')).toBeTruthy();
+    addInvite('keyholder', 'Asha');
+    await screen.findByText('Waiting for them to register');
+    addInvite('keyholder', 'Asha');
+    expect(await screen.findByText('Asha already has an invite.')).toBeTruthy();
+    addInvite('setter', '');
+    expect(await screen.findByText('Setter 1 (Setter)')).toBeTruthy();
+    const stored = JSON.parse(localStorage.getItem(`paperseal.invites.${examId}`) ?? '[]') as BoardInvite[];
+    expect(stored.find((i) => i.role === 'setter')?.owner).toBeUndefined();
+    expect(new Set(stored.map((i) => i.inviteSecret)).size).toBe(2);
   });
 
   it('prints the link when it cannot be copied', async () => {
     const { env } = await seeded('exam');
+    stock([setter]);
     renderBoard(env, fakeTee());
     await screen.findByRole('heading', { name: 'Bring people in' });
     vi.stubGlobal('navigator', { ...navigator, clipboard: undefined });
-    fireEvent.click(button('Copy the link for Setters'));
-    expect(await screen.findByText(/#\/setter\?exam=/)).toBeTruthy();
+    fireEvent.click(button('Copy the link for Setter 1 (Setter)'));
+    expect(await screen.findByText(/#\/join\?exam=/)).toBeTruthy();
+  });
+
+  it('keeps the invites when the board is opened again', async () => {
+    const { env } = await seeded('exam');
+    renderBoard(env, fakeTee());
+    await screen.findByRole('heading', { name: 'Bring people in' });
+    addInvite('keyholder', 'Asha');
+    await screen.findByText('Waiting for them to register');
+    cleanup();
+    renderBoard(env, fakeTee());
+    expect(await screen.findByText('Asha (Neutral party)')).toBeTruthy();
   });
 
   it('counts against what is needed, and holds the list until it is complete', async () => {
     const { node, env } = await seeded('exam');
     const sent = node.sent.length;
-    renderBoard(env, fakeTee({ registrations: [...neutrals, ...centres.slice(1), setter] }));
-    await screen.findByLabelText('Role for Asha');
-    expect(screen.getByText('3 of 3')).toBeTruthy();
+    stock(everyone);
+    renderBoard(env, fakeTee({ registrations: registrationsOf([...neutrals, ...centres.slice(1), setter]) }));
+    expect(await screen.findByText('3 of 3')).toBeTruthy();
     expect(screen.getByText('6 of 7')).toBeTruthy();
     expect(screen.getByText(/1, at least 5 needed/)).toBeTruthy();
     await screen.findByText(/needs exactly 3 neutral parties and 7 centres with keys/);
@@ -211,14 +286,17 @@ describe('step 4, bring people in', () => {
     expect(node.sent).toHaveLength(sent);
   });
 
-  it('defaults the roles, posts with one action, and moves on by itself', async () => {
+  it('composes the list by itself from matching invites, posts with one action, and moves on', async () => {
     const { node, env } = await seeded('exam');
     const sent = node.sent.length;
-    renderBoard(env, fakeTee({ registrations: everyone }));
-    const role = await screen.findByLabelText<HTMLSelectElement>('Role for Asha');
-    expect(within(role).getByRole<HTMLOptionElement>('option', { name: 'Neutral party' }).selected).toBe(true);
-    expect(screen.getByLabelText<HTMLSelectElement>('Role for Centre 1').value).not.toBe('');
-    expect(screen.getByLabelText<HTMLSelectElement>('Role for Setter 1').value).not.toBe('');
+    stock(everyone);
+    renderBoard(env, fakeTee({ registrations: registrationsOf(everyone) }));
+    // A centre's key place is the only choice, and it is already made. Key holders and setters have none.
+    const role = await screen.findByLabelText<HTMLSelectElement>('Role for Centre 1');
+    expect(within(role).getByRole<HTMLOptionElement>('option', { name: 'Centre with a key' }).selected).toBe(true);
+    expect(screen.queryByLabelText('Role for Asha')).toBeNull();
+    expect(screen.queryByLabelText('Role for Setter 1')).toBeNull();
+    expect(screen.getAllByText('Registered')).toHaveLength(11);
     await waitFor(() => {
       expect(button('Post the list').disabled).toBe(false);
     });
@@ -232,26 +310,79 @@ describe('step 4, bring people in', () => {
 
   it('never defaults anyone to a centre without a key', async () => {
     const { env } = await seeded('exam');
-    renderBoard(env, fakeTee({ registrations: [...everyone, holder(20, 'Centre 8')] }));
+    const extra = holder(20, 'Centre 8', 'centre');
+    stock([...everyone, extra]);
+    renderBoard(env, fakeTee({ registrations: registrationsOf([...everyone, extra]) }));
     expect((await screen.findByLabelText<HTMLSelectElement>('Role for Centre 8')).value).toBe('');
   });
 
-  it('lets the board change a role, and the rules of the list follow', async () => {
+  it('lets the board change a centre, and the rules of the list follow', async () => {
     const { env } = await seeded('exam');
-    renderBoard(env, fakeTee({ registrations: everyone }));
-    const role = await screen.findByLabelText('Role for Asha');
+    stock(everyone);
+    renderBoard(env, fakeTee({ registrations: registrationsOf(everyone) }));
+    const role = await screen.findByLabelText('Role for Centre 1');
     await waitFor(() => {
       expect(button('Post the list').disabled).toBe(false);
     });
     fireEvent.change(role, { target: { value: '' } });
     expect(button('Post the list').disabled).toBe(true);
+    expect(screen.getByText('6 of 7')).toBeTruthy();
+  });
+
+  it('keeps a registration without a valid tag off the list and says so', async () => {
+    const { env } = await seeded('exam');
+    stock(everyone);
+    const guessed: RegistrationEntry = { ...holder(30, 'Asha').registration, inviteTag: `0x${'77'.repeat(32)}` };
+    renderBoard(env, fakeTee({ registrations: [...registrationsOf(everyone.slice(1)), guessed] }));
+    await screen.findByText('Registered without one of your invites. Not on the list.');
+    expect(screen.getAllByText('Waiting for them to register')).toHaveLength(1);
     expect(screen.getByText('2 of 3')).toBeTruthy();
+  });
+
+  it('refuses a tag copied from someone else, and a right tag under another name', async () => {
+    const { env } = await seeded('exam');
+    stock(everyone);
+    const [asha, ...rest] = neutrals;
+    const copied: RegistrationEntry = { ...holder(31, 'Asha').registration, inviteTag: (asha as Person).registration.inviteTag };
+    const renamed: RegistrationEntry = { ...(rest[0] as Person).registration, owner: 'Someone Else' };
+    renderBoard(env, fakeTee({ registrations: [copied, renamed, ...registrationsOf(centres), setter.registration] }));
+    await waitFor(() => {
+      expect(screen.getAllByText('Registered without one of your invites. Not on the list.')).toHaveLength(2);
+    });
+    expect(screen.getByText('0 of 3')).toBeTruthy();
+  });
+
+  it('refuses both keys when two use one invite, until the board reissues it', async () => {
+    const { node, env } = await seeded('exam');
+    const sent = node.sent.length;
+    stock(everyone);
+    const twin: RegistrationEntry = {
+      ...holder(40, 'Asha').registration,
+      inviteTag: tagFor((neutrals[0] as Person).invite.inviteSecret, key(40 + 10)),
+    };
+    renderBoard(env, fakeTee({ registrations: [...registrationsOf(everyone), twin] }));
+    await screen.findByText('Two security keys used this invite. Neither is on the list.');
+    expect(screen.getByText('2 of 3')).toBeTruthy();
+    expect(button('Post the list').disabled).toBe(true);
+    expect(node.sent).toHaveLength(sent);
+    const before = (JSON.parse(localStorage.getItem(`paperseal.invites.${examId}`) ?? '[]') as BoardInvite[]).find((i) => i.id === 'invite-100');
+    fireEvent.click(button('Reissue the invite for Asha (Neutral party)'));
+    await waitFor(() => {
+      expect(screen.queryByText('Two security keys used this invite. Neither is on the list.')).toBeNull();
+    });
+    const after = (JSON.parse(localStorage.getItem(`paperseal.invites.${examId}`) ?? '[]') as BoardInvite[]).find((i) => i.id === 'invite-100');
+    expect(after?.inviteSecret).not.toBe(before?.inviteSecret);
+    expect(screen.getAllByText('Waiting for them to register')).toHaveLength(1);
+    // Both old keys now match nothing, so neither is listed, and a new link can be copied.
+    expect(screen.getAllByText('Registered without one of your invites. Not on the list.')).toHaveLength(2);
+    expect(button('Copy the link for Asha (Neutral party)')).toBeTruthy();
   });
 
   it('blocks posting while the sealed machine is not at this stage, and says why', async () => {
     const { node, env } = await seeded('exam');
     const sent = node.sent.length;
-    renderBoard(env, fakeTee({ registrations: everyone, status: { stage: 'submit' } }));
+    stock(everyone);
+    renderBoard(env, fakeTee({ registrations: registrationsOf(everyone), status: { stage: 'submit' } }));
     await screen.findByText(/at the submit stage, not onboard/);
     expect(button('Post the list').disabled).toBe(true);
     expect(node.sent).toHaveLength(sent);
@@ -260,7 +391,8 @@ describe('step 4, bring people in', () => {
   it('blocks posting for a machine that fails its proof', async () => {
     verifyTee.mockRejectedValue(new TypeError('network down'));
     const { env } = await seeded('exam');
-    renderBoard(env, fakeTee({ registrations: everyone }));
+    stock(everyone);
+    renderBoard(env, fakeTee({ registrations: registrationsOf(everyone) }));
     await screen.findByText(/could not be checked: network down/);
     expect(button('Post the list').disabled).toBe(true);
   });
@@ -268,7 +400,8 @@ describe('step 4, bring people in', () => {
   it('checks again right before sending', async () => {
     const { node, env } = await seeded('exam');
     const sent = node.sent.length;
-    const tee = fakeTee({ registrations: everyone });
+    stock(everyone);
+    const tee = fakeTee({ registrations: registrationsOf(everyone) });
     renderBoard(env, tee);
     await waitFor(() => {
       expect(button('Post the list').disabled).toBe(false);

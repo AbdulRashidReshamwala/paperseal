@@ -30,6 +30,8 @@ const areas: { path: string; label: string; plain: string; Area: LazyExoticCompo
   },
 ];
 
+const Join = lazy(() => import('./shared/Join'));
+
 function Home() {
   return (
     <Page header={<RoleHeader role="Welcome" />}>
@@ -74,6 +76,7 @@ export function App() {
       <ExamFromLink />
       <Routes>
         <Route path="/" element={<Home />} />
+        <Route path="/join" element={<Join />} />
         {areas.map(({ path, Area }) => (
           <Route key={path} path={`${path}/*`} element={<Area />} />
         ))}

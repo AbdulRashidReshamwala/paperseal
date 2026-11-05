@@ -1,17 +1,20 @@
 import { createWebAuthnKeys, KeyError, type Keys, type Registration } from '@paperseal/keys';
-import { fromHex, NotImplementedError, requireHardwareAttestation, toHex, type Hex } from '@paperseal/protocol';
+import { fromHex, NotImplementedError, requireHardwareAttestation, toHex, type Hex, type Invite } from '@paperseal/protocol';
 import { TeeApiError, type TeeClient } from '@paperseal/tee-client';
-import { Button, Check, Field, KeyTouch, securityKeyProblem, Stage, type KeyTouchState } from '@paperseal/ui';
-import { useRef, useState, type ReactNode } from 'react';
+import { Check, KeyTouch, securityKeyProblem, Stage, type KeyTouchState } from '@paperseal/ui';
+import { useState, type ReactNode } from 'react';
 
 import { useCurrentExamId } from './currentExam';
+import { credentialIsForInvite, useInvite } from './invite';
 import { tee as defaultTee } from './tee';
 
 /*
- * Registration is the same for setters, key holders and centres. A setter registers a passkey
- * only (no PRF key) and has no name: its owner is the `setterOwner` hash of its own passkey public
- * key, which `keys.register` computes after the passkey exists. The README's Hardware Keys section
- * describes the ceremony. `credentialId` is not secret, but a passkey cannot be used without it,
+ * Registration is the same for setters, key holders and centres, and it starts from an invite link
+ * (see `shared/invite.ts`): the role and the name come from the link, so nothing is typed, and with
+ * no link there is no form. The invite's secret never leaves this device: only the tag the passkey
+ * signs goes to the TEE. A setter registers a passkey only (no PRF key) and has no name: its owner
+ * is the `setterOwner` hash of its own passkey public key, which `keys.register` computes after the
+ * passkey exists. The README's Hardware Keys section describes the ceremony. `credentialId` is not secret, but a passkey cannot be used without it,
  * so it is kept in this browser's localStorage per exam and role. A key holder and a centre are
  * separate roles with separate keys, because one browser can hold both.
  */
@@ -23,6 +26,8 @@ export interface StoredCredential {
   role: RegisterRole;
   credentialId: Hex;
   passkeyPublicKey: Hex;
+  /** The tag this key registered with, so a new invite for the same role can be told from the old one. */
+  inviteTag?: Hex;
 }
 
 const storageKey = (examId: Hex, role: RegisterRole) => `paperseal.credential.${examId.toLowerCase()}.${role}`;
@@ -42,7 +47,13 @@ export function loadCredential(examId: Hex, role: RegisterRole): StoredCredentia
     const value = JSON.parse(raw) as Partial<StoredCredential>;
     const hex = (v: unknown): v is Hex => typeof v === 'string' && /^0x[0-9a-f]+$/.test(v);
     if (typeof value.owner !== 'string' || !hex(value.credentialId) || !hex(value.passkeyPublicKey)) return null;
-    return { owner: value.owner, role, credentialId: value.credentialId, passkeyPublicKey: value.passkeyPublicKey };
+    return {
+      owner: value.owner,
+      role,
+      credentialId: value.credentialId,
+      passkeyPublicKey: value.passkeyPublicKey,
+      ...(hex(value.inviteTag) ? { inviteTag: value.inviteTag } : {}),
+    };
   } catch {
     return null;
   }
@@ -74,9 +85,8 @@ export function describeError(error: unknown): string {
 export interface RegisterFlowInput {
   keys: Pick<Keys, 'register'>;
   tee: Pick<TeeClient, 'registerChallenge' | 'register'>;
-  /** The name a key holder or centre registers under. A setter has none, so it is ignored for one. */
-  owner: string;
-  role: RegisterRole;
+  /** From the invite link. It names the role and the owner, and holds the secret the tag is made from. */
+  invite: Invite;
 }
 
 /**
@@ -85,10 +95,12 @@ export interface RegisterFlowInput {
  */
 export async function registerWithTee(input: RegisterFlowInput): Promise<Registration> {
   const { challenge } = await input.tee.registerChallenge();
+  const { invite } = input;
+  const inviteSecret = fromHex(invite.inviteSecret);
   const registration = await input.keys.register(
-    input.role === 'setter'
-      ? { role: 'setter', challenge: fromHex(challenge) }
-      : { role: 'holder', owner: input.owner, challenge: fromHex(challenge) },
+    invite.role === 'setter' || invite.owner === undefined
+      ? { role: 'setter', challenge: fromHex(challenge), inviteSecret }
+      : { role: 'holder', owner: invite.owner, challenge: fromHex(challenge), inviteSecret },
   );
   await input.tee.register(registration.request);
   return registration;
@@ -125,77 +137,83 @@ export function Trouble(props: { children: ReactNode; detail?: readonly string[]
   );
 }
 
-const roleCopy: Record<RegisterRole, { lede: string; next: string }> = {
+const noLink = {
+  title: 'Open your invitation link',
+  lede: 'You register from the private link your exam board sent you. It says who you are, so there is nothing to type here.',
+  next: 'If you can’t find the link, ask your exam board to send it again.',
+};
+
+const roleCopy: Record<RegisterRole, { lede: (owner: string | undefined) => string; next: string }> = {
   setter: {
-    lede: 'Your name is never published. The public list shows only a code made from your security key, so this page doesn’t ask who you are.',
+    lede: () =>
+      'You are registering as a question setter. Your name is never published. The public list shows only a code made from your security key.',
     next: 'Your exam board publishes the approved list. Then you can write your questions.',
   },
   keyholder: {
-    lede: 'Enter the name your exam board invited you under. It appears on the public approved list.',
+    lede: (owner) => `You are registering as ${owner ?? 'a key holder'}, a key holder for this exam. Your name appears on the public approved list.`,
     next: 'Your exam board publishes the approved list. You have nothing else to do until release day.',
   },
   centre: {
-    lede: 'Enter your centre’s name as your exam board invited it. It appears on the public approved list.',
+    lede: (owner) => `You are registering ${owner ?? 'your centre'} as an exam centre. The name appears on the public approved list.`,
     next: 'Your exam board publishes the approved list. You can then download the sealed paper.',
   },
 };
+
+const newKey = 'To use a different security key, ask your exam board for a new invitation link.';
 
 export interface RegisterProps {
   role: RegisterRole;
   keys?: Pick<Keys, 'register'>;
   tee?: Pick<TeeClient, 'registerChallenge' | 'register'> | null;
   examId?: Hex | null;
+  /** The invite to register under. By default the one this browser opened from a link, if any. */
+  invite?: Invite | null;
   onRegistered?: (credential: StoredCredential) => void;
-  /** Goes straight to the key touch, for someone replacing a key already stored here. */
-  again?: boolean;
   /** Replaces the role's usual "what happens next", when the caller knows better. */
   next?: string;
 }
 
 /**
- * One screen for every role: one name field where the role needs a name, and one key touch. A
- * Stage only, so the caller's page supplies the header.
+ * One screen for every role, and one key touch. The role and name come from the invite link, so there
+ * is no form: with no usable link it says so in plain words. A Stage only, so the caller's page
+ * supplies the header.
  */
 export function Register(props: RegisterProps) {
   const { role } = props;
   const currentExam = useCurrentExamId();
   const examId = props.examId === undefined ? currentExam : props.examId;
   const tee = props.tee === undefined ? defaultTee : props.tee;
-  const [owner, setOwner] = useState('');
-  const [nameError, setNameError] = useState<string | undefined>();
+  const held = useInvite(role);
+  const given = props.invite === undefined ? held : props.invite;
+  // A link for another exam or role can't be used on this page.
+  const invite = given && given.role === role && (!examId || given.examId === examId) ? given : null;
   const [touch, setTouch] = useState<KeyTouchState>('idle');
   const [keyError, setKeyError] = useState<unknown>();
   const [failure, setFailure] = useState<{ text: string; detail: string } | null>(null);
-  const [done, setDone] = useState<StoredCredential | null>(() =>
-    examId && !props.again ? loadCredential(examId, role) : null,
-  );
-  const nameField = useRef<HTMLDivElement>(null);
+  const [fresh, setFresh] = useState<StoredCredential | null>(null);
 
-  const needsName = role !== 'setter';
   const copy = roleCopy[role];
+  // The stored key counts only while it belongs to the invite in hand: a new link means a new key.
+  const stored = fresh ?? (examId ? loadCredential(examId, role) : null);
+  const done = stored && (!invite || credentialIsForInvite(stored, invite)) ? stored : null;
 
   const submit = async () => {
-    if (!examId || !tee) return;
-    if (needsName && owner.trim() === '') {
-      setNameError('Enter your name first.');
-      nameField.current?.querySelector('input')?.focus();
-      return;
-    }
-    setNameError(undefined);
+    if (!examId || !tee || !invite) return;
     setFailure(null);
     setTouch('waiting');
     try {
-      const registration = await registerWithTee({ keys: props.keys ?? browserKeys(), tee, owner: owner.trim(), role });
+      const registration = await registerWithTee({ keys: props.keys ?? browserKeys(), tee, invite });
       const credential: StoredCredential = {
         // A setter's owner is the hash `keys.register` computed from its new passkey.
         owner: registration.owner,
         role,
         credentialId: toHex(registration.credentialId),
         passkeyPublicKey: registration.request.passkeyPublicKey,
+        inviteTag: registration.request.inviteTag,
       };
       saveCredential(examId, credential);
       setTouch('success');
-      setDone(credential);
+      setFresh(credential);
       props.onRegistered?.(credential);
     } catch (cause) {
       if (isSecurityKeyError(cause)) {
@@ -229,40 +247,20 @@ export function Register(props: RegisterProps) {
     return (
       <Stage
         title="Your security key is registered"
-        {...(needsName ? { lede: `Registered as ${done.owner}.` } : {})}
-        next={copy.next}
-      >
-        <Button
-          onClick={() => {
-            setDone(null);
-            setTouch('idle');
-          }}
-        >
-          Register a different key
-        </Button>
-      </Stage>
+        {...(role !== 'setter' ? { lede: `Registered as ${done.owner}.` } : {})}
+        next={`${copy.next} ${newKey}`}
+      />
     );
   }
+
+  if (!invite) return <Stage title={noLink.title} lede={noLink.lede} next={noLink.next} />;
 
   return (
     <Stage
       title="Register your security key"
-      lede={copy.lede}
+      lede={copy.lede(invite.owner)}
       action={
         <>
-          {needsName ? (
-            <div ref={nameField}>
-              <Field
-                label="Name on the approved list"
-                value={owner}
-                error={nameError}
-                onChange={(value) => {
-                  setOwner(value);
-                  setNameError(undefined);
-                }}
-              />
-            </div>
-          ) : null}
           <KeyTouch
             state={touch}
             error={keyError}
