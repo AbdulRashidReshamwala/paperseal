@@ -12,6 +12,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
+
+	"paperseal/tee/internal/abilayout"
+	"paperseal/tee/internal/spec"
 )
 
 // Reasons Decode refuses criteria. Wrapped errors add where and why.
@@ -25,6 +28,8 @@ var (
 	ErrRepeatedTopic    = errors.New("criteria: repeated topic name")
 	ErrTopicQuestions   = errors.New("criteria: topic questions must be at least 1")
 	ErrSelectedOverflow = errors.New("criteria: questions sum exceeds uint32")
+	ErrTooLarge         = errors.New("criteria: bytes exceed limits.criteriaBytes")
+	ErrLimit            = errors.New("criteria: over a limit in spec limits")
 )
 
 // Topic is one topic of the paper.
@@ -104,11 +109,70 @@ func Encode(c Criteria) ([]byte, error) {
 	return args.Pack(c)
 }
 
-// Decode parses criteria and applies every rule in the spec. ABI decoding
+// checkLayout walks the offsets of abi.encode(Criteria) from the raw bytes and
+// allocates nothing. Each topic and its name must have bytes of its own, so no
+// input decodes to more than its own length.
+func checkLayout(b []byte) error {
+	top, err := abilayout.Word(b, 0)
+	if err != nil {
+		return err
+	}
+	if top != 32 {
+		return fmt.Errorf("%w: criteria offset %d, want 32", abilayout.ErrLayout, top)
+	}
+	// The tuple is two numbers and the offset of topics, which follows them.
+	const head = 3 * 32
+	off, err := abilayout.Word(b, 32+2*32)
+	if err != nil {
+		return err
+	}
+	if off != head {
+		return fmt.Errorf("%w: topics offset %d, want %d", abilayout.ErrLayout, off, head)
+	}
+	_, _, err = abilayout.Array(b, 32+head, len(b), func(start, limit int) (int, error) {
+		const topicHead = 2 * 32 // The name's offset, then questions.
+		if limit-start < topicHead {
+			return 0, fmt.Errorf("%w: topic is shorter than its head", abilayout.ErrLayout)
+		}
+		name, err := abilayout.Word(b, start)
+		if err != nil {
+			return 0, err
+		}
+		if name != topicHead {
+			return 0, fmt.Errorf("%w: name offset %d, want %d", abilayout.ErrLayout, name, topicHead)
+		}
+		return abilayout.Bytes(b, start+topicHead, limit)
+	})
+	return err
+}
+
+// checkLimits applies the spec's limits to decoded criteria.
+func checkLimits(c Criteria) error {
+	lim := spec.C.Limits
+	if len(c.Topics) > lim.Topics {
+		return fmt.Errorf("%w: %d topics, at most %d", ErrLimit, len(c.Topics), lim.Topics)
+	}
+	for i, t := range c.Topics {
+		if len(t.Name) > lim.TopicNameBytes {
+			return fmt.Errorf("topic %d: %w: name is %d bytes, at most %d", i, ErrLimit, len(t.Name), lim.TopicNameBytes)
+		}
+	}
+	return nil
+}
+
+// Decode parses criteria and applies every rule in the spec. Before decoding it
+// refuses bytes over limits.criteriaBytes and bytes whose offsets share or
+// overlap values, which keeps what the decoder builds proportional to the input. ABI decoding
 // tolerates trailing bytes, gaps, shared offsets and dirty padding, so it
 // re-encodes what it read and refuses any difference: one set of criteria has
 // one encoding. The caller checks the hash against the attested criteriaHash.
 func Decode(b []byte) (Criteria, error) {
+	if len(b) > spec.C.Limits.CriteriaBytes {
+		return Criteria{}, fmt.Errorf("%w: %d bytes, at most %d", ErrTooLarge, len(b), spec.C.Limits.CriteriaBytes)
+	}
+	if err := checkLayout(b); err != nil {
+		return Criteria{}, fmt.Errorf("%w: %v", ErrMalformed, err)
+	}
 	values, err := args.Unpack(b)
 	if err != nil {
 		return Criteria{}, fmt.Errorf("%w: %v", ErrMalformed, err)
@@ -117,6 +181,9 @@ func Decode(b []byte) (Criteria, error) {
 	var out struct{ Criteria Criteria }
 	if err := args.Copy(&out, values); err != nil {
 		return Criteria{}, fmt.Errorf("%w: %v", ErrMalformed, err)
+	}
+	if err := checkLimits(out.Criteria); err != nil {
+		return Criteria{}, err
 	}
 	again, err := args.Pack(out.Criteria)
 	if err != nil {

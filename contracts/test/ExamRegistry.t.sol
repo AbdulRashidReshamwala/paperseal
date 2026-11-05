@@ -190,6 +190,72 @@ contract ExamRegistryTest is Test {
         assertEq(vm.parseJsonUint(json, ".drand.genesisTime"), GENESIS);
     }
 
+    function test_Limits_MatchSpec() public {
+        string memory json = _constants();
+        uint256 entriesBytes = vm.parseJsonUint(json, ".limits.entriesBytes");
+        uint256 criteriaBytes = vm.parseJsonUint(json, ".limits.criteriaBytes");
+        assertEq(entriesBytes, 327680);
+        assertEq(criteriaBytes, 16384);
+
+        // The contract's constants are private, so check them through behaviour at the spec values.
+        _create();
+        vm.prank(BOARD);
+        vm.expectRevert(ExamRegistry.EntriesTooLarge.selector);
+        registry.postApprovedList(EXAM_ID, _filled(0x01, entriesBytes + 1));
+        vm.prank(BOARD);
+        registry.postApprovedList(EXAM_ID, _filled(0x01, entriesBytes));
+
+        _expectCriteriaLength(criteriaBytes, bytes4(0));
+        _expectCriteriaLength(criteriaBytes + 1, ExamRegistry.CriteriaTooLarge.selector);
+    }
+
+    function _expectCriteriaLength(uint256 length, bytes4 reason) internal {
+        bytes memory big = _filled(0x02, length);
+        ExamRegistry.ExamSettings memory settings = _settings(EXAM_ID);
+        settings.examId = keccak256(abi.encode("criteria-limit", length));
+        settings.criteriaHash = _expectedCriteriaHash(big);
+        vm.prank(BOARD);
+        if (reason != bytes4(0)) vm.expectRevert(reason);
+        registry.createExam(COMMIT, DIGEST, settings, big);
+        if (reason == bytes4(0)) assertEq(registry.getExam(settings.examId).createdAt, block.timestamp);
+    }
+
+    function test_PostApprovedList_AcceptsExactlyMaxEntries() public {
+        _create();
+        bytes memory list = _filled(0x01, 327680);
+        vm.prank(BOARD);
+        registry.postApprovedList(EXAM_ID, list);
+        assertEq(registry.getApprovedList(EXAM_ID).listHash, _expectedListHash(EXAM_ID, list));
+    }
+
+    function test_PostApprovedList_RejectsOneByteOverMaxEntries() public {
+        _create();
+        vm.expectRevert(ExamRegistry.EntriesTooLarge.selector);
+        vm.prank(BOARD);
+        registry.postApprovedList(EXAM_ID, _filled(0x01, 327681));
+        assertEq(registry.getApprovedList(EXAM_ID).postedAt, 0);
+    }
+
+    function test_CreateExam_AcceptsExactlyMaxCriteria() public {
+        bytes memory big = _filled(0x02, 16384);
+        ExamRegistry.ExamSettings memory settings = _settings(EXAM_ID);
+        settings.criteriaHash = _expectedCriteriaHash(big);
+        vm.prank(BOARD);
+        registry.createExam(COMMIT, DIGEST, settings, big);
+        assertEq(registry.getExam(EXAM_ID).settings.criteriaHash, settings.criteriaHash);
+    }
+
+    function test_CreateExam_RejectsOneByteOverMaxCriteria() public {
+        // The hash is correct for the oversized bytes, so only the length check can reject them.
+        bytes memory big = _filled(0x02, 16385);
+        ExamRegistry.ExamSettings memory settings = _settings(EXAM_ID);
+        settings.criteriaHash = _expectedCriteriaHash(big);
+        vm.expectRevert(ExamRegistry.CriteriaTooLarge.selector);
+        vm.prank(BOARD);
+        registry.createExam(COMMIT, DIGEST, settings, big);
+        assertEq(registry.getExam(EXAM_ID).createdAt, 0);
+    }
+
     // Access control
 
     function testFuzz_CreateExam_OnlyBoard(address caller) public {

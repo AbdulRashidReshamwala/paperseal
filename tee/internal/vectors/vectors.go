@@ -7,10 +7,12 @@ package vectors
 import (
 	"crypto/ecdh"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"paperseal/tee/internal/approvedlist"
 	"paperseal/tee/internal/attestation"
@@ -38,6 +40,95 @@ type File struct {
 	Release          ReleaseVector  `json:"release"`
 	ReleaseEntries   EntriesVector  `json:"releaseEntries"`
 	Manifest         ManifestVector `json:"manifest"`
+	Limits           LimitsVector   `json:"limits"`
+}
+
+// LimitsVector holds inputs every reader must reject without decoding them, per
+// "Size Limits" in spec/api.md. Each input is Prefix followed by zero bytes up
+// to Length bytes in all, which keeps the file small: a shared-offset attack is
+// a few hundred bytes of offsets and then one large zero-filled value.
+type LimitsVector struct {
+	Reject []RejectVector `json:"reject"`
+}
+
+// RejectVector is one input that must be refused. Kind is "entries" or
+// "criteria". Reason is "overCap" for a value longer than its byte cap, or
+// "sharedOffsets" for array offsets that don't start after the head, increase
+// strictly and leave each element ending before the next.
+type RejectVector struct {
+	Name   string `json:"name"`
+	Kind   string `json:"kind"`
+	Reason string `json:"reason"`
+	Prefix string `json:"prefix"`
+	Length int    `json:"length"`
+}
+
+// Bytes returns the input the vector describes.
+func (r RejectVector) Bytes() ([]byte, error) {
+	prefix, err := hex.DecodeString(strings.TrimPrefix(r.Prefix, "0x"))
+	if err != nil {
+		return nil, err
+	}
+	if r.Length < len(prefix) {
+		return nil, fmt.Errorf("vectors: %s: length %d is shorter than its prefix", r.Name, r.Length)
+	}
+	return append(prefix, make([]byte, r.Length-len(prefix))...), nil
+}
+
+func word(n uint64) []byte {
+	return binary.BigEndian.AppendUint64(make([]byte, 24), n)
+}
+
+// sharedEntries is a list of n entries whose offsets all point at one entry,
+// whose owner is zeros up to length bytes in all.
+func sharedEntries(n, length int) RejectVector {
+	b := append(word(0x20), word(uint64(n))...)
+	for range n {
+		b = append(b, word(uint64(32*n))...)
+	}
+	// One entry: role 1, then offsets of passkey, derived and owner. The
+	// passkey and derived values are empty and the owner is the large value.
+	b = append(b, word(1)...)
+	b = append(b, word(0x80)...)
+	b = append(b, word(0xa0)...)
+	b = append(b, word(0xc0)...)
+	b = append(b, word(0)...)
+	b = append(b, word(0)...)
+	b = append(b, word(uint64(length-len(b)-32))...)
+	return RejectVector{"entries share one large entry", "entries", "sharedOffsets", x(b), length}
+}
+
+// sharedTopics is the same attack on criteria.topics.
+func sharedTopics(n, length int) RejectVector {
+	b := append(word(0x20), word(10)...)
+	b = append(b, word(3)...)
+	b = append(b, word(0x60)...)
+	b = append(b, word(uint64(n))...)
+	for range n {
+		b = append(b, word(uint64(32*n))...)
+	}
+	b = append(b, word(0x40)...)
+	b = append(b, word(1)...)
+	b = append(b, word(uint64(length-len(b)-32))...)
+	return RejectVector{"topics share one large topic", "criteria", "sharedOffsets", x(b), length}
+}
+
+func limitsVector() LimitsVector {
+	l := spec.C.Limits
+	validList, err := approvedlist.Encode(SamplePerRole())
+	if err != nil {
+		panic(err)
+	}
+	validCriteria, err := criteria.Encode(SampleCriteria())
+	if err != nil {
+		panic(err)
+	}
+	return LimitsVector{Reject: []RejectVector{
+		{"entries one byte over the cap", "entries", "overCap", x(validList), l.EntriesBytes + 1},
+		{"criteria one byte over the cap", "criteria", "overCap", x(validCriteria), l.CriteriaBytes + 1},
+		sharedEntries(100, l.EntriesBytes-1024),
+		sharedTopics(20, l.CriteriaBytes-1024),
+	}}
 }
 
 // HPKEVector is one message sealed in Go. A reader derives the recipient key
@@ -180,6 +271,8 @@ func fieldText(v any) string {
 		return x(v[:])
 	case []byte:
 		return x(v)
+	case string:
+		return v
 	case uint32:
 		return fmt.Sprint(v)
 	}
@@ -204,10 +297,20 @@ func SampleCriteria() criteria.Criteria {
 	}
 }
 
-// SamplePerRole has one entry per role.
+// sampleSetterCommitment is the commitment of the sample setter, "setter-01".
+func sampleSetterCommitment() (hashing.Message, error) {
+	return hashing.SetterCommitment(fill(0x11), "setter-01", fill(0x77))
+}
+
+// SamplePerRole has one entry per role. The setter's owner is its commitment.
 func SamplePerRole() []approvedlist.Entry {
+	commitment, err := sampleSetterCommitment()
+	if err != nil {
+		panic(err)
+	}
+	sum := commitment.Sum()
 	return []approvedlist.Entry{
-		{Role: approvedlist.RoleSetter, PasskeyPublicKey: pubKey(1), Owner: "setter-01"},
+		{Role: approvedlist.RoleSetter, PasskeyPublicKey: pubKey(1), Owner: x(sum[:])},
 		{Role: approvedlist.RoleNeutral, PasskeyPublicKey: pubKey(3), DerivedPublicKey: pubKey(4), Owner: "neutral-01"},
 		{Role: approvedlist.RoleCentreHolder, PasskeyPublicKey: pubKey(5), DerivedPublicKey: pubKey(6), Owner: "centre-01"},
 		{Role: approvedlist.RoleCentre, PasskeyPublicKey: pubKey(7), DerivedPublicKey: pubKey(8), Owner: "centre-02"},
@@ -255,6 +358,7 @@ func Build() (File, error) {
 		msgs = append(msgs, m)
 	}
 	add(hashing.InstanceKey(examID, pubKey(2)))
+	add(sampleSetterCommitment())
 	add(hashing.Registration(pubKey(1), []byte("centre-01"), challenge[:]))
 	add(criteriaMessage, nil)
 	add(list, nil)
@@ -283,8 +387,10 @@ func Build() (File, error) {
 		Note: "Generated by tee/internal/vectors from fixed inputs. Public keys are 1G, 2G, ... on P-256. " +
 			"Each message is SHA-256(abi.encode(string tag, field, ...)). " +
 			"HPKE and AES vectors are sealed in Go with repeatable randomness, to be opened in TypeScript. " +
+			"limits.reject inputs are Prefix then zero bytes up to Length, and every reader must refuse them before decoding. " +
 			"The approvedList sample pins the encoding only: its key-holder counts are wrong, so the TEE rejects it.",
 		Criteria:     CriteriaVector{sampleCriteria, x(encodedCriteria), x(criteriaHash[:]), selected},
+		Limits:       limitsVector(),
 		ApprovedList: ListVector{ExamID: x(examID[:]), Entries: x(entries), Hash: x(listHash[:])},
 	}
 	for _, e := range sample {

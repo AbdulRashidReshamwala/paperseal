@@ -95,7 +95,9 @@ export function SignIn() {
     <Screen title="Sign in" lede="Setters sign in with a passkey on a security key.">
       <Panel title="Your key">
         <Rows>
-          <Row label="Name">{credential.owner}</Row>
+          <Row label="Commitment">
+            <Mono>{credential.owner}</Mono>
+          </Row>
           <Row label="Passkey public key">
             <Mono>{credential.passkeyPublicKey}</Mono>
           </Row>

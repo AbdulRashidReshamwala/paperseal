@@ -177,17 +177,22 @@ func TestRejectsNonCanonicalEncodings(t *testing.T) {
 	shared = append(shared, word(0x40)...)
 	shared = append(shared, topic("a", 1)...)
 
-	for name, input := range map[string][]byte{
-		"trailing byte":       append(bytes.Clone(one), 0),
-		"trailing word":       append(bytes.Clone(one), make([]byte, 32)...),
-		"gap before criteria": gap,
-		"gap before topics":   topicsGap,
-		"dirty padding":       dirty,
-		"shared topic":        shared,
+	// The layout check refuses gaps and shared values before any decoding.
+	// Trailing bytes and dirty padding are what the canonical comparison catches.
+	for name, want := range map[string]struct {
+		input []byte
+		err   error
+	}{
+		"trailing byte":       {append(bytes.Clone(one), 0), ErrNonCanonical},
+		"trailing word":       {append(bytes.Clone(one), make([]byte, 32)...), ErrNonCanonical},
+		"gap before criteria": {gap, ErrMalformed},
+		"gap before topics":   {topicsGap, ErrMalformed},
+		"dirty padding":       {dirty, ErrNonCanonical},
+		"shared topic":        {shared, ErrMalformed},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := Decode(input); !errors.Is(err, ErrNonCanonical) {
-				t.Fatalf("got %v", err)
+			if _, err := Decode(want.input); !errors.Is(err, want.err) {
+				t.Fatalf("got %v, want %v", err, want.err)
 			}
 		})
 	}

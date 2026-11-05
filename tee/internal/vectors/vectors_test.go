@@ -167,3 +167,36 @@ func TestSealedVectorsOpenFromTheFile(t *testing.T) {
 		t.Errorf("manifest: %v", err)
 	}
 }
+
+// The reject inputs must fail as the file says: by size, or by layout, which
+// is ErrMalformed before any decoding.
+func TestLimitsVectorsAreRejected(t *testing.T) {
+	f, err := Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Limits.Reject) == 0 {
+		t.Fatal("no reject vectors")
+	}
+	for _, r := range f.Limits.Reject {
+		b, err := r.Bytes()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got, tooLarge, malformed error
+		switch r.Kind {
+		case "entries":
+			_, got = approvedlist.Decode(b)
+			tooLarge, malformed = approvedlist.ErrTooLarge, approvedlist.ErrMalformed
+		case "criteria":
+			_, got = criteria.Decode(b)
+			tooLarge, malformed = criteria.ErrTooLarge, criteria.ErrMalformed
+		default:
+			t.Fatalf("%s: kind %q", r.Name, r.Kind)
+		}
+		want := map[string]error{"overCap": tooLarge, "sharedOffsets": malformed}[r.Reason]
+		if want == nil || !errors.Is(got, want) {
+			t.Errorf("%s: got %v, want %v", r.Name, got, want)
+		}
+	}
+}

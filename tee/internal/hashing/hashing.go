@@ -45,6 +45,9 @@ type Field struct {
 // Bytes32 is a fixed 32-byte field.
 func Bytes32(name string, b [32]byte) Field { return Field{name, bytes32Type, b} }
 
+// String is a text field, such as a setter's name.
+func String(name, s string) Field { return Field{name, stringType, s} }
+
 // Bytes is a variable-length field, which includes public keys.
 func Bytes(name string, b []byte) Field { return Field{name, bytesType, b} }
 
@@ -119,6 +122,16 @@ func InstanceKey(examID [32]byte, encryptionPublicKey []byte) (Message, error) {
 	return New("instanceKey", spec.C.DomainTags.InstanceKey,
 		Bytes32("examId", examID),
 		Bytes("encryptionPublicKey", encryptionPublicKey))
+}
+
+// SetterCommitment is the public, salted commitment to a setter's name. Its Sum
+// is the setter's owner, as lowercase 0x hex. The TEE never sees the name, so it
+// can't check the hash. Anyone can once the board publishes the name and salt.
+func SetterCommitment(examID [32]byte, name string, salt [32]byte) (Message, error) {
+	return New("setterCommitment", spec.C.DomainTags.SetterCommitment,
+		Bytes32("examId", examID),
+		String("name", name),
+		Bytes32("salt", salt))
 }
 
 // Registration is the message a passkey signs at registration. A setter

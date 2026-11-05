@@ -1,0 +1,239 @@
+import { spawnSync } from 'node:child_process';
+
+import { examRegistryAbi } from '@paperseal/chain';
+import {
+  checkApprovedList,
+  chain,
+  checkSchedule,
+  decodeCriteria,
+  encodeApprovedList,
+  approvedListHash,
+  fromHex,
+  isSetterCommitment,
+  ApprovedListError,
+  ScheduleError,
+  setterCommitment,
+  startupArgs,
+  threshold,
+  toHex,
+  type ApprovedListEntry,
+  type Hex,
+} from '@paperseal/protocol';
+import { decodeFunctionData, getAbiItem, toFunctionSelector, type AbiFunction } from 'viem';
+
+import { calldata, castSendArgs } from './cast';
+import { deployed, gaps, rpcHost } from './config';
+import { parseReleaseBody } from './github';
+import { releaseOrder, roster } from './roster';
+import { computeSchedule, liveCriteria, plan, questionsPerSetterPerTopic, runTeeArgs } from './schedule';
+
+/* `dry-check`: everything that can be checked with no network, no chain, no TEE and no key. */
+
+let failures = 0;
+async function check(label: string, run: () => Promise<string | void> | string | void): Promise<void> {
+  try {
+    const detail = await run();
+    console.log(`PASS  ${label}${detail ? `: ${detail}` : ''}`);
+  } catch (error) {
+    failures += 1;
+    console.log(`FAIL  ${label}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+const expect = (ok: boolean, message: string) => {
+  if (!ok) throw new Error(message);
+};
+
+const NOW = 1_800_000_000;
+const COMMIT = `0x${'ab'.repeat(20)}` as Hex;
+const DIGEST = `0x${'cd'.repeat(32)}` as Hex;
+
+const sigOf = (name: string): string => {
+  const item = getAbiItem({ abi: examRegistryAbi, name: name as 'createExam' }) as AbiFunction;
+  type P = { type: string; components?: readonly P[] };
+  const t = (p: P): string => (p.type.startsWith('tuple') ? `(${(p.components ?? []).map(t).join(',')})${p.type.slice(5)}` : p.type);
+  return `${name}(${item.inputs.map(t).join(',')})`;
+};
+
+const cast = (args: string[]) => spawnSync('cast', args, { encoding: 'utf8' });
+
+export async function dryCheck(): Promise<void> {
+  const schedule = computeSchedule(NOW);
+  const settings = plan('Dry check exam', schedule).settings;
+
+  await check('schedule: gaps are +40, +52, +55 and +65 minutes, each round the first at or after its time', () => {
+    const near = (actual: number, want: number) => actual >= want && actual < want + 3;
+    expect(near(schedule.lockAtUnix, NOW + gaps.lock), `lock ${String(schedule.lockAtUnix - NOW)}s`);
+    expect(near(schedule.unlockAtUnix, schedule.examStart - schedule.delta), 'unlock round is not the first at or after T - delta');
+    expect(schedule.examStart === NOW + 55 * 60 && schedule.delta === 180, 'T or delta');
+    expect(near(schedule.endAtUnix, NOW + gaps.end), 'end round');
+    expect(BigInt(schedule.lockRound) < BigInt(schedule.unlockRound) && BigInt(schedule.unlockRound) < BigInt(schedule.endRound), 'round order');
+    expect(schedule.endAtUnix > schedule.examStart, 'the end round must be after T');
+    return `lock ${schedule.lockRound}, unlock ${schedule.unlockRound}, end ${schedule.endRound}`;
+  });
+
+  await check('checkSchedule accepts it and rejects a wrong unlock round, a wrong chain and a zero delta', () => {
+    checkSchedule({ ...settings, chainId: chain.chainId });
+    const rejects = (patch: object, code: string) => {
+      try {
+        checkSchedule({ ...settings, ...patch });
+      } catch (error) {
+        expect(error instanceof ScheduleError && error.code === code, `expected ${code}, got ${String(error)}`);
+        return;
+      }
+      throw new Error(`${code} was not raised`);
+    };
+    rejects({ unlockRound: String(Number(schedule.unlockRound) + 1) }, 'unlock_round');
+    rejects({ chainId: 1 }, 'chain_id');
+    rejects({ delta: 0 }, 'delta_zero');
+  });
+
+  const built = plan('Dry check exam', schedule);
+  await check('criteria: 2 topics of 3, maxSetterPercent 50, minBankMultiple 2; encoding round-trips and hashes', () => {
+    const back = decodeCriteria(fromHex(built.criteriaEncoded));
+    expect(JSON.stringify(back) === JSON.stringify(liveCriteria), 'round trip');
+    expect(liveCriteria.topics.length === 2 && liveCriteria.topics.every((t) => t.questions === 3), 'topics');
+    expect(liveCriteria.maxSetterPercent === 50 && liveCriteria.minBankMultiple === 2, 'percent or multiple');
+    // 2 setters x 3 per topic = 6 per topic, which is 2 x 3, and each holds exactly 50 percent.
+    const perTopic = 2 * questionsPerSetterPerTopic;
+    expect(perTopic >= liveCriteria.minBankMultiple * 3, 'bank per topic is too small');
+    expect((questionsPerSetterPerTopic / perTopic) * 100 <= liveCriteria.maxSetterPercent, 'a setter holds too much of a topic');
+    return built.criteriaHash;
+  });
+
+  await check('roster: 13 participants, 3 neutrals plus 7 centre key holders equal 10 holders, release order reaches 8 only on the 8th', () => {
+    const by = (role: number) => roster.filter((r) => r.role === role).length;
+    expect(roster.length === 13 && by(1) === 2 && by(2) === threshold.neutrals && by(3) === threshold.centres && by(4) === 1, 'roster counts');
+    expect(releaseOrder.length === threshold.required, 'release order is not the threshold');
+    expect(releaseOrder.slice(0, 7).every((n) => n.startsWith('centre-')) && releaseOrder[7]?.startsWith('neutral-') === true, 'centres first, a neutral party 8th');
+  });
+
+  const registry = deployed.registry;
+  const settingsArgs = {
+    examId: built.examId,
+    examStart: BigInt(schedule.examStart),
+    delta: BigInt(schedule.delta),
+    lockRound: BigInt(schedule.lockRound),
+    unlockRound: BigInt(schedule.unlockRound),
+    endRound: BigInt(schedule.endRound),
+    criteriaHash: built.criteriaHash,
+    rpcHost,
+  };
+  const createArgs = [COMMIT, DIGEST, settingsArgs, built.criteriaEncoded] as const;
+  const createData = calldata('createExam', createArgs);
+
+  await check('createExam calldata decodes back to the inputs and has the selector of the ABI signature', () => {
+    const decoded = decodeFunctionData({ abi: examRegistryAbi, data: createData });
+    expect(decoded.functionName === 'createExam', 'function name');
+    const [commit, digest, s, criteria] = decoded.args as unknown as [Hex, Hex, typeof settingsArgs, Hex];
+    expect(commit === COMMIT && digest === DIGEST && criteria === built.criteriaEncoded, 'commit, digest or criteria');
+    expect(s.examStart === settingsArgs.examStart && s.unlockRound === settingsArgs.unlockRound && s.rpcHost === rpcHost && s.criteriaHash === built.criteriaHash, 'settings');
+    expect(createData.slice(0, 10) === toFunctionSelector(sigOf('createExam')), 'selector');
+    return `${String((createData.length - 2) / 2)} bytes, selector ${createData.slice(0, 10)}`;
+  });
+
+  const cd = cast(['--version']);
+  await check('createExam, postApprovedList and postBuild calldata equal what `cast calldata` builds independently', () => {
+    if (cd.status !== 0) return 'skipped, cast is not installed';
+    const quote = (value: string) => `"${value}"`;
+    const tuple = `(${[built.examId, schedule.examStart, schedule.delta, schedule.lockRound, schedule.unlockRound, schedule.endRound, built.criteriaHash, quote(rpcHost)].join(',')})`;
+    const viaCast = cast(['calldata', sigOf('createExam'), COMMIT, DIGEST, tuple, built.criteriaEncoded]);
+    expect(viaCast.status === 0, `cast calldata failed: ${viaCast.stderr.trim()}`);
+    expect(viaCast.stdout.trim() === createData, 'createExam calldata differs from cast');
+
+    const entries = syntheticList(built.examId);
+    const listData = calldata('postApprovedList', [built.examId, entries.encoded]);
+    const list = cast(['calldata', sigOf('postApprovedList'), built.examId, entries.encoded]);
+    expect(list.status === 0 && list.stdout.trim() === listData, 'postApprovedList calldata differs from cast');
+
+    const word = (n: number) => `0x${n.toString(16).padStart(2, '0').repeat(32)}`;
+    const sig = `0x${'11'.repeat(64)}`;
+    const key = `0x04${'22'.repeat(64)}`;
+    const buildData = calldata('postBuild', [built.examId, word(1), word(2), word(3), word(4), 6, 12, built.criteriaHash, sig, key]);
+    const build = cast(['calldata', sigOf('postBuild'), built.examId, word(1), word(2), word(3), word(4), '6', '12', built.criteriaHash, sig, key]);
+    expect(build.status === 0 && build.stdout.trim() === buildData, 'postBuild calldata differs from cast');
+    return 'all three equal';
+  });
+
+  await check('approved list: setters are commitments, composed and encoded by the protocol package, calldata decodes back', () => {
+    const { encoded, entries } = syntheticList(built.examId);
+    checkApprovedList(entries);
+    const data = calldata('postApprovedList', [built.examId, encoded]);
+    const decoded = decodeFunctionData({ abi: examRegistryAbi, data });
+    expect(decoded.functionName === 'postApprovedList' && (decoded.args as unknown as Hex[])[1] === encoded, 'round trip');
+    for (const e of entries.filter((x) => x.role === 1)) expect(isSetterCommitment(e.owner), 'setter owner is not a commitment');
+    const bad = entries.map((e) => (e.role === 1 ? { ...e, owner: 'Alice' } : e));
+    try {
+      checkApprovedList(bad);
+    } catch (error) {
+      expect(error instanceof ApprovedListError, 'wrong error type');
+      return `list hash ${toHex(approvedListHash(fromHex(built.examId), fromHex(encoded)))}; a setter named in the clear is rejected`;
+    }
+    throw new Error('a setter with a plain name was accepted');
+  });
+
+  await check('setterCommitment is deterministic and depends on the salt and the name', () => {
+    const id = fromHex(built.examId);
+    const a = setterCommitment(id, 'setter-1', fromHex(`0x${'01'.repeat(32)}`));
+    expect(a === setterCommitment(id, 'setter-1', fromHex(`0x${'01'.repeat(32)}`)), 'not deterministic');
+    expect(a !== setterCommitment(id, 'setter-1', fromHex(`0x${'02'.repeat(32)}`)), 'salt does not matter');
+    expect(a !== setterCommitment(id, 'setter-2', fromHex(`0x${'01'.repeat(32)}`)), 'name does not matter');
+    expect(isSetterCommitment(a), 'shape');
+  });
+
+  await check('cast send arguments: keystore account and password file path, calldata passed as --data, no key or prompt flags', () => {
+    const args = castSendArgs(registry, createData);
+    const at = (flag: string) => args[args.indexOf(flag) + 1];
+    expect(args[0] === 'send' && args[1] === registry, 'to');
+    expect(at('--data') === createData, '--data');
+    expect(at('--account') === deployed.keystoreAccount && at('--password-file') === deployed.passwordFile, 'account or password file');
+    expect(at('--rpc-url') === deployed.rpcUrl && args.includes('--json'), 'rpc or json');
+    for (const forbidden of ['--private-key', '--interactive', '--keystore', '--mnemonic', '--ledger', '--trezor']) expect(!args.includes(forbidden), `${forbidden} must not be used`);
+    // The file is only named, never opened: nothing here reads it, so the check is on the argv alone.
+    expect(args.filter((a) => a.includes('board-keystore-password')).length === 1, 'the password file path appears once');
+    return `account ${deployed.keystoreAccount}, password file path only (contents never read)`;
+  });
+
+  await check('run-tee.sh arguments: ten startup arguments in spec order, then --image-digest=sha256:<hex>, in the formats the script accepts', () => {
+    const args = runTeeArgs(settings, DIGEST);
+    expect(args.length === 11, `${String(args.length)} arguments`);
+    expect(JSON.stringify(args.slice(0, 10)) === JSON.stringify(startupArgs(settings)), 'startup arguments');
+    const names = args.map((a) => a.slice(2, a.indexOf('=')));
+    expect(names.join(',') === 'exam-id,exam-start,delta,lock-round,unlock-round,end-round,criteria-hash,rpc-host,registry,chain-id,image-digest', `order ${names.join(',')}`);
+    expect(/^--image-digest=sha256:[0-9a-f]{64}$/.test(args[10] as string), 'image digest');
+    expect(/^--registry=0x[0-9a-f]{40}$/.test(args[8] as string), 'registry must be lowercase');
+    expect(/^--rpc-host=[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(args[7] as string), 'rpc host');
+    return args.join(' ');
+  });
+
+  await check('GitHub release parsing follows the apps/web rules', () => {
+    const body = (j: object) => `notes\n\n\`\`\`json\n${JSON.stringify(j)}\n\`\`\`\n`;
+    const good = { version: 'v0.2.0', commit: COMMIT, imageDigest: DIGEST, run: 'https://github.com/o/r/actions/runs/1' };
+    expect(parseReleaseBody(body(good), 'v0.2.0')?.imageDigest === DIGEST, 'good release');
+    expect(parseReleaseBody(body({ ...good, version: 'v0.2.1' }), 'v0.2.0') === null, 'version must equal the tag');
+    expect(parseReleaseBody(body({ ...good, imageDigest: `0x${'CD'.repeat(32)}` }), 'v0.2.0') === null, 'digest must be lowercase');
+    expect(parseReleaseBody(body({ ...good, commit: `0x${'ab'.repeat(32)}` }), 'v0.2.0') === null, 'commit must be 20 bytes');
+    expect(parseReleaseBody(body({ ...good, run: 'http://x' }), 'v0.2.0') === null, 'run must be https');
+    expect(parseReleaseBody(`${body(good)}${body(good)}`, 'v0.2.0') === null, 'exactly one block');
+    expect(parseReleaseBody(body(good), 'v0.2') === null, 'tag shape');
+  });
+
+  console.log(failures === 0 ? '\ndry-check: all checks passed (offline, nothing sent).' : `\ndry-check: ${String(failures)} check(s) failed.`);
+  process.exitCode = failures === 0 ? 0 : 1;
+}
+
+/** A well-formed list of 13 entries with fake keys, for encoding checks only. Never posted. */
+function syntheticList(examId: Hex): { entries: ApprovedListEntry[]; encoded: Hex } {
+  const point = (n: number): Uint8Array => {
+    const out = new Uint8Array(65);
+    out[0] = 4;
+    out.fill(n, 1);
+    return out;
+  };
+  const entries: ApprovedListEntry[] = roster.map((r, i) => ({
+    role: r.role,
+    passkeyPublicKey: point(i + 1),
+    derivedPublicKey: r.role === 1 ? new Uint8Array() : point(100 + i),
+    owner: r.role === 1 ? setterCommitment(fromHex(examId), r.name, fromHex(`0x${(i + 1).toString(16).padStart(2, '0').repeat(32)}`)) : r.name,
+  }));
+  return { entries, encoded: toHex(encodeApprovedList(entries)) };
+}

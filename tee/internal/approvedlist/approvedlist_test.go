@@ -3,7 +3,9 @@ package approvedlist
 import (
 	"bytes"
 	"crypto/ecdh"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -22,6 +24,12 @@ func key(t *testing.T, scalar byte) []byte {
 	return priv.PublicKey().Bytes()
 }
 
+// commit is a well-formed setter owner: 0x and 64 lowercase hex digits.
+func commit(name string) string {
+	sum := sha256.Sum256([]byte(name))
+	return "0x" + hex.EncodeToString(sum[:])
+}
+
 // fullList is an acceptable list: 3 neutrals, 7 centre holders, a setter and a
 // centre without a share.
 func fullList(t *testing.T) []Entry {
@@ -35,7 +43,7 @@ func fullList(t *testing.T) []Entry {
 		}
 		list = append(list, e)
 	}
-	add(RoleSetter, "setter")
+	add(RoleSetter, commit("setter"))
 	for i := range 3 {
 		add(RoleNeutral, fmt.Sprintf("neutral-%d", i))
 	}
@@ -131,10 +139,10 @@ func raw(role byte, passkey, derived []byte, owner string) []byte {
 func TestLayout(t *testing.T) {
 	a, b, c := key(t, 1), key(t, 2), key(t, 3)
 	got := encode(t, []Entry{
-		{RoleSetter, a, nil, "s"},
+		{RoleSetter, a, nil, commit("s")},
 		{RoleCentre, b, c, "cé"},
 	})
-	want := handList(tuple(1, a, nil, "s"), tuple(4, b, c, "cé"))
+	want := handList(tuple(1, a, nil, commit("s")), tuple(4, b, c, "cé"))
 	if !bytes.Equal(got, want) {
 		t.Fatalf("got  %x\nwant %x", got, want)
 	}
@@ -200,15 +208,20 @@ func TestRejectsNonCanonicalEncodings(t *testing.T) {
 	copy(reordered[head+32:], word(0x80+32+96))
 	copy(reordered[head+64:], word(0x80))
 
-	for name, input := range map[string][]byte{
-		"gap before the list": gap,
-		"dirty padding":       dirtyPadding,
-		"shared tuple":        shared,
-		"swapped offsets":     reordered,
+	// The layout check refuses these before any decoding. Dirty padding is the
+	// one the canonical comparison has to catch.
+	for name, want := range map[string]struct {
+		input []byte
+		err   error
+	}{
+		"gap before the list": {gap, ErrMalformed},
+		"dirty padding":       {dirtyPadding, ErrNonCanonical},
+		"shared tuple":        {shared, ErrMalformed},
+		"swapped offsets":     {reordered, ErrMalformed},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := Decode(input); !errors.Is(err, ErrNonCanonical) {
-				t.Fatalf("got %v", err)
+			if _, err := Decode(want.input); !errors.Is(err, want.err) {
+				t.Fatalf("got %v, want %v", err, want.err)
 			}
 		})
 	}
@@ -231,8 +244,8 @@ func TestRejectsNonListInput(t *testing.T) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
-	// A zero offset reads the offset word as the count, and that isn't canonical.
-	if _, err := Decode(make([]byte, 32)); !errors.Is(err, ErrNonCanonical) {
+	// A zero offset reads the offset word as the count, and the layout check refuses it.
+	if _, err := Decode(make([]byte, 32)); !errors.Is(err, ErrMalformed) {
 		t.Errorf("one word: %v", err)
 	}
 }
@@ -275,6 +288,58 @@ func TestRejectsBadEntries(t *testing.T) {
 	}
 }
 
+func TestSetterOwnerIsACommitment(t *testing.T) {
+	a := key(t, 1)
+	good := commit("x")
+	upper := "0x" + strings.ToUpper(good[2:])
+	for name, owner := range map[string]string{
+		"a name":            "setter-01",
+		"no prefix":         good[2:],
+		"uppercase hex":     upper,
+		"uppercase prefix":  "0X" + good[2:],
+		"too short":         good[:len(good)-1],
+		"too long":          good + "0",
+		"non-hex digit":     good[:2] + "g" + good[3:],
+		"surrounding space": " " + good,
+		"trailing newline":  good + "\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Decode(raw(1, a, nil, owner)); !errors.Is(err, ErrSetterOwner) {
+				t.Fatalf("got %v, want ErrSetterOwner", err)
+			}
+			if _, err := Encode([]Entry{{RoleSetter, a, nil, owner}}); !errors.Is(err, ErrSetterOwner) {
+				t.Fatalf("Encode: got %v, want ErrSetterOwner", err)
+			}
+		})
+	}
+	list := append(fullList(t)[1:], Entry{RoleSetter, a, nil, good})
+	if _, err := Decode(encode(t, list)); err != nil {
+		t.Fatalf("well-formed commitment: %v", err)
+	}
+}
+
+func TestOtherRolesOwnerIsAnyNonBlankText(t *testing.T) {
+	a, b := key(t, 1), key(t, 2)
+	for _, role := range []byte{2, 3, 4} {
+		for _, owner := range []string{"", " ", "\t\n ", "\u00a0"} {
+			if _, err := Decode(raw(role, a, b, owner)); !errors.Is(err, ErrOwner) {
+				t.Errorf("role %d, owner %q: got %v, want ErrOwner", role, owner, err)
+			}
+		}
+		// Only a setter's owner has a format. Any other text is fine.
+		for _, owner := range []string{"centre-01", "x", "0x12", "cé"} {
+			if _, err := Decode(raw(role, a, b, owner)); errors.Is(err, ErrOwner) || errors.Is(err, ErrSetterOwner) {
+				t.Errorf("role %d, owner %q: got %v", role, owner, err)
+			}
+		}
+	}
+	for _, owner := range []string{"", " ", "\t"} {
+		if _, err := Decode(raw(1, a, nil, owner)); !errors.Is(err, ErrOwner) {
+			t.Errorf("setter, owner %q: got %v, want ErrOwner", owner, err)
+		}
+	}
+}
+
 func TestEncodeRejectsBadEntries(t *testing.T) {
 	a := key(t, 1)
 	for name, e := range map[string]Entry{
@@ -308,7 +373,7 @@ func TestRejectsRepeatedDerivedKey(t *testing.T) {
 
 // Setters have no derived key, so their empty keys are not repeats.
 func TestManySettersAreNotRepeatedDerivedKeys(t *testing.T) {
-	list := append(fullList(t), Entry{RoleSetter, key(t, 205), nil, "second setter"})
+	list := append(fullList(t), Entry{RoleSetter, key(t, 205), nil, commit("second setter")})
 	if _, err := Decode(encode(t, list)); err != nil {
 		t.Fatal(err)
 	}
@@ -368,7 +433,7 @@ func TestRejectsWrongHolderCounts(t *testing.T) {
 // A list can have any number of setters and of centres without a share.
 func TestOtherRolesAreNotCounted(t *testing.T) {
 	list := fullList(t)
-	list = append(list, Entry{RoleSetter, key(t, 201), nil, "another setter"})
+	list = append(list, Entry{RoleSetter, key(t, 201), nil, commit("another setter")})
 	list = append(list, Entry{RoleCentre, key(t, 203), key(t, 204), "another centre"})
 	if _, err := Decode(encode(t, list)); err != nil {
 		t.Fatal(err)

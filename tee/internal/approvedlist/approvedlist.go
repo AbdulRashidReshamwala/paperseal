@@ -8,10 +8,13 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"regexp"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 
+	"paperseal/tee/internal/abilayout"
 	"paperseal/tee/internal/hashing"
 	"paperseal/tee/internal/spec"
 )
@@ -34,10 +37,13 @@ var (
 	ErrUnknownRole        = errors.New("approvedlist: unknown role")
 	ErrPasskey            = errors.New("approvedlist: bad passkey public key")
 	ErrDerivedKey         = errors.New("approvedlist: bad derived public key for the role")
-	ErrOwner              = errors.New("approvedlist: owner must be non-empty UTF-8")
+	ErrOwner              = errors.New("approvedlist: owner must be non-blank UTF-8")
+	ErrSetterOwner        = errors.New("approvedlist: a setter's owner must be 0x and 64 lowercase hex digits")
 	ErrRepeatedPasskey    = errors.New("approvedlist: repeated passkey")
 	ErrRepeatedDerivedKey = errors.New("approvedlist: repeated derived key")
 	ErrHolderCount        = errors.New("approvedlist: wrong number of key holders")
+	ErrTooLarge           = errors.New("approvedlist: entries exceed limits.entriesBytes")
+	ErrLimit              = errors.New("approvedlist: over a limit in spec limits")
 )
 
 // listArgs is the ABI shape of `entries`: one Entry[] argument.
@@ -76,11 +82,20 @@ func (e Entry) check() error {
 	} else if err := hashing.CheckPublicKey(e.DerivedPublicKey); err != nil {
 		return fmt.Errorf("%w: %v", ErrDerivedKey, err)
 	}
-	if e.Owner == "" || !utf8.ValidString(e.Owner) {
+	if strings.TrimSpace(e.Owner) == "" || !utf8.ValidString(e.Owner) {
 		return ErrOwner
+	}
+	// The TEE never sees the name, so it can't check the hash. It checks the
+	// format only. Anyone can recompute the commitment once the board
+	// publishes the name and salt.
+	if e.Role == RoleSetter && !commitmentFormat.MatchString(e.Owner) {
+		return fmt.Errorf("%w: %q", ErrSetterOwner, e.Owner)
 	}
 	return nil
 }
+
+// commitmentFormat is the owner of a setter: lowercase 0x hex of a SHA-256.
+var commitmentFormat = regexp.MustCompile(`^0x[0-9a-f]{64}$`)
 
 // Encode writes entries in the given order, because the hash covers the posted
 // bytes and order is free. It checks each entry but not the list rules, so it
@@ -95,11 +110,71 @@ func Encode(entries []Entry) ([]byte, error) {
 	return pack(entries)
 }
 
+// checkLayout walks the offsets of abi.encode(Entry[]) from the raw bytes and
+// allocates nothing. Every element and each of its three values must have bytes
+// of its own, so no input decodes to more than its own length.
+func checkLayout(b []byte) error {
+	top, err := abilayout.Word(b, 0)
+	if err != nil {
+		return err
+	}
+	if top != 32 {
+		return fmt.Errorf("%w: array offset %d, want 32", abilayout.ErrLayout, top)
+	}
+	_, _, err = abilayout.Array(b, 32, len(b), func(start, limit int) (int, error) {
+		const head = 4 * 32 // role, then the offsets of three values.
+		if limit-start < head {
+			return 0, fmt.Errorf("%w: entry is shorter than its head", abilayout.ErrLayout)
+		}
+		pos := head
+		end := start + head
+		for i := range 3 {
+			off, err := abilayout.Word(b, start+32*(i+1))
+			if err != nil {
+				return 0, err
+			}
+			// Each value starts at or after the end of the one before it, and
+			// the first right after the head.
+			if off < uint64(pos) || off > uint64(limit-start) || (i == 0 && off != head) {
+				return 0, fmt.Errorf("%w: value %d offset %d is out of place", abilayout.ErrLayout, i, off)
+			}
+			if end, err = abilayout.Bytes(b, start+int(off), limit); err != nil {
+				return 0, err
+			}
+			pos = end - start
+		}
+		return end, nil
+	})
+	return err
+}
+
+// checkLimits applies the spec's limits to a decoded list.
+func checkLimits(entries []Entry) error {
+	lim := spec.C.Limits
+	if len(entries) > lim.Entries {
+		return fmt.Errorf("%w: %d entries, at most %d", ErrLimit, len(entries), lim.Entries)
+	}
+	for i, e := range entries {
+		if len(e.Owner) > lim.OwnerBytes {
+			return fmt.Errorf("entry %d: %w: owner is %d bytes, at most %d", i, ErrLimit, len(e.Owner), lim.OwnerBytes)
+		}
+	}
+	return nil
+}
+
 // Decode parses entries and applies every list rule that needs only the list
-// itself. ABI decoding tolerates trailing bytes, gaps, shared offsets and dirty
+// itself. Before decoding it refuses bytes over limits.entriesBytes and bytes
+// whose offsets share or overlap values, which keeps what the decoder builds
+// proportional to the input. ABI decoding tolerates trailing bytes, gaps, shared offsets and dirty
 // padding, so it re-encodes what it read and refuses any difference: one list
 // has one encoding. The caller must still run CheckRegistered.
 func Decode(b []byte) ([]Entry, error) {
+	if len(b) > spec.C.Limits.EntriesBytes {
+		return nil, fmt.Errorf("%w: %d bytes, at most %d", ErrTooLarge, len(b), spec.C.Limits.EntriesBytes)
+	}
+	if err := checkLayout(b); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrMalformed, err)
+	}
 	values, err := listArgs.Unpack(b)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrMalformed, err)
@@ -107,6 +182,9 @@ func Decode(b []byte) ([]Entry, error) {
 	var entries []Entry
 	if err := listArgs.Copy(&entries, values); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrMalformed, err)
+	}
+	if err := checkLimits(entries); err != nil {
+		return nil, err
 	}
 	again, err := pack(entries)
 	if err != nil {

@@ -1,5 +1,5 @@
 import { createWebAuthnKeys, KeyError, type Keys, type Registration } from '@paperseal/keys';
-import { fromHex, NotImplementedError, toHex, type Hex } from '@paperseal/protocol';
+import { fromHex, isSetterCommitment, NotImplementedError, toHex, type Hex } from '@paperseal/protocol';
 import { TeeApiError, type TeeClient } from '@paperseal/tee-client';
 import { Button, EmptyState, Field, Mono, Panel, Row, Rows, Screen } from '@paperseal/ui';
 import { useState } from 'react';
@@ -69,6 +69,19 @@ export function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * A setter registers under the commitment from the board's invite, never a name, because the
+ * approved list is public. Key holders and centres keep names. Returns a message in words, or null.
+ */
+export function ownerProblem(role: RegisterRole, owner: string): string | null {
+  const value = owner.trim();
+  if (value === '') return null;
+  if (role === 'setter' && !isSetterCommitment(value)) {
+    return 'This is not a commitment. Paste the commitment from your invite: 0x followed by 64 lowercase hex digits, not your name.';
+  }
+  return null;
+}
+
 export interface RegisterFlowInput {
   keys: Pick<Keys, 'register'>;
   tee: Pick<TeeClient, 'registerChallenge' | 'register'>;
@@ -110,8 +123,10 @@ export function Register(props: RegisterProps) {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<StoredCredential | null>(() => (examId ? loadCredential(examId, role) : null));
 
+  const problem = ownerProblem(role, owner);
+
   const submit = async () => {
-    if (!examId || !tee) return;
+    if (!examId || !tee || problem) return;
     setBusy(true);
     setError(null);
     try {
@@ -149,7 +164,7 @@ export function Register(props: RegisterProps) {
       {done ? (
         <Panel title="Registered">
           <Rows>
-            <Row label="Name">{done.owner}</Row>
+            <Row label={done.role === 'setter' ? 'Commitment' : 'Name'}>{done.owner}</Row>
             <Row label="Role">{done.role}</Row>
             <Row label="Passkey public key">
               <Mono>{done.passkeyPublicKey}</Mono>
@@ -158,7 +173,9 @@ export function Register(props: RegisterProps) {
         </Panel>
       ) : (
         <EmptyState title="No key registered">
-          Registration needs a connection to the TEE, and the name the board invited you under.
+          {role === 'setter'
+            ? 'Registration needs a connection to the TEE, and the commitment from the board\u2019s invite.'
+            : 'Registration needs a connection to the TEE, and the name the board invited you under.'}
         </EmptyState>
       )}
       {!examId ? (
@@ -167,9 +184,19 @@ export function Register(props: RegisterProps) {
         <EmptyState title="TEE not connected">Set VITE_TEE_URL to connect to the TEE.</EmptyState>
       ) : (
         <Panel title={done ? 'Register again' : 'Register'}>
-          <Field label="Name on the approved list" value={owner} onChange={setOwner} />
+          {role === 'setter' ? (
+            <Field
+              label="Commitment from your invite"
+              hint="The board gave you this, with a salt. It goes on the public list in place of your name."
+              error={problem ?? undefined}
+              value={owner}
+              onChange={setOwner}
+            />
+          ) : (
+            <Field label="Name on the approved list" value={owner} onChange={setOwner} />
+          )}
           <Button
-            disabled={busy || owner.trim() === ''}
+            disabled={busy || owner.trim() === '' || problem !== null}
             onClick={() => {
               void submit();
             }}

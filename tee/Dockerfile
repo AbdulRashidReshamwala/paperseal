@@ -1,8 +1,8 @@
 # Both base images are pinned to their linux/amd64 manifests. Update a digest
 # only in a deliberate change, because it changes the image digest.
 
-# golang:1.24.6-bookworm
-FROM golang:1.24.6-bookworm@sha256:4f8589362626cfa081fdab2b474cda87c3b51d74b1e227c110d2ffde56daad5c AS build
+# golang:1.25.14-bookworm
+FROM golang:1.25.14-bookworm@sha256:c268a04d59aea0b180ed9946a658cfab9e7b3391dc90eed6e4969ccff98c851f AS build
 ARG SOURCE_DATE_EPOCH
 ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOTOOLCHAIN=local GOFLAGS=-mod=readonly
 WORKDIR /src

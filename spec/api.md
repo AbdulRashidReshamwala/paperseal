@@ -101,6 +101,8 @@ This only fills in the board's form. The on-chain values are what count, and any
 | `3` | Centre that is a key holder | 65 bytes |
 | `4` | Approved centre without a share | 65 bytes |
 
+For a setter, `owner` is the lowercase `0x`-prefixed hex of the `setterCommitment` hash, not a name. The board picks a random 32-byte `salt` per setter and gives it to the setter with the invite, because a name list could otherwise be tested against an unsalted hash. The setter registers with that commitment as `owner`. After the end round, the board publishes each setter's name and salt, and anyone can recompute the commitment.
+
 Order is free, because the hash covers the posted bytes. The TEE decodes `entries`, then re-encodes it and rejects the list if the bytes differ, so one list has one encoding. It also rejects a list with an unknown role, a repeated passkey, a repeated derived key, the wrong number of key holders from `threshold`, or an entry it didn't verify at registration.
 
 The TEE reads `getApprovedList` over TLS at the `finalized` block, from `rpcHost`, using root certificates in the attested image. It then calls `eth_getLogs` for that record's `postedBlock` only.
@@ -113,6 +115,7 @@ Every client reads `entries` and `criteria` this way. `getExam` returns `created
 | --- | --- | --- |
 | `registration` | Passkey | `bytes derivedPublicKey`, `bytes holderId`, `bytes challenge` |
 | `instanceKey` | TEE | `bytes32 examId`, `bytes encryptionPublicKey` |
+| `setterCommitment` | None, a public hash | `bytes32 examId`, `string name`, `bytes32 salt` |
 | `criteria` | None, a public hash | `bytes criteria` |
 | `approvedList` | TEE | `bytes32 examId`, `bytes entries` |
 | `questionSubmission` | Passkey | `bytes32 examId`, `bytes challenge`, `bytes32 questionHash` |
@@ -197,6 +200,15 @@ Written at unlock, each covered by the signed release log:
 | `release-token.jwt` | The PKI attestation token of the instance that ran Unlock |
 
 Unlock may run on a different instance from the Build, so the log names its signer in `instancePublicKey`, and `release-token.jwt` attests that key. `entriesHash` is the plain SHA-256 of `abi.encode(ReleaseEntry[])`, with `ReleaseEntry` being `(bytes passkeyPublicKey, bytes32 shareHash, uint64 round)`, in the order received.
+
+## Size Limits
+
+`limits` in `constants.json` caps `entries` and `criteria`, because ABI offsets let many elements share one large value, so a small input can decode to a huge one. Every reader must reject a value before decoding it if:
+
+- It is longer than `limits.entriesBytes` or `limits.criteriaBytes`.
+- Its array offsets don't start right after the array's head and increase strictly, with each element ending at or before the next one starts.
+
+After decoding, readers also apply `limits.entries`, `limits.topics`, `limits.ownerBytes` and `limits.topicNameBytes`. `ExamRegistry` rejects oversized `entries` and `criteria` by length alone, and still doesn't decode them.
 
 ## TEE Lifecycle
 

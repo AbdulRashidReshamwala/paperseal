@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from './App';
-import { buildWorld, examId, offlineQuicknet, registryAddress, type World } from './fixtures';
+import { buildWorld, examId, offlineQuicknet, registryAddress, setterName, setterSalt, type World } from './fixtures';
 import { SettingsProvider, type Settings } from './settings';
 
 let chainData: unknown;
@@ -127,6 +127,30 @@ describe('screens with data', () => {
     expect(await screen.findByText('paper.bin')).toBeTruthy();
     expect(screen.getByText(must(world.manifest.files.find((f) => f.name === 'paper.bin')).sha256)).toBeTruthy();
     expect(screen.getByText(/Manifest hash matches/)).toBeTruthy();
+  });
+
+  it('Commitments shows the setter as sealed, then Pass or Fail per published name', async () => {
+    const world = await buildWorld();
+    arrange(world);
+    open('/commitments', 1000);
+    expect(await screen.findByText('Setter (sealed)')).toBeTruthy();
+    expect(screen.queryByText(setterName)).toBeNull();
+    expect(screen.getByText(/only works after the board publishes/)).toBeTruthy();
+    const box = await screen.findByPlaceholderText(/"salt"/);
+    const check = () => fireEvent.click(screen.getByRole('button', { name: 'Check against the list' }));
+
+    fireEvent.change(box, { target: { value: JSON.stringify([{ name: 'Not A Setter', salt: setterSalt }]) } });
+    check();
+    expect(await screen.findByText(/is not a setter on the chain list/)).toBeTruthy();
+
+    fireEvent.change(box, { target: { value: JSON.stringify([{ name: setterName, salt: setterSalt }]) } });
+    check();
+    await waitFor(() => expect(screen.queryByText(/is not a setter on the chain list/)).toBeNull());
+    expect(screen.getByText(setterName)).toBeTruthy();
+
+    fireEvent.change(box, { target: { value: 'not json' } });
+    check();
+    expect(await screen.findByText('This is not JSON.')).toBeTruthy();
   });
 
   it('Commitments is neutral, not failing, when the manifest is not published', async () => {

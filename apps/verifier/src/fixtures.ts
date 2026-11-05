@@ -15,6 +15,7 @@ import {
   hashMessage,
   padPaper,
   saltedPaperHash,
+  setterCommitment,
   startupArgs,
   storageManifestHash,
   toHex,
@@ -151,6 +152,10 @@ export const paper: Paper = {
   ],
 };
 
+/** What the board publishes after the end round. The list holds only the commitment. */
+export const setterSalt: Hex = `0x${'5a'.repeat(32)}`;
+export const setterName = 'Setter A';
+
 export function approvedList(): ApprovedListEntry[] {
   const key = (n: number) => Uint8Array.from([0x04, n, ...random(63)]);
   const entry = (role: number, name: string, n: number): ApprovedListEntry => ({
@@ -160,7 +165,7 @@ export function approvedList(): ApprovedListEntry[] {
     derivedPublicKey: role === 1 ? new Uint8Array(0) : key(n + 100),
   });
   return [
-    entry(1, 'Setter A', 1),
+    entry(1, setterCommitment(fromHex(examId), setterName, fromHex(setterSalt)), 1),
     ...[0, 1, 2].map((i) => entry(2, `Neutral ${String(i + 1)}`, 10 + i)),
     ...[0, 1, 2, 3, 4, 5, 6].map((i) => entry(3, `Centre ${String(i + 1)}`, 20 + i)),
     entry(4, 'Approved centre', 40),

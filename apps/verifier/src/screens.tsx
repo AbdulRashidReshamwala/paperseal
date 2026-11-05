@@ -4,6 +4,7 @@ import {
   decodeCriteria,
   fromHex,
   requireHardwareAttestation,
+  roles,
   roundTimeSeconds,
   storageNames,
   type Hex,
@@ -23,6 +24,13 @@ import {
 } from './attest';
 import { chainChecks, computedListHash, criteriaMatches, loadChain, sameHex, type ChainData, type CheckResult } from './checks';
 import { approvedEntries, checkManifest, holdersOf, type ManifestReport } from './commitments';
+import {
+  checkPublishedSetters,
+  parsePublishedSetters,
+  SetterJsonError,
+  type PublishedSetter,
+  type SetterReport,
+} from './setters';
 import { RoundRow, useLatestRound, useNow, type LatestRound } from './live';
 import { runProof, type ProofChecks, type ProofState } from './proof';
 import { releaseTokenName, utf8Text } from './storage';
@@ -204,11 +212,17 @@ function ListRows(props: {
         )}
       </Row>
       {Array.isArray(entries) ? (
-        entries.map((entry, index) => (
-          <Row key={index} label={roleNames[entry.role] ?? `Unknown role ${entry.role}`}>
-            {entry.owner}
-          </Row>
-        ))
+        entries.map((entry, index) =>
+          entry.role === roles.setter ? (
+            <Row key={index} label="Setter (sealed)">
+              <Mono>{entry.owner}</Mono>
+            </Row>
+          ) : (
+            <Row key={index} label={roleNames[entry.role] ?? `Unknown role ${entry.role}`}>
+              {entry.owner}
+            </Row>
+          ),
+        )
       ) : (
         <Row label="List decode">{failure(entries)}</Row>
       )}
@@ -429,6 +443,79 @@ function ManifestRows({ result }: { result: Extract<ManifestResult, { kind: 'rea
   );
 }
 
+/**
+ * Setters are sealed on the chain until the board publishes each name and salt after the end round.
+ * Anyone can paste that JSON here and each entry is recomputed against the on-chain list.
+ */
+function SetterNames({ examId, entries }: { examId: Hex; entries: Hex | null }) {
+  const [text, setText] = useState('');
+  const [result, setResult] = useState<{ report: SetterReport } | { error: string } | null>(null);
+  const list = useMemo(() => approvedEntries(entries), [entries]);
+
+  const run = (event: FormEvent) => {
+    event.preventDefault();
+    if (!list) return;
+    try {
+      const published: PublishedSetter[] = parsePublishedSetters(text);
+      setResult({ report: checkPublishedSetters(examId, list, published) });
+    } catch (error) {
+      if (!(error instanceof SetterJsonError)) throw error;
+      setResult({ error: error.message });
+    }
+  };
+
+  return (
+    <Panel title="Setter names (after the board publishes)">
+      <p>
+        Setters appear on the list as a salted hash, so nobody can see who they are before the exam. This check only
+        works after the board publishes each setter&apos;s name and salt, which it does after the end round. Before
+        that there is nothing to check and nothing here can pass.
+      </p>
+      {!list ? (
+        <NeutralNote>There is no approved list on the chain to check against yet.</NeutralNote>
+      ) : (
+        <form onSubmit={run}>
+          <label className="ps-field">
+            <span>Published JSON, an array of name and salt</span>
+            <textarea
+              className="ps-input"
+              rows={6}
+              spellCheck={false}
+              value={text}
+              placeholder='[{"name": "…", "salt": "0x…"}]'
+              onChange={(event) => {
+                setText(event.target.value);
+              }}
+            />
+          </label>
+          <Button type="submit" disabled={text.trim() === ''}>
+            Check against the list
+          </Button>
+        </form>
+      )}
+      {result && 'error' in result && (
+        <p role="alert">
+          <Badge tone="bad">Fail</Badge> {result.error}
+        </p>
+      )}
+      {result && 'report' in result && (
+        <Rows>
+          {result.report.rows.map((row, index) => (
+            <Row key={index} label={row.name}>
+              {verdict(row.check === 'pass')} <Mono>{row.commitment}</Mono>
+              {row.check === 'pass' ? '' : ' is not a setter on the chain list'}
+            </Row>
+          ))}
+          <Row label="Every setter on the chain list is named">
+            {verdict(result.report.coverage === 'pass')}
+            {result.report.unmatched.length > 0 ? ` ${String(result.report.unmatched.length)} still sealed` : ''}
+          </Row>
+        </Rows>
+      )}
+    </Panel>
+  );
+}
+
 export function Commitments() {
   const { registry, examId, storage } = useConnections();
   const chainLoad = useMemo(() => loadChain(registry, examId), [registry, examId]);
@@ -474,6 +561,9 @@ export function Commitments() {
             )}
           </Rows>
         )}
+      </Connected>
+      <Connected title="Setter names" notConnected={setChain} load={chainLoad}>
+        {({ entries }) => (examId ? <SetterNames examId={examId} entries={entries} /> : null)}
       </Connected>
       <Connected
         title="Storage manifest"

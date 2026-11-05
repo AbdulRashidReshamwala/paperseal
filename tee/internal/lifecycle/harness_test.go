@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -113,6 +114,16 @@ type person struct {
 
 func newPerson(t *testing.T, owner string, role approvedlist.Role) *person {
 	t.Helper()
+	if role == approvedlist.RoleSetter {
+		// A setter's owner is the commitment, not the name.
+		var examID, salt [32]byte
+		m, err := hashing.SetterCommitment(examID, owner, salt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sum := m.Sum()
+		owner = "0x" + hex.EncodeToString(sum[:])
+	}
 	p := &person{owner: owner, role: role, passkey: webauthntest.New(t)}
 	if role != approvedlist.RoleSetter {
 		ikm := make([]byte, 32)

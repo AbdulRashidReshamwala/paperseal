@@ -39,8 +39,8 @@ const point = (fill: number) => Uint8Array.from([4, ...bytes(64, fill)]);
 const sha = (data: Uint8Array) => new Uint8Array(createHash('sha256').update(data).digest());
 
 describe('constants and stages', () => {
-  it('has a schema for every one of the 12 domain tags', () => {
-    expect(Object.keys(constants.domainTags)).toHaveLength(12);
+  it('has a schema for every one of the 13 domain tags', () => {
+    expect(Object.keys(constants.domainTags)).toHaveLength(13);
     const sample = { examId: bytes(32, 1), encryptionPublicKey: point(2) };
     expect(constants.domainTags.instanceKey).toBe('paperseal/v1/instance-key');
     expect(encodeMessage('instanceKey', sample).length).toBeGreaterThan(0);

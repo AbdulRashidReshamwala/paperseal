@@ -55,6 +55,14 @@ type Constants struct {
 		UserVerification           string `json:"userVerification"`
 		RequireHardwareAttestation bool   `json:"requireHardwareAttestation"`
 	} `json:"webauthn"`
+	Limits struct {
+		EntriesBytes   int `json:"entriesBytes"`
+		CriteriaBytes  int `json:"criteriaBytes"`
+		Entries        int `json:"entries"`
+		Topics         int `json:"topics"`
+		OwnerBytes     int `json:"ownerBytes"`
+		TopicNameBytes int `json:"topicNameBytes"`
+	} `json:"limits"`
 	Padding struct {
 		QuestionBytes int `json:"questionBytes"`
 		PaperBytes    int `json:"paperBytes"`
@@ -70,6 +78,7 @@ type Constants struct {
 	DomainTags struct {
 		AttestationNonce   string `json:"attestationNonce"`
 		InstanceKey        string `json:"instanceKey"`
+		SetterCommitment   string `json:"setterCommitment"`
 		Registration       string `json:"registration"`
 		Criteria           string `json:"criteria"`
 		ApprovedList       string `json:"approvedList"`

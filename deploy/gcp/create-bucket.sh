@@ -12,7 +12,7 @@ if exists gcloud storage buckets describe "gs://$BUCKET" --project="$PROJECT_ID"
 else
   run gcloud storage buckets create "gs://$BUCKET" \
     --project="$PROJECT_ID" --location="$REGION" \
-    --uniform-bucket-level-access --public-access-prevention=inherited
+    --uniform-bucket-level-access --no-public-access-prevention
 fi
 
 # If an organization policy enforces public access prevention, this fails and

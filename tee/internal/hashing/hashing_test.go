@@ -183,6 +183,8 @@ func TestSignedMessageLayouts(t *testing.T) {
 			[]value{text("paperseal/v1/registration"), dyn(k), dyn([]byte{0xaa}), dyn([]byte{0xbb, 0xcc})}},
 		{"setter registration", msg(Registration(nil, []byte{0xaa}, []byte{0xbb})),
 			[]value{text("paperseal/v1/registration"), dyn([]byte{}), dyn([]byte{0xaa}), dyn([]byte{0xbb})}},
+		{"setterCommitment", msg(SetterCommitment(fill(1), "Asha", fill(2))),
+			[]value{text("paperseal/v1/setter-commitment"), b32(1), text("Asha"), b32(2)}},
 		{"criteria", msg(Criteria([]byte{0xaa})),
 			[]value{text("paperseal/v1/criteria"), dyn([]byte{0xaa})}},
 		{"approvedList", msg(ApprovedList(fill(1), []byte{0xaa, 0xbb})),

@@ -40,6 +40,14 @@
     "userVerification": "required",
     "requireHardwareAttestation": false
   },
+  "limits": {
+    "entriesBytes": 327680,
+    "criteriaBytes": 16384,
+    "entries": 512,
+    "topics": 64,
+    "ownerBytes": 128,
+    "topicNameBytes": 64
+  },
   "padding": {
     "questionBytes": 4096,
     "paperBytes": 1048576
@@ -55,6 +63,7 @@
   "domainTags": {
     "attestationNonce": "paperseal/v1/attestation-nonce",
     "instanceKey": "paperseal/v1/instance-key",
+    "setterCommitment": "paperseal/v1/setter-commitment",
     "registration": "paperseal/v1/registration",
     "criteria": "paperseal/v1/criteria",
     "approvedList": "paperseal/v1/approved-list",

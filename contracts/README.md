@@ -13,6 +13,7 @@
 - Only the board's address can write. It is set once at deployment, for every exam in that deployment.
 - Each record can be written once. The commit hash, image digest and exam settings, including the rounds that set the exam date, can never change.
 - `postApprovedList` stores `sha256(abi.encode(tag, examId, entries))` and emits the full bytes, where `entries` is `abi.encode(Entry[])`. The contract doesn't decode the entries, because the TEE checks their content.
+- `postApprovedList` reverts with `EntriesTooLarge` if `entries` is over 327680 bytes (`limits.entriesBytes`), and `createExam` reverts with `CriteriaTooLarge` if `criteria` is over 16384 bytes (`limits.criteriaBytes`). Both checks are by length alone and come before any hashing, with no decoding. See "Size Limits" in `spec/api.md`. A test reads both limits from `spec/constants.json` so the contract can't drift from them.
 - The Build stores the TEE's signature and instance public key. The contract doesn't verify the signature, because the attested key only exists off-chain. Apps verify it against the attestation token.
 - The contract checks formats and consistency only, so that a mistyped value can't fill a write-once slot. A Build must carry the posted approved list hash and the exam's criteria hash.
 - `createExam` takes the encoded selection criteria and reverts unless `sha256(abi.encode(tag, criteria))` equals `settings.criteriaHash`. It emits the bytes in `ExamCreated` so anyone can read them and recompute the hash, but doesn't store or decode them.

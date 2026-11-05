@@ -25,6 +25,7 @@ import (
 
 	"paperseal/tee/internal/hashing"
 	"paperseal/tee/internal/settings"
+	"paperseal/tee/internal/spec"
 )
 
 func testExam(t *testing.T) settings.Exam {
@@ -354,5 +355,48 @@ func TestABIMatchesFoundryOutput(t *testing.T) {
 		if want != hex.EncodeToString(m.ID) {
 			t.Errorf("%s: selector %x, Foundry says %q", name, m.ID, want)
 		}
+	}
+}
+
+func TestEventDataSizeIsCappedBeforeDecoding(t *testing.T) {
+	lim := spec.C.Limits
+	c, r, _ := setup(t)
+	ctx := context.Background()
+
+	c.criteria = make([]byte, lim.CriteriaBytes)
+	if _, err := r.Criteria(ctx); err != nil {
+		t.Fatalf("criteria at the cap: %v", err)
+	}
+	c.criteria = make([]byte, lim.CriteriaBytes+eventOverhead+64)
+	if _, err := r.Criteria(ctx); err == nil || !strings.Contains(err.Error(), "log data is") {
+		t.Fatalf("oversized criteria event: %v", err)
+	}
+
+	c.listPosted = true
+	c.entries = make([]byte, lim.EntriesBytes)
+	c.listHash = listHashFor(t, c.exam, c.entries)
+	if _, err := r.ApprovedList(ctx); err != nil {
+		t.Fatalf("entries at the cap: %v", err)
+	}
+	c.entries = make([]byte, lim.EntriesBytes+eventOverhead+64)
+	c.listHash = listHashFor(t, c.exam, c.entries)
+	if _, err := r.ApprovedList(ctx); err == nil || !strings.Contains(err.Error(), "log data is") {
+		t.Fatalf("oversized entries event: %v", err)
+	}
+}
+
+func TestResponseIsCappedAtOneMiB(t *testing.T) {
+	if maxResponse != 1<<20 {
+		t.Fatalf("maxResponse %d", maxResponse)
+	}
+	big := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"`))
+		w.Write(make([]byte, maxResponse))
+		w.Write([]byte(`"}`))
+	}))
+	defer big.Close()
+	_, err := NewAt(testExam(t), big.URL, big.Client()).Criteria(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("got %v", err)
 	}
 }

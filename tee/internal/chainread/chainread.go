@@ -36,14 +36,20 @@ import (
 
 	"paperseal/tee/internal/hashing"
 	"paperseal/tee/internal/settings"
+	"paperseal/tee/internal/spec"
 )
 
 // RootsPath is where the image holds the TLS root certificates the TEE trusts.
 // The Dockerfile copies them there from the pinned build image.
 const RootsPath = "/etc/paperseal/roots.pem"
 
-// maxResponse bounds an RPC response. The approved list is the largest.
-const maxResponse = 16 << 20
+// maxResponse bounds an RPC response. The approved list is the largest, and
+// limits.entriesBytes (320 KiB) as hex in a log fits well within 1 MiB.
+const maxResponse = 1 << 20
+
+// eventOverhead is room in event data for everything but the large value: the
+// fixed fields, offsets, length word and padding.
+const eventOverhead = 1024
 
 // Errors a caller can act on.
 var (
@@ -309,6 +315,15 @@ func (r *RPC) eventData(ctx context.Context, event string, block uint64) (map[st
 	data, err := hex.DecodeString(strings.TrimPrefix(found[0].Data, "0x"))
 	if err != nil {
 		return nil, fmt.Errorf("chainread: %s: log data is not hex", event)
+	}
+	// Decoding trusts the offsets in data, so cap its size first. Each event
+	// carries one large value, and the rest of its ABI encoding is a few words.
+	lim := spec.C.Limits.EntriesBytes + eventOverhead
+	if event == "ExamCreated" {
+		lim = spec.C.Limits.CriteriaBytes + eventOverhead
+	}
+	if len(data) > lim {
+		return nil, fmt.Errorf("chainread: %s: log data is %d bytes, at most %d", event, len(data), lim)
 	}
 	out := map[string]any{}
 	if err := ev.Inputs.NonIndexed().UnpackIntoMap(out, data); err != nil {

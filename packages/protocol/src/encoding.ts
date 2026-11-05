@@ -3,7 +3,7 @@ import { keccak_256 } from '@noble/hashes/sha3.js';
 import { decodeAbiParameters, encodeAbiParameters, type AbiParameter } from 'viem';
 
 import { fromHex, toHex, utf8ToBytes } from './bytes';
-import { domainTags, threshold, type DomainTagName } from './constants';
+import { domainTags, limits, threshold, type DomainTagName } from './constants';
 import type { Hex } from './types';
 
 /*
@@ -13,7 +13,7 @@ import type { Hex } from './types';
  */
 
 /** ABI types used by the Signed Messages table. */
-export type FieldType = 'bytes32' | 'uint32' | 'bytes';
+export type FieldType = 'bytes32' | 'uint32' | 'bytes' | 'string';
 
 /** `key` fields are P-256 public keys: 65-byte uncompressed points, or empty when `optional`. */
 type Field = readonly [name: string, type: FieldType, check?: 'publicKey' | 'optionalPublicKey'];
@@ -32,6 +32,11 @@ export const messageSchemas = {
   instanceKey: [
     ['examId', 'bytes32'],
     ['encryptionPublicKey', 'bytes', 'publicKey'],
+  ],
+  setterCommitment: [
+    ['examId', 'bytes32'],
+    ['name', 'string'],
+    ['salt', 'bytes32'],
   ],
   registration: [
     ['derivedPublicKey', 'bytes', 'optionalPublicKey'],
@@ -80,7 +85,7 @@ export const messageSchemas = {
 
 export type MessageName = keyof typeof messageSchemas;
 
-type FieldValue<T extends FieldType> = T extends 'uint32' ? number : Uint8Array;
+type FieldValue<T extends FieldType> = T extends 'uint32' ? number : T extends 'string' ? string : Uint8Array;
 
 /** The named fields of a message, typed from its schema. */
 export type MessageFields<N extends MessageName> = {
@@ -93,11 +98,15 @@ function assertPublicKey(name: string, key: Uint8Array): void {
   }
 }
 
-function checkField([name, type, check]: Field, value: unknown): Uint8Array | number {
+function checkField([name, type, check]: Field, value: unknown): Uint8Array | number | string {
   if (type === 'uint32') {
     if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value >= 2 ** 32) {
       throw new RangeError(`${name} must be a uint32`);
     }
+    return value;
+  }
+  if (type === 'string') {
+    if (typeof value !== 'string') throw new TypeError(`${name} must be a string`);
     return value;
   }
   if (!(value instanceof Uint8Array)) throw new TypeError(`${name} must be bytes`);
@@ -119,13 +128,27 @@ export function encodeMessage<N extends MessageName>(name: N, fields: MessageFie
     if (value === undefined) throw new TypeError(`${name} is missing ${field[0]}`);
     const checked = checkField(field, value);
     params.push({ type: field[1] === 'bytes' ? 'bytes' : field[1] });
-    args.push(typeof checked === 'number' ? checked : toHex(checked));
+    args.push(typeof checked === 'number' || typeof checked === 'string' ? checked : toHex(checked));
   }
   return fromHex(encodeAbiParameters(params, args));
 }
 
 export function hashMessage<N extends MessageName>(name: N, fields: MessageFields<N>): Uint8Array {
   return sha256(encodeMessage(name, fields));
+}
+
+/**
+ * `setterCommitment(examId, name, salt)`: the lowercase 0x hex of the message hash, which is the
+ * `owner` of a setter on the approved list. The name is hashed as given, so callers pass the
+ * exact text the board will publish.
+ */
+export function setterCommitment(examId: Uint8Array, name: string, salt: Uint8Array): Hex {
+  return toHex(hashMessage('setterCommitment', { examId, name, salt }));
+}
+
+/** True for a string shaped like a commitment: `0x` and 64 lowercase hex digits. */
+export function isSetterCommitment(value: string): value is Hex {
+  return /^0x[0-9a-f]{64}$/.test(value);
 }
 
 /** `build.paperHash`: the plain SHA-256 of the encrypted paper file. */
@@ -220,13 +243,23 @@ function checkEntry(entry: ApprovedListEntry, index: number): void {
   if (entry.owner.length === 0) throw new ApprovedListError(`${at} has an empty owner`);
 }
 
+/** A setter's owner must look like a `setterCommitment`, never a name. */
+function checkSetterOwner(entry: ApprovedListEntry, index: number): void {
+  if (entry.role === roles.setter && !isSetterCommitment(entry.owner)) {
+    throw new ApprovedListError(
+      `entry ${String(index)} is a setter whose owner is not a setter commitment (lowercase 0x and 64 hex digits)`,
+    );
+  }
+}
+
 /**
- * The list rules from spec/api.md: no repeated passkey, no repeated non-empty
+ * The list rules from spec/api.md: a setter's owner is a commitment, no repeated passkey, no repeated non-empty
  * derived key, and key-holder counts from `threshold`. Applies the per-entry
  * rules too. Order is free.
  */
 export function checkApprovedList(entries: readonly ApprovedListEntry[]): void {
   entries.forEach(checkEntry);
+  entries.forEach(checkSetterOwner);
   const passkeys = new Set<string>();
   const derived = new Set<string>();
   const counts = new Map<number, number>();
@@ -265,11 +298,134 @@ export function encodeApprovedList(entries: readonly ApprovedListEntry[]): Uint8
   );
 }
 
+/* ------------------------------------------------------------ Size Limits */
+
+/**
+ * Where a tuple's dynamic fields sit: `headWords` is the head length in 32-byte words, and
+ * `dynamic` lists the head slots that hold an offset to a `bytes` or `string` tail.
+ */
+interface ElementShape {
+  headWords: number;
+  dynamic: readonly number[];
+}
+
+const WORD = 32;
+const paddedLength = (length: number): number => Math.ceil(length / WORD) * WORD;
+
+/** Reads a word as a number no larger than `max`; anything else fails. Allocates nothing. */
+function readWord(buf: Uint8Array, at: number, max: number, fail: (message: string) => Error): number {
+  if (at < 0 || at + WORD > buf.length) throw fail('layout reads past the end of the bytes');
+  for (let i = 0; i < WORD - 4; i += 1) {
+    if (buf[at + i] !== 0) throw fail('layout has an offset or length that is too large');
+  }
+  const value = new DataView(buf.buffer, buf.byteOffset + at + WORD - 4, 4).getUint32(0);
+  if (value > max) throw fail('layout has an offset or length that is too large');
+  return value;
+}
+
+/**
+ * Checks a run of offsets that each point at a region, per "Size Limits" in spec/api.md: the first
+ * starts right after the head, each starts after the one before it, and each region ends at or
+ * before the next starts. `regionEnd` returns where a region ends. Returns where the last one ends.
+ */
+function checkOffsets(
+  headStart: number,
+  offsets: readonly number[],
+  fail: (message: string) => Error,
+  regionEnd: (start: number) => number,
+): number {
+  let expected = offsets.length * WORD;
+  let end = headStart + expected;
+  offsets.forEach((offset, index) => {
+    if (index === 0 ? offset !== expected : offset < expected) {
+      throw fail('layout has offsets that overlap or leave gaps');
+    }
+    end = regionEnd(headStart + offset);
+    expected = end - headStart;
+  });
+  return end;
+}
+
+/** End of a `bytes` or `string` at `start`, reading its length word. */
+function tailEnd(buf: Uint8Array, start: number, fail: (message: string) => Error): number {
+  const length = readWord(buf, start, buf.length, fail);
+  const end = start + WORD + paddedLength(length);
+  if (end > buf.length) throw fail('layout has a length that runs past the end of the bytes');
+  return end;
+}
+
+/** Checks an array at `start` (its length word) of tuples of one shape. Returns where it ends. */
+function checkTupleArray(
+  buf: Uint8Array,
+  start: number,
+  shape: ElementShape,
+  fail: (message: string) => Error,
+): number {
+  const count = readWord(buf, start, Math.floor(buf.length / WORD), fail);
+  const headStart = start + WORD;
+  const offsets: number[] = [];
+  for (let i = 0; i < count; i += 1) offsets.push(readWord(buf, headStart + i * WORD, buf.length, fail));
+  if (headStart + count * WORD > buf.length) throw fail('layout has a length that runs past the end of the bytes');
+  return checkOffsets(headStart, offsets, fail, (elementStart) => {
+    const inner = shape.dynamic.map((slot) => readWord(buf, elementStart + slot * WORD, buf.length, fail));
+    const innerEnd = checkOffsetsFrom(buf, elementStart, shape, inner, fail);
+    return innerEnd;
+  });
+}
+
+/** Like `checkOffsets` for a tuple's head, whose first tail starts after `headWords` words. */
+function checkOffsetsFrom(
+  buf: Uint8Array,
+  elementStart: number,
+  shape: ElementShape,
+  inner: readonly number[],
+  fail: (message: string) => Error,
+): number {
+  let expected = shape.headWords * WORD;
+  let end = elementStart + expected;
+  inner.forEach((offset, index) => {
+    if (index === 0 ? offset !== expected : offset < expected) {
+      throw fail('layout has offsets that overlap or leave gaps');
+    }
+    end = tailEnd(buf, elementStart + offset, fail);
+    expected = end - elementStart;
+  });
+  return end;
+}
+
+/**
+ * The layout check from "Size Limits": `abi.encode(Entry[])` is one offset word (32), then the
+ * array. Runs on the raw bytes, and allocates only for the offsets it reads, which the byte
+ * length already bounds.
+ */
+function checkEntriesLayout(encoded: Uint8Array): void {
+  const fail = (message: string): ApprovedListError => new ApprovedListError(`entries ${message}`);
+  if (readWord(encoded, 0, encoded.length, fail) !== WORD) throw fail('layout does not start with the array offset 32');
+  checkTupleArray(encoded, WORD, { headWords: 4, dynamic: [1, 2, 3] }, fail);
+}
+
+/** `abi.encode(Criteria)`: offset 32, then a head of 3 words, whose last is the topics offset (96). */
+function checkCriteriaLayout(encoded: Uint8Array): void {
+  const fail = (message: string): CriteriaError => new CriteriaError(`criteria ${message}`);
+  if (readWord(encoded, 0, encoded.length, fail) !== WORD) throw fail('layout does not start with the tuple offset 32');
+  const tuple = WORD;
+  if (readWord(encoded, tuple + 2 * WORD, encoded.length, fail) !== 3 * WORD) {
+    throw fail('layout has a topics offset that is not right after the head');
+  }
+  checkTupleArray(encoded, tuple + 3 * WORD, { headWords: 2, dynamic: [0] }, fail);
+}
+
+const utf8Length = (text: string): number => utf8ToBytes(text).length;
+
 /**
  * Decodes `entries`, re-encodes it and rejects the list if the bytes differ,
  * then applies the list rules, as the TEE does.
  */
 export function decodeApprovedList(encoded: Uint8Array): ApprovedListEntry[] {
+  if (encoded.length > limits.entriesBytes) {
+    throw new ApprovedListError(`entries is longer than ${String(limits.entriesBytes)} bytes`);
+  }
+  checkEntriesLayout(encoded);
   let entries: ApprovedListEntry[];
   try {
     const [decoded] = decodeAbiParameters(entriesParameters, toHex(encoded));
@@ -282,6 +438,14 @@ export function decodeApprovedList(encoded: Uint8Array): ApprovedListEntry[] {
   } catch (cause) {
     throw new ApprovedListError(`entries is not abi.encode(Entry[]): ${(cause as Error).message}`);
   }
+  if (entries.length > limits.entries) {
+    throw new ApprovedListError(`entries has more than ${String(limits.entries)} entries`);
+  }
+  entries.forEach((entry, index) => {
+    if (utf8Length(entry.owner) > limits.ownerBytes) {
+      throw new ApprovedListError(`entry ${String(index)} owner is longer than ${String(limits.ownerBytes)} bytes`);
+    }
+  });
   if (toHex(encodeApprovedList(entries)) !== toHex(encoded)) {
     throw new ApprovedListError('entries is not the canonical encoding');
   }
@@ -385,6 +549,10 @@ export function encodeCriteria(criteria: Criteria): Uint8Array {
 
 /** Decodes `criteria`, checks the rules, then re-encodes and rejects differing bytes. */
 export function decodeCriteria(encoded: Uint8Array): Criteria {
+  if (encoded.length > limits.criteriaBytes) {
+    throw new CriteriaError(`criteria is longer than ${String(limits.criteriaBytes)} bytes`);
+  }
+  checkCriteriaLayout(encoded);
   let criteria: Criteria;
   try {
     const [decoded] = decodeAbiParameters(criteriaParameters, toHex(encoded));
@@ -396,6 +564,14 @@ export function decodeCriteria(encoded: Uint8Array): Criteria {
   } catch (cause) {
     throw new CriteriaError(`criteria is not abi.encode(Criteria): ${(cause as Error).message}`);
   }
+  if (criteria.topics.length > limits.topics) {
+    throw new CriteriaError(`criteria has more than ${String(limits.topics)} topics`);
+  }
+  criteria.topics.forEach(({ name }, index) => {
+    if (utf8Length(name) > limits.topicNameBytes) {
+      throw new CriteriaError(`topic ${String(index)} name is longer than ${String(limits.topicNameBytes)} bytes`);
+    }
+  });
   if (toHex(encodeCriteria(criteria)) !== toHex(encoded)) {
     throw new CriteriaError('criteria is not the canonical encoding');
   }

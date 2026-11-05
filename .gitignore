@@ -21,3 +21,6 @@ e2e/.browsers/
 
 # Local research notes, not published
 research/
+
+# Live run state and report from e2e/live/
+e2e/.live/

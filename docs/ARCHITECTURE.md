@@ -92,7 +92,6 @@ The README leaves these open. They are defaults for the build and can change.
 
 - Which approved authenticator AAGUIDs does the attestation check accept?
 - Where are published artefacts found? The verifier needs a PKI token per instance key, and the TEE keeps no state to serve them later. The default is to list them in a storage manifest.
-- Who hosts the official copy of `apps/verifier`? The default is a static host outside the board's control, with a published build digest so people can compare it.
 - Which RPC operator does the exam use, and how is its API key handled? Attested settings are public, so a key in `rpcHost` or the startup arguments would be exposed.
 
 ## Spec Gaps

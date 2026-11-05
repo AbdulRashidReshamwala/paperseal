@@ -5,8 +5,10 @@ pragma solidity 0.8.30;
 /// @notice Public, write-once record of each exam. Only the board's address can write. Nothing here can be
 ///         changed once written, including the exam's start time, `delta` and drand rounds, which set its date.
 /// @dev The approved list and selection criteria are each kept as a hash and emitted in full. Neither is
-///      decoded here, because the board app and the TEE check their content. TEE signatures are stored but not verified. The attested key only exists
-///      off-chain, so apps verify them against the attestation token. The length and format checks here only
+///      decoded here, because the board app and the TEE check their content. Each is rejected by length alone
+///      if it is over `limits.entriesBytes` or `limits.criteriaBytes` in spec/constants.json, because ABI offsets
+///      let a small input decode to a huge one. See "Size Limits" in spec/api.md. TEE signatures are stored but
+///      not verified. The attested key only exists off-chain, so apps verify them against the attestation token. The length and format checks here only
 ///      stop a mistyped value from filling a write-once slot. They prove nothing about who signed.
 ///      Rounds are checked against quicknet's published timing, but never against block time or drand output.
 contract ExamRegistry {
@@ -99,6 +101,8 @@ contract ExamRegistry {
     error UnlockRoundMismatch(uint256 expected, uint256 actual);
     error ApprovedListHashMismatch(bytes32 expected, bytes32 actual);
     error CriteriaHashMismatch(bytes32 expected, bytes32 actual);
+    error EntriesTooLarge();
+    error CriteriaTooLarge();
 
     /// @notice `drand.genesisTime` in spec/constants.json, the Unix time of quicknet round 1.
     uint64 public constant QUICKNET_GENESIS_TIME = 1692803367;
@@ -109,6 +113,10 @@ contract ExamRegistry {
     string private constant CRITERIA_TAG = "paperseal/v1/criteria";
     /// @dev `domainTags.approvedList` in spec/constants.json.
     string private constant APPROVED_LIST_TAG = "paperseal/v1/approved-list";
+    /// @dev `limits.entriesBytes` in spec/constants.json, the most bytes `entries` can have.
+    uint256 private constant ENTRIES_BYTES = 327680;
+    /// @dev `limits.criteriaBytes` in spec/constants.json, the most bytes `criteria` can have.
+    uint256 private constant CRITERIA_BYTES = 16384;
     /// @dev An uncompressed P-256 public key: 0x04, then x and y.
     uint256 private constant PUBLIC_KEY_LENGTH = 65;
     /// @dev A TEE signature: r || s.
@@ -136,7 +144,8 @@ contract ExamRegistry {
     /// @param imageDigest The SHA-256 digest of the container image.
     /// @param settings The attested exam settings.
     /// @param criteria The selection criteria as `abi.encode(Criteria)`, from "Selection Criteria" in spec/api.md.
-    ///        Emitted but not stored, and must hash to `settings.criteriaHash`.
+    ///        Emitted but not stored, and must hash to `settings.criteriaHash`. Reverts with `CriteriaTooLarge`
+    ///        if longer than 16384 bytes, checked by length before anything else reads it.
     function createExam(
         bytes20 commitHash,
         bytes32 imageDigest,
@@ -150,6 +159,7 @@ contract ExamRegistry {
                 || settings.criteriaHash == bytes32(0) || settings.delta == 0 || bytes(settings.rpcHost).length == 0
                 || criteria.length == 0
         ) revert ZeroValue();
+        if (criteria.length > CRITERIA_BYTES) revert CriteriaTooLarge();
         _checkSchedule(settings);
         _checkCriteria(settings.criteriaHash, criteria);
 
@@ -179,11 +189,13 @@ contract ExamRegistry {
     /// @notice Posts the encoded approved list. Stores its hash and emits the full bytes.
     /// @dev The hash is the `approvedList` message in spec/api.md, which the TEE signs into the Build. It covers
     ///      the posted bytes as they are.
-    /// @param entries The list as `abi.encode(Entry[])`, from "Approved List" in spec/api.md.
+    /// @param entries The list as `abi.encode(Entry[])`, from "Approved List" in spec/api.md. Reverts with
+    ///        `EntriesTooLarge` if longer than 327680 bytes, checked by length without decoding.
     function postApprovedList(bytes32 examId, bytes calldata entries) external onlyBoard {
         if (_exams[examId].createdAt == 0) revert ExamNotFound(examId);
         if (_approvedLists[examId].postedAt != 0) revert ApprovedListAlreadyPosted(examId);
         if (entries.length == 0) revert ZeroValue();
+        if (entries.length > ENTRIES_BYTES) revert EntriesTooLarge();
 
         bytes32 listHash = sha256(abi.encode(APPROVED_LIST_TAG, examId, entries));
         _approvedLists[examId] = ApprovedList({listHash: listHash, postedAt: _now(), postedBlock: _blockNumber()});
