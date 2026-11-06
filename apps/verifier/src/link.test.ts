@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { renderHook } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { examLink, shareUrl, useShareAddress } from './link';
+import { examLink, shareUrl, useExamLink, useShareAddress } from './link';
 
 const id = `0x${'ab'.repeat(32)}`;
 const page = 'https://verify.example/exams/';
@@ -50,9 +51,43 @@ describe('useShareAddress', () => {
     expect(globalThis.history.state).toEqual({ idx: 0 });
   });
 
-  it('does nothing without an exam', () => {
+  it('leaves a name as it is', () => {
     globalThis.history.replaceState(null, '', '/#/name/jee-main-2026.board.eth');
     renderHook(() => useShareAddress({ kind: 'name', name: 'jee-main-2026.board.eth' }));
     expect(globalThis.location.hash).toBe('#/name/jee-main-2026.board.eth');
+  });
+
+  it('drops ?exam= once the page has moved to a name, and keeps the rest of the query', () => {
+    globalThis.history.replaceState({ idx: 0 }, '', `/?exam=${id}&x=1#/name/jee-main-2026.board.eth`);
+    renderHook(() => useShareAddress({ kind: 'name', name: 'jee-main-2026.board.eth' }));
+    expect(globalThis.location.search).toBe('?x=1');
+    expect(globalThis.location.hash).toBe('#/name/jee-main-2026.board.eth');
+    expect(globalThis.history.state).toEqual({ idx: 0 });
+  });
+
+  it('does nothing without an exam', () => {
+    globalThis.history.replaceState(null, '', `/?exam=${id}#/exams`);
+    renderHook(() => useShareAddress({ kind: 'none' }));
+    expect(globalThis.location.search).toBe(`?exam=${id}`);
+    expect(globalThis.location.hash).toBe('#/exams');
+  });
+});
+
+describe('useExamLink', () => {
+  afterEach(() => {
+    globalThis.history.replaceState(null, '', '/');
+  });
+
+  const linkAt = (address: string) => {
+    globalThis.history.replaceState(null, '', address);
+    return renderHook(() => useExamLink(), { wrapper: MemoryRouter }).result.current;
+  };
+
+  it('reads ?exam= from an address with no route', () => {
+    expect(linkAt(`/?exam=${id}`)).toEqual({ kind: 'exam', id });
+  });
+
+  it('goes home from a ?exam= link when the header sets #/', () => {
+    expect(linkAt(`/?exam=${id}#/`)).toEqual({ kind: 'none' });
   });
 });

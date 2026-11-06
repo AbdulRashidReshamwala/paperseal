@@ -382,7 +382,7 @@ function Head({ view, chosen, agent }: { view: Custody; chosen: boolean; agent: 
 function shareLinkOf(examId: Hex, name: string | null): string {
   const here = globalThis.location as Location | undefined;
   const base = here ? `${here.origin}${here.pathname}` : '';
-  return name ? `${base}#/name/${name}` : `${base}#/exam/${examId}`;
+  return name ? `${base}#/name/${name}` : `${base}?exam=${examId}`;
 }
 
 function glanceOf(board: string | null, found: People | null, held: Copies | null): { label: string; value: string }[] {

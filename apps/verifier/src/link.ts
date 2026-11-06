@@ -68,13 +68,14 @@ export function useRoute(): { routePath: string; routeSearch: string } {
   return routeOfHash(hash) ?? { routePath: location.pathname, routeSearch: location.search };
 }
 
-/** The exam the link in the address bar names. */
+/**
+ * The exam the link in the address bar names. The page query counts only while the address has no
+ * route of its own, so the header's `#/` goes home from a `?exam=` link.
+ */
 export function useExamLink(): ExamLink {
   const route = useRoute();
-  return examLink({
-    search: (globalThis.location as Location | undefined)?.search ?? '',
-    ...route,
-  });
+  const here = globalThis.location as Location | undefined;
+  return examLink({ search: here && !routeOfHash(here.hash) ? here.search : '', ...route });
 }
 
 /**
@@ -93,13 +94,25 @@ export function shareUrl(href: string): string | null {
   return url.href;
 }
 
-/** Rewrites the address bar to the share form once the page shows an exam, without a reload. */
+/** The address with `?exam=` dropped, because `#/name/...` is the link people see. Null with none to drop. */
+export function nameUrl(href: string): string | null {
+  const url = new URL(href);
+  if (!url.searchParams.has('exam')) return null;
+  url.searchParams.delete('exam');
+  return url.href;
+}
+
+/**
+ * Keeps the address bar on the link people should see, without a reload: the share form for an exam
+ * opened by ID, and a name with no `?exam=` left over from before the page moved to it.
+ */
 export function useShareAddress(link: ExamLink): void {
-  const id = link.kind === 'exam' ? link.id : null;
+  const key = link.kind === 'exam' ? link.id : link.kind === 'name' ? link.name : null;
+  const named = link.kind === 'name';
   useEffect(() => {
     const location = globalThis.location as Location | undefined;
-    if (id === null || !location) return;
-    const next = shareUrl(location.href);
+    if (key === null || !location) return;
+    const next = named ? nameUrl(location.href) : shareUrl(location.href);
     if (next !== null && next !== location.href) globalThis.history.replaceState(globalThis.history.state, '', next);
-  }, [id]);
+  }, [key, named]);
 }
