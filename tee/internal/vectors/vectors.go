@@ -194,7 +194,7 @@ func paperVectors(seed [32]byte) ([]PaperVector, error) {
 			{Topic: "geometry", Text: "Name a triangle."},
 		}},
 		{"characters that encode differently", []build.PaperQuestion{
-			{Topic: "algebra", Text: "q\" \\ \b\f\n\r\t\u0001\u001f \u007f \u00e9 \u2028 \u2029 \U0001F600", Options: []string{"\u2028", `\u2028`, "</script>"}},
+			{Topic: "algebra", Text: "q\" \\ \b\f\n\r\t\u0001\u001f \u007f \u00e9 \u2028 \u2029 \U0001F600", Options: []string{"a\u2028b", `\u2028`, "</script>"}},
 		}},
 	}
 	var out []PaperVector
