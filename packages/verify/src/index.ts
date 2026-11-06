@@ -9,5 +9,6 @@ export * from './checks';
 export * from './commitments';
 export * from './load';
 export * from './proof';
+export * from './report';
 export * from './storage';
 export * from './unlock';

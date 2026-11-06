@@ -2,7 +2,7 @@
 
 How any AI agent checks an exam from the original sources. Change this file first, then every implementation in the same change. The reasoning is in [the proposal](../docs/proposals/agent-verification.md).
 
-**Status:** specified, not implemented.
+**Status:** implemented: packages/verify (checker), apps/verifier (copy button)
 
 ## Rules
 

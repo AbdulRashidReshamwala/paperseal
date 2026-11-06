@@ -87,6 +87,7 @@ A tag `v<major>.<minor>.<patch>` on the repository makes `.github/workflows/repr
 | `commit` | `0x`-prefixed git SHA-1, the `commitHash` in `createExam` |
 | `imageDigest` | `0x`-prefixed digest with no `sha256:` prefix, the `imageDigest` in `createExam` |
 | `run` | `string`, the URL of the workflow run that built it |
+| `checkerSha256` | `0x`-prefixed plain SHA-256 of `paperseal-verify.mjs`, the [agent checker](agent-verification.md#checker) attached to the release |
 
 The metadata sits in the notes because browsers can read them through the GitHub API, but can't fetch release assets across origins. The board app lists these releases, ignores drafts, prereleases and any release that doesn't parse, and rejects a release whose `commit` differs from what its tag points at.
 
