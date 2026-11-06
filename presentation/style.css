@@ -62,7 +62,7 @@ html,body{height:100%;background:#05070d;overflow:hidden}
 /* shared animation helpers */
 @keyframes drop{0%{transform:translate(var(--fx),var(--fy)) rotate(var(--r0));opacity:0}55%{opacity:1}100%{transform:rotate(var(--r1));opacity:1}}
 @keyframes popin{0%{transform:scale(.4) rotate(-6deg);opacity:0}70%{transform:scale(1.08)}100%{transform:scale(1);opacity:1}}
-@keyframes press{0%{transform:scale(3) rotate(-30deg);opacity:0}60%{opacity:1}80%{transform:scale(.92)}100%{transform:scale(1) rotate(-8deg);opacity:1}}
+@keyframes press{0%{transform:scale(3) rotate(-30deg);opacity:0}60%{opacity:1}80%{transform:scale(.92)}100%{transform:scale(1) rotate(-6deg);opacity:1}}
 .slide.on .drop{animation:drop .9s cubic-bezier(.2,.8,.25,1.04) var(--d,0s) both}
 .slide.on .rise{animation:rise .7s cubic-bezier(.2,.8,.3,1) var(--d,0s) both}
 .slide.on .pop{animation:popin .45s ease-out var(--d,0s) both}
@@ -108,8 +108,7 @@ html,body{height:100%;background:#05070d;overflow:hidden}
 .p5 .tags{position:absolute;left:110px;bottom:70px;display:flex;gap:24px}
 .p5 .tag{background:#f1ecdf;border-left:10px solid var(--wax);padding:16px 26px;font:600 30px var(--sans);box-shadow:0 8px 20px #0003;border-radius:3px}
 .p5 .tag:nth-child(2){border-left-color:var(--gold)}.p5 .tag:nth-child(3){border-left-color:var(--ink)}.p5 .tag:nth-child(4){border-left-color:var(--slate)}
-.p5 .seal{position:absolute;left:1540px;top:690px;width:250px;height:250px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#e2604a,var(--wax) 45%,var(--wax2));box-shadow:0 14px 30px #0006,inset 0 -12px 16px #0004;display:grid;place-items:center;color:#ffd9d0;font:700 100px var(--serif);transform:rotate(-8deg)}
-.p5 .seal::before{content:"";position:absolute;inset:26px;border-radius:50%;border:6px solid #ffffff55}
+.p5 .seal{position:absolute;left:1480px;top:610px;width:400px;height:auto;transform:rotate(-6deg);filter:drop-shadow(0 18px 24px #0004)}
 
 .static [class*="anim-"],.static .drop,.static .rise,.static .pop,.static .press{animation:none!important}
 
@@ -148,7 +147,7 @@ html,body{height:100%;background:#05070d;overflow:hidden}
 .s2 .paperout{left:1380px;top:310px;width:430px;height:620px;padding:46px 40px}
 .s2 .ln{display:block;height:16px;background:#c7bfa8;border-radius:8px;margin-top:34px;transform-origin:left;animation:draw .5s ease-out var(--d) both}
 .s2 .ln:nth-child(odd){width:86%}
-.s2 .seal.sm{position:absolute;left:1650px;top:820px;width:170px;height:170px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#e2604a,var(--wax) 45%,var(--wax2));box-shadow:0 12px 24px #0006,inset 0 -8px 12px #0004;display:grid;place-items:center;color:#ffd9d0;font:700 66px var(--serif);transform:rotate(-8deg)}
+.s2 .seal.sm{position:absolute;left:1580px;top:740px;width:290px;height:auto;transform:rotate(-6deg);filter:drop-shadow(0 12px 16px #0004)}
 
 /* step 3 */
 .s3 .kk{position:absolute;left:190px;top:470px;width:250px;height:250px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#f0d27c,var(--gold) 55%,#a8832d);box-shadow:0 16px 30px #0004;display:grid;place-items:center;font:700 130px var(--serif);color:#3a2c07}
@@ -203,8 +202,7 @@ html,body{height:100%;background:#05070d;overflow:hidden}
 .close .cl{left:340px;top:150px;width:1240px;height:780px;padding:100px 120px}
 .close .cl h2{font:700 180px/1 var(--serif);margin-top:30px;letter-spacing:-4px}
 .close .pr{color:var(--wax)}
-.close .seal{position:absolute;left:1420px;top:690px;width:270px;height:270px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#e2604a,var(--wax) 45%,var(--wax2));box-shadow:0 14px 30px #0006,inset 0 -12px 16px #0004;display:grid;place-items:center;color:#ffd9d0;font:700 108px var(--serif);transform:rotate(-8deg)}
-.close .seal::before{content:"";position:absolute;inset:28px;border-radius:50%;border:6px solid #ffffff55}
+.close .seal{position:absolute;left:1340px;top:560px;width:480px;height:auto;transform:rotate(-6deg);filter:drop-shadow(0 22px 30px #0006)}
 #bar{position:fixed;left:0;bottom:0;height:4px;background:#b8321f;width:0;transition:width .3s}
 #count{position:fixed;right:16px;bottom:10px;font:14px var(--mono);color:#555a70}
 @media (prefers-reduced-motion:reduce){.slide.on [class*="anim-"],.drop,.rise,.pop,.press{animation:none!important}}
