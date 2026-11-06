@@ -1,6 +1,8 @@
-import { Page, Row, Rows, RoleHeader, Seal, Stage } from '@paperseal/ui';
-import { lazy, Suspense, useEffect, type ComponentType, type LazyExoticComponent } from 'react';
+import { LoadingSeal, Page, Row, Rows, RoleHeader, Seal, Stage } from '@paperseal/ui';
+import { lazy, Suspense, useEffect, type ComponentType, type LazyExoticComponent, type ReactNode } from 'react';
 import { Link, Route, Routes, useLocation } from 'react-router';
+
+import { RouteFade } from './shared/RouteFade';
 
 // Lazy, so each role downloads only its own code. Do not import an area statically.
 const areas: { path: string; label: string; plain: string; Area: LazyExoticComponent<ComponentType> }[] = [
@@ -73,17 +75,31 @@ function ExamFromLink() {
   return null;
 }
 
+/**
+ * One route. A router navigation is a React transition, and a transition leaves the old page up with no
+ * sign of waiting while a chunk loads. Only a new Suspense boundary shows its fallback, so each route has
+ * its own, and needs its own key to count as new. The key stays the same across an area's inner routes,
+ * so the board keeps its provider.
+ */
+function Screen(props: { children: ReactNode }) {
+  return (
+    <Suspense fallback={<LoadingSeal />}>
+      <RouteFade>{props.children}</RouteFade>
+    </Suspense>
+  );
+}
+
 export function App() {
   return (
-    <Suspense fallback={<div className="ps-shell">Loading.</div>}>
+    <Suspense fallback={<LoadingSeal />}>
       <ExamFromLink />
       <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/join" element={<Join />} />
-        <Route path="/enrol" element={<Enrol />} />
-        <Route path="/exam" element={<ExamPage />} />
+        <Route path="/" element={<Screen key="home"><Home /></Screen>} />
+        <Route path="/join" element={<Screen key="join"><Join /></Screen>} />
+        <Route path="/enrol" element={<Screen key="enrol"><Enrol /></Screen>} />
+        <Route path="/exam" element={<Screen key="exam"><ExamPage /></Screen>} />
         {areas.map(({ path, Area }) => (
-          <Route key={path} path={`${path}/*`} element={<Area />} />
+          <Route key={path} path={`${path}/*`} element={<Screen key={path}><Area /></Screen>} />
         ))}
       </Routes>
     </Suspense>

@@ -5,6 +5,7 @@ export * from './Countdown';
 export * from './Hash';
 export * from './KeyTouch';
 export * from './MockLabel';
+export * from './LoadingSeal';
 export * from './Logo';
 export * from './Seal';
 export * from './Stage';
