@@ -51,6 +51,10 @@
     "questionOptionsMin": 2,
     "questionOptionsMax": 6
   },
+  "schedule": {
+    "maxDeltaSeconds": 86400,
+    "maxEndAfterStartSeconds": 604800
+  },
   "padding": {
     "questionBytes": 4096,
     "paperBytes": 1048576

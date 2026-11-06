@@ -80,6 +80,11 @@ type Constants struct {
 		QuestionOptionsMin int `json:"questionOptionsMin"`
 		QuestionOptionsMax int `json:"questionOptionsMax"`
 	} `json:"limits"`
+	// Schedule bounds Exam Settings beyond what the contract checks.
+	Schedule struct {
+		MaxDeltaSeconds         uint64 `json:"maxDeltaSeconds"`
+		MaxEndAfterStartSeconds uint64 `json:"maxEndAfterStartSeconds"`
+	} `json:"schedule"`
 	Padding struct {
 		QuestionBytes int `json:"questionBytes"`
 		PaperBytes    int `json:"paperBytes"`

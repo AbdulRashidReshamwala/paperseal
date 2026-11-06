@@ -449,7 +449,7 @@ describe('sync-abi.mjs', () => {
     writeFileSync(artifact, JSON.stringify({ abi, deployedBytecode: deployedBytecode({ 7: [{ start: 2, length: 32 }] }) }));
     expect(spawnSync('node', [script, artifact, output, pin, sample], { encoding: 'utf8' }).status).toBe(0);
     const { board, code: filled } = JSON.parse(readFileSync(sample, 'utf8')) as { board: string; code: string };
-    expect(filled.slice(4, 68)).toBe(board.slice(2).padStart(64, '0'));
+    expect(filled.slice(6, 70)).toBe(board.slice(2).padStart(64, '0'));
     expect(filled.length).toBe(code.length);
   });
 

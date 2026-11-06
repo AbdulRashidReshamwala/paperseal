@@ -15,6 +15,8 @@ import {
   newInviteSecret,
   ApprovedListError,
   ScheduleError,
+  schedule as specSchedule,
+  scheduleBoundsProblem,
   matchInvites,
   setterOwner,
   startupArgs,
@@ -105,6 +107,19 @@ export async function dryCheck(): Promise<void> {
       return `lock ${s.lockRound}, unlock ${s.unlockRound}, end ${s.endRound}, delta ${String(s.delta)}s, run needs ${String(want.lead)}s before Lock`;
     });
   }
+
+  await check('both schedules fit the schedule bounds in spec/constants.json, and a long delta or far end round is refused', () => {
+    for (const mode of ['latest', 'finalized'] as const) {
+      const s = computeSchedule(NOW, gapsFor(mode));
+      const problem = scheduleBoundsProblem({ examStart: BigInt(s.examStart), delta: BigInt(s.delta), endRound: BigInt(s.endRound) });
+      expect(problem === null, `${mode}: ${String(problem)}`);
+    }
+    const base = { examStart: BigInt(NOW), delta: BigInt(specSchedule.maxDeltaSeconds), endRound: BigInt(schedule.endRound) };
+    expect(scheduleBoundsProblem(base) === null, 'the longest delta was refused');
+    expect(scheduleBoundsProblem({ ...base, delta: base.delta + 1n }) === 'delta_too_long', 'a long delta was accepted');
+    expect(scheduleBoundsProblem({ ...base, endRound: 2n ** 64n - 1n }) === 'end_too_far', 'an end round never reached was accepted');
+    return `delta at most ${String(specSchedule.maxDeltaSeconds)}s, end at most ${String(specSchedule.maxEndAfterStartSeconds)}s after T`;
+  });
 
   await check('checkSchedule accepts it and rejects a wrong unlock round, a wrong chain and a zero delta', () => {
     checkSchedule({ ...settings, chainId: chain.chainId });

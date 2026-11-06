@@ -38,6 +38,13 @@ The startup arguments are one `--<name>=<value>` each, in the order of this tabl
 - `unlockRound` is the first quicknet round at or after `examStart − delta`, which is `ceil((examStart − delta − genesisTime) / periodSeconds) + 1`. The paper can't open early by rounding.
 - `endRound` is produced after `examStart`.
 
+`schedule` in `constants.json` adds two bounds that the contract doesn't check, so each reader does:
+
+- `delta` is at most `schedule.maxDeltaSeconds`, 24 hours. The paper is with centres from `T−Δ`, so a long `Δ` means a long time to leak.
+- `endRound` is produced at most `schedule.maxEndAfterStartSeconds`, 7 days, after `examStart`. An end round far ahead, or one drand will never reach, would mean the paper never opens to everyone and the proof never happens.
+
+The TEE refuses to start with settings outside these, the board app refuses them before publishing, and the verifier fails the exam's first step. The development and `finalized` schedules in `e2e/live/config.ts` fit them, and `dry-check` checks this.
+
 `createExam` also stores two values that are not startup arguments:
 
 | Field | Type |
@@ -255,7 +262,7 @@ Unlock may run on a different instance from the Build, so the log names its sign
 
 ## Dev Mode
 
-`chain.readBlock` is `latest` during development, so a full test exam takes under 5 minutes, and must be `finalized` for any real exam. A block at `latest` can be reorged, so a run may fail, but `ExamRegistry` still rejects a mismatched Build. The value is in the attested image, like `webauthn.requireHardwareAttestation`, and the verifier shows both.
+`chain.readBlock` is `latest` during development, so a full test exam takes under 5 minutes, and must be `finalized` for any real exam. A block at `latest` can be reorged, so a run may fail, but `ExamRegistry` still rejects a mismatched Build. The value is in the attested image, like `webauthn.requireHardwareAttestation`, and the verifier shows both in its folded evidence, as the values it was built with.
 
 ## Size Limits
 

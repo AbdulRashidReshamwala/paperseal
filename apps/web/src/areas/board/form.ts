@@ -10,6 +10,7 @@ import {
   firstRoundAtOrAfter,
   fromHex,
   roundTimeSeconds,
+  schedule,
   ScheduleError,
   selectedCount,
   toHex,
@@ -308,6 +309,10 @@ function scheduleMessage(error: ScheduleError): string {
       return 'That date is too far in the past.';
     case 'delta_zero':
       return 'Enter a whole number of minutes, at least 1.';
+    case 'delta_too_long':
+      return `The paper can be released at most ${String(schedule.maxDeltaSeconds / 3600)} hours before the exam. Choose a shorter release time.`;
+    case 'end_too_far':
+      return `The exam must end within ${String(schedule.maxEndAfterStartSeconds / 86400)} days of its start. Choose a shorter length.`;
     default:
       return error.message;
   }
