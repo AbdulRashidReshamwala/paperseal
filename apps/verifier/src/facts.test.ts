@@ -168,6 +168,17 @@ describe('the other copies', () => {
     expect(copy.links).toBeUndefined();
   });
 
+  it('says Reading while a source loads, and could not be read only after a real failure', () => {
+    const reading = copies(viewOf({ arkiv: { state: 'loading' } }), none, { state: 'loading' });
+    expect(copyIn(reading, 'log', 'arkiv')).toMatchObject({ state: 'reading', note: '' });
+    expect(copyIn(reading, 'log', 'swarm')).toMatchObject({ state: 'reading', note: '' });
+    expect(reading?.feed).toMatchObject({ state: 'reading', text: 'Reading.' });
+    const failed = copies(viewOf({ arkiv: { state: 'error', message: '429' } }), none, { state: 'error', message: '429' });
+    expect(copyIn(failed, 'log', 'arkiv').state).toBe('unread');
+    expect(copyIn(failed, 'log', 'swarm').state).toBe('unread');
+    expect(failed?.feed.state).toBe('unread');
+  });
+
   it('says when Arkiv has no row, and when it could not be read', () => {
     expect(copyIn(copies(viewOf({ arkiv: { state: 'ready', value: report({}), readAt: 0 } }), none), 'log', 'arkiv').state).toBe('missing');
     expect(copyIn(copies(viewOf({ arkiv: { state: 'error', message: '429' } }), none), 'log', 'arkiv').state).toBe('unread');
@@ -217,13 +228,24 @@ describe('people', () => {
     expect(hearsay?.verified).toBe(false);
   });
 
-  it('shows a name it could not read as not confirmed, and a confirmed one as confirmed', () => {
+  it('says could not be checked for a read with no answer, and notes a name that changed since', () => {
+    const base = people(viewOf())?.holders[0];
+    if (!base) throw new Error('no holder');
+    const answer = (value: object) => ({ state: 'ready', value: { [base.key]: value }, readAt: 0 }) as unknown as NonNullable<View['partyNames']>;
+    const failed = people(viewOf({ partyNames: answer({ state: 'unreadable', name: base.name, expected: '0x', reason: '' }) }));
+    expect(failed?.holders[0]?.state).toMatchObject({ tone: 'neutral', word: 'Could not be checked' });
+    const changed = people(viewOf({ partyNames: answer({ state: 'confirmed', name: base.name, expected: '0x', reason: '', changedSince: true }) }));
+    expect(changed?.holders[0]?.state.word).toBe('Name confirmed');
+    expect(changed?.holders[0]?.state.note).toMatch(/has changed since/);
+  });
+
+  it('shows a name with no answer yet as could not be checked, and a confirmed one as confirmed', () => {
     const base = people(viewOf())?.holders[0];
     if (!base) throw new Error('no holder');
     const partyNames = { state: 'ready', value: { [base.key]: { state: 'confirmed', name: base.name, expected: '0x', reason: '' } }, readAt: 0 } as unknown as View['partyNames'];
     const named = people(viewOf(partyNames ? { partyNames } : {}));
     expect(named?.holders[0]?.state.word).toBe('Name confirmed');
-    expect(named?.holders[1]?.state.word).toBe('Not confirmed');
+    expect(named?.holders[1]?.state.word).toBe('Could not be checked');
   });
 });
 

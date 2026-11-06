@@ -1,5 +1,5 @@
 import { chain as chainSpec, type Hex } from '@paperseal/protocol';
-import { Badge, CopyButton, Hash, Mono, Panel, Row, Rows, type Tone } from '@paperseal/ui';
+import { Badge, Button, CopyButton, Hash, Mono, Panel, Row, Rows, type Tone } from '@paperseal/ui';
 import { Fragment, type ReactNode } from 'react';
 
 import { dayTime, REPOSITORY, sepoliaName, utcTime, vouchNote, type View } from './custody';
@@ -223,7 +223,7 @@ function CopyRow({ copy, zone }: { copy: Copy; zone: string | undefined }) {
       <Badge tone={state.tone}>{state.word}</Badge>
       {copy.used ? <Badge tone="ok">Used by this page</Badge> : null}
       {copy.at === undefined ? null : <span>{dayTime(copy.at, zone)}</span>}
-      <span className="vf-aside">{copy.note}</span>
+      {copy.note ? <span className="vf-aside">{copy.note}</span> : null}
       {copy.links?.map((link) => (
         <Out key={link.href} href={link.href}>
           {link.text}
@@ -252,8 +252,9 @@ function PieceBlock({ piece, zone }: { piece: Piece; zone: string | undefined })
 }
 
 /** Where every piece of evidence lives, and which copy this page used. */
-export function CopiesSection({ found, zone, view }: { found: Copies; zone: string | undefined; view: Pick<View, 'now'> }) {
+export function CopiesSection({ found, zone, view, onRetry }: { found: Copies; zone: string | undefined; view: Pick<View, 'now'>; onRetry: () => void }) {
   const { feed } = found;
+  const failed = feed.state === 'unread' || found.pieces.some((piece) => piece.copies.some((copy) => copy.state === 'unread'));
   return (
     <Panel title="Where the evidence lives">
       <p className="vf-evidence-text">
@@ -262,6 +263,11 @@ export function CopiesSection({ found, zone, view }: { found: Copies; zone: stri
       {found.pieces.map((piece) => (
         <PieceBlock key={piece.id} piece={piece} zone={zone} />
       ))}
+      {failed ? (
+        <p className="vf-more">
+          <Button onClick={onRetry}>Read again</Button>
+        </p>
+      ) : null}
       <h3 className="vf-evidence-heading">The relay that writes these copies</h3>
       <Rows>
         <Row label="Feed">{feed.text}</Row>

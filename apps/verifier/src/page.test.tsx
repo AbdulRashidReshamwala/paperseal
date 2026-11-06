@@ -29,7 +29,9 @@ vi.mock('./checks', async (original) => ({
 
 /** What reading a party name against its key comes to. Null runs the real read, which needs an RPC. */
 let passkeyAnswer: ((name: string, key: Hex) => PasskeyNameState) | null = null;
-let passkeyReads: { name: string; key: Hex; rpcUrl: string | undefined }[] = [];
+let passkeyReads: { name: string; key: Hex; rpcUrl: string | undefined; atBlock: bigint | undefined }[] = [];
+/** What today's record comes to, where a test sets it apart from the record when the list was posted. */
+let passkeyToday: PasskeyNameState | null = null;
 
 /** What reading an exam name comes to. Null runs the real checks, which need no RPC for a name they refuse. */
 let nameAnswer: ((name: string) => ExamNameResult) | null = null;
@@ -42,10 +44,10 @@ vi.mock('@paperseal/chain', async (original) => {
       nameReads.push({ name, rpcUrl: options.rpcUrl });
       return nameAnswer ? Promise.resolve(nameAnswer(name)) : real.resolveExamName(name, options);
     },
-    checkPasskeyName: (name: string, key: Hex, options: { rpcUrl?: string }): Promise<PasskeyNameResult> => {
-      passkeyReads.push({ name, key, rpcUrl: options.rpcUrl });
+    checkPasskeyName: (name: string, key: Hex, options: { rpcUrl?: string; atBlock?: bigint }): Promise<PasskeyNameResult> => {
+      passkeyReads.push({ name, key, rpcUrl: options.rpcUrl, atBlock: options.atBlock });
       if (!passkeyAnswer) return real.checkPasskeyName(name, key, options);
-      const state = passkeyAnswer(name, key);
+      const state = options.atBlock === undefined && passkeyToday ? passkeyToday : passkeyAnswer(name, key);
       return Promise.resolve({ state, name, expected: passkeyRecordValue(key), reason: state });
     },
   };
@@ -109,7 +111,7 @@ function arrange(world: World, files: Record<string, Uint8Array> = {}) {
   chainData = {
     registryCode: registryMatches,
     exam: world.exam,
-    list: { listHash: world.build.approvedListHash },
+    list: { listHash: world.build.approvedListHash, postedBlock: 123n },
     build: world.build,
     criteria: world.criteriaHex,
     entries: world.entriesHex,
@@ -162,6 +164,7 @@ afterEach(() => {
   nameReads = [];
   passkeyAnswer = null;
   passkeyReads = [];
+  passkeyToday = null;
   buckets = [];
   arkivReader = null;
   arkivReaders = [];
@@ -1134,30 +1137,56 @@ describe('party names', () => {
   it('reads only names, never a setter or a plain name', async () => {
     const { world } = await opened(() => () => 'confirmed');
     await waitFor(() => {
-      expect(passkeyReads.length).toBe(3);
+      expect(passkeyReads.filter((read) => read.atBlock === 123n).length).toBe(3);
     });
-    expect(passkeyReads.map((read) => read.name).sort()).toEqual(['asha.eth', 'ben.eth', 'north.centres.maths-board.eth']);
+    expect(passkeyReads.filter((read) => read.atBlock === 123n).map((read) => read.name).sort()).toEqual(['asha.eth', 'ben.eth', 'north.centres.maths-board.eth']);
     const setterKey = toHex(peopleOf(world).find((entry) => entry.role === 1)?.passkeyPublicKey ?? new Uint8Array());
     expect(passkeyReads.some((read) => read.key === setterKey)).toBe(false);
   });
 
   it('says "Not confirmed" in plain words for a missing or wrong record, and never fails the exam', async () => {
     const { step } = await opened((w) => (_name, key) => (key === keyOf(w, 'asha.eth') ? 'mismatch' : 'missing'));
-    expect(await within(step).findByText('The record on asha.eth names a different security key.')).toBeTruthy();
+    expect(await within(step).findByText("When this exam's list was posted, the record on asha.eth named a different security key.")).toBeTruthy();
     expect(within(rowFor(step, 'asha.eth')).getByText('Not confirmed')).toBeTruthy();
-    expect(within(step).getByText('ben.eth has no record for this security key yet.')).toBeTruthy();
+    expect(within(step).getByText("When this exam's list was posted, ben.eth had no record for this security key.")).toBeTruthy();
     // The two failures on this page are the test PKI's, in steps 2 and 6. Step 3 has none.
     expect(step.querySelector('.vf-step-failures')).toBeNull();
     expect(screen.getByRole('alert').textContent).not.toMatch(/Step\s*3/);
     expect(stateOf(step)).toBe('done');
   });
 
-  it('treats a name that could not be read as not confirmed, and still passes the step', async () => {
+  it('says a name could not be checked, never a pass or a different key, and still passes the step', async () => {
     const { step } = await opened(() => () => 'unreadable');
-    expect(await within(step).findByText('asha.eth could not be read just now.')).toBeTruthy();
-    expect(within(step).getAllByText('Not confirmed').length).toBe(2);
+    expect(await within(step).findByText(/The record on asha.eth from when this exam's list was posted could not be read here/)).toBeTruthy();
+    expect(within(rowFor(step, 'asha.eth')).getByText('Could not be checked')).toBeTruthy();
+    expect(within(step).queryByText('Name confirmed')).toBeNull();
+    expect(within(step).queryByText(/different security key/)).toBeNull();
     expect(stateOf(step)).toBe('done');
     expect(screen.getByRole('alert').textContent).not.toMatch(/Step\s*3/);
+  });
+
+  it('reads each name at the block the list was posted, and never falls back to today for the answer', async () => {
+    const { step } = await opened(() => () => 'unreadable');
+    await within(step).findAllByText('Could not be checked');
+    expect(passkeyReads.length).toBeGreaterThan(0);
+    expect(passkeyReads.every((read) => read.atBlock === 123n)).toBe(true);
+  });
+
+  it('keeps a name confirmed when its record matched then and differs today, and says it changed', async () => {
+    passkeyToday = 'mismatch';
+    const { step } = await opened(() => () => 'confirmed');
+    await waitFor(() => {
+      expect(within(step).getAllByText('Name confirmed').length).toBe(3);
+    });
+    expect(await within(step).findByText(/The record on asha.eth has changed since this exam's list was posted/)).toBeTruthy();
+    expect(within(step).queryByText('Not confirmed')).toBeNull();
+  });
+
+  it('leaves a name not confirmed when its record did not match then, even if it matches today', async () => {
+    passkeyToday = 'confirmed';
+    const { step } = await opened(() => () => 'mismatch');
+    expect(await within(step).findByText(/When this exam's list was posted, the record on asha.eth named a different security key/)).toBeTruthy();
+    expect(within(step).queryByText('Name confirmed')).toBeNull();
   });
 
   it('shows a centre name as a label that proves nothing about independence', async () => {

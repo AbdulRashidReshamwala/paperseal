@@ -1,10 +1,9 @@
 import { arkiv } from '@paperseal/arkiv';
-import type { PasskeyNameResult } from '@paperseal/chain';
 import { ownerEnsName, roles, roundTimeSeconds, storageNames, toHex, type ApprovedListEntry, type Hex } from '@paperseal/protocol';
 import type { Tone } from '@paperseal/ui';
 
 import { approvedEntries } from './commitments';
-import { roleNames, type Custody, type View } from './custody';
+import { nameUnchecked, nameWords, roleNames, type Custody, type PartyName, type View } from './custody';
 import { ARKIV_STALE_AFTER_SECONDS, isValidLog, roundReached, type ArkivReport, type LiveReport, type Records, type Release } from './load';
 import type { Polled } from './poll';
 import { releaseTokenName } from './storage';
@@ -74,16 +73,12 @@ export interface People {
 
 function nameState(entry: ApprovedListEntry, name: string | null, names: View['partyNames']): NameState {
   if (name === null) return { tone: 'warn', word: 'Not an ENS name' };
-  const result: PasskeyNameResult | undefined = names?.state === 'ready' ? names.value[toHex(entry.passkeyPublicKey)] : undefined;
-  if (result?.state === 'confirmed') return { tone: 'ok', word: 'Name confirmed' };
+  const result: PartyName | undefined = names?.state === 'ready' ? names.value[toHex(entry.passkeyPublicKey)] : undefined;
+  if (result?.state === 'confirmed') return { tone: 'ok', word: 'Name confirmed', ...(result.changedSince ? { note: nameWords(result, 'this name') } : {}) };
   if (result === undefined && (names === undefined || names.state === 'off')) return { tone: 'neutral', word: 'Not checked' };
   if (result === undefined && names?.state === 'loading') return { tone: 'neutral', word: 'Reading' };
-  const note =
-    result === undefined || result.state === 'refused' || result.state === 'unreadable' || result.state === 'invalid'
-      ? 'This name could not be read just now.'
-      : result.state === 'mismatch'
-        ? 'The record on this name names a different security key.'
-        : 'This name has no record for this security key yet.';
+  const note = nameWords(result, 'this name');
+  if (nameUnchecked(result)) return { tone: 'neutral', word: 'Could not be checked', note };
   return entry.role === roles.neutral ? { tone: 'warn', word: 'Not confirmed', note } : { tone: 'neutral', word: 'Label only', note };
 }
 
@@ -182,7 +177,7 @@ function enoughReleased(view: View): { at: number } | null {
 
 /* ------------------------------------------------------------------ Copies */
 
-export type CopyState = 'checked' | 'held' | 'missing' | 'unread' | 'off' | 'failed';
+export type CopyState = 'checked' | 'held' | 'reading' | 'missing' | 'unread' | 'off' | 'failed';
 export type CopySource = 'registry' | 'bucket' | 'tee' | 'arkiv' | 'swarm';
 
 export const sourceWords: Record<CopySource, string> = {
@@ -196,6 +191,7 @@ export const sourceWords: Record<CopySource, string> = {
 export const stateWords: Record<CopyState, { word: string; tone: Tone }> = {
   checked: { word: 'Checked', tone: 'ok' },
   held: { word: 'Held, not checked', tone: 'neutral' },
+  reading: { word: 'Reading', tone: 'neutral' },
   missing: { word: 'Not found', tone: 'neutral' },
   unread: { word: 'Could not be read', tone: 'neutral' },
   off: { word: 'Not used', tone: 'neutral' },
@@ -299,7 +295,7 @@ function arkivCopies(view: View): { log: Copy; token: Copy } {
   if (!view.sources.arkiv) return same('off', 'Add who may write the copy on Arkiv under "Check it yourself".');
   const polled = view.arkiv;
   if (polled.state === 'error') return same('unread', 'This does not fail the exam. This page keeps trying.');
-  if (polled.state !== 'ready') return same('unread', 'Reading.');
+  if (polled.state !== 'ready') return same('reading', '');
   if ('kind' in polled.value) return same('missing', polled.value.message);
   const report: ArkivReport = polled.value;
   const { log, token } = report;
@@ -327,11 +323,11 @@ function teeCopy(view: View, over: boolean): Copy {
   return { source: 'tee', state: 'held', note: 'It has not shown it is running this exam, so nothing it says is used.' };
 }
 
-const rank: Record<CopyState, number> = { checked: 0, held: 1, unread: 2, failed: 3, missing: 4, off: 5 };
+const rank: Record<CopyState, number> = { checked: 0, held: 1, reading: 2, unread: 3, failed: 4, missing: 5, off: 6 };
 
 function swarmCopy(polled: Polled<SwarmReport> | undefined, judge: (copy: SwarmCopy) => Pick<Copy, 'state' | 'note'>): Copy {
   if (!polled || polled.state === 'off') return { source: 'swarm', state: 'off', note: 'Backups are found through Arkiv, which is not set up here.' };
-  if (polled.state === 'loading') return { source: 'swarm', state: 'unread', note: 'Reading.' };
+  if (polled.state === 'loading') return { source: 'swarm', state: 'reading', note: '' };
   if (polled.state === 'error') return { source: 'swarm', state: 'unread', note: `No backup could be looked up just now. This does not fail the exam. ${polled.message}` };
   const { copies } = polled.value;
   if (copies.length === 0) return { source: 'swarm', state: 'missing', note: 'No backup is recorded for this exam.' };
@@ -436,7 +432,7 @@ export function copies(view: View, result: Pick<Custody, 'progressSource'>, swar
 /* ------------------------------------------------------------------ The relay */
 
 export interface Feed {
-  state: 'off' | 'unread' | 'silent' | 'fresh' | 'stopped' | 'quiet';
+  state: 'off' | 'reading' | 'unread' | 'silent' | 'fresh' | 'stopped' | 'quiet';
   text: string;
   /** The newest heartbeat, if one is still kept. */
   heartbeat?: { at: number; stage: string };
@@ -448,7 +444,8 @@ function feed(view: View, over: boolean): Feed {
   if (!view.sources.arkiv) return { state: 'off', text: 'The copy on Arkiv is not set up here.' };
   const polled = view.arkiv;
   if (polled.state === 'error') return { state: 'unread', text: 'The relay’s feed could not be read just now. This does not fail the exam.' };
-  if (polled.state !== 'ready' || 'kind' in polled.value) return { state: 'unread', text: 'Reading the relay’s feed.' };
+  if (polled.state !== 'ready') return { state: 'reading', text: 'Reading.' };
+  if ('kind' in polled.value) return { state: 'silent', text: polled.value.message };
   const report = polled.value;
   const exam = view.records.state === 'ready' ? view.records.value.chain.exam : null;
   const open = exam ? roundReached(Number(exam.settings.unlockRound), view.latest.round, view.now) && !over : false;
