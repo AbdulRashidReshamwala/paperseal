@@ -16,20 +16,25 @@ import { usePoll } from './usePoll';
 const POLL_MS = 15_000;
 const EXAM_ARG = /^--exam-id=(0x[0-9a-fA-F]{64})$/;
 
+/** The exam a token's start arguments name, or null if it names none. This reads the token and checks nothing. */
+export function examIdInToken(token: string): Hex | null {
+  const claims = decodeToken(token) as unknown as { submods?: { container?: { args?: unknown } } };
+  const args = claims.submods?.container?.args;
+  if (!Array.isArray(args)) return null;
+  for (const arg of args as unknown[]) {
+    const found = typeof arg === 'string' ? EXAM_ARG.exec(arg) : null;
+    if (found?.[1]) return found[1].toLowerCase() as Hex;
+  }
+  return null;
+}
+
 /** The exam the machine says it runs, or null if that cannot be read. */
 export async function machineExamId(tee: Partial<Pick<TeeClient, 'status'>> & Pick<TeeClient, 'attestation'>): Promise<Hex | null> {
   try {
     const named = (await tee.status?.())?.examId;
     if (named) return named.toLowerCase() as Hex;
     const { token } = await tee.attestation();
-    const claims = decodeToken(token) as unknown as { submods?: { container?: { args?: unknown } } };
-    const args = claims.submods?.container?.args;
-    if (!Array.isArray(args)) return null;
-    for (const arg of args as unknown[]) {
-      const found = typeof arg === 'string' ? EXAM_ARG.exec(arg) : null;
-      if (found?.[1]) return found[1].toLowerCase() as Hex;
-    }
-    return null;
+    return examIdInToken(token);
   } catch {
     return null;
   }

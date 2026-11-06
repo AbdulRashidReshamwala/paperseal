@@ -158,7 +158,7 @@ export interface View {
    * What each listed party's ENS name says about its security key, by passkey public key. A label and a
    * proof of who holds a key, never a check the exam depends on. Absent where names are not read.
    */
-  partyNames?: Polled<Record<string, PasskeyNameResult>>;
+  partyNames?: Polled<Record<string, PartyName>>;
   sources: { chain: boolean; storage: boolean; tee: boolean; arkiv: boolean };
   records: Polled<Records>;
   live: Polled<LiveReport | Neutral>;
@@ -732,7 +732,23 @@ function listSummary(entries: readonly ApprovedListEntry[]): string {
 }
 
 const ensNote =
-  'A name marked "Name confirmed" has a record, set by whoever controls that name, that names this security key. It is not something the exam depends on, so a name that is not confirmed never fails a check.';
+  'A name marked "Name confirmed" had a record naming this security key when this exam\'s list was posted, set by whoever controlled that name. A name can be given a new key later, so that is the time that counts. It is not something the exam depends on, so a name that is not confirmed never fails a check.';
+
+/** What a party name's check says, with `changedSince` when today's record no longer matches it. */
+export type PartyName = PasskeyNameResult & { changedSince?: boolean };
+
+/** Whether the check never got an answer. That is neither a match nor a wrong key. */
+export const nameUnchecked = (result: PartyName | undefined) =>
+  result === undefined || result.state === 'refused' || result.state === 'unreadable' || result.state === 'invalid';
+
+/** What a name's record said when the list was posted, in plain words. `subject` is the name, or "this name". */
+export function nameWords(result: PartyName | undefined, subject: string): string {
+  if (nameUnchecked(result)) return `The record on ${subject} from when this exam's list was posted could not be read here. This page tries again.`;
+  if (result?.changedSince) return `The record on ${subject} has changed since this exam's list was posted. It matched then, and that is what counts.`;
+  return result?.state === 'mismatch'
+    ? `When this exam's list was posted, the record on ${subject} named a different security key.`
+    : `When this exam's list was posted, ${subject} had no record for this security key.`;
+}
 
 /** The name above `name`, whose controller vouches for it. Null for a name that sits directly under a top-level domain, which its holder controls. */
 function directoryOf(name: string): string | null {
@@ -752,7 +768,10 @@ function ensRows(entry: ApprovedListEntry, name: string, names: View['partyNames
   const label = roleNames[entry.role] ?? `Unknown role ${String(entry.role)}`;
   const result = names?.state === 'ready' ? names.value[toHex(entry.passkeyPublicKey)] : undefined;
   if (result?.state === 'confirmed') {
-    return [{ kind: 'tag', label, value: name, tone: 'ok', tag: 'Name confirmed' }];
+    return [
+      { kind: 'tag', label, value: name, tone: 'ok', tag: 'Name confirmed' },
+      ...(result.changedSince ? [{ kind: 'text', text: nameWords(result, name) } as const] : []),
+    ];
   }
   const holdsKey = entry.role === roles.neutral;
   const pending = result === undefined && (names === undefined || names.state === 'off' || names.state === 'loading');
@@ -763,12 +782,13 @@ function ensRows(entry: ApprovedListEntry, name: string, names: View['partyNames
       ...(off ? [{ kind: 'text', text: `${name} was not read. Add where to read the public record under "Check it yourself".` } as const] : []),
     ];
   }
-  const why =
-    result === undefined || result.state === 'refused' || result.state === 'unreadable' || result.state === 'invalid'
-      ? `${name} could not be read just now.`
-      : result.state === 'mismatch'
-        ? `The record on ${name} names a different security key.`
-        : `${name} has no record for this security key yet.`;
+  const why = nameWords(result, name);
+  if (nameUnchecked(result)) {
+    return [
+      { kind: 'tag', label, value: name, tone: 'neutral', tag: 'Could not be checked' },
+      { kind: 'text', text: why },
+    ];
+  }
   return [
     { kind: 'tag', label, value: name, tone: holdsKey ? 'warn' : 'neutral', tag: holdsKey ? 'Not confirmed' : 'Label only' },
     { kind: 'text', text: holdsKey ? why : `${why} ${name} is a label${directoryOf(name) ? `, and whoever controls ${directoryOf(name) ?? ''} vouches for it` : ''}. It does not show that the centre is independent.` },
@@ -1604,8 +1624,11 @@ const BEFORE_SEAL: readonly StepId[] = ['name', 'published', 'attested', 'people
 function sealOf(c: Context, steps: readonly CustodyStep[]): SealState | null {
   const { proof } = c.view;
   const opened = proof?.ok === true ? proof.result.state : null;
-  if (opened === 'opened') return 'open';
-  if (opened === 'failed') return 'opening';
+  // The seal breaks only for a real problem. Before there is a paper there is no seal to break.
+  if (opened === 'failed') return 'broken';
+  if (c.build && steps.some((step) => step.state === 'failed')) return 'broken';
+  // Open is a seal of approval, so it waits for the last check.
+  if (opened === 'opened') return steps.find((step) => step.id === 'open')?.state === 'done' ? 'open' : 'opening';
   // A seal says the paper was built and sealed as promised, so all of that has to have been shown.
   if (!steps.filter((step) => BEFORE_SEAL.includes(step.id)).every((step) => step.state === 'done')) return null;
   if (opened === 'sealed') return 'sealed';

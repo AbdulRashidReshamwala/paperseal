@@ -5,7 +5,7 @@ import { sha256, type Address } from 'viem';
 import { describe, expect, it, vi, type Mock } from 'vitest';
 
 import { approvedList, registryAddress } from './fixtures';
-import { examStatus, findParticipant, loadExamHistory, roleWords, type HistoryReader, type HistoryRegistry } from './history';
+import { examStatus, findParticipant, isAbandoned, loadExamHistory, roleWords, type HistoryReader, type HistoryRegistry } from './history';
 
 /*
  * The Arkiv reader and the registry are the two things stubbed here. Approved lists are real
@@ -230,7 +230,7 @@ describe('finding exams by participant', () => {
     const reader = readerOf([], rows);
     const search = await findParticipant({ reader, registry, writers: [writer], owner });
     expect(reader.participantRows).toHaveBeenCalledWith({ registry: registryAddress, owner }, [writer]);
-    expect(search.exams).toEqual([{ examId: idOf(1), role: 'centre-holder', examStart: 1_900_000_001n }]);
+    expect(search.exams).toEqual([{ examId: idOf(1), role: 'centre-holder', examStart: 1_900_000_001n, built: false }]);
     expect(search.ignored).toEqual({ notOnList: 4, badList: 0, malformed: 0 });
     expect(search.unchecked).toEqual([]);
   });
@@ -270,7 +270,7 @@ describe('finding exams by participant', () => {
     const registry = registryOf({ [idOf(1)]: onChain(1, { list: true, entries }) });
     registry.getExam.mockImplementation(() => Promise.reject(new Error('HTTP request failed. Status: 429')));
     const search = await findParticipant({ reader: readerOf([], [participantRow(1)]), registry, writers: [writer], owner: centre.owner });
-    expect(search.exams).toEqual([{ examId: idOf(1), role: 'centre-holder', examStart: null }]);
+    expect(search.exams).toEqual([{ examId: idOf(1), role: 'centre-holder', examStart: null, built: false }]);
   });
 
   it('matches the owner exactly, and reads nothing without writers', async () => {
@@ -311,5 +311,15 @@ describe('examStatus', () => {
     expect(examStatus({ examStart: start, stage: 'built', rounds }, 150, at(150))).toBe('sealed');
     expect(examStatus({ examStart: start, stage: 'built', rounds }, 250, at(250))).toBe('under-way');
     expect(examStatus({ examStart: start, stage: 'built', rounds }, 300, at(300))).toBe('finished');
+  });
+});
+
+describe('isAbandoned', () => {
+  it('needs a passed start and a known absence of a Build', () => {
+    expect(isAbandoned({ examStart: 100n, built: false }, 100)).toBe(true);
+    expect(isAbandoned({ examStart: 100n, built: false }, 99)).toBe(false);
+    expect(isAbandoned({ examStart: 100n, built: true }, 500)).toBe(false);
+    expect(isAbandoned({ examStart: 100n, built: null }, 500)).toBe(false);
+    expect(isAbandoned({ examStart: null, built: false }, 500)).toBe(false);
   });
 });

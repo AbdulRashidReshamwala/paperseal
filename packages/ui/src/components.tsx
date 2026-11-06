@@ -6,7 +6,7 @@ import {
 } from "react";
 
 import { isChromium, type BrandedNavigator } from "./browser";
-import { Logo, Wordmark } from "./Logo";
+import { HomeMark, Logo } from "./Logo";
 
 export function AppShell(props: {
   name: string;
@@ -273,7 +273,7 @@ export function ChromiumGate(props: {
   return (
     <div className="ps-shell">
       <header className="ps-role">
-        <Wordmark />
+        <HomeMark />
       </header>
       <Screen
         title="Open this page in Chrome"

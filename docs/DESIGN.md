@@ -108,7 +108,7 @@ Spacing sits on a 4px grid: `--ps-space-1` to `--ps-space-8` are 4, 8, 12, 16, 2
 | Token | Value | Use |
 | --- | --- | --- |
 | `--ps-time-quick` | 140ms | Hover and press |
-| `--ps-time-seal` | 720ms | The seal breaking or closing |
+| `--ps-time-seal` | 720ms | The seal breaking |
 | `--ps-ease-settle` | slight overshoot | Wax settling |
 
 Motion is for the seal and for waiting on a security key. Under `prefers-reduced-motion`, all animation and transitions stop. Every state still shows in full, because state is never carried by movement.
@@ -214,13 +214,14 @@ It reads as a ledger: `when` on the left, then the rail, then the label. On phon
 
 ### `Seal`
 
-The signature. `state` is `sealed`, `opening` or `open`. It closes, cracks and breaks as the state changes, so keep the same element mounted and change the prop. `caption` prints the state in words. `stamp` presses it down on mount. Use it at most once per screen, and only on a screen where the seal's state is the news.
+The signature, a seal of approval. `state` is `sealed`, `opening`, `open` or `broken`. It stays whole through a normal exam, opening included, and comes apart only as `broken`, so keep the same element mounted and change the prop. `caption` prints the state in words, or the words you pass. `stamp` presses it down on mount. Use it at most once per screen, and only on a screen where the seal's state is the news.
 
 | Exam state | Seal |
 | --- | --- |
 | Questions sealed, paper built, waiting for unlock | `sealed` |
 | Paper unlocked, key holders releasing | `opening` |
 | Paper decrypted at a centre, or opened to the public | `open` |
+| The verifier found a failed check on a published paper | `broken` |
 
 Only show a seal's state that the code has established. `Seal` is not evidence, and never show `sealed` as a stand-in for a check that hasn't run.
 

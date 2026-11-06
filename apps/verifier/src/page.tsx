@@ -1,5 +1,5 @@
 import { createArkivReader } from '@paperseal/arkiv';
-import { checkPasskeyName, createEnsLookup, resolveExamName, type ExamNameResult, type PasskeyNameResult } from '@paperseal/chain';
+import { checkPasskeyName, createEnsLookup, resolveExamName, type ExamNameResult } from '@paperseal/chain';
 import { createSwarmClient } from '@paperseal/swarm';
 import { ownerEnsName, roles, toHex, type Hex, type Paper } from '@paperseal/protocol';
 import {
@@ -22,13 +22,13 @@ import { http } from 'viem';
 import { teeStorageBucket } from './attest';
 import { createBackupCache, type BackupSource } from './backup';
 import { loadChain, type ChainData } from './checks';
-import { clockTime, custody, dayTime, REPOSITORY, type Custody, type CustodyStep, type Failure } from './custody';
+import { clockTime, custody, dayTime, REPOSITORY, type Custody, type CustodyStep, type Failure, type PartyName } from './custody';
 import { Evidence } from './evidence';
 import { checkedCopies, copies, people, timeline, type Copies, type People } from './facts';
 import { readBoardName, readExamName, readVersion } from './identity';
 import { useExamLink } from './link';
 import { useLatestRound, useNow } from './live';
-import { loadArkiv, loadLive, loadRecords, releaseRecorded, roundReached, signedKeyPriv, useProof, type Records } from './load';
+import { loadArkiv, loadLive, loadRecords, releaseRecorded, roundReached, signedKeyPriv, useProof, withinTime, type Records } from './load';
 import { eachLimited } from './history';
 import { usePoll, type Polled } from './poll';
 import { approvedEntries } from './commitments';
@@ -58,6 +58,10 @@ const CLOCK_POLL_MS = 6000;
 const NAME_READS_AT_ONCE = 4;
 /** The exam's names and its Swarm backups change rarely, so they are looked at now and then. */
 const SLOW_POLL_MS = 5 * 60_000;
+/** A read that never answers must not leave a section on "Reading". It counts as failed, and is tried again. */
+const READ_TIMEOUT_MS = 30_000;
+/** A Swarm read fetches each file of a backup, so it gets longer. */
+const SWARM_TIMEOUT_MS = 60_000;
 
 /**
  * Reads the exam name on a `#/name/` route, with the viewer's own RPC and nothing else. An RPC that
@@ -80,25 +84,33 @@ function useExamName(name: string | null, rpcUrl: string, everyMs: number): Poll
 /**
  * Reads each listed party's ENS name against its security key, with the viewer's own RPC and nothing
  * else. Setters have no name. A name is a label and a proof of who holds a key, never a check the exam
- * depends on, so every answer comes back as a result and a failed read never fails anything.
+ * depends on, so every answer comes back as a result and a failed read never fails anything. Each is
+ * read as it stood when the list was posted: a name given a new key later says nothing about this
+ * exam. Today's record is read only to say a confirmed name has changed since.
  */
-function usePartyNames(entries: Hex | null, rpcUrl: string, everyMs: number): Polled<Record<string, PasskeyNameResult>> {
+function usePartyNames(entries: Hex | null, postedBlock: bigint | null, rpcUrl: string, everyMs: number): Polled<Record<string, PartyName>> {
   const load = useMemo(() => {
     const listed = approvedEntries(entries ?? null) ?? [];
     const named = listed.flatMap((entry) => {
       const name = entry.role === roles.setter ? null : ownerEnsName(entry.owner);
       return name ? [{ name, key: toHex(entry.passkeyPublicKey) }] : [];
     });
-    if (named.length === 0 || !rpcUrl) return null;
+    if (named.length === 0 || !rpcUrl || postedBlock === null) return null;
+    const readName = async (name: string, key: Hex): Promise<PartyName> => {
+      const then = await checkPasskeyName(name, key, { rpcUrl, atBlock: postedBlock });
+      if (then.state !== 'confirmed') return then;
+      const today = await checkPasskeyName(name, key, { rpcUrl });
+      return today.state === 'mismatch' ? { ...then, changedSince: true } : then;
+    };
     // A name that answered is kept for the visit. Only one the RPC could not answer is read again.
-    const known = new Map<string, PasskeyNameResult>();
+    const known = new Map<string, PartyName>();
     return async () => {
       const left = named.filter(({ key }) => !known.has(key));
-      const read = await eachLimited(left, NAME_READS_AT_ONCE, async ({ name, key }) => [key, await checkPasskeyName(name, key, { rpcUrl })] as const);
+      const read = await eachLimited(left, NAME_READS_AT_ONCE, async ({ name, key }) => [key, await readName(name, key)] as const);
       for (const [key, result] of read) if (result.state !== 'unreadable') known.set(key, result);
       return { ...Object.fromEntries(read), ...Object.fromEntries(known) };
     };
-  }, [entries, rpcUrl]);
+  }, [entries, postedBlock, rpcUrl]);
   return usePoll(load, everyMs);
 }
 
@@ -205,7 +217,7 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
   const records = usePoll(loadRecordsNow, recordsEvery);
 
   const chain = records.state === 'ready' ? records.value.chain : null;
-  const partyNames = usePartyNames(chain?.entries ?? null, settings.rpcUrl, recordsEvery);
+  const partyNames = usePartyNames(chain?.entries ?? null, chain?.list?.postedBlock ?? null, settings.rpcUrl, recordsEvery);
   const chainRef = useRef<ChainData | null>(chain);
   useEffect(() => {
     chainRef.current = chain;
@@ -224,12 +236,19 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
   }, [tee, registry, examId, wantsLive, bucket]);
   const live = usePoll(loadLiveNow, pollMs.live);
 
+  // Each press of "Read again" bumps this, which makes a new read of Arkiv and Swarm below.
+  const [retries, setRetries] = useState(0);
   const loadArkivNow = useMemo(() => {
     if (!arkivReader || !registry || !examId || !examPublished) return null;
+    void retries;
     const addresses = writers.map((writer) => writer.address);
     return () =>
-      loadArkiv({ reader: arkivReader, writers: addresses, chain: () => chainRef.current, examId, registry: registry.address as Hex, bucket });
-  }, [arkivReader, writers, registry, examId, examPublished, bucket]);
+      withinTime(
+        loadArkiv({ reader: arkivReader, writers: addresses, chain: () => chainRef.current, examId, registry: registry.address as Hex, bucket }),
+        READ_TIMEOUT_MS,
+        'Arkiv took too long to answer.',
+      );
+  }, [arkivReader, writers, registry, examId, examPublished, bucket, retries]);
   const arkivRead = usePoll(loadArkivNow, finished ? recordsEvery : pollMs.live * 3);
 
   // Every backup recorded for this exam, read and checked for the Copies section only.
@@ -237,20 +256,25 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
   const writerAddresses = useMemo(() => writers.map((writer) => writer.address), [writers]);
   const loadSwarmNow = useMemo(() => {
     if (!arkivReader || !registry || !examId || !examPublished) return null;
+    void retries;
     const client = swarmApiUrl ? createSwarmClient({ apiUrl: swarmApiUrl }) : null;
     return () =>
-      loadSwarm({
-        rows: arkivReader,
-        swarm: client,
-        apiUrl: swarmApiUrl,
-        cache: swarmCache,
-        chain: () => chainRef.current,
-        writers: writerAddresses,
-        examId,
-        registry: registry.address as Hex,
-        bucket,
-      });
-  }, [arkivReader, registry, examId, examPublished, swarmApiUrl, swarmCache, writerAddresses, bucket]);
+      withinTime(
+        loadSwarm({
+          rows: arkivReader,
+          swarm: client,
+          apiUrl: swarmApiUrl,
+          cache: swarmCache,
+          chain: () => chainRef.current,
+          writers: writerAddresses,
+          examId,
+          registry: registry.address as Hex,
+          bucket,
+        }),
+        SWARM_TIMEOUT_MS,
+        'The backup took too long to read.',
+      );
+  }, [arkivReader, registry, examId, examPublished, swarmApiUrl, swarmCache, writerAddresses, bucket, retries]);
   const swarmRead = usePoll(loadSwarmNow, finished ? recordsEvery : SLOW_POLL_MS);
 
   const boardAddress = chain?.registryCode.state === 'match' ? chain.registryCode.board : null;
@@ -302,6 +326,9 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
     arkivWriters: writers,
     arkivWritersIgnored: resolved?.arkivWritersIgnored ?? [],
     swarm: swarmRead,
+    retryCopies: () => {
+      setRetries((count) => count + 1);
+    },
     identity,
     board: boardAddress,
     registryAddress: (registry?.address as Hex | undefined) ?? null,
@@ -314,7 +341,7 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
 
 function SealMark({ state, empty }: { state: SealState | null; empty: string }) {
   // Keep one element mounted, so the seal closes and breaks as its state changes.
-  if (state) return <Seal state={state} caption />;
+  if (state) return <Seal state={state} caption={state === 'open' ? 'Approved' : true} />;
   return (
     <figure className="vf-no-seal">
       <span className="vf-no-seal-ring" aria-hidden="true" />
@@ -327,11 +354,10 @@ function SealMark({ state, empty }: { state: SealState | null; empty: string }) 
  * The same shape as `Stage`, because `Stage` can only show a seal in one of its three states, and
  * before the paper is sealed this page has to show that there is no seal yet.
  */
-function Head({ view, zone }: { view: Custody; zone: string }) {
+function Head({ view, chosen }: { view: Custody; chosen: boolean }) {
   return (
-    <section className="ps-stage" data-sealed="true">
+    <section className="ps-stage" data-sealed={chosen ? 'true' : undefined}>
       <div className="ps-stage-main">
-        <p className="ps-eyebrow">Where this exam is now</p>
         <h1 className="ps-stage-title">{view.headline}</h1>
         <div className="ps-stage-lede">
           <p>{view.verdict}</p>
@@ -340,11 +366,12 @@ function Head({ view, zone }: { view: Custody; zone: string }) {
           <span className="ps-stage-next-label">What happens next</span>
           <span>{view.next}</span>
         </p>
-        <p className="vf-zone">Times are in your time zone, {zone}.</p>
       </div>
-      <div className="ps-stage-seal">
-        <SealMark state={view.seal} empty={view.noSeal} />
-      </div>
+      {chosen ? (
+        <div className="ps-stage-seal">
+          <SealMark state={view.seal} empty={view.noSeal} />
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -465,14 +492,14 @@ function PaperView({ paper }: { paper: Paper }) {
   );
 }
 
-function Freshness({ records }: { records: Polled<Records> }) {
+function Freshness({ records, zone }: { records: Polled<Records>; zone: string }) {
   if (records.state !== 'ready') return null;
   const time = new Intl.DateTimeFormat('en-GB', { timeStyle: 'medium' }).format(records.readAt);
   return (
     <p className="vf-fresh">
       {records.stale
-        ? `The public record could not be read again, so this shows what it said at ${time}. This page keeps trying.`
-        : `Last read at ${time}. This page updates by itself.`}
+        ? `The public record could not be read again, so this shows what it said at ${time}. This page keeps trying. Times are in ${zone}.`
+        : `Last read at ${time}. Times are in ${zone}.`}
     </p>
   );
 }
@@ -644,18 +671,18 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
   if (!loaded) {
     return (
       <div className="ps-shell vf-page">
-        <RoleHeader role="Public record" note="Anyone can check this" />
+        <RoleHeader role="Public record" />
         <LoadingSeal />
       </div>
     );
   }
   return (
     <div className="ps-shell vf-page">
-      <RoleHeader role="Public record" {...(exam ? { exam } : {})} note="Anyone can check this" />
+      <RoleHeader role="Public record" {...(exam ? { exam } : {})} />
       <main>
         <FailureAlarm failures={result.failures} />
         <Warnings warnings={result.warnings} />
-        <Head view={result} zone={zoneName()} />
+        <Head view={result} chosen={chosen} />
         <Glance items={recordedExam ? glanceOf(boardLabel, found, held) : []} />
         {view.records.state === 'error' ? (
           <p className="vf-gap">
@@ -675,8 +702,15 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
             </Check>
           </p>
         ) : null}
-        <Stepper steps={result.steps.map((step) => toStep(step, view.now))} evidenceLabel="Show the evidence" />
-        <Freshness records={view.records} />
+        {chosen ? (
+          <Stepper steps={result.steps.map((step) => toStep(step, view.now))} evidenceLabel="Show the evidence" />
+        ) : (
+          <section className="ps-panel vf-choose">
+            <ExamPicker current={false} invalid={view.invalidLink} />
+            <HistoryLink />
+          </section>
+        )}
+        <Freshness records={view.records} zone={zoneName()} />
         {recordedExam && view.examId && view.registryAddress ? (
           <IdentitySection
             examId={view.examId}
@@ -693,19 +727,14 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
         ) : null}
         {found ? <PeopleSection found={found} zone={zone} /> : null}
         {moments.length > 0 ? <TimelineSection moments={moments} zone={zone} /> : null}
-        {held ? <CopiesSection found={held} zone={zone} view={view} /> : null}
+        {held ? <CopiesSection found={held} zone={zone} view={view} onRetry={view.retryCopies} /> : null}
         {result.paper ? <PaperView paper={result.paper} /> : null}
         {chosen ? (
           <Panel title="Check a different exam">
             <ExamPicker current invalid={false} />
             <HistoryLink />
           </Panel>
-        ) : (
-          <Panel title="Choose an exam">
-            <ExamPicker current={false} invalid={view.invalidLink} />
-            <HistoryLink />
-          </Panel>
-        )}
+        ) : null}
         <section className="ps-panel vf-self-host">
           <h2>Check it yourself</h2>
           <p>

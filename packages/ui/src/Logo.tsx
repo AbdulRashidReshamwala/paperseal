@@ -51,3 +51,12 @@ export function Wordmark(props: {
     </span>
   );
 }
+
+/** The wordmark in a page's header, linking home. Both apps route by hash, so this needs no router. */
+export function HomeMark() {
+  return (
+    <a className="ps-home" href="#/">
+      <Wordmark />
+    </a>
+  );
+}

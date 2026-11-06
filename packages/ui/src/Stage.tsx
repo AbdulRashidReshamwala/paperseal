@@ -1,7 +1,7 @@
 import type { ButtonHTMLAttributes, MouseEvent, ReactNode } from 'react';
 
 import { CheckIcon } from './icons';
-import { Wordmark } from './Logo';
+import { HomeMark } from './Logo';
 import { Seal, type SealState } from './Seal';
 
 /** One quiet line naming who this is for and which exam. There are no tabs: state picks the screen. */
@@ -15,7 +15,7 @@ export function RoleHeader(props: {
 }) {
   return (
     <header className="ps-role">
-      <Wordmark />
+      <HomeMark />
       <span className="ps-role-name">{props.role}</span>
       {props.exam ? <span className="ps-role-exam">{props.exam}</span> : null}
       {props.note ? <span className="ps-role-note">{props.note}</span> : null}
@@ -29,7 +29,7 @@ export function Page(props: { header?: ReactNode; children: ReactNode }) {
     <div className="ps-shell">
       {props.header ?? (
         <header className="ps-role">
-          <Wordmark />
+          <HomeMark />
         </header>
       )}
       <main>{props.children}</main>

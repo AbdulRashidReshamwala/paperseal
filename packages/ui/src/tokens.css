@@ -201,6 +201,15 @@ a:hover {
   white-space: nowrap;
 }
 
+.ps-home {
+  display: inline-flex;
+  text-decoration: none;
+}
+
+.ps-home:hover .ps-wordmark {
+  color: var(--ps-seal-ink);
+}
+
 .ps-logo {
   flex: none;
 }
@@ -497,39 +506,16 @@ a:hover {
   transition: transform var(--ps-time-seal) var(--ps-ease-settle);
 }
 
-.ps-seal-crack {
-  fill: none;
-  stroke: var(--ps-paper);
-  stroke-width: 1.6;
-  stroke-linejoin: bevel;
-  stroke-dasharray: 1;
-  stroke-dashoffset: 1;
-  transition: stroke-dashoffset var(--ps-time-seal) ease-out;
-}
-
-.ps-seal[data-state='opening'] .ps-seal-crack {
-  stroke-dashoffset: 0;
-}
-
-.ps-seal[data-state='opening'] .ps-seal-half[data-side='left'] {
-  transform: translate(-1px, 0) rotate(-1.5deg);
-}
-
-.ps-seal[data-state='opening'] .ps-seal-half[data-side='right'] {
-  transform: translate(1px, 0) rotate(1deg);
-}
-
-.ps-seal[data-state='open'] .ps-seal-half[data-side='left'] {
+.ps-seal[data-state='broken'] .ps-seal-half[data-side='left'] {
   transform: translate(-9px, 3px) rotate(-11deg);
 }
 
-.ps-seal[data-state='open'] .ps-seal-half[data-side='right'] {
+.ps-seal[data-state='broken'] .ps-seal-half[data-side='right'] {
   transform: translate(9px, 6px) rotate(9deg);
 }
 
-.ps-seal[data-state='open'] .ps-seal-crack {
-  stroke-dashoffset: 1;
-  transition: none;
+.ps-seal[data-state='broken'] figcaption {
+  color: var(--ps-fail);
 }
 
 .ps-seal[data-stamp='true'] svg {
