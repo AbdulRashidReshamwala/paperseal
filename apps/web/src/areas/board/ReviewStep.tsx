@@ -1,6 +1,6 @@
-import { chain, roles } from '@paperseal/protocol';
+import { chain, roles, type Hex } from '@paperseal/protocol';
 import { Button, Hash, LoadingSeal, PrimaryAction, Row, Rows, useLoaded } from '@paperseal/ui';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { setCurrentExamId } from '../../shared/currentExam';
@@ -11,7 +11,7 @@ import { useBoardWallet, walletStageLabels, type WalletStage } from './hooks';
 import { Fold, Problem, WalletProblem } from './Parts';
 import { saveParties, type ChosenParty } from './parties';
 import { bankNeeded, formatWhen } from './plan';
-import { explainError, publishExam, type PublishRequest } from './publishFlow';
+import { explainError, publishExam, readBack, type PublishRequest } from './publishFlow';
 import type { Releases } from './releases';
 import { versionSummary, VersionEvidence, VersionPicker, VersionProblems } from './VersionChoice';
 
@@ -53,6 +53,36 @@ export function ReviewStep(props: { releases: Releases; onBack: () => void }) {
         }
       : null;
 
+  function openPublished(examId: Hex) {
+    setCurrentExamId(examId);
+    rememberExam({ id: examId, name: plan.name });
+    if (plan.parties.length > 0) saveParties(examId, plan.parties);
+    resetDraft();
+    void navigate(`/board/exam/${examId}`);
+  }
+
+  // A page that lost track of its publish, such as a reload while it was mining, still finds its exam.
+  const latest = useRef({ request, openPublished, running: progress.state === 'running' });
+  useEffect(() => {
+    latest.current = { request, openPublished, running: progress.state === 'running' };
+  });
+  const examId = request?.examId;
+  useEffect(() => {
+    const { createRegistry } = environment;
+    if (!examId || !createRegistry) return;
+    let stopped = false;
+    const look = async () => {
+      const now = latest.current;
+      if (now.running || !now.request) return;
+      const back = await readBack(createRegistry(), now.request, 1).catch(() => null);
+      if (!stopped && back?.matches) latest.current.openPublished(now.request.examId);
+    };
+    void look();
+    return () => {
+      stopped = true;
+    };
+  }, [environment, examId]);
+
   async function confirm() {
     if (!request) return;
     // The lock time may have passed while this page was open.
@@ -67,18 +97,10 @@ export function ReviewStep(props: { releases: Releases; onBack: () => void }) {
         setProgress({ state: 'running', stage });
       });
       // The pointer follows the exam only when ExamRegistry returns what was sent. A mismatch leaves it where it was.
-      if (outcome.matches) {
-        setCurrentExamId(request.examId);
-        rememberExam({ id: request.examId, name: plan.name });
-      }
-      if (outcome.matches && plan.parties.length > 0) saveParties(request.examId, plan.parties);
       addReceipt({ kind: 'publish', outcome, version: request.fields.version, name: plan.name });
       setProgress({ state: 'idle' });
       // A correct read-back goes straight on to the invites. Only a mismatch stops on a receipt.
-      if (outcome.matches) {
-        resetDraft();
-        void navigate(`/board/exam/${request.examId}`);
-      }
+      if (outcome.matches) openPublished(request.examId);
     } catch (error) {
       setProgress({ state: 'failed', message: explainError(error) });
     }
