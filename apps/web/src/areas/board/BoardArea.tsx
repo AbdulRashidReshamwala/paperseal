@@ -13,6 +13,7 @@ import { BoardHome } from './BoardHome';
 import { BuildStep } from './BuildStep';
 import { DetailsStep, TopicsStep } from './CreateStep';
 import { DraftShell, ExamShell } from './DraftFrame';
+import { ExamNameCard } from './ExamNameCard';
 import { decideStep, readSnapshot, type Snapshot } from './examState';
 import { usePoll } from './hooks';
 import { MachineCheck } from './MachineCheck';
@@ -213,6 +214,7 @@ function BoardFlow(props: { mode: Mode }) {
     withLink(
       <ExamShell>
         <MachineCheck examId={examId} snapshot={value} />
+        <ExamNameCard key={examId} examId={examId} />
         {children}
       </ExamShell>,
     );

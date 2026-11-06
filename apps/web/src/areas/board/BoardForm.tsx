@@ -1,4 +1,5 @@
 import type { ExamRegistry } from '@paperseal/chain';
+import { examIdFromName, type Hex } from '@paperseal/protocol';
 import type { TeeClient } from '@paperseal/tee-client';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router';
@@ -36,6 +37,8 @@ interface BoardForm {
   resetDraft: () => void;
   /** The published exam's name. ExamRegistry stores only its hash, so this lasts for the session. */
   examName: string | null;
+  /** True once for an exam this session just published, so its name is asked for in the wallet by itself, once. */
+  claimNamePrompt: (examId: Hex) => boolean;
   receipts: readonly Receipt[];
   /** A receipt the board has to see before the flow moves on. */
   held: Receipt | null;
@@ -154,10 +157,15 @@ export function BoardFormProvider(props: {
     latest.current = blank;
     setForm(blank);
   }, []);
+  const namePrompts = useRef(new Set<string>());
+  const claimNamePrompt = useCallback((examId: Hex) => namePrompts.current.delete(examId.toLowerCase()), []);
   const addReceipt = useCallback((receipt: Receipt) => {
     setReceipts((previous) => [...previous, receipt]);
     if (mustBeSeen(receipt)) setHeld(receipt);
-    if (receipt.kind === 'publish' && receipt.outcome.matches) setExamName(receipt.name);
+    if (receipt.kind === 'publish' && receipt.outcome.matches) {
+      setExamName(receipt.name);
+      namePrompts.current.add(examIdFromName(receipt.name).toLowerCase());
+    }
   }, []);
   const dismissHeld = useCallback(() => {
     setHeld(null);
@@ -175,6 +183,7 @@ export function BoardFormProvider(props: {
       draftMissing: form.missing,
       resetDraft,
       examName,
+      claimNamePrompt,
       receipts,
       held,
       addReceipt,
@@ -182,7 +191,7 @@ export function BoardFormProvider(props: {
       environment,
       tee,
     }),
-    [plan, setPlan, publish, setPublish, draftStep, setDraftStep, draftId, form.missing, resetDraft, examName, receipts, held, addReceipt, dismissHeld, environment, tee],
+    [plan, setPlan, publish, setPublish, draftStep, setDraftStep, draftId, form.missing, resetDraft, examName, claimNamePrompt, receipts, held, addReceipt, dismissHeld, environment, tee],
   );
   return <BoardFormContext.Provider value={value}>{props.children}</BoardFormContext.Provider>;
 }

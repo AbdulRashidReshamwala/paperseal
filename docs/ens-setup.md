@@ -18,9 +18,11 @@ This guide uses Sepolia, where anyone can register a look-alike name, so it is a
 
 The exam's name must be a valid ENS label, such as `jee-main-2026`: lowercase letters, digits and hyphens, with no spaces or dots. The board app refuses anything else when you create the exam, because a different spelling would hash to a different exam ID.
 
-After publishing the exam, open the board app's status step. It lists the exact records to set.
+Publishing does this for you. Once the exam is saved, the board app asks the board wallet for one more confirmation, which writes every record below in one `multicall` on the resolver of the wallet's primary name. It reads the name back with the same checks the verifier runs, and shows the name and its link only if they all pass. The exam works without a name, so a declined or failed confirmation changes nothing else: the page says the name isn't set and offers Try again, and reopening the exam offers it too.
 
-With ENS v2, which the Sepolia ENS app runs, there is no subname to create. Your name has its own resolver, and that resolver can hold records for any name under it, such as `jee-main-2026.paperseal-mumbai.eth`. You write those records by name, and every write is one transaction from the board wallet.
+The app must be the one that published the exam in this browser, because `ExamRegistry` stores only the name's hash. In another browser, set the records by hand as below.
+
+With ENS v2, which the Sepolia ENS app runs, there is no subname to create. Your name has its own resolver, and that resolver can hold records for any name under it, such as `jee-main-2026.paperseal-mumbai.eth`. The app takes the resolver from the chain and fills the values from its own settings: `VITE_REGISTRY_ADDRESS`, `VITE_TEE_URL`, `VITE_STORAGE_URL`, `VITE_TEE_STORAGE_BUCKET` and `VITE_ARKIV_WRITERS`. A setting left empty is not written.
 
 | Record | Value |
 | --- | --- |
@@ -30,7 +32,7 @@ With ENS v2, which the Sepolia ENS app runs, there is no subname to create. Your
 | Text `paperseal.bucket` | The storage bucket the TEE was started with |
 | Text `paperseal.arkiv-writers` | Optional. The relay addresses that mirror the unlock to Arkiv, separated by commas (`spec/arkiv.md`, "Writers") |
 
-The ENS app has no screen for this, so use `cast`, with the board keystore from the main setup:
+To set them by hand, every write is one transaction from the board wallet. The ENS app has no screen for this, so use `cast`, with the board keystore from the main setup:
 
 1. Find your name's resolver:
    ```bash

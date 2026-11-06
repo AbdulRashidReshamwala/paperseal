@@ -105,6 +105,7 @@ Set at build time for `apps/web` and `apps/verifier` (viewers can change them in
 | `VITE_EXAM_ID` | the published exam ID, as a fallback |
 | `VITE_STORAGE_URL` | `https://storage.googleapis.com/<BUCKET>` |
 | `VITE_TEE_STORAGE_BUCKET` | `<BUCKET>`, the one environment value the token check allows |
+| `VITE_ARKIV_WRITERS` | the relay addresses that mirror the unlock to Arkiv, separated by commas. The board app writes them to each exam's ENS name, and the verifier uses them as its default |
 | `VITE_SWARM_API_URL` | a read-only Swarm gateway for backups (`swarm.defaultApiUrl` in `spec/arkiv.json`, the viewer's own Bee node, when unset). The verifier only reads `GET /bzz/...` from it |
 | `VITE_RELEASES_REPO` | your fork as `owner/name`, so the apps read TEE releases from it (upstream's `AbdulRashidReshamwala/paperseal` when unset) |
 | `VITE_RELEASE_TAG` | verifier only: the release tag this build comes from, such as `v1.2.3`. The "Check with your own AI" prompt names it as the checker version. Unset or not `vX.Y.Z`, that button is disabled |

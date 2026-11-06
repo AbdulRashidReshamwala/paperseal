@@ -87,6 +87,7 @@ function directory(extra: readonly Person[] = []): EnsLookup {
     },
     code: () => Promise.resolve(undefined),
     board: () => Promise.reject(new Error('not read')),
+    resolver: () => Promise.resolve(null),
   };
 }
 
@@ -603,40 +604,6 @@ describe('step 7, exam status', () => {
     expect(screen.getByRole('button', { name: 'Copy public link' })).toBeTruthy();
   });
 
-  /** The value beside a record's label in the ENS card. */
-  const recordValue = (card: HTMLElement, label: string) =>
-    within(card).getByText(label, { selector: 'li > span:first-child' }).nextElementSibling?.textContent;
-
-  it('lists the ENS records to set, with the values this app uses', async () => {
-    vi.stubEnv('VITE_TEE_URL', 'https://tee.example.org/');
-    vi.stubEnv('VITE_STORAGE_URL', 'https://storage.googleapis.com/exam-bucket');
-    vi.stubEnv('VITE_TEE_STORAGE_BUCKET', 'exam-bucket');
-    vi.stubEnv('VITE_VERIFIER_URL', 'https://verify.example.org/');
-    const { env } = await seeded('build');
-    renderBoard(env, fakeTee());
-    const fold = await screen.findByText('Give this exam an ENS name (optional)');
-    const card = fold.parentElement as HTMLElement;
-    expect(within(card).getByText(/See docs\/ens-setup\.md/)).toBeTruthy();
-    expect(recordValue(card, 'ETH address')).toMatch(new RegExp(`^${env.registryAddress ?? ''}`));
-    expect(recordValue(card, 'Text paperseal.tee')).toMatch(/^https:\/\/tee\.example\.org(Copy)?$/);
-    expect(recordValue(card, 'Text paperseal.storage')).toMatch(/^https:\/\/storage\.googleapis\.com\/exam-bucket(Copy)?$/);
-    expect(recordValue(card, 'Text paperseal.bucket')).toMatch(/^exam-bucket(Copy)?$/);
-    // This session didn't publish the exam, so it doesn't know the name, only its hash.
-    expect(recordValue(card, 'Subname')).toBe('<exam name>');
-    expect(recordValue(card, 'Public page by name')).toBe('https://verify.example.org/#/name/<exam name>.<your-name>.eth');
-    expect(within(card).getByRole('button', { name: 'Copy Text paperseal.tee' })).toBeTruthy();
-  });
-
-  it('says which ENS values are not set, and leaves out the verifier link without its address', async () => {
-    const { env } = await seeded('build');
-    renderBoard(env, fakeTee());
-    const card = (await screen.findByText('Give this exam an ENS name (optional)')).parentElement as HTMLElement;
-    expect(recordValue(card, 'Text paperseal.tee')).toMatch(/Ask whoever installed Paper Seal to set VITE_TEE_URL\.$/);
-    expect(recordValue(card, 'Text paperseal.storage')).toMatch(/Ask whoever installed Paper Seal to set VITE_STORAGE_URL\.$/);
-    expect(recordValue(card, 'Text paperseal.bucket')).toMatch(/Ask whoever installed Paper Seal to set VITE_TEE_STORAGE_BUCKET\.$/);
-    expect(within(card).queryByText('Public page by name')).toBeNull();
-  });
-
   it('opens once the end time has passed', async () => {
     const { env } = await seeded('build', {}, { lock: -7200, start: -3000, end: -60 });
     renderBoard(env, fakeTee({ status: { stage: 'released' } }));
@@ -813,8 +780,8 @@ describe('step 3, a name counts only by its record', () => {
     const rest = directory();
     const reading: EnsLookup = { ...rest, text: (n, k) => (k === ens.records.directory ? Promise.reject(new HttpRequestError({ url: 'https://rpc.example.org', status: 503 })) : rest.text(n, k)) };
     renderBoard({ ...env, ensLookup: reading }, fakeTee());
-    await screen.findByText(/paperseal-demo\.eth can't be read right now/);
-    expect(button('Try again')).toBeTruthy();
+    const note = (await screen.findByText(/paperseal-demo\.eth can't be read right now/)).closest('p') as HTMLElement;
+    expect(within(note).getByRole('button', { name: 'Try again' })).toBeTruthy();
     expect(screen.getByLabelText(/^Add a name that isn't listed/)).toBeTruthy();
   });
 });
