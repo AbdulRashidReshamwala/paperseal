@@ -112,8 +112,6 @@ describe('demo keys, the board does everyone else', () => {
     const backToBoard = async (name: string, heading: string | RegExp) => {
       await become('Exam board', '/board');
       await page.goto(`${web.url}/#/board?exam=${keccak256(toBytes(name))}`);
-      await page.getByText(name).first().waitFor({ timeout: 60_000 });
-      await page.getByText(name).first().click().catch(() => undefined);
       await actor.seeHeading(heading, 120_000);
     };
 
