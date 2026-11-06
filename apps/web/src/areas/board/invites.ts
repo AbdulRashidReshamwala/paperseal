@@ -1,11 +1,10 @@
 import {
   checkInvite,
   encodeInviteLink,
-  ensNameProblem,
   InviteError,
-  looksLikeEnsName,
   newInviteSecret,
   ownerProblem,
+  partyNameProblem,
   roles,
   type Hex,
   type Invite,
@@ -14,7 +13,7 @@ import {
 
 /*
  * The board's invites, from "Invites" in spec/api.md. Each is one person's link: a random secret,
- * a role and, for key holders and centres, the name that goes on the public list. They are kept in
+ * a role and, for key holders and centres, the ENS name that goes on the public list. They are kept in
  * this browser only, per exam, so the board's app can recompute every `inviteTag` and match it with
  * what the TEE lists. Neither the secrets nor setters' labels are sent anywhere or published.
  */
@@ -93,9 +92,10 @@ export const inviteRoleNames: Record<InviteRole, string> = {
 };
 
 /**
- * A new invite, or the reason it can't be made. Key holders and centres need a name that fits the
- * public list and isn't already invited. A name written like an ENS name must be a normalised one
- * (spec/api.md, "Party Names"), and anything else is kept as a plain name. A setter's text is only the board's own note, and may be empty.
+ * A new invite, or the reason it can't be made. Key holders and centres need a normalised ENS name
+ * that isn't already invited (spec/api.md, "Party Names"): there are no plain names. Whether the name
+ * exists on the chain is asked separately, because it needs a read. A setter's text is only the
+ * board's own note, and may be empty.
  */
 export function createInvite(
   existing: readonly BoardInvite[],
@@ -108,11 +108,9 @@ export function createInvite(
     const label = name === '' ? `Setter ${String(existing.filter((invite) => invite.role === 'setter').length + 1)}` : name;
     return { ok: true, invite: { id, role, label, inviteSecret: newInviteSecret() } };
   }
-  if (name === '') return { ok: false, reason: 'Enter the name to show on the public list.' };
-  const problem = ownerProblem(name);
+  if (name === '') return { ok: false, reason: 'Enter an ENS name, like iit-delhi.eth.' };
+  const problem = ownerProblem(name) ?? partyNameProblem(name);
   if (problem) return { ok: false, reason: problem };
-  const ensProblem = looksLikeEnsName(name) ? ensNameProblem(name) : null;
-  if (ensProblem) return { ok: false, reason: ensProblem };
   if (existing.some((invite) => invite.owner === name)) return { ok: false, reason: `${name} already has an invite.` };
   return { ok: true, invite: { id, role, owner: name, label: name, inviteSecret: newInviteSecret() } };
 }

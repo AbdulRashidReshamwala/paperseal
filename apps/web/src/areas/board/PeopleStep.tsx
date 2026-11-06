@@ -1,4 +1,5 @@
-import { ensNameProblem, entriesFor, listRolesFor, looksLikeEnsName, matchInvites, roles, threshold, type InviteRole, type InviteState } from '@paperseal/protocol';
+import { checkPartyNameExists, type EnsLookup } from '@paperseal/chain';
+import { entriesFor, listRolesFor, matchInvites, roles, threshold, type InviteRole, type InviteState } from '@paperseal/protocol';
 import type { RegistrationEntry, TeeClient } from '@paperseal/tee-client';
 import { Button, Check, Field, Hash, Panel, Row, Rows, Stage, Stamp } from '@paperseal/ui';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
@@ -99,30 +100,80 @@ function CopyLink(props: { who: string; url: string }) {
 
 const inviteRoleOptions: InviteRole[] = ['keyholder', 'centre', 'setter'];
 
-/** Under the name field: a plain name is fine, and an ENS name is recognised as one. */
-function hintFor(text: string): string {
-  const name = text.trim();
-  if (looksLikeEnsName(name) && ensNameProblem(name) === null) {
-    return 'This is an ENS name. It is read once they register, and the public list shows it as typed.';
-  }
-  return 'A plain name, or an ENS name such as dr-rao.eth. A person without an ENS name can use a plain name.';
+/** Under the name field: the example, and what a centre may use. */
+function hintFor(role: InviteRole): string {
+  return role === 'centre'
+    ? 'Like iit-delhi.eth. A name you issue under your own, such as north-1.centres.your-board.eth, works too. It is shown on the public list as typed.'
+    : 'Like iit-delhi.eth. It is shown on the public list as typed.';
 }
 
-/** Makes one invite: a role and a name, then a link to copy. Setters need no name, and any note stays here. */
-function AddInvite(props: { invites: readonly BoardInvite[]; onAdd: (invite: BoardInvite) => void }) {
+/** Why a name that was read cannot be invited, with the next step. Null when it exists. */
+function existenceProblem(name: string, found: Awaited<ReturnType<typeof checkPartyNameExists>>, role: InviteRole): string | null {
+  switch (found.state) {
+    case 'exists':
+      return null;
+    case 'missing':
+      return role === 'centre'
+        ? `${name} does not exist yet. Create it first, for example under your own name, then add it again.`
+        : `${name} does not exist yet. Ask them to create it in the ENS app on Sepolia, then add it again.`;
+    case 'refused':
+      return `${name} can't be read here, so it can't be added. Use a name that can be read without an outside lookup.`;
+    case 'invalid':
+      return found.reason;
+    case 'unreadable':
+      return `Names can't be read right now, so ${name} is not added yet. Try again in a moment.`;
+  }
+}
+
+/**
+ * Makes one invite: a role and an ENS name, then a link to copy. Setters need no name, and any note stays here.
+ * A name must exist on the chain. When the chain can't be read, the board is told and can try again.
+ */
+function AddInvite(props: { invites: readonly BoardInvite[]; lookup: EnsLookup | null | undefined; onAdd: (invite: BoardInvite) => void }) {
   const [role, setRole] = useState<InviteRole>('keyholder');
   const [text, setText] = useState('');
   const [error, setError] = useState<string | undefined>();
+  const [busy, setBusy] = useState(false);
+  const [retry, setRetry] = useState(false);
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    if (busy) return;
     const made = createInvite(props.invites, role, text);
     if (!made.ok) {
       setError(made.reason);
       return;
     }
+    const finish = () => {
+      setError(undefined);
+      setRetry(false);
+      setText('');
+      props.onAdd(made.invite);
+    };
+    const name = made.invite.owner;
+    if (role === 'setter' || name === undefined) {
+      finish();
+      return;
+    }
+    if (!props.lookup) {
+      setError(`This page can't read names, so ${name} can't be added. Reload this page. If it stays like this, contact whoever runs Paper Seal.`);
+      return;
+    }
+    setBusy(true);
     setError(undefined);
-    setText('');
-    props.onAdd(made.invite);
+    checkPartyNameExists(name, { lookup: props.lookup }).then(
+      (found) => {
+        setBusy(false);
+        const problem = existenceProblem(name, found, role);
+        setRetry(found.state === 'unreadable');
+        if (problem) setError(problem);
+        else finish();
+      },
+      () => {
+        setBusy(false);
+        setRetry(true);
+        setError(existenceProblem(name, { state: 'unreadable', name, reason: '' }, role) ?? undefined);
+      },
+    );
   };
   return (
     <form className="board-invite-form" onSubmit={submit}>
@@ -134,6 +185,7 @@ function AddInvite(props: { invites: readonly BoardInvite[]; onAdd: (invite: Boa
           onChange={(event) => {
             setRole(event.target.value as InviteRole);
             setError(undefined);
+            setRetry(false);
           }}
         >
           {inviteRoleOptions.map((option) => (
@@ -144,16 +196,19 @@ function AddInvite(props: { invites: readonly BoardInvite[]; onAdd: (invite: Boa
         </select>
       </label>
       <Field
-        label={role === 'setter' ? 'A note for yourself (optional, kept private)' : 'Name to show on the public list'}
-        {...(role === 'setter' ? {} : { hint: hintFor(text) })}
+        label={role === 'setter' ? 'A note for yourself (optional, kept private)' : 'ENS name'}
+        {...(role === 'setter' ? {} : { hint: hintFor(role) })}
         value={text}
         error={error}
         onChange={(value) => {
           setText(value);
           setError(undefined);
+          setRetry(false);
         }}
       />
-      <Button type="submit">Add invite</Button>
+      <Button type="submit" disabled={busy}>
+        {busy ? 'Looking up the name' : retry ? 'Try again' : 'Add invite'}
+      </Button>
     </form>
   );
 }
@@ -418,6 +473,7 @@ export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPoste
             {examId ? (
               <AddInvite
                 invites={invites}
+                lookup={environment.ensLookup}
                 onAdd={(invite) => {
                   update([...invites, invite]);
                 }}

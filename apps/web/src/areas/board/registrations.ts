@@ -1,6 +1,7 @@
 import {
   ApprovedListError,
   checkApprovedList,
+  checkPartyNames,
   encodeApprovedList,
   approvedListHash,
   fromHex,
@@ -49,9 +50,10 @@ export interface ComposedList {
   hash: Hex;
 }
 
-/** Validates with `checkApprovedList`, then encodes with `encodeApprovedList`. Throws `ApprovedListError` in words. */
+/** Validates with `checkApprovedList`, refuses a key holder or centre owner that is not an ENS name, then encodes with `encodeApprovedList`. Throws `ApprovedListError` in words. */
 export function composeApprovedList(examId: Hex, entries: readonly ApprovedListEntry[]): ComposedList {
   checkApprovedList(entries);
+  checkPartyNames(entries);
   const encoded = encodeApprovedList(entries);
   return { encoded: toHex(encoded), hash: toHex(approvedListHash(fromHex(examId), encoded)) };
 }

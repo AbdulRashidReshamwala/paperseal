@@ -21,7 +21,7 @@ export interface InviteNames {
 }
 
 export type NameStanding =
-  /** Not an ENS name, or a setter. Nothing to read. */
+  /** A setter, which has no name. Nothing to read. */
   | { kind: 'plain' }
   /** Not read yet. */
   | { kind: 'reading' }
@@ -38,7 +38,7 @@ interface NamedInvite {
   goAhead?: boolean;
 }
 
-/** The ENS name of an invite, for a key holder or a centre. Null for a plain name and for every setter. */
+/** The ENS name of an invite, for a key holder or a centre. Null for every setter, and for an owner that is not one (no longer invitable). */
 export function inviteEnsName(invite: Pick<NamedInvite, 'role' | 'owner'>): string | null {
   return invite.role === 'setter' || invite.owner === undefined ? null : ownerEnsName(invite.owner);
 }
@@ -64,7 +64,7 @@ export function nameStanding(invite: NamedInvite, names: InviteNames | undefined
 }
 
 /**
- * Whether a registered invite may be on the list. A centre or plain name always may: a board-issued name
+ * Whether a registered invite may be on the list. A centre always may: a board-issued name
  * is a label and nothing waits on it. A key holder with an ENS name needs a confirmed record, or the
  * board's choice to go ahead without it. A record that names another key is never listed.
  */
