@@ -104,7 +104,8 @@ html,body{height:100%;background:#05070d;overflow:hidden}
 /* page 5 */
 .p5 .main{left:300px;top:130px;width:1320px;height:820px;padding:100px 110px}
 .p5 .k{font-size:30px}
-.p5 h2{font:700 128px/1.06 var(--serif);margin-top:30px;letter-spacing:-2px}
+.p5 h2{font:700 112px/1.06 var(--serif);margin-top:26px;letter-spacing:-2px}
+.p5 .qual{font:400 38px/1.3 var(--serif);color:#3f4863;margin-top:26px}
 .p5 .tags{position:absolute;left:110px;bottom:70px;display:flex;gap:24px}
 .p5 .tag{background:#f1ecdf;border-left:10px solid var(--wax);padding:16px 26px;font:600 30px var(--sans);box-shadow:0 8px 20px #0003;border-radius:3px}
 .p5 .tag:nth-child(2){border-left-color:var(--gold)}.p5 .tag:nth-child(3){border-left-color:var(--ink)}.p5 .tag:nth-child(4){border-left-color:var(--slate)}
@@ -193,11 +194,11 @@ html,body{height:100%;background:#05070d;overflow:hidden}
 .vf .atk p{font:700 44px/1.15 var(--serif);margin-top:6px}
 .vf .def p{font:400 32px/1.22 var(--serif);margin-top:6px;max-width:500px;color:#2a3350}
 .vf .arrow{position:absolute;left:845px;font:700 72px var(--serif);color:var(--wax)}
-.vf .blocked{position:absolute;right:28px;top:70px;font:500 32px var(--mono);letter-spacing:4px;color:var(--wax);border:6px solid var(--wax);border-radius:8px;padding:6px 16px;transform:rotate(-8deg);mix-blend-mode:multiply;filter:url(#rough);opacity:.9}
+.vf .blocked{position:absolute;right:24px;top:76px;font:500 25px var(--mono);letter-spacing:3px;color:var(--wax);border:6px solid var(--wax);border-radius:8px;padding:6px 16px;transform:rotate(-8deg);mix-blend-mode:multiply;filter:url(#rough);opacity:.9}
 .desk-stone .hd .hl{background:linear-gradient(transparent 62%,#d9b45a99 62% 92%,transparent 92%)}
 .lim .lm{top:330px;width:540px;height:520px;padding:50px 44px}
 .lim .lm h3{font:700 62px/1.05 var(--serif);color:var(--wax)}
-.lim .lm p{font:400 38px/1.35 var(--serif);margin-top:24px;color:#2a3350}
+.lim .lm p{font:400 34px/1.35 var(--serif);margin-top:24px;color:#2a3350}
 .lim .hd h2{color:var(--paper)}
 .close .cl{left:340px;top:150px;width:1240px;height:780px;padding:100px 120px}
 .close .cl h2{font:700 180px/1 var(--serif);margin-top:30px;letter-spacing:-4px}
