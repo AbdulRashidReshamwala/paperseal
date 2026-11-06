@@ -2,9 +2,9 @@ import { useId } from 'react';
 
 import sealUrl from './assets/seal.svg';
 
-export type SealState = 'sealed' | 'opening' | 'open';
+export type SealState = 'sealed' | 'opening' | 'open' | 'broken';
 
-const WORDS: Record<SealState, string> = { sealed: 'Sealed', opening: 'Opening', open: 'Open' };
+const WORDS: Record<SealState, string> = { sealed: 'Sealed', opening: 'Opening', open: 'Open', broken: 'Broken' };
 
 /** The break runs top to bottom. Both halves are clipped along this same line, so they fit together. */
 const CRACK = '60,0 66,17 55,33 64,50 54,68 65,86 57,103 62,120';
@@ -15,9 +15,10 @@ function Face() {
 }
 
 /**
- * The one memorable mark in the system. It closes, breaks and opens as `state` changes.
- * Use it once per screen at most. Motion stops under prefers-reduced-motion: the state still
- * shows, and the accessible name always says it in words.
+ * The one memorable mark in the system, a seal of approval. It stays whole through a normal exam, opening
+ * included, and comes apart only as `broken`, when something went wrong. Use it once per screen at most.
+ * Motion stops under prefers-reduced-motion: the state still shows, and the accessible name always says
+ * it in words.
  */
 export function Seal(props: {
   state: SealState;
@@ -25,15 +26,15 @@ export function Seal(props: {
   size?: number;
   /** The accessible name. Defaults to the state in words. */
   label?: string;
-  /** Print the state in words beneath the seal. */
-  caption?: boolean;
+  /** Print the state in words beneath the seal, or these words in its place. */
+  caption?: boolean | string;
   /** Press the seal down as it mounts, for the moment something is sealed. */
   stamp?: boolean;
 }) {
   const { state, size = 112 } = props;
   // useId can contain characters that are unsafe inside url(#...).
   const id = `ps-seal-${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
-  const word = WORDS[state];
+  const word = typeof props.caption === 'string' ? props.caption : WORDS[state];
   return (
     <figure className="ps-seal" data-state={state} data-stamp={props.stamp ? 'true' : undefined}>
       <svg role="img" aria-label={props.label ?? word} viewBox="0 0 120 120" width={size} height={size}>
@@ -55,7 +56,6 @@ export function Seal(props: {
             <Face />
           </g>
         </g>
-        <polyline className="ps-seal-crack" points={CRACK} pathLength={1} />
       </svg>
       {props.caption ? <figcaption>{word}</figcaption> : null}
     </figure>

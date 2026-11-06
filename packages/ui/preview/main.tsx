@@ -125,7 +125,7 @@ function LiveSeal() {
     <>
       <Seal state={state} size={148} caption />
       <div className="pv-controls">
-        {(['sealed', 'opening', 'open'] as const).map((next) => (
+        {(['sealed', 'opening', 'open', 'broken'] as const).map((next) => (
           <Button
             key={next}
             aria-pressed={state === next}
@@ -299,7 +299,7 @@ function Preview() {
         </div>
       </Section>
 
-      <Section title="Seal" intro="The one signature. Once per screen at most. It closes, breaks and opens with state, and holds still under reduced motion.">
+      <Section title="Seal" intro="The one signature. Once per screen at most. A seal of approval: it stays whole unless something went wrong, and holds still under reduced motion.">
         <div className="pv-specimens">
           <Specimen title="Try it">
             <LiveSeal />
@@ -312,6 +312,9 @@ function Preview() {
           </Specimen>
           <Specimen title="Open">
             <Seal state="open" caption />
+          </Specimen>
+          <Specimen title="Broken">
+            <Seal state="broken" caption />
           </Specimen>
           <Specimen title="Stamp">
             <Stamp>Sealed</Stamp> <Stamp tone="ink">Received</Stamp>

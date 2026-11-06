@@ -341,7 +341,7 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
 
 function SealMark({ state, empty }: { state: SealState | null; empty: string }) {
   // Keep one element mounted, so the seal closes and breaks as its state changes.
-  if (state) return <Seal state={state} caption />;
+  if (state) return <Seal state={state} caption={state === 'open' ? 'Approved' : true} />;
   return (
     <figure className="vf-no-seal">
       <span className="vf-no-seal-ring" aria-hidden="true" />
@@ -354,11 +354,10 @@ function SealMark({ state, empty }: { state: SealState | null; empty: string }) 
  * The same shape as `Stage`, because `Stage` can only show a seal in one of its three states, and
  * before the paper is sealed this page has to show that there is no seal yet.
  */
-function Head({ view, zone }: { view: Custody; zone: string }) {
+function Head({ view, chosen }: { view: Custody; chosen: boolean }) {
   return (
-    <section className="ps-stage" data-sealed="true">
+    <section className="ps-stage" data-sealed={chosen ? 'true' : undefined}>
       <div className="ps-stage-main">
-        <p className="ps-eyebrow">Where this exam is now</p>
         <h1 className="ps-stage-title">{view.headline}</h1>
         <div className="ps-stage-lede">
           <p>{view.verdict}</p>
@@ -367,11 +366,12 @@ function Head({ view, zone }: { view: Custody; zone: string }) {
           <span className="ps-stage-next-label">What happens next</span>
           <span>{view.next}</span>
         </p>
-        <p className="vf-zone">Times are in your time zone, {zone}.</p>
       </div>
-      <div className="ps-stage-seal">
-        <SealMark state={view.seal} empty={view.noSeal} />
-      </div>
+      {chosen ? (
+        <div className="ps-stage-seal">
+          <SealMark state={view.seal} empty={view.noSeal} />
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -492,14 +492,14 @@ function PaperView({ paper }: { paper: Paper }) {
   );
 }
 
-function Freshness({ records }: { records: Polled<Records> }) {
+function Freshness({ records, zone }: { records: Polled<Records>; zone: string }) {
   if (records.state !== 'ready') return null;
   const time = new Intl.DateTimeFormat('en-GB', { timeStyle: 'medium' }).format(records.readAt);
   return (
     <p className="vf-fresh">
       {records.stale
-        ? `The public record could not be read again, so this shows what it said at ${time}. This page keeps trying.`
-        : `Last read at ${time}. This page updates by itself.`}
+        ? `The public record could not be read again, so this shows what it said at ${time}. This page keeps trying. Times are in ${zone}.`
+        : `Last read at ${time}. Times are in ${zone}.`}
     </p>
   );
 }
@@ -671,18 +671,18 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
   if (!loaded) {
     return (
       <div className="ps-shell vf-page">
-        <RoleHeader role="Public record" note="Anyone can check this" />
+        <RoleHeader role="Public record" />
         <LoadingSeal />
       </div>
     );
   }
   return (
     <div className="ps-shell vf-page">
-      <RoleHeader role="Public record" {...(exam ? { exam } : {})} note="Anyone can check this" />
+      <RoleHeader role="Public record" {...(exam ? { exam } : {})} />
       <main>
         <FailureAlarm failures={result.failures} />
         <Warnings warnings={result.warnings} />
-        <Head view={result} zone={zoneName()} />
+        <Head view={result} chosen={chosen} />
         <Glance items={recordedExam ? glanceOf(boardLabel, found, held) : []} />
         {view.records.state === 'error' ? (
           <p className="vf-gap">
@@ -702,8 +702,15 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
             </Check>
           </p>
         ) : null}
-        <Stepper steps={result.steps.map((step) => toStep(step, view.now))} evidenceLabel="Show the evidence" />
-        <Freshness records={view.records} />
+        {chosen ? (
+          <Stepper steps={result.steps.map((step) => toStep(step, view.now))} evidenceLabel="Show the evidence" />
+        ) : (
+          <section className="ps-panel vf-choose">
+            <ExamPicker current={false} invalid={view.invalidLink} />
+            <HistoryLink />
+          </section>
+        )}
+        <Freshness records={view.records} zone={zoneName()} />
         {recordedExam && view.examId && view.registryAddress ? (
           <IdentitySection
             examId={view.examId}
@@ -727,12 +734,7 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
             <ExamPicker current invalid={false} />
             <HistoryLink />
           </Panel>
-        ) : (
-          <Panel title="Choose an exam">
-            <ExamPicker current={false} invalid={view.invalidLink} />
-            <HistoryLink />
-          </Panel>
-        )}
+        ) : null}
         <section className="ps-panel vf-self-host">
           <h2>Check it yourself</h2>
           <p>

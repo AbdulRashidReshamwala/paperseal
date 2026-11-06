@@ -20,7 +20,7 @@ import {
 } from './plan';
 
 /** Time alone opens the seal, so the state follows the scheduled times. */
-export function sealStateAt(nowMs: number, unlockMs: number, endMs: number): SealState {
+export function sealStateAt(nowMs: number, unlockMs: number, endMs: number): Exclude<SealState, 'broken'> {
   if (nowMs < unlockMs) return 'sealed';
   return nowMs < endMs ? 'opening' : 'open';
 }
@@ -94,7 +94,7 @@ export function StatusStep(props: { examId: Hex; snapshot: Snapshot }) {
   const named = examName && settings && examIdFromName(examName).toLowerCase() === settings.examId.toLowerCase() ? examName : null;
   const justSealed = receipts.some((receipt) => receipt.kind === 'build' && receipt.outcome.matches);
 
-  const copy: Record<SealState, { title: string; lede: string; next: string }> = {
+  const copy: Record<ReturnType<typeof sealStateAt>, { title: string; lede: string; next: string }> = {
     sealed: {
       title: `Sealed. Nothing to do until ${formatTimeOnly(unlockSeconds)}`,
       lede: 'The paper is sealed and its record is public. No one person can open it before then.',
