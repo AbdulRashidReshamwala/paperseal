@@ -45,6 +45,12 @@ export function demoPanel<Props extends object>(): LazyExoticComponent<Component
   return lazy(() => import('../demo/BoardPanel') as unknown as Promise<{ default: ComponentType<Props> }>);
 }
 
+/** Five filled topics for the create page, to save typing in a demo. Null outside demo mode. */
+export function demoTopics(): { name: string; questions: string }[] | null {
+  if (!on) return null;
+  return ['Mathematics', 'Physics', 'Chemistry', 'Biology', 'English'].map((name) => ({ name, questions: '5' }));
+}
+
 /** The `credentials` option for `createWebAuthnKeys`, empty outside demo mode, so the browser's real one applies. */
 export function credentialsOption(): { credentials?: Pick<CredentialsContainer, 'create' | 'get'> } {
   if (!on) return {};

@@ -1,11 +1,14 @@
 import { Button } from '@paperseal/ui';
 import { useState, type ReactNode } from 'react';
 
+import { demoTopics } from '../../shared/demoKeys';
 import { useBoardForm, useEvaluated } from './BoardForm';
 import { DraftPage, type DraftRail } from './DraftFrame';
 import { evaluatePublish, parseLocalTime, whenTyped } from './form';
 import { Fold, Input, Problem } from './Parts';
 import { bankNeeded, durationError, examLabel, formatWhen, isTight, plainWords, type PlanInput } from './plan';
+
+const sampleTopics = demoTopics();
 
 /** A fold that stays open while it holds something the board must deal with. */
 function Advanced(props: { needed: boolean; children: ReactNode }) {
@@ -198,6 +201,15 @@ export function TopicsStep(props: { rail: DraftRail; onBack: () => void; onConti
         >
           Add topic
         </Button>
+        {sampleTopics ? (
+          <Button
+            onClick={() => {
+              set({ topics: sampleTopics });
+            }}
+          >
+            Add 5 topics with 5 questions
+          </Button>
+        ) : null}
       </div>
       {needs ? (
         <p className="board-note" role="status">
