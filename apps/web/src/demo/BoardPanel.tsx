@@ -1,3 +1,4 @@
+import { examIdInToken } from '../shared/machineExam';
 import type { Hex } from '@paperseal/protocol';
 import { Button, Check, PrimaryAction, Row, Rows } from '@paperseal/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -139,6 +140,12 @@ function Everyone(props: PanelProps & { stage: PanelStage }) {
   const look = useCallback(async () => {
     if (!acting) return null;
     try {
+      // The machine serves one exam. Its status doesn't name it, so its stage alone could be another exam's.
+      const machine = examIdInToken((await acting.tee.attestation()).token);
+      if (machine?.toLowerCase() !== acting.examId.toLowerCase()) {
+        setPlan(null);
+        return null;
+      }
       const next = await planFor(stage, acting, latest.current, pending.current);
       setPlan(next);
       setProblem(null);
