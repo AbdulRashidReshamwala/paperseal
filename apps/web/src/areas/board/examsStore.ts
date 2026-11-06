@@ -17,6 +17,8 @@ export interface KnownExam {
   id: Hex;
   /** Null for an exam published before names were kept. */
   name: string | null;
+  /** Milliseconds since 1970, when this browser published it. Null for an exam found from older traces. */
+  addedAt: number | null;
 }
 
 function storage(): Storage | null {
@@ -35,8 +37,14 @@ function readStored(): KnownExam[] {
     if (!Array.isArray(list)) return [];
     const exams: KnownExam[] = [];
     for (const entry of list as unknown[]) {
-      const { id, name } = (entry ?? {}) as { id?: unknown; name?: unknown };
-      if (isExamId(id) && !exams.some((exam) => exam.id === id)) exams.push({ id, name: typeof name === 'string' && name !== '' ? name : null });
+      const { id, name, addedAt } = (entry ?? {}) as { id?: unknown; name?: unknown; addedAt?: unknown };
+      if (isExamId(id) && !exams.some((exam) => exam.id === id)) {
+        exams.push({
+          id,
+          name: typeof name === 'string' && name !== '' ? name : null,
+          addedAt: typeof addedAt === 'number' && Number.isFinite(addedAt) ? addedAt : null,
+        });
+      }
     }
     return exams;
   } catch {
@@ -45,10 +53,10 @@ function readStored(): KnownExam[] {
 }
 
 /** Called once an exam is published and read back correctly. The newest comes first. */
-export function rememberExam(exam: { id: Hex; name: string }): void {
+export function rememberExam(exam: { id: Hex; name: string }, now = Date.now()): void {
   try {
     const id = exam.id.toLowerCase() as Hex;
-    storage()?.setItem(KEY, JSON.stringify([{ id, name: exam.name }, ...readStored().filter((known) => known.id !== id)]));
+    storage()?.setItem(KEY, JSON.stringify([{ id, name: exam.name, addedAt: now }, ...readStored().filter((known) => known.id !== id)]));
   } catch {
     // Not stored: the exam is still reachable from the board's current exam.
   }
@@ -57,7 +65,7 @@ export function rememberExam(exam: { id: Hex; name: string }): void {
 export function listKnownExams(): KnownExam[] {
   const exams = readStored();
   const add = (id: unknown) => {
-    if (isExamId(id) && !exams.some((exam) => exam.id === id)) exams.push({ id, name: null });
+    if (isExamId(id) && !exams.some((exam) => exam.id === id)) exams.push({ id, name: null, addedAt: null });
   };
   add(getStoredExamId());
   try {
