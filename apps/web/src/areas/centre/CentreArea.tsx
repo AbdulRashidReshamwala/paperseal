@@ -1,11 +1,13 @@
 import { roles, roundTimeSeconds, toHex, requireHardwareAttestation } from '@paperseal/protocol';
-import { Check, Countdown, KeyTouch, Page, PrimaryAction, RoleHeader, Seal, Stage } from '@paperseal/ui';
+import { Button, Check, Countdown, KeyTouch, Page, PrimaryAction, RoleHeader, Seal, Stage } from '@paperseal/ui';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import type { ReleaseContext } from '../../release/flow';
 import { Gate, TechnicalDetail } from '../../release/Gate';
 import { useHolderProgress, type HolderProgress, type ProgressActions } from '../../release/progress';
 import { ReleaseCount, ReleaseStage, releaseContext } from '../../release/ReleaseStage';
+import { HandOutStage } from './HandOut';
+import { useHandOut } from './rooms';
 import { UnlockLog } from './Log';
 import { PaperSheet } from './PaperSheet';
 import { centreStage, sealFor, type CentreStage } from './stage';
@@ -48,6 +50,10 @@ function OpenAction({ open }: { open: OpenPaper }) {
   }
 }
 
+function printPaper() {
+  globalThis.print();
+}
+
 /** One page: the exam's state decides what shows, and the seal stays mounted so it breaks in place. */
 export function CentreView(props: {
   progress: HolderProgress;
@@ -60,8 +66,13 @@ export function CentreView(props: {
   onReleased: () => void;
   /** The checked unlock log. A prop so the page can be shown without a sealed machine. */
   log?: ReactNode;
+  /** How long each room takes to be marked as sent in the demo. */
+  handOutStepMs?: number;
 }) {
   const { progress, actions, context, files, open, justReleased } = props;
+  // Handing out is a demonstration kept in this page's memory, next to the paper.
+  const handOut = useHandOut(props.handOutStepMs);
+  const [handingOut, setHandingOut] = useState(false);
   const refusal = open.phase.name === 'failed' ? open.phase.refusal : null;
   const stage: CentreStage = centreStage(progress, {
     filesReady: files.state === 'ready',
@@ -168,6 +179,7 @@ export function CentreView(props: {
           </Stage>
         );
       case 'paper-open':
+        if (handingOut) return <HandOutStage handOut={handOut} onPrint={printPaper} />;
         return (
           <Stage
             title="The paper is open"
@@ -175,14 +187,16 @@ export function CentreView(props: {
             action={
               <PrimaryAction
                 onClick={() => {
-                  globalThis.print();
+                  setHandingOut(true);
                 }}
               >
-                Print the paper
+                Hand out the paper
               </PrimaryAction>
             }
             next="It is held on this page only. If you reload, one more touch of your security key opens it again."
-          />
+          >
+            <Button onClick={printPaper}>Print the paper</Button>
+          </Stage>
         );
       case 'machine-waiting':
         return (
