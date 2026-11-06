@@ -195,7 +195,7 @@ export function CreateStep(props: { eyebrow: string; onContinue: () => void }) {
           </div>
         </form>
       }
-      next="Next you choose the Paper Seal version. Then you review everything before anything is published."
+      next="Next you review everything. Nothing is published until you confirm."
     />
   );
 }
