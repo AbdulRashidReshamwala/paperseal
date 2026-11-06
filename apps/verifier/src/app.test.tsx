@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { criteriaHash, encodeApprovedList, approvedListHash, encodeCriteria, fromHex, toHex, type Hex } from '@paperseal/protocol';
 import { App } from './App';
 import { chainChecks } from './checks';
-import { examLink } from './link';
+import { examLink, routeOfHash } from './link';
 import {
   clearSettings,
   connect,
@@ -89,6 +89,13 @@ describe('exam links', () => {
 
   it('prefers the hash, which a picked exam sets, over the page query', () => {
     expect(url({ search: `?exam=0x${'11'.repeat(32)}`, routePath: `/exam/${id}` })).toEqual({ kind: 'exam', id });
+  });
+
+  it('reads the route from the address, so a changed hash is seen without a reload', () => {
+    expect(routeOfHash('#/exam/0xnothex')).toEqual({ routePath: '/exam/0xnothex', routeSearch: '' });
+    expect(routeOfHash(`#/?exam=${id}`)).toEqual({ routePath: '/', routeSearch: `?exam=${id}` });
+    expect(routeOfHash('')).toBeNull();
+    expect(url({ ...(routeOfHash('#/exam/0xnothex') ?? {}) })).toEqual({ kind: 'invalid' });
   });
 
   it('has no exam without a link, and an invalid one stays invalid', () => {

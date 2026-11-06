@@ -52,6 +52,7 @@
 
 .board-problem {
   max-width: 34em;
+  overflow-wrap: anywhere;
   margin: 0 0 var(--ps-space-3);
 }
 

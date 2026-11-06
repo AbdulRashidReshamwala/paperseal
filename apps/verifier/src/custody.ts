@@ -528,8 +528,13 @@ function lockedStep(c: Context): Draft {
   const { exam, build } = c;
   const lockAt = exam ? roundTimeSeconds(Number(exam.settings.lockRound)) : null;
   const { items, ok } = criteriaItems(c);
+  // The counts are the Build's own claim. Until the Build is shown to come from the sealed machine
+  // they are only a claim, so this step is not done on the Build alone.
+  const confirmed = build !== null && buildSignatureItem(c.records?.token ?? null).ok;
   const note = build
-    ? `${plural(Number(build.selected), 'question')} chosen from a question bank of ${String(build.bankSize)}.`
+    ? confirmed
+      ? `${plural(Number(build.selected), 'question')} chosen from a question bank of ${String(build.bankSize)}.`
+      : 'A paper is recorded, but its files can’t be checked yet, so the number of questions chosen is not confirmed.'
     : !exam || lockAt === null
       ? 'Waiting for the exam board to publish the exam.'
       : c.lockReached
@@ -538,7 +543,7 @@ function lockedStep(c: Context): Draft {
   return {
     id: 'locked',
     label: 'Questions closed',
-    complete: ok && build !== null,
+    complete: ok && confirmed,
     at: lockAt,
     round: exam ? Number(exam.settings.lockRound) : null,
     note,
@@ -1014,8 +1019,10 @@ function verdictLine(c: Context, steps: readonly CustodyStep[], failures: readon
   if (!c.exam) return 'Nothing has been checked yet.';
   const done = steps.filter((step) => step.state === 'done').length;
   if (done === steps.length) return 'Every step has been checked. Nothing failed.';
-  const gaps = [c.records?.token, c.records?.manifest, c.records?.log].some((source) => source?.kind === 'unavailable');
-  if (gaps) return 'Nothing has failed so far, but some public files could not be read yet.';
+  const gaps = [c.records?.token, c.records?.manifest, c.records?.log].some(
+    (source) => source !== undefined && source !== null && source.kind !== 'ready' && source.kind !== 'malformed',
+  );
+  if (gaps) return 'Nothing has failed so far, but some public files could not be read yet, so those steps are not confirmed.';
   return `This exam is on track. Nothing has failed so far. ${String(done)} of ${String(steps.length)} steps are confirmed.`;
 }
 

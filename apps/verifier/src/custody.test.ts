@@ -172,6 +172,24 @@ describe('the whole chain', () => {
   });
 });
 
+describe('a Build with no files to check it against', () => {
+  it('does not call the questions locked, and does not say everything is fine', () => {
+    const result = scene({
+      records: {
+        token: { kind: 'unavailable', message: 'Storage returned 404' },
+        manifest: { kind: 'unavailable', message: 'Storage returned 404' },
+      },
+    });
+    expect(step(result, 'locked').state).not.toBe('done');
+    expect(step(result, 'locked').state).not.toBe('failed');
+    expect(step(result, 'locked').note).toMatch(/not confirmed/);
+    expect(step(result, 'sealed').state).not.toBe('done');
+    expect(result.failures).toEqual([]);
+    expect(result.verdict).toMatch(/not confirmed/);
+    expect(result.verdict).not.toMatch(/on track/);
+  });
+});
+
 describe('step 1, exam published', () => {
   it('done', () => {
     const s = step(scene(), 'published');
