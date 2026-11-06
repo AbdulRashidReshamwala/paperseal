@@ -10,7 +10,7 @@ import { TEE_STATUS_POLL_MS } from '../../shared/TeeStatus';
 import BoardArea from './BoardArea';
 import { saveDraft, type DraftContent } from './draftStore';
 import { rememberExam } from './examsStore';
-import { HOME_LIST_DEADLINE_MS, HOME_READ_LIMIT, useListSettled, useRowReads, type RowRead } from './homeReads';
+import { HOME_LIST_DEADLINE_MS, HOME_READ_LIMIT, HOME_READ_TIMEOUT_MS, useListSettled, useRowReads, type RowRead } from './homeReads';
 import { defaultPlan } from './plan';
 import type { PublishEnvironment } from './publishFlow';
 
@@ -248,6 +248,49 @@ describe('the status on each published exam', () => {
     expect(document.querySelector('.board-skeleton')).toBeNull();
     // The exam date is shown as a real date and time.
     expect(within(row('waiting')).getByText(/^Exam on .*\d{4}/)).toBeTruthy();
+  });
+
+  it('hides an exam that started with no Build, once its read says so, and keeps a finished one', async () => {
+    remember(['finished', 'unposted', 'noList', 'nobody']);
+    renderBoard('/board', chainOf({ ...names, noList: { start: -DAY } }).environment);
+    await waitFor(() => {
+      expect(within(row('finished')).getByText('Finished')).toBeTruthy();
+    });
+    expect(screen.queryByText('unposted')).toBeNull();
+    expect(screen.queryByText('noList')).toBeNull();
+    expect(within(row('nobody')).getByText('Inviting')).toBeTruthy();
+    expect(titles()).toHaveLength(2);
+  });
+
+  it('does not hide a row while its read is unknown or failed', async () => {
+    vi.useFakeTimers();
+    remember(['slow', 'broken', 'gone']);
+    renderBoard('/board', chainOf({ slow: { start: -DAY, hang: true }, broken: { start: -DAY, broken: true } }).environment);
+    await pass(HOME_LIST_DEADLINE_MS);
+    expect(within(row('slow')).getByText('Checking…')).toBeTruthy();
+    expect(within(row('broken')).getByText('Unavailable')).toBeTruthy();
+    await pass(HOME_READ_TIMEOUT_MS);
+    expect(within(row('slow')).getByText('Unavailable')).toBeTruthy();
+    // Not on the registry at all: not known to be abandoned either.
+    expect(within(row('gone')).getByText('Unpublished')).toBeTruthy();
+  });
+
+  it('removes an exam from this browser only, after one confirm, and keeping it changes nothing', async () => {
+    remember(['waiting', 'posted']);
+    renderBoard('/board', chainOf(names).environment);
+    await screen.findByText('waiting');
+    fireEvent.click(screen.getByRole('button', { name: 'Remove waiting' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Keep it' }));
+    expect(titles()).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove waiting' }));
+    expect(screen.getByText(/Remove from this browser's list\? It stays on the public record\./)).toBeTruthy();
+    expect(titles()).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, remove waiting' }));
+    expect(titles()).toEqual(['posted']);
+    cleanup();
+    renderBoard('/board', chainOf(names).environment);
+    await screen.findByText('posted');
+    expect(screen.queryByText('waiting')).toBeNull();
   });
 
   it('shows the row that needs the board more strongly than the others', async () => {
