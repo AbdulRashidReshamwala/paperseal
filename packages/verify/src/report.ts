@@ -538,9 +538,12 @@ export async function checkExam(input: CheckExamInput): Promise<AgentReport> {
     method,
     checker: input.checker,
     exam: { examId, registry, chainId: chainSpec.chainId, mode },
-    assumed: { repository: input.repository.toLowerCase(), registry },
+    // The repository as given, so it reads the same as the prompt's Repository line.
+    assumed: { repository: input.repository, registry },
     overall: overallOf(claims, mode, method),
-    claims,
+    claims: claims.map((claim, i) =>
+      i === 0 ? { ...claim, evidence: [...claim.evidence, ev('chain', 'readFrom', input.rpcUrls.map(hostOf).join(', '))] } : claim,
+    ),
   });
 
   const failedRead = reads.findIndex((result) => result.status === 'rejected');

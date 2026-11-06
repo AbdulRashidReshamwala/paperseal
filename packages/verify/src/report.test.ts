@@ -83,7 +83,7 @@ describe('checkExam', () => {
     // mode is unknown until exam mode ships, so a clean exam is still partial.
     expect(report.overall).toBe('partial');
     expect(report.exam).toEqual({ examId, registry: registryAddress, chainId: 11155111, mode: 'unknown' });
-    expect(report.assumed).toEqual({ repository: 'owner/paperseal', registry: registryAddress });
+    expect(report.assumed).toEqual({ repository: 'Owner/Paperseal', registry: registryAddress });
     valid(report);
   });
 
