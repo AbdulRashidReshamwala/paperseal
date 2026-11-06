@@ -45,21 +45,30 @@ export function demoPanel<Props extends object>(): LazyExoticComponent<Component
   return lazy(() => import('../demo/BoardPanel') as unknown as Promise<{ default: ComponentType<Props> }>);
 }
 
-/** Five filled topics for the create page, to save typing in a demo. Null outside demo mode. */
+/** Two small topics for the create page, so a demo's bank is small. Null outside demo mode. */
 export function demoTopics(): { name: string; questions: string }[] | null {
   if (!on) return null;
-  return ['Mathematics', 'Physics', 'Chemistry', 'Biology', 'English'].map((name) => ({ name, questions: '5' }));
+  return ['Mathematics', 'Physics'].map((name) => ({ name, questions: '2' }));
 }
 
-/** Times for a short exam from now, in the date picker's local format. Null outside demo mode. */
-export function demoTimes(now = new Date()): { examStart: string; lockTime: string; durationMinutes: string; releaseMinutes: string } | null {
+/** A four minute demo from now, in the date picker's local format. Null outside demo mode. */
+export function demoTimes(now = new Date()): {
+  examStart: string;
+  lockTime: string;
+  durationMinutes: string;
+  releaseMinutes: string;
+  maxSetterPercent: string;
+  minBankMultiple: string;
+} | null {
   if (!on) return null;
+  const minute = 60_000;
+  const nextMinute = Math.ceil(now.getTime() / minute) * minute;
   const local = (minutes: number) => {
-    const at = new Date(now.getTime() + minutes * 60_000);
+    const at = new Date(nextMinute + minutes * minute);
     const pad = (n: number) => String(n).padStart(2, '0');
     return `${String(at.getFullYear())}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(at.getHours())}:${pad(at.getMinutes())}`;
   };
-  return { examStart: local(40), lockTime: local(25), durationMinutes: '10', releaseMinutes: '10' };
+  return { examStart: local(6), lockTime: local(4), durationMinutes: '1', releaseMinutes: '1', maxSetterPercent: '50', minBankMultiple: '2' };
 }
 
 /** How many setters a demo has, to fill the invites in one click. Null outside demo mode. */

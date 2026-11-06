@@ -139,4 +139,6 @@ Each button works one person at a time, with that person's planted key and throu
 
 **Ask for a touch** in the bar asks a plugged-in security key for a touch, at most once per click. The first touch makes a throwaway credential on it. The touch is only for show: its result is thrown away and never used for any key. If no key answers or you press Cancel, the planted key carries on, after 30 seconds at most. Untick it to skip the touch.
 
+For a four minute demo, publish off camera, then run `pnpm demo:vm <exam name>` to start the machine on it. New exams default to two small topics and a four minute window.
+
 `pnpm --filter @paperseal/e2e ui:demo` runs whole exams this way in one tab, on the local mock world, without Sepolia: one person by person, and one with the **Everyone else** buttons.

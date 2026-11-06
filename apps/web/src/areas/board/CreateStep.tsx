@@ -168,7 +168,7 @@ export function TopicsStep(props: { rail: DraftRail; onBack: () => void; onConti
     >
       {sampleTopics ? (
         <DemoFill
-          label="Add 5 topics with 5 questions"
+          label="Add 2 topics with 2 questions"
           onClick={() => {
             set({ topics: sampleTopics });
           }}

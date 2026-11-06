@@ -13,8 +13,8 @@ const alias = Object.fromEntries(
 );
 
 const entry = process.argv[2];
-if (entry !== 'main' && entry !== 'check' && entry !== 'names') {
-  console.error('usage: cli.mjs main|check|names [args]');
+if (entry !== 'main' && entry !== 'check' && entry !== 'names' && entry !== 'vm') {
+  console.error('usage: cli.mjs main|check|names|vm [args]');
   process.exit(2);
 }
 
