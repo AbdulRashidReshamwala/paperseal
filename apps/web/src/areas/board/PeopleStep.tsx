@@ -365,7 +365,7 @@ export function PeopleStep(props: { examId: Hex; snapshot: Snapshot; onPosted: (
   return (
     <>
       <h1 className="board-draft-title">Bring everyone in</h1>
-      <p className="board-draft-lede">Share the link and invite your setters. Once everyone has registered, post the list.</p>
+      <p className="board-draft-lede">Invite your setters and share the link with centres. Once everyone has registered, post the list.</p>
       {published ? (
         <div className="board-section board-people-published">
           <Stamp press>Published</Stamp>
@@ -384,7 +384,37 @@ export function PeopleStep(props: { examId: Hex; snapshot: Snapshot; onPosted: (
       ) : null}
       <section className="board-draft-card board-people-job">
         <h2>
-          <span>1</span> Share the exam link
+          <span>1</span> Invite the setters
+        </h2>
+        <p className="board-note">
+          {needs ? `You need at least ${String(needs.setters)}. ` : ''}Each link works for one setter only, so send it to them privately.
+        </p>
+        <AddInvite
+          invites={invites}
+          onAdd={(invite) => {
+            update([...invites, invite]);
+          }}
+        />
+        {invites.length > 0 ? (
+          <Rows>
+            {matching.rows.map(({ invite, state }) => (
+              <InviteRow
+                key={invite.id}
+                invite={invite}
+                state={state}
+                link={linkFor(base, examId, invite)}
+                onReissue={() => {
+                  update(invites.map((item) => (item.id === invite.id ? reissueInvite(invite) : item)));
+                }}
+              />
+            ))}
+          </Rows>
+        ) : null}
+        <InviteBackup examId={examId} invites={invites} onRestore={update} />
+      </section>
+      <section className="board-draft-card board-people-job">
+        <h2>
+          <span>2</span> Share the exam link with centres
         </h2>
         <p className="board-link">
           <span>Send this link to every centre and neutral party so they can register.</span>
@@ -429,36 +459,6 @@ export function PeopleStep(props: { examId: Hex; snapshot: Snapshot; onPosted: (
             ENS names are read on Sepolia, a test network, where anyone can register a similar name. Whoever runs {directoryName} decides which key belongs to each name on it.
           </p>
         </Fold>
-      </section>
-      <section className="board-draft-card board-people-job">
-        <h2>
-          <span>2</span> Invite the setters
-        </h2>
-        <p className="board-note">
-          {needs ? `You need at least ${String(needs.setters)}. ` : ''}Each link works for one setter only, so send it to them privately.
-        </p>
-        <AddInvite
-          invites={invites}
-          onAdd={(invite) => {
-            update([...invites, invite]);
-          }}
-        />
-        {invites.length > 0 ? (
-          <Rows>
-            {matching.rows.map(({ invite, state }) => (
-              <InviteRow
-                key={invite.id}
-                invite={invite}
-                state={state}
-                link={linkFor(base, examId, invite)}
-                onReissue={() => {
-                  update(invites.map((item) => (item.id === invite.id ? reissueInvite(invite) : item)));
-                }}
-              />
-            ))}
-          </Rows>
-        ) : null}
-        <InviteBackup examId={examId} invites={invites} onRestore={update} />
       </section>
       <section className="board-draft-card board-people-job">
         <h2>
