@@ -101,7 +101,8 @@ function renderBoard(path: string, environment: PublishEnvironment, teeClient: T
 }
 const where = () => screen.getByTestId('where').textContent;
 const row = (title: string) => screen.getByText(title).closest('li') as HTMLElement;
-const titles = () => screen.getAllByRole('listitem').map((item) => item.querySelector('strong')?.textContent);
+const list = () => screen.getByRole('list', { name: 'Your exams and drafts' });
+const titles = () => within(list()).getAllByRole('listitem').map((item) => item.querySelector('strong')?.textContent);
 
 beforeEach(() => {
   localStorage.clear();
@@ -117,8 +118,8 @@ describe('/board, the home page', () => {
     expect(screen.getByText('You have no exams yet.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Create an exam' })).toBeTruthy();
     expect(screen.queryByLabelText(/^Exam name/)).toBeNull();
-    expect(screen.queryByRole('list')).toBeNull();
-    expect(document.querySelectorAll('.ps-stage-action button')).toHaveLength(1);
+    expect(screen.queryByRole('list', { name: 'Your exams and drafts' })).toBeNull();
+    expect(document.querySelectorAll('.board-home-action button')).toHaveLength(1);
   });
 
   it('goes to /board/new from Create an exam, which is step 1 of 6 on an empty form, and a reload stays there', () => {
@@ -186,7 +187,12 @@ describe('/board, the home page', () => {
 
   it('opens an exam by its ID, and refuses text that is not one', () => {
     const id = examIdFromName('elsewhere-2027');
+    HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement) {
+      this.open = true;
+    };
     renderBoard('/board', chainOf({}).environment);
+    expect(screen.queryByLabelText('Exam ID')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Open an exam by its ID' }));
     const field = screen.getByLabelText('Exam ID');
     fireEvent.change(field, { target: { value: '0x12' } });
     fireEvent.click(screen.getByRole('button', { name: 'Open' }));
@@ -230,11 +236,11 @@ describe('the status on each published exam', () => {
     await pass(HOME_LIST_DEADLINE_MS - 1);
     expect(screen.queryByText('nobody')).toBeNull();
     await pass(1);
-    expect(within(row('nobody')).getByText('Choose who takes part')).toBeTruthy();
-    expect(within(row('waiting')).getByText('Waiting for questions')).toBeTruthy();
-    expect(within(row('posted')).getByText('Paper posted')).toBeTruthy();
-    expect(within(row('finished')).getByText('Exam finished')).toBeTruthy();
-    expect(within(row('unposted')).getByText('Exam failed')).toBeTruthy();
+    expect(within(row('nobody')).getByText('Inviting')).toBeTruthy();
+    expect(within(row('waiting')).getByText('Collecting')).toBeTruthy();
+    expect(within(row('posted')).getByText('Posted')).toBeTruthy();
+    expect(within(row('finished')).getByText('Finished')).toBeTruthy();
+    expect(within(row('unposted')).getByText('Failed')).toBeTruthy();
     expect(within(row('slow')).getByText('Checking…')).toBeTruthy();
     expect(row('slow').querySelector('.board-skeleton-bar')?.getAttribute('aria-hidden')).toBe('true');
     expect(within(row('slow')).getByRole('status').textContent).toBe('Checking…');
@@ -249,8 +255,8 @@ describe('the status on each published exam', () => {
     remember(['nobody', 'waiting']);
     renderBoard('/board', chainOf(names).environment);
     await waitFor(() => {
-      expect(within(row('nobody')).getByText('Choose who takes part')).toBeTruthy();
-      expect(within(row('waiting')).getByText('Waiting for questions')).toBeTruthy();
+      expect(within(row('nobody')).getByText('Inviting')).toBeTruthy();
+      expect(within(row('waiting')).getByText('Collecting')).toBeTruthy();
     });
     expect(row('nobody').classList.contains('board-row-act')).toBe(true);
     expect(row('waiting').classList.contains('board-row-act')).toBe(false);
@@ -261,23 +267,23 @@ describe('the status on each published exam', () => {
     setCurrentExamId(examIdFromName('waiting'));
     renderBoard('/board', chainOf(names).environment, tee('submit', [{ kind: 'build' }]));
     await waitFor(() => {
-      expect(within(row('waiting')).getByText('Paper ready to post')).toBeTruthy();
+      expect(within(row('waiting')).getByText('Ready')).toBeTruthy();
     });
     expect(row('waiting').classList.contains('board-row-act')).toBe(true);
-    expect(within(row('posted')).getByText('Paper posted')).toBeTruthy();
+    expect(within(row('posted')).getByText('Posted')).toBeTruthy();
     cleanup();
     renderBoard('/board', chainOf(names).environment, tee('failed'));
     await waitFor(() => {
-      expect(within(row('waiting')).getByText('Exam failed')).toBeTruthy();
+      expect(within(row('waiting')).getByText('Failed')).toBeTruthy();
     });
   });
 
-  it('says Status not available right now for a read that failed, and the other rows still show', async () => {
+  it('says Unavailable for a read that failed, and the other rows still show', async () => {
     remember(['waiting', 'broken']);
     renderBoard('/board', chainOf({ ...names, broken: { start: DAY, broken: true } }).environment);
     await waitFor(() => {
-      expect(within(row('broken')).getByText('Status not available right now')).toBeTruthy();
-      expect(within(row('waiting')).getByText('Waiting for questions')).toBeTruthy();
+      expect(within(row('broken')).getByText('Unavailable')).toBeTruthy();
+      expect(within(row('waiting')).getByText('Collecting')).toBeTruthy();
     });
     expect(within(row('broken')).getByRole('button', { name: 'Open broken' })).toBeTruthy();
     expect(screen.queryByRole('alert')).toBeNull();
@@ -287,7 +293,7 @@ describe('the status on each published exam', () => {
     remember(['waiting']);
     renderBoard('/board', { createRegistry: null } as unknown as PublishEnvironment);
     expect(skeleton()).toBeNull();
-    expect(within(row('waiting')).getByText('Status not available right now')).toBeTruthy();
+    expect(within(row('waiting')).getByText('Unavailable')).toBeTruthy();
   });
 
   it('opens a published exam from its row', async () => {
@@ -303,7 +309,7 @@ describe('the status on each published exam', () => {
     const { environment, stats } = chainOf(many);
     renderBoard('/board', environment);
     await waitFor(() => {
-      expect(screen.getAllByText('Waiting for questions')).toHaveLength(9);
+      expect(screen.getAllByText('Collecting')).toHaveLength(9);
     });
     expect(stats.peak).toBeLessThanOrEqual(HOME_READ_LIMIT);
     expect(stats.peak).toBeGreaterThan(1);
@@ -322,7 +328,7 @@ describe('the list on first load', () => {
     saveDraft('a', draft('my-draft'), 2_000);
     renderBoard('/board', chainOf({ waiting, other: waiting }).environment);
     expect(skeleton()?.querySelectorAll('li.board-row')).toHaveLength(3);
-    expect(screen.queryByRole('listitem')).toBeNull();
+    expect(screen.queryByRole('list', { name: 'Your exams and drafts' })).toBeNull();
     expect(screen.queryByText('waiting')).toBeNull();
     expect(screen.queryByText('my-draft')).toBeNull();
     expect(screen.queryByText('Draft')).toBeNull();
@@ -345,8 +351,8 @@ describe('the list on first load', () => {
     renderBoard('/board', chainOf({ waiting, slow: slowExam }).environment);
     await pass(1_000);
     expect(skeleton()).not.toBeNull();
-    expect(screen.queryByText('Waiting for questions')).toBeNull();
-    expect(screen.queryByRole('listitem')).toBeNull();
+    expect(screen.queryByText('Collecting')).toBeNull();
+    expect(screen.queryByRole('list', { name: 'Your exams and drafts' })).toBeNull();
   });
 
   it('counts a failed read as read, so the list shows without waiting for the deadline', async () => {
@@ -356,7 +362,7 @@ describe('the list on first load', () => {
     expect(skeleton()).not.toBeNull();
     await pass(1_000);
     expect(skeleton()).toBeNull();
-    expect(within(row('broken')).getByText('Status not available right now')).toBeTruthy();
+    expect(within(row('broken')).getByText('Unavailable')).toBeTruthy();
   });
 
   it('never comes back once settled, on later polls or when they fail', async () => {
@@ -379,7 +385,7 @@ describe('the list on first load', () => {
     watcher.disconnect();
     expect(stats.listReads).toBeGreaterThan(before);
     expect(returned).toBe(false);
-    expect(within(row('waiting')).getByText('Waiting for questions')).toBeTruthy();
+    expect(within(row('waiting')).getByText('Collecting')).toBeTruthy();
   });
 
   it('skips the skeleton when only drafts are listed', () => {

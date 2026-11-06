@@ -287,3 +287,314 @@
   gap: 0.5rem;
   overflow-wrap: anywhere;
 }
+
+/*
+ * The board home page. Flat and quiet on purpose: one bordered table, one action, no decoration.
+ * Everything sits under `.board-home`, so no other screen changes.
+ */
+.ps-shell:has(.board-home) {
+  max-width: 1080px;
+  padding-inline: var(--ps-space-6);
+}
+
+.ps-shell:has(.board-home) .ps-role {
+  align-items: center;
+  padding-bottom: var(--ps-space-4);
+  margin-bottom: 40px;
+  border-bottom: 1px solid var(--ps-rule);
+}
+
+.board-home-top {
+  display: flex;
+  gap: var(--ps-space-6);
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: var(--ps-space-5);
+}
+
+.board-home-top h1 {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
+.board-home-top p {
+  margin: var(--ps-space-1) 0 0;
+  font-size: 0.9375rem;
+  color: var(--ps-ink-soft);
+}
+
+.board-home .ps-primary {
+  width: auto;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 var(--ps-space-4);
+  font-size: var(--ps-text-small);
+  font-weight: 600;
+  white-space: nowrap;
+  border: 0;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.board-home .ps-primary:hover {
+  background: var(--ps-wax-deep);
+}
+
+.board-home-surface {
+  overflow: hidden;
+  background: var(--ps-field);
+  border: 1px solid var(--ps-rule);
+  border-radius: 8px;
+}
+
+.board-home-head,
+.board-home .board-row {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1.4fr) 176px;
+  gap: var(--ps-space-4);
+  align-items: center;
+  padding: 0 var(--ps-space-5);
+}
+
+.board-home-head {
+  height: 40px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--ps-ink-soft);
+}
+
+.board-home .board-home-list {
+  margin: 0;
+}
+
+.board-home .board-row,
+.board-home .board-row-act {
+  min-height: 72px;
+  padding-inline: var(--ps-space-5);
+  background: none;
+  border-top: 1px solid var(--ps-rule);
+  border-left: 0;
+  transition: background-color var(--ps-time-quick);
+}
+
+.board-home .board-home-list[aria-label] .board-row:hover {
+  background: color-mix(in srgb, var(--ps-ink) 3%, transparent);
+}
+
+.board-home-name {
+  display: grid;
+  min-width: 0;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.board-home-name strong {
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+
+.board-home-name > span:not(.board-skeleton-bar) {
+  font-size: 0.8125rem;
+  color: var(--ps-ink-soft);
+}
+
+.board-home-pill {
+  display: inline-flex;
+  white-space: nowrap;
+  gap: var(--ps-space-2);
+  align-items: center;
+  font-size: var(--ps-text-small);
+}
+
+.board-home-pill::before {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  content: "";
+  background: var(--ps-rule-strong);
+  border-radius: 50%;
+}
+
+.board-home-pill[data-tone='act'] {
+  font-weight: 600;
+}
+
+.board-home-pill[data-tone='act']::before {
+  background: var(--ps-wax);
+}
+
+.board-home-pill[data-tone='neutral']::before {
+  background: var(--ps-pass);
+}
+
+.board-home-pill[data-tone='quiet'] {
+  color: var(--ps-ink-soft);
+}
+
+.board-home-date {
+  font-size: var(--ps-text-small);
+  font-variant-numeric: tabular-nums;
+  color: var(--ps-ink-soft);
+}
+
+.board-home-actions {
+  display: flex;
+  gap: var(--ps-space-1);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.board-home-actions > span:not(.board-skeleton-bar) {
+  margin-right: var(--ps-space-1);
+  font-size: 0.8125rem;
+  color: var(--ps-ink-soft);
+}
+
+.board-home .board-home-actions .ps-button {
+  min-height: 32px;
+  padding: 0 var(--ps-space-3);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--ps-ink);
+  background: transparent;
+  border: 1px solid var(--ps-rule-strong);
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.board-home .board-home-actions .ps-button:hover {
+  background: var(--ps-paper-deep);
+}
+
+.board-home .board-home-actions .board-home-text {
+  color: var(--ps-ink-soft);
+  border-color: transparent;
+}
+
+.board-home .board-home-actions .board-home-confirm {
+  color: var(--ps-fail);
+  border-color: var(--ps-fail);
+}
+
+.board-home .board-skeleton-bar {
+  width: 96px;
+  height: 12px;
+  background: var(--ps-paper-deep);
+  border-radius: 4px;
+}
+
+.board-home .board-skeleton-bar::before {
+  content: none;
+}
+
+.board-home .board-skeleton-title {
+  width: 148px;
+  height: 14px;
+}
+
+.board-home .board-home-name .board-skeleton-bar + .board-skeleton-bar {
+  margin-top: var(--ps-space-2);
+}
+
+.board-home .board-home-bar-pill {
+  width: 112px;
+}
+
+.board-home .board-home-bar-button {
+  width: 64px;
+  height: 32px;
+  border-radius: 6px;
+}
+
+.board-home .board-home-bar-text {
+  width: 56px;
+  height: 32px;
+  border-radius: 6px;
+}
+
+.board-home-foot {
+  display: flex;
+  gap: var(--ps-space-5);
+  align-items: baseline;
+  justify-content: space-between;
+  margin-top: var(--ps-space-4);
+  font-size: 0.8125rem;
+  color: var(--ps-ink-soft);
+}
+
+.board-home-foot p {
+  margin: 0;
+}
+
+.board-home-foot .board-fold {
+  flex: none;
+  margin: 0;
+}
+
+.board-home-empty {
+  display: grid;
+  gap: var(--ps-space-3);
+  justify-items: center;
+  padding: var(--ps-space-8) var(--ps-space-5);
+  color: var(--ps-ink-soft);
+}
+
+.board-home-empty p {
+  margin: 0;
+}
+
+.board-home-link {
+  flex: none;
+  padding: 0;
+  font: inherit;
+  color: var(--ps-ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  background: none;
+  border: 0;
+}
+
+.board-home-dialog {
+  width: min(480px, calc(100vw - 48px));
+  padding: var(--ps-space-5);
+  color: var(--ps-ink);
+  background: var(--ps-field);
+  border: 1px solid var(--ps-rule);
+  border-radius: 8px;
+}
+
+.board-home-dialog::backdrop {
+  background: color-mix(in srgb, var(--ps-ink) 40%, transparent);
+}
+
+.board-home-dialog h2 {
+  margin: 0;
+  font-size: var(--ps-text-section);
+  font-weight: 400;
+}
+
+.board-home-dialog p {
+  margin: var(--ps-space-1) 0 var(--ps-space-4);
+  font-size: var(--ps-text-small);
+  color: var(--ps-ink-soft);
+}
+
+.board-home-dialog-actions {
+  display: flex;
+  gap: var(--ps-space-2);
+  justify-content: flex-end;
+  margin-top: var(--ps-space-4);
+}
+
+.board-home-dialog .ps-primary,
+.board-home-dialog .ps-button {
+  width: auto;
+  min-height: 40px;
+  padding: 0 var(--ps-space-4);
+  font-size: var(--ps-text-small);
+  border-radius: 6px;
+}

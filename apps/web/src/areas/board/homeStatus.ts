@@ -20,21 +20,21 @@ export interface ExamStatus {
 export function examStatus(snapshot: Snapshot, nowMs: number): ExamStatus {
   const settings = snapshot.found?.exam.settings;
   const step = decideStep(snapshot);
-  if (!settings || step === 'draft') return { label: 'Not on the public record yet', needsBoard: false };
-  if (step === 'people') return { label: 'Choose who takes part', needsBoard: true };
+  if (!settings || step === 'draft') return { label: 'Unpublished', needsBoard: false };
+  if (step === 'people') return { label: 'Inviting', needsBoard: true };
   const unlockMs = roundTimeSeconds(Number(settings.unlockRound)) * 1000;
   const endMs = roundTimeSeconds(Number(settings.endRound)) * 1000;
   if (step === 'status') {
     return sealStateAt(nowMs, unlockMs, endMs) === 'open'
-      ? { label: 'Exam finished', needsBoard: false }
-      : { label: 'Paper posted', needsBoard: false };
+      ? { label: 'Finished', needsBoard: false }
+      : { label: 'Posted', needsBoard: false };
   }
   // No paper's record is posted. Past the end, none can be, so the exam cannot go ahead.
-  if (snapshot.status?.stage === 'failed' || nowMs >= endMs) return { label: 'Exam failed', needsBoard: false };
-  if (step === 'post-build') return { label: 'Paper ready to post', needsBoard: true };
+  if (snapshot.status?.stage === 'failed' || nowMs >= endMs) return { label: 'Failed', needsBoard: false };
+  if (step === 'post-build') return { label: 'Ready', needsBoard: true };
   return nowMs >= roundTimeSeconds(Number(settings.lockRound)) * 1000
-    ? { label: 'Paper is being built', needsBoard: false }
-    : { label: 'Waiting for questions', needsBoard: false };
+    ? { label: 'Building', needsBoard: false }
+    : { label: 'Collecting', needsBoard: false };
 }
 
 export type HomeRow =
