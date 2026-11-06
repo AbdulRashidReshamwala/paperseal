@@ -1,6 +1,6 @@
 import { roles, roundTimeSeconds, toHex, requireHardwareAttestation } from '@paperseal/protocol';
 import { Check, Countdown, KeyTouch, Page, PrimaryAction, RoleHeader, Seal, Stage } from '@paperseal/ui';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import type { ReleaseContext } from '../../release/flow';
 import { Gate, TechnicalDetail } from '../../release/Gate';
@@ -72,6 +72,11 @@ export function CentreView(props: {
   });
   // A refused release is a failure, and a seal is good news.
   const [releaseRefused, setReleaseRefused] = useState(false);
+  // Once the paper can be opened, what needs no security key is got ahead of the press. The touch waits for it.
+  const { prepare } = open;
+  useEffect(() => {
+    if (stage === 'open') prepare();
+  }, [stage, prepare]);
   const seal = stage === 'release' && releaseRefused ? null : sealFor(stage);
   const status = progress.status.value;
   const round = progress.chain.value?.unlockRound ?? null;

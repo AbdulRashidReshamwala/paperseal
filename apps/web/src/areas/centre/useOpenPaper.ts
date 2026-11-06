@@ -1,6 +1,6 @@
 import { timelockDecrypt } from '@paperseal/crypto';
-import { fromHex, toHex, type Paper } from '@paperseal/protocol';
-import { useState } from 'react';
+import { fromHex, toHex, type Hex, type Paper } from '@paperseal/protocol';
+import { useEffect, useRef, useState } from 'react';
 
 import { storageUrl } from '../../shared/config';
 import { useCurrentExamId } from '../../shared/currentExam';
@@ -10,7 +10,7 @@ import { registry } from '../../shared/registry';
 import { storageFetcher, StorageVerificationError } from '../../shared/storage';
 import { downloadPaperFiles, type Downloaded } from './download';
 import { chainReaders } from './readers';
-import { PaperHashMismatchError, unlockPaper, UnlockError, type UnlockStep } from './unlock';
+import { PaperHashMismatchError, prepareUnlock, unlockPaper, UnlockError, type PreparedUnlock, type UnlockStep } from './unlock';
 
 export type OpenPhase =
   | { name: 'idle' }
@@ -100,7 +100,21 @@ export function refusalFor(step: UnlockStep | null, error: unknown): Refusal {
   };
 }
 
+/** How long what was got ahead of the press stays good. After this the press gets it again. */
+export const EARLY_TTL_MS = 120_000;
+
+/** What needs no security key: the centre's entry, the Build and criteria, the time seal and its sealed key. */
+interface Early {
+  derivedPublicKey: Hex;
+  build: NonNullable<Awaited<ReturnType<ReturnType<typeof chainReaders>['readBuild']>>>;
+  criteria: Awaited<ReturnType<ReturnType<typeof chainReaders>['readCriteria']>>;
+  prepared: PreparedUnlock;
+  at: number;
+}
+
 export interface OpenPaper {
+  /** Gets what needs no security key, ahead of the press. It never starts the touch. */
+  prepare: () => void;
   phase: OpenPhase;
   /** Set only after `unlockPaper` returns, which is after every check has passed. */
   paper: Paper | null;
@@ -112,12 +126,77 @@ export function useOpenPaper(downloaded: Downloaded | null, identity: StoredCred
   const examId = useCurrentExamId();
   const [phase, setPhase] = useState<OpenPhase>({ name: 'idle' });
   const [paper, setPaper] = useState<Paper | null>(null);
+  const early = useRef<Promise<Early | null> | null>(null);
+
+  const wipe = (held: Early | null) => {
+    held?.prepared.kPub.fill(0);
+  };
+  const forget = () => {
+    const held = early.current;
+    early.current = null;
+    void held?.then(wipe);
+  };
+  // Nothing is held once this page is gone.
+  useEffect(() => forget, []);
+
+  async function gather(): Promise<Early | null> {
+    if (!registry || !examId || !storageUrl || !identity || !downloaded) return null;
+    try {
+      const own = await listEntryFor(registry, examId, identity.passkeyPublicKey);
+      if (!own || own.derivedPublicKey.length === 0) return null;
+      const readers = chainReaders(registry, examId);
+      const build = await readers.readBuild();
+      if (!build) return null;
+      const derivedPublicKey = toHex(own.derivedPublicKey);
+      const prepared = await prepareUnlock({
+        derivedPublicKey,
+        keyPubTlock: downloaded.keyPubTlock,
+        timelockDecrypt: (ciphertext) => timelockDecrypt(ciphertext),
+        fetchFile: storageFetcher(storageUrl, examId),
+      });
+      return { derivedPublicKey, build, criteria: await readers.readCriteria(), prepared, at: Date.now() };
+    } catch {
+      // Not an error to show: pressing the button gets everything again and says what went wrong.
+      return null;
+    }
+  }
 
   async function run() {
     if (!registry || !examId || !storageUrl || !identity) return;
     let current: UnlockStep | null = null;
     setPhase({ name: 'checking' });
+    const waiting = early.current;
+    early.current = null;
+    let ahead = waiting ? await waiting : null;
+    if (ahead && Date.now() - ahead.at >= EARLY_TTL_MS) {
+      wipe(ahead);
+      ahead = null;
+    }
     try {
+      if (ahead && downloaded) {
+        const held = ahead;
+        ahead = null;
+        const shown = await unlockPaper({
+          examId,
+          credentialId: fromHex(identity.credentialId),
+          derivedPublicKey: held.derivedPublicKey,
+          keys: browserKeys(),
+          build: held.build,
+          criteria: held.criteria,
+          paperFile: downloaded.paper,
+          keyPubTlock: downloaded.keyPubTlock,
+          timelockDecrypt: (ciphertext) => timelockDecrypt(ciphertext),
+          fetchFile: storageFetcher(storageUrl, examId),
+          prepared: held.prepared,
+          onStep: (step) => {
+            current = step;
+            setPhase(step === 'touch' ? { name: 'touch' } : step === 'decrypt' || step === 'check' ? { name: 'opening' } : { name: 'checking' });
+          },
+        });
+        setPaper(shown);
+        setPhase({ name: 'idle' });
+        return;
+      }
       const own = await listEntryFor(registry, examId, identity.passkeyPublicKey);
       if (!own || own.derivedPublicKey.length === 0) throw new Error('Your security key is not an approved centre on the on-chain list.');
       const fetchFile = storageFetcher(storageUrl, examId);
@@ -149,10 +228,16 @@ export function useOpenPaper(downloaded: Downloaded | null, identity: StoredCred
       setPaper(null);
       if (current === 'touch' && !(error instanceof UnlockError)) setPhase({ name: 'key-failed', error });
       else setPhase({ name: 'failed', refusal: refusalFor(current, error) });
+    } finally {
+      wipe(ahead);
     }
   }
 
   return {
+    prepare: () => {
+      if (early.current || paper) return;
+      early.current = gather();
+    },
     phase,
     paper,
     start: () => {
