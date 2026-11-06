@@ -1,5 +1,6 @@
 import type { Criteria, Hex, Stage as ExamStage } from '@paperseal/protocol';
 import { Button, LoadingSeal, Page, RoleHeader, Stage, useLoaded } from '@paperseal/ui';
+import { useExamTitle } from '../../shared/NamedExam';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { useMachineElsewhere } from '../../shared/machineExam';
@@ -116,6 +117,7 @@ function Quiet(props: { title: string; lede?: string; next: string; detail?: str
 export function SetterFlow() {
   const session = useSession();
   const { env, examId, credential, outcome, confirmed, status, statusError, checking, runConfirm } = session;
+  const title = useExamTitle(examId);
 
   // Above every screen, so a re-check or the bank closing never loses what is being written. It is
   // held in memory only: a question's text is never stored.
@@ -245,5 +247,5 @@ export function SetterFlow() {
     }
   };
 
-  return <Page header={<RoleHeader role="Setter" />}>{loaded ? body() : <LoadingSeal />}</Page>;
+  return <Page header={<RoleHeader role="Setter" exam={title} />}>{loaded ? body() : <LoadingSeal />}</Page>;
 }

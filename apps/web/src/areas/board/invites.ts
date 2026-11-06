@@ -110,6 +110,6 @@ export function reissueInvite(invite: BoardInvite): BoardInvite {
   return { ...invite, inviteSecret: newInviteSecret() };
 }
 
-export function linkFor(base: string, examId: Hex, invite: BoardInvite): string {
-  return encodeInviteLink(base, { examId, role: invite.role, inviteSecret: invite.inviteSecret } satisfies Invite);
+export function linkFor(base: string, examId: Hex, invite: BoardInvite, name?: string | null): string {
+  return encodeInviteLink(base, { examId, role: invite.role, inviteSecret: invite.inviteSecret, ...(name ? { name } : {}) } satisfies Invite);
 }

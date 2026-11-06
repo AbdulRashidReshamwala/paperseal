@@ -404,7 +404,7 @@ export function PeopleStep(props: { examId: Hex; snapshot: Snapshot; onPosted: (
                 key={invite.id}
                 invite={invite}
                 state={state}
-                link={linkFor(base, examId, invite)}
+                link={linkFor(base, examId, invite, verifiedName)}
                 onReissue={() => {
                   update(invites.map((item) => (item.id === invite.id ? reissueInvite(invite) : item)));
                 }}
