@@ -3,12 +3,12 @@ import { useId } from 'react';
 import sealUrl from './assets/seal.svg';
 import { LOGO_SEAL } from './logoPaths';
 
-/** From this size up, the realistic wax seal is shown. Below it, the flat mark. */
-const REALISTIC_FROM = 48;
+/** From this size up, the realistic wax seal is shown. Below it the art turns to mush, so the flat mark. */
+const REALISTIC_FROM = 24;
 
 /**
- * The mark: a wax seal stamped "PS". Under 48px, and always with `tone="mono"`, it is the flat
- * single-path mark, filled with `--ps-wax` or `currentColor`. From 48px up it is the realistic seal.
+ * The mark: a wax seal stamped "PS". Under 24px, and always with `tone="mono"`, it is the flat
+ * single-path mark, filled with `--ps-wax` or `currentColor`. From 24px up it is the realistic seal.
  */
 export function Logo(props: {
   /** Width and height in pixels. Prefer 16, 32, 48, 96. */

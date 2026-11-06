@@ -11,7 +11,7 @@ const root = join(import.meta.dirname, '..', '..', '..');
 
 describe('Logo', () => {
   it('has a title that names it', () => {
-    const html = renderToString(<Logo />);
+    const html = renderToString(<Logo size={16} />);
     expect(html).toContain('role="img"');
     const id = /aria-labelledby="([^"]+)"/.exec(html)?.[1];
     expect(id).toBeTruthy();
@@ -19,7 +19,7 @@ describe('Logo', () => {
   });
 
   it('is hidden when decorative', () => {
-    const html = renderToString(<Logo decorative />);
+    const html = renderToString(<Logo size={16} decorative />);
     expect(html).toContain('aria-hidden="true"');
     expect(html).not.toContain('<title');
     expect(html).not.toContain('role="img"');
@@ -34,7 +34,7 @@ describe('Logo', () => {
 
   it('stays on the two colours through tokens', () => {
     const css = readFileSync(join(import.meta.dirname, 'tokens.css'), 'utf8');
-    expect(renderToString(<Logo />)).not.toMatch(/#[0-9a-f]{3,6}/i);
+    expect(renderToString(<Logo size={16} />)).not.toMatch(/#[0-9a-f]{3,6}/i);
     expect(css).toMatch(/\.ps-logo-wax {\s+fill: var\(--ps-wax\);/);
     expect(css).toMatch(/\.ps-logo\[data-tone='mono'\] \.ps-logo-wax {\s+fill: currentColor;/);
   });
@@ -51,13 +51,13 @@ describe('Logo', () => {
     expect(html).toContain(`d="${LOGO_SEAL}"`);
   });
 
-  it('shows the realistic seal as an image from 48px, named by its title', () => {
+  it('shows the realistic seal as an image from 24px, named by its title', () => {
     const html = renderToString(<Logo size={96} title="Seal" />);
     expect(html).toContain('<img');
     expect(html).toContain('width="96"');
     expect(html).toContain('alt="Seal"');
     expect(html).toContain('class="ps-logo"');
-    const hidden = renderToString(<Logo size={48} decorative />);
+    const hidden = renderToString(<Logo size={24} decorative />);
     expect(hidden).toContain('alt=""');
     expect(hidden).toContain('aria-hidden="true"');
   });

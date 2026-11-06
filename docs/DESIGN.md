@@ -125,7 +125,7 @@ Motion is for the seal and for waiting on a security key. Under `prefers-reduced
 
 ### `Logo` and `Wordmark`
 
-The mark is a wax seal with a near-black `PS` monogram. It comes in two forms, chosen by size. Below 48px it is flat: one wax-coloured blob with the `PS` knocked out, drawn inline from `LOGO_SEAL` in `src/logoPaths.ts`. From 48px up it is the realistic bright seal in `src/assets/seal.svg`. The brand sources and earlier versions are in `presentation/assets/logo`, and v3 is the chosen one.
+The mark is a wax seal with a near-black `PS` monogram. It comes in two forms, chosen by size. Below 24px it is flat: one wax-coloured blob with the `PS` knocked out, drawn inline from `LOGO_SEAL` in `src/logoPaths.ts`. From 24px up it is the realistic bright seal in `src/assets/seal.svg`. The brand sources and earlier versions are in `presentation/assets/logo`, and v3 is the chosen one.
 
 - `Logo` is the mark alone. `size` is in pixels. `title` is its accessible name, "Paper Seal" by default. Set `decorative` when the words sit beside it.
 - `Wordmark` is the mark with "Paper Seal" in Libre Caslon Text. `size` is the mark's height and the words scale with it, so it follows the same size rule. The words are its accessible name.

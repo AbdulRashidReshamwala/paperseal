@@ -205,6 +205,11 @@ a:hover {
   flex: none;
 }
 
+/* The seal's art has a transparent margin, so it is enlarged to sit level with the words. */
+.ps-wordmark img.ps-logo {
+  scale: 1.32;
+}
+
 .ps-logo-wax {
   fill: var(--ps-wax);
 }
@@ -484,48 +489,6 @@ a:hover {
   font-weight: 600;
   letter-spacing: 0.08em;
   color: var(--ps-seal-ink);
-}
-
-.ps-seal-under {
-  fill: var(--ps-wax-deep);
-}
-
-.ps-seal-wax {
-  fill: var(--ps-wax);
-}
-
-.ps-seal-well {
-  fill: none;
-  stroke: var(--ps-wax-deep);
-  stroke-width: 1.5;
-}
-
-.ps-seal-beads {
-  fill: none;
-  stroke: var(--ps-wax-deep);
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  stroke-dasharray: 0.1 4.3;
-}
-
-.ps-seal-shine {
-  fill: none;
-  stroke: var(--ps-wax-shine);
-  stroke-width: 2;
-  stroke-linecap: round;
-  opacity: 0.8;
-}
-
-.ps-seal-mark {
-  font-family: var(--ps-serif);
-  font-size: 29px;
-  font-weight: 700;
-  fill: var(--ps-wax-deep);
-}
-
-.ps-seal-mark-lift {
-  fill: var(--ps-wax-shine);
-  opacity: 0.55;
 }
 
 .ps-seal-half {
