@@ -3,14 +3,17 @@ import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { createExamRegistry } from '@paperseal/chain';
-import { decodeInviteFragment, examNameProblem, firstRoundAtOrAfter, roundTimeSeconds, startupArgs, type Hex } from '@paperseal/protocol';
+import { ens, examNameProblem, firstRoundAtOrAfter, parseKeyCard, roundTimeSeconds, startupArgs, type Hex, type KeyCard } from '@paperseal/protocol';
 import { keccak256, toBytes } from 'viem';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import { startApp, startChain, type Chain } from '../src/chain';
+import { startEnsRpc, type EnsRpc } from '../src/ens';
 import { stopAll } from '../src/procs';
 import { castSend } from '../live/cast';
 import { deployed, rpcHost } from '../live/config';
+import { writeNameRecords } from '../live/names';
+import { partyParent } from '../live/roster';
 import { liveCriteria, liveQuestion, questionsPerSetterPerTopic } from '../live/schedule';
 import { startMockTee, type MockTee } from '../mock/mockTee';
 import { makeMockPki, type MockPki } from '../mock/pki';
@@ -24,6 +27,8 @@ import { button, centre as centreText, composer, field, fold, hashOf, radio, ste
  * THE REAL RUN, through the screens. The deployed TEE (tee.abdulrashid.dev, a Confidential Space VM),
  * Sepolia and the real public bucket. Nothing is stubbed. The apps are the local Vite dev servers,
  * configured with the deployed addresses. Every person has one window, one tab and one virtual key.
+ * Virtual keys die with the browser, so each key holder and centre enrols first, and this run writes
+ * their records on the demo directory, as its owner would from their key cards.
  *
  *   board      in the UI. Its wallet is a page script whose signing goes to `cast send` with the Foundry keystore
  *              (the key and its password are never read), so each wallet signature is counted as such.
@@ -155,9 +160,50 @@ describe('real exam through the screens', () => {
       const warm = await browser.newPage();
       await warm.goto(base);
       await warm.waitForLoadState('networkidle');
-      if (base === web.url) for (const a of ['board', 'setter', 'keyholder', 'centre', 'join']) await warm.goto(`${base}/#/${a}`).then(() => warm.waitForLoadState('networkidle'));
+      if (base === web.url) for (const a of ['board', 'setter', 'keyholder', 'centre', 'join', 'enrol', 'exam']) await warm.goto(`${base}/#/${a}`).then(() => warm.waitForLoadState('networkidle'));
       await warm.close();
     }
+
+    // ---------------------------------------------------------------- everyone opens a window, and each party enrols
+    const roster = [
+      ...[1, 2].map((n) => ({ who: `setter-${String(n)}`, role: 'setter', label: `setter ${String(n)}` })),
+      ...[1, 2, 3].map((n) => ({ who: `neutral-${String(n)}`, role: 'keyholder', label: `neutral-${String(n)}.${partyParent}` })),
+      ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ who: `centre-${String(n)}`, role: 'centre', label: `centre-${String(n)}.${partyParent}` })),
+    ];
+    const parties = roster.filter((p) => p.role !== 'setter');
+    const people: Record<string, Actor> = {};
+    const open = async (who: string, role: string) => {
+      const videoDir = videoDirFor(who);
+      people[who] = await openActor(browser, who, null, { role, ...(videoDir ? { videoDir } : {}) });
+    };
+    for (const p of roster) await open(p.who, p.role === 'keyholder' ? 'key holder' : p.role);
+    await open('verifier', 'verifier');
+    const verifier = people.verifier;
+    if (!verifier) throw new Error('no verifier window');
+
+    const cards: { name: string; card: KeyCard }[] = [];
+    await Promise.all(
+      parties.map((p) =>
+        step(`${p.who} sets up their security key once and gets a key card`, async () => {
+          const a = people[p.who];
+          if (!a) throw new Error('no window');
+          await a.flow('enrol', async () => {
+            await a.page.goto(`${web.url}/#/enrol`);
+            await a.page.getByRole('button', { name: button.enrol }).click({ timeout: 60_000 });
+            await a.seeHeading(text.keyCardHeading, 60_000);
+            await a.page.locator('summary', { hasText: 'The full card' }).click();
+            cards.push({ name: p.label, card: parseKeyCard(await a.page.getByLabel('Your key card', { exact: true }).innerText()) });
+          });
+          if (p.who === 'centre-1') await a.shot(`${PREFIX}00-key-card`);
+        }),
+      ),
+    );
+    const named = await step('the directory owner puts each card on its name and lists the names', async () => {
+      if (cards.length !== parties.length) throw new Error(`only ${String(cards.length)} key cards`);
+      await world.writeNames(cards);
+      return `${String(cards.length)} names`;
+    });
+    if (!named) throw new Error('the names could not be written, so nobody can be chosen. See the results file.');
 
     // ---------------------------------------------------------------- schedule (this run only)
     const now = Math.floor(Date.now() / 1000);
@@ -224,7 +270,7 @@ describe('real exam through the screens', () => {
         throw new Error(`publish did not finish. Page: ${(await board.text()).slice(0, 600)}`);
       });
       await board.see(text.publishedStamp, 10_000);
-      await board.say('Exam board: published, now invite people');
+      await board.say('Exam board: published, now choose who takes part');
       await board.shot(`${PREFIX}04-published`);
       await board.beat(2500);
       board.mark('published');
@@ -281,28 +327,26 @@ describe('real exam through the screens', () => {
       await bp.reload();
     }
 
-    // ---------------------------------------------------------------- the board makes invites while the VM boots
-    const roster = [
-      ...[1, 2].map((n) => ({ who: `setter-${String(n)}`, role: 'setter', label: `setter ${String(n)}` })),
-      // Key holders and centres are invited by ENS name only, and the board's page reads each name,
-      // so these 11 names must exist first (see "What the owner creates" in docs/ens-setup.md).
-      ...[1, 2, 3].map((n) => ({ who: `neutral-${String(n)}`, role: 'keyholder', label: `neutral-${String(n)}.paperseal-demo.eth` })),
-      ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ who: `centre-${String(n)}`, role: 'centre', label: `centre-${String(n)}.paperseal-demo.eth` })),
-    ];
+    // ---------------------------------------------------------------- the board chooses names while the VM boots
     const links: Record<string, string> = {};
-    await step('board makes 13 invites and copies each link (UI)', () =>
-      board.flow('invites: add and copy 13 links', async () => {
+    let examLink = '';
+    await step('board picks 11 names from the directory, makes 2 setter invites and copies the links (UI)', () =>
+      board.flow('choose names and copy links', async () => {
         await board.seeHeading(text.peopleHeading, 60_000);
-        for (const person of roster) {
-          await bp.getByLabel(field.inviteRole).selectOption(person.role);
-          await board.type(bp.getByLabel(field.inviteName), person.label);
+        // Ticking in this order fills the neutral places, then the key places. The eighth centre has no default.
+        for (const person of parties) await bp.getByLabel(`Include ${person.label}`).check({ timeout: 60_000 });
+        await bp.getByLabel(`Role for centre-8.${partyParent}`).selectOption({ label: 'Centre getting the key at unlock' });
+        await bp.getByRole('button', { name: button.copyExamLink }).click();
+        examLink = await bp.evaluate(() => navigator.clipboard.readText());
+        for (const person of roster.filter((p) => p.role === 'setter')) {
+          await board.type(bp.getByLabel(field.inviteNote), person.label);
           await bp.getByRole('button', { name: button.addInvite }).click();
-          await bp.getByRole('button', { name: new RegExp(`^Copy the link for ${person.label} \\(`) }).click();
+          await bp.getByRole('button', { name: `Copy the link for ${person.label}` }).click();
           links[person.who] = await bp.evaluate(() => navigator.clipboard.readText());
         }
         await board.shot(`${PREFIX}05-invites-waiting`);
-        if (Object.keys(links).length !== 13) throw new Error(`only ${String(Object.keys(links).length)} links copied`);
-        return '13 links';
+        if (Object.keys(links).length !== 2 || !examLink.includes(examId)) throw new Error('the links were not copied');
+        return '11 names, 2 links';
       }),
     );
 
@@ -319,28 +363,22 @@ describe('real exam through the screens', () => {
       throw new Error('the TEE did not come back');
     });
 
-    // ---------------------------------------------------------------- everyone opens their link and registers
-    const people: Record<string, Actor> = {};
-    const open = async (who: string, role: string) => {
-      const videoDir = videoDirFor(who);
-      people[who] = await openActor(browser, who, null, { role, ...(videoDir ? { videoDir } : {}) });
-    };
-    for (const p of roster) await open(p.who, p.role === 'keyholder' ? 'key holder' : p.role);
-    await open('verifier', 'verifier');
-    const verifier = people.verifier;
-    if (!verifier) throw new Error('no verifier window');
-
+    // ---------------------------------------------------------------- setters use their links, parties the exam link
+    const local = (link: string) => link.replace(/^https?:\/\/[^#]+/, `${web.url}/`);
     await Promise.all(
       roster.map((p) =>
-        step(`${p.who} registers from their link`, async () => {
+        step(p.role === 'setter' ? `${p.who} registers from their link` : `${p.who} registers from the public exam page`, async () => {
           const a = people[p.who];
           if (!a) throw new Error('no window');
           await a.flow('register', async () => {
-            const link = links[p.who] ?? '';
-            const invite = decodeInviteFragment(new URL(link).hash);
-            expect(invite.examId).toBe(examId);
-            await a.page.goto(link.replace(/^https?:\/\/[^#]+/, `${web.url}/`));
-            await a.page.getByRole('button', { name: button.register }).click({ timeout: 60_000 });
+            if (p.role === 'setter') {
+              await a.page.goto(local(links[p.who] ?? ''));
+              await a.page.getByRole('button', { name: button.register }).click({ timeout: 60_000 });
+            } else {
+              await a.page.goto(local(examLink));
+              await a.page.getByLabel(field.partyName).fill(p.label, { timeout: 60_000 });
+              await a.page.getByRole('button', { name: button.registerByName }).click();
+            }
             await a.see(/security key is registered|You are registered|Nothing to do yet/, 60_000);
           });
           if (p.who === 'setter-1' || p.who === 'centre-1' || p.who === 'neutral-1') await a.shot(`${PREFIX}10-registered`);
@@ -355,28 +393,8 @@ describe('real exam through the screens', () => {
         await board.seeHeading(text.peopleHeading, 60_000);
         await board.see('Registered', 60_000);
         await board.shot(`${PREFIX}11-people-registered`);
-        // A key holder's name is confirmed by a record holding the new security key, which cannot exist before
-        // they register. Unless the name already has it, the board goes ahead without it, as the screen offers.
-        for (let n = 1; n <= 3; n++) {
-          const name = `neutral-${String(n)}.paperseal-demo.eth`;
-          const go = bp.getByRole('button', { name: `Go ahead without the name for ${name} (Key holder)` });
-          const row = bp.locator('li', { hasText: name });
-          const deadline = Date.now() + 90_000;
-          while (Date.now() < deadline) {
-            if ((await go.count()) > 0) {
-              await go.click();
-              break;
-            }
-            if ((await row.getByText('Name confirmed').count()) > 0) break;
-            await sleep(1000);
-          }
-        }
-        // Seven centres hold part of the key and the eighth gets the key at unlock. The screen's default is not relied on.
-        for (let n = 1; n <= 8; n++) {
-          const pick = bp.getByLabel(`Role for centre-${String(n)}.paperseal-demo.eth`);
-          await pick.waitFor({ timeout: 60_000 });
-          await pick.selectOption({ label: n === 8 ? 'Centre getting the key at unlock' : 'Centre holding part of the key' });
-        }
+        // Each name counts only when its record matches the key that registered.
+        await bp.waitForFunction((want) => document.body.innerText.split('Name confirmed').length - 1 >= want, parties.length, { timeout: 90_000 });
         await board.shot(`${PREFIX}11b-people-places`);
         board.mark('post-list-start');
         await board.say('Exam board: post the list of people');
@@ -688,9 +706,9 @@ describe('real exam through the screens', () => {
       const a = people['centre-8'];
       if (!a) throw new Error('no window');
       const late = await openActor(browser, 'late-centre', null, { role: 'centre' });
-      await late.page.goto(links['centre-8']?.replace(/^https?:\/\/[^#]+/, `${web.url}/`) ?? '');
+      await late.page.goto(local(examLink));
       await late.seeHeading(text.endedHeading, 60_000);
-      if (await late.page.getByRole('button', { name: button.register }).count()) throw new Error('registration offered after the end');
+      if (await late.page.getByRole('button', { name: button.registerByName }).count()) throw new Error('registration offered after the end');
       await late.shot(`${PREFIX}62-ended`);
     });
 
@@ -702,6 +720,7 @@ describe('real exam through the screens', () => {
           ]
         : [
             'The board wallet signatures (createExam, postApprovedList, postBuild) are produced by `cast send` with the Foundry keystore, behind the injected wallet. The buttons were clicked in the UI.',
+            'The directory records are written by this driver with `cast send` from each key card, as docs/ens-setup.md says. Virtual keys die with the browser, so a real directory would hold real keys instead.',
             'The TEE VM start (run-tee.sh --reset) is run by this driver, not by a screen.',
           ]),
     );
@@ -731,8 +750,13 @@ interface World {
   bindings?: Record<string, (...args: never[]) => unknown>;
   /** Mock only: points the mock machine at the published exam. */
   startTee?: (examId: Hex) => Promise<void>;
+  /** Puts each key card on its name, and lists the names on the directory. */
+  writeNames: (cards: readonly { name: string; card: KeyCard }[]) => Promise<void>;
   stop: () => Promise<void>;
 }
+
+/** Neutrals first, then centres in order, as the directory reads. */
+const byRole = (a: string, b: string) => a.localeCompare(b) * (a[0] === b[0] ? 1 : -1);
 
 /** The deployed system: the real TEE VM, Sepolia, the real bucket. */
 function liveWorld(): World {
@@ -750,6 +774,7 @@ function liveWorld(): World {
     rpcHost,
     walletScript: castWalletScript(deployed.rpcUrl, BOARD_ADDRESS),
     bindings: { __castSend: (data: Hex, to: Hex) => castSend(data, to) },
+    writeNames: (cards) => writeNameRecords(cards, log),
     stop: async () => undefined,
   };
 }
@@ -760,10 +785,12 @@ function liveWorld(): World {
  * virtual security keys and real PRF-derived keys, HPKE, AES-GCM, ECDSA and every message and file of
  * spec/api.md, the drand clock and beacons, and the GitHub release list. REPLACED: the Go TEE by e2e/mock,
  * its attestation by a throwaway root, Shamir by random shares, the machine's WebAuthn signature checks,
- * Sepolia by anvil, the board's Foundry wallet by anvil's test wallet, and the bucket by a local server.
+ * Sepolia by anvil, ENS by the stand-in in e2e/src/ens.ts, the board's Foundry wallet by anvil's test
+ * wallet, and the bucket by a local server.
  */
 async function mockWorld(): Promise<World> {
   const chain: Chain = await startChain();
+  const names: EnsRpc = await startEnsRpc(chain.rpcUrl);
   const pki: MockPki = makeMockPki();
   const storage = await startStorage();
   const registry = createExamRegistry({ address: chain.registry, rpcUrl: chain.rpcUrl });
@@ -771,7 +798,7 @@ async function mockWorld(): Promise<World> {
   const tee: MockTee = await startMockTee({ pki, registry, storage: storage.files, bucket, log });
   return {
     env: {
-      VITE_RPC_URL: chain.rpcUrl,
+      VITE_RPC_URL: names.rpcUrl,
       VITE_REGISTRY_ADDRESS: chain.registry,
       VITE_TEE_URL: tee.url,
       VITE_STORAGE_URL: storage.url,
@@ -784,10 +811,21 @@ async function mockWorld(): Promise<World> {
     rpcHost: 'sepolia.example.org',
     walletScript: testWalletScript(chain.rpcUrl),
     startTee: (examId) => tee.init(examId),
+    writeNames: (cards) => {
+      for (const { name, card } of cards) {
+        names.set(name, {
+          address: '0x000000000000000000000000000000000000dEaD',
+          texts: { [ens.records.passkey]: card.passkey, [ens.records.credential]: card.credentialId },
+        });
+      }
+      names.set(partyParent, { texts: { [ens.records.directory]: JSON.stringify(cards.map(({ name }) => name).sort(byRole)) } });
+      return Promise.resolve();
+    },
     stop: async () => {
       await tee.stop();
       pki.stop();
       await storage.stop();
+      await names.stop();
       await chain.stop();
     },
   };

@@ -1,9 +1,9 @@
-import { decodeInviteFragment, ens, fromHex, passkeyRecordValue, toHex, type Hex } from '@paperseal/protocol';
+import { decodeInviteFragment, ens, fromHex, noInviteTag, passkeyRecordValue, setterOwner, toHex, type Hex } from '@paperseal/protocol';
 import { keccak256, toBytes } from 'viem';
 import { describe, expect, it } from 'vitest';
 
 import { testWalletScript } from '../src/wallet';
-import { inviteTag, listWith, postListDirect, publishDirect, strangerKey, timings, type Timing } from './chainkit';
+import { demoParent, inviteTag, listWith, postListDirect, publishDirect, strangerKey, timings, type Timing } from './chainkit';
 import type { Lab } from './lab';
 import { openActor, proxyGithubIfLimited, type Actor } from './kit';
 import { button, field, fold, hashOf, text, unfold } from './selectors';
@@ -17,7 +17,7 @@ import { button, field, fold, hashOf, text, unfold } from './selectors';
  */
 
 const NAME = 'ui-suite-physics-final';
-/** Key holders and centres are invited by ENS name only. The lab's ENS stand-in (e2e/src/ens.ts) knows these. */
+/** Key holders and centres are chosen by ENS name. The lab's ENS stand-in (e2e/src/ens.ts) knows these. */
 const KEYHOLDER = 'neutral-anna.paperseal-demo.eth';
 const CENTRE = 'north-centre.paperseal-demo.eth';
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -83,56 +83,64 @@ export function boardTests(lab: () => Lab): void {
       expect(await hashOf(page, 'exam ID').catch(() => '')).toBeDefined();
     });
 
-    it('invites: add, copy link, matched, not invited, doubled, reissue [stub tee]', async () => {
+    it('names and invites: choose, exam link, confirmed, stranger, setter link, doubled, reissue [stub tee]', async () => {
       const { tee } = lab();
       const page = board.page;
       const examId = keccak256(toBytes(NAME));
       tee.state.registrations = [];
-      const links: Record<string, string> = {};
-      lab().ens.set(KEYHOLDER);
-      lab().ens.set(CENTRE);
-      await board.flow('add and copy three invites', async () => {
-        await board.seeHeading(text.peopleHeading);
-        await board.shot('09-people-empty');
-        for (const [role, name] of [
-          ['keyholder', KEYHOLDER],
-          ['centre', CENTRE],
-          ['setter', 'for setter one'],
-        ] as const) {
-          await page.getByLabel(field.inviteRole).selectOption(role);
-          await board.type(page.getByLabel(field.inviteName), name);
-          await page.getByRole('button', { name: button.addInvite }).click();
-          await page.getByRole('button', { name: new RegExp(`Copy the link for ${name}`) }).click();
-          const copied = await page.evaluate(() => navigator.clipboard.readText());
-          expect(copied).toContain('#/join?');
-          links[role] = copied;
-        }
-        await board.shot('10-people-three-waiting');
-      });
-      const keyholder = decodeInviteFragment(new URL(links.keyholder ?? '').hash);
-      expect(keyholder.examId).toBe(examId);
-      const register = (invite: { inviteSecret: Hex }, owner: string, key = strangerKey(), tagSecret: Hex = invite.inviteSecret) => {
-        // The name's record names this key, as the key holder would have set it.
-        lab().ens.set(owner, { address: '0x00000000000000000000000000000000000000ee', texts: { [ens.records.passkey]: passkeyRecordValue(key) } });
-        tee.state.registrations.push({
-          owner,
-          passkeyPublicKey: key,
-          derivedPublicKey: strangerKey(),
-          inviteTag: toHex(inviteTag(fromHex(tagSecret), fromHex(key))),
+      const named = (name: string, key: Hex) => {
+        lab().ens.set(name, {
+          address: '0x00000000000000000000000000000000000000ee',
+          texts: { [ens.records.passkey]: passkeyRecordValue(key), [ens.records.credential]: '0x0102' },
         });
       };
-      await board.flow('see a registration match, and a stranger', async () => {
-        register(keyholder, KEYHOLDER);
-        // Not invited: a tag made from a secret the board never issued.
-        register(keyholder, 'Someone Else', strangerKey(), toHex(new Uint8Array(32).fill(7)));
-        await board.see('Name confirmed', 30_000);
-        await board.see('Not invited', 30_000);
-        await board.shot('11-people-matched-and-not-invited');
+      const keyholderKey = strangerKey();
+      const centreKey = strangerKey();
+      named(KEYHOLDER, keyholderKey);
+      named(CENTRE, centreKey);
+      lab().ens.set(demoParent, { texts: { [ens.records.directory]: JSON.stringify([KEYHOLDER, CENTRE]) } });
+      await board.flow('choose two names from the directory, and copy the exam link', async () => {
+        await page.reload();
+        await board.seeHeading(text.peopleHeading);
+        await board.shot('09-people-empty');
+        await page.getByLabel(`Include ${KEYHOLDER}`).check({ timeout: 30_000 });
+        await page.getByLabel(`Include ${CENTRE}`).check();
+        await page.getByRole('button', { name: button.copyExamLink }).click();
+        const copied = await page.evaluate(() => navigator.clipboard.readText());
+        expect(copied).toContain(`#/exam?exam=${examId}`);
+        await board.shot('10-people-chosen');
       });
-      await board.flow('doubled invite, then reissue', async () => {
-        const centre = decodeInviteFragment(new URL(links.centre ?? '').hash);
-        register(centre, CENTRE);
-        register(centre, CENTRE);
+      const register = (owner: string, key: Hex) => {
+        tee.state.registrations.push({ owner, passkeyPublicKey: key, derivedPublicKey: strangerKey(), inviteTag: toHex(noInviteTag) });
+      };
+      await board.flow('a record that matches, and a key that does not', async () => {
+        register(KEYHOLDER, keyholderKey);
+        await board.see('Name confirmed', 30_000);
+        register(CENTRE, strangerKey());
+        await board.see(/with a different security key, so they are not on the list/, 30_000);
+        await board.shot('11-people-confirmed-and-other-key');
+      });
+      await board.flow('a stranger shows only as a count', async () => {
+        register(`stranger.${demoParent}`, strangerKey());
+        await board.see(/registrations? match(es)? nobody here/, 30_000);
+      });
+      await board.flow('a setter invite, doubled, then reissued', async () => {
+        await board.type(page.getByLabel(field.inviteNote), 'for setter one');
+        await page.getByRole('button', { name: button.addInvite }).click();
+        await page.getByRole('button', { name: 'Copy the link for for setter one' }).click();
+        const link = await page.evaluate(() => navigator.clipboard.readText());
+        expect(link).toContain('#/join?');
+        const invite = decodeInviteFragment(new URL(link).hash);
+        expect(invite.examId).toBe(examId);
+        for (let i = 0; i < 2; i++) {
+          const key = strangerKey();
+          tee.state.registrations.push({
+            owner: setterOwner(fromHex(key)),
+            passkeyPublicKey: key,
+            derivedPublicKey: '0x',
+            inviteTag: toHex(inviteTag(fromHex(invite.inviteSecret), fromHex(key))),
+          });
+        }
         await board.see(/Two security keys used this invite/, 30_000);
         await board.shot('12-people-doubled');
         await page.getByRole('button', { name: button.reissue }).click();

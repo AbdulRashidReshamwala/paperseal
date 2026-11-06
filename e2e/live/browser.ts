@@ -24,13 +24,15 @@ export interface Participant {
   page: Page;
   cdp: CDPSession;
   authenticatorId: string;
-  /** Made by the board before registration. A participant registers only from this invite's link. */
+  /** A setter's invite, made by the board before registration. */
   invite?: IssuedInvite;
+  /** A party's enrolment, made once, before any exam. */
+  enrolled?: { credentialId: Hex; passkeyPublicKey: Hex; attestationObject: Hex };
   /** Set by registration. */
   credentialId?: Hex;
   passkeyPublicKey?: Hex;
   derivedPublicKey?: Hex;
-  /** The `inviteTag` this participant registered with: HMAC-SHA-256 of its invite secret over its passkey. */
+  /** The `inviteTag` this participant registered with: an invite's HMAC for a setter, 32 zero bytes for a party. */
   inviteTag?: Hex;
   /**
    * What the TEE and the list call this participant. For a setter it is `setterOwner(passkeyPublicKey)`,

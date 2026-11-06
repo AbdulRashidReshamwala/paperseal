@@ -3,6 +3,7 @@
 // passkey creation, the PRF-derived key, signing and one-touch share release all happen here.
 // Everything crosses to the driver as hex.
 import { createWebAuthnKeys, KeyError } from '@paperseal/keys';
+import type { Hex } from '@paperseal/protocol';
 
 const toHex = (bytes: Uint8Array) => `0x${Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')}`;
 const fromHex = (hex: string) => Uint8Array.from(hex.replace(/^0x/, '').match(/../g) ?? [], (h) => parseInt(h, 16));
@@ -37,20 +38,35 @@ const api = {
     (document.getElementById('who') as HTMLElement).textContent = text;
   },
   /**
-   * Everything POST /v1/register needs. A setter passes no owner: `keys.register` makes it from the new
+   * Everything POST /v1/register needs for a setter. `keys.register` makes the owner from the new
    * passkey. The challenge is passed on as the TEE gave it, whatever its width. The invite secret comes
    * from the invite link and stays in this page: only the tag made from it is in the request.
    */
-  register: (owner: string | null, role: 'holder' | 'setter', challengeHex: string, inviteSecretHex: string) =>
+  register: (challengeHex: string, inviteSecretHex: string) =>
     attempt(async () => {
-      const challenge = fromHex(challengeHex);
-      const inviteSecret = fromHex(inviteSecretHex);
-      const r = await keys.register(
-        role === 'setter' || owner === null ? { role: 'setter', challenge, inviteSecret } : { role: 'holder', owner, challenge, inviteSecret },
-      );
+      const r = await keys.register({ role: 'setter', challenge: fromHex(challengeHex), inviteSecret: fromHex(inviteSecretHex) });
       return { credentialId: toHex(r.credentialId), owner: r.owner, request: r.request };
     }),
-  getPublicKey: (credentialIdHex: string) => attempt(async () => toHex(await keys.getPublicKey(fromHex(credentialIdHex)))),
+  /** Enrolment: a permanent PRF passkey and its public values. */
+  enrol: () =>
+    attempt(async () => {
+      const k = await keys.generateKey({ id: crypto.getRandomValues(new Uint8Array(32)), name: 'Paper Seal key' });
+      return { credentialId: toHex(k.credentialId), passkeyPublicKey: toHex(k.passkeyPublicKey), attestationObject: toHex(k.attestationObject) };
+    }),
+  /** Registration by name, with no invite. Two touches. */
+  registerByName: (owner: string, examIdHex: string, credentialIdHex: string, passkey: Hex, challengeHex: string, attestationHex: string) =>
+    attempt(async () => {
+      const r = await keys.registerByName({
+        owner,
+        examId: fromHex(examIdHex),
+        credentialId: fromHex(credentialIdHex),
+        passkey,
+        challenge: () => Promise.resolve(fromHex(challengeHex)),
+        attestationObject: fromHex(attestationHex),
+      });
+      return { request: r.request };
+    }),
+  getPublicKey: (credentialIdHex: string, examIdHex: string) => attempt(async () => toHex(await keys.getPublicKey(fromHex(credentialIdHex), fromHex(examIdHex)))),
   sign: (credentialIdHex: string, messageHex: string) =>
     attempt(async () => {
       const s = await keys.sign(fromHex(credentialIdHex), fromHex(messageHex));

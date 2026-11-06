@@ -1,15 +1,15 @@
-import { encodeInviteLink, fromHex, newInviteSecret, toHex, type Hex, type Invite, type InviteRole } from '@paperseal/protocol';
+import { encodeInviteLink, ens, fromHex, newInviteSecret, parseKeyCard, toHex, type Hex, type Invite, type KeyCard } from '@paperseal/protocol';
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import { demoParent, inviteTag, listWith, postBuildDirect, postListDirect, publishDirect, timings, type PublishedHere, type Timing } from './chainkit';
 import { openActor, type Actor } from './kit';
 import type { Lab } from './lab';
-import { button, text } from './selectors';
+import { button, field, text } from './selectors';
 
 /*
- * Join and Register from an invite link, then the setter, key holder and centre screens in every state
- * the exam can put them in. Real Chrome with a virtual security key does the registration (a real
- * passkey and PRF key are made in the page). The TEE is the stub [stub tee], so a registration is accepted
+ * A setter's invite link, a party's enrolment and registration by name, then the setter, key holder and
+ * centre screens in every state the exam can put them in. Real Chrome with a virtual security key does
+ * the registration (a real passkey and PRF key are made in the page). The TEE is the stub [stub tee], so a registration is accepted
  * without the real TEE's checks, and every screen that needs a TRUSTED TEE shows the app's refusal.
  * What the exam is doing (list posted, Build posted, rounds) is real data on the local anvil chain.
  */
@@ -34,15 +34,55 @@ export function holderTests(lab: () => Lab): void {
     });
     let n = 0;
     const exam = (timing: Timing) => publishDirect(lab().chain, `UI holders ${String(++n)} ${String(Date.now())}`, timing);
-    const link = (examId: Hex, role: InviteRole, owner?: string) => {
-      const invite: Invite = { examId, role, ...(role === 'setter' ? {} : { owner: owner ?? `holder.${demoParent}` }), inviteSecret: newInviteSecret() };
+    const setterLink = (examId: Hex) => {
+      const invite: Invite = { examId, role: 'setter', inviteSecret: newInviteSecret() };
       return { invite, url: encodeInviteLink(`${lab().web.url}/`, invite) };
     };
     const actor = async (name: string, role: string) => (actors[name] ??= await openActor(lab().browser, name, null, { role }));
 
-    /** Opens the link as the person would, clicks the one button, and returns what the TEE was sent. */
-    const enroll = async (a: Actor, published: PublishedHere, role: InviteRole, owner?: string): Promise<Enrolled> => {
-      const { invite, url } = link(published.examId, role, owner);
+    /** One key card per person: enrolment is once, and the page shows the same card after that. */
+    const cards: Record<string, KeyCard> = {};
+    const keyCard = async (a: Actor): Promise<KeyCard> => {
+      const known = cards[a.name];
+      if (known) return known;
+      await a.page.goto(`${lab().web.url}/#/enrol`);
+      await a.page.getByRole('button', { name: button.enrol }).click();
+      await a.seeHeading(text.keyCardHeading, 30_000);
+      await a.page.locator('summary', { hasText: 'The full card' }).click();
+      const card = parseKeyCard(await a.page.getByLabel('Your key card', { exact: true }).innerText());
+      cards[a.name] = card;
+      return card;
+    };
+    /** Puts the card on the name, as the directory owner would. */
+    const publish = (owner: string, card: KeyCard) => {
+      lab().ens.set(owner, {
+        address: '0x00000000000000000000000000000000000000ee',
+        texts: { [ens.records.passkey]: card.passkey, [ens.records.credential]: card.credentialId },
+      });
+    };
+
+    /** Opens the exam page as the person would, gives the name, and returns what the TEE was sent. */
+    const registerName = async (a: Actor, published: PublishedHere, owner: string, area: 'keyholder' | 'centre'): Promise<Enrolled> => {
+      publish(owner, await keyCard(a));
+      // The stub is shared across exams, and a key it already holds under this name would need no touch.
+      lab().tee.state.registrations = lab().tee.state.registrations.filter((r) => r.owner !== owner);
+      await a.page.goto(`${lab().web.url}/#/exam?exam=${published.examId}`);
+      await a.page.reload();
+      await a.page.getByLabel(field.partyName).fill(owner);
+      await a.page.getByRole('button', { name: button.registerByName }).click();
+      let found = lab().tee.state.registrations.find((r) => r.owner === owner);
+      for (let i = 0; i < 100 && !found; i++) {
+        await a.page.waitForTimeout(300);
+        found = lab().tee.state.registrations.find((r) => r.owner === owner);
+      }
+      if (!found) throw new Error(`the stub TEE did not receive the registration. Page: ${(await a.text()).slice(0, 400)}`);
+      await a.page.goto(`${lab().web.url}/#/${area}?exam=${published.examId}`);
+      return { passkeyPublicKey: found.passkeyPublicKey, derivedPublicKey: found.derivedPublicKey, owner: found.owner };
+    };
+
+    /** Opens a setter's link, clicks the one button, and returns what the TEE was sent. */
+    const registerSetter = async (a: Actor, published: PublishedHere): Promise<Enrolled> => {
+      const { invite, url } = setterLink(published.examId);
       await a.page.goto(url);
       await a.page.getByRole('button', { name: button.register }).click();
       const tag = (key: Hex) => toHex(inviteTag(fromHex(invite.inviteSecret), fromHex(key)));
@@ -62,7 +102,7 @@ export function holderTests(lab: () => Lab): void {
         await a.seeHeading(text.openLinkHeading);
         await a.shot('01-no-link');
         const published = await exam(timings.future);
-        const good = new URL(link(published.examId, 'keyholder', `x.${demoParent}`).url).hash;
+        const good = new URL(setterLink(published.examId).url).hash;
         await a.page.goto(`${lab().web.url}/${good.replace(/&secret=0x[0-9a-f]+/, '')}`);
         await a.seeHeading(text.linkProblemHeading);
         await a.shot('02-missing-secret');
@@ -78,30 +118,85 @@ export function holderTests(lab: () => Lab): void {
       });
     });
 
-    it('register from a link: setter, key holder and centre [stub tee]', async () => {
+    it('an old key holder link no longer opens', async () => {
+      const a = await actor('visitor', 'join');
+      await a.flow('old link', async () => {
+        const published = await exam(timings.future);
+        const old = new URL(setterLink(published.examId).url).hash.replace('role=setter', 'role=keyholder');
+        await a.page.goto(`${lab().web.url}/${old}`);
+        await a.seeHeading(text.linkProblemHeading);
+      });
+    });
+
+    it('enrol once: a card of public values, and doing it again makes no second key', async () => {
+      const a = await actor('keyholder-1', 'key holder');
+      await a.flow('enrol', async () => {
+        const card = await keyCard(a);
+        expect(card.passkey).toMatch(/^0x[0-9a-f]{64}$/);
+        await a.shot('05-key-card');
+        await a.page.reload();
+        await a.seeHeading(text.keyCardHeading, 30_000);
+        expect(await a.page.getByRole('button', { name: button.enrol }).count()).toBe(0);
+        // The same key, asked to enrol again once the directory shows it, makes nothing new.
+        await a.page.evaluate(() => {
+          localStorage.removeItem('paperseal.enrolments');
+        });
+        lab().ens.set(demoParent, { texts: { [ens.records.directory]: JSON.stringify([`enrolled.${demoParent}`]) } });
+        publish(`enrolled.${demoParent}`, card);
+        await a.page.reload();
+        await a.page.getByRole('button', { name: button.enrol }).waitFor();
+        await a.page.waitForTimeout(1500); // The directory has been read.
+        await a.page.getByRole('button', { name: button.enrol }).click();
+        await a.seeHeading(text.alreadySetUpHeading, 30_000);
+        await a.shot('06-already-set-up');
+      });
+    });
+
+    it('register from a link and by name: setter, key holder and centre [stub tee]', async () => {
       const published = await exam(timings.future);
-      for (const [name, role, uiRole] of [
-        ['setter-1', 'setter', 'setter'],
-        ['keyholder-1', 'keyholder', 'key holder'],
+      const s = await actor('setter-1', 'setter');
+      await s.flow('register', async () => {
+        const { url } = setterLink(published.examId);
+        await s.page.goto(url);
+        await s.page.getByRole('button', { name: button.register }).waitFor();
+        await s.shot('10-setter-register');
+        await s.page.getByRole('button', { name: button.register }).click();
+        await s.see(/security key is registered|You are registered|Nothing to do yet/, 30_000);
+        await s.shot('11-setter-registered');
+        await s.page.reload();
+        await s.see(/security key is registered|You are registered|Nothing to do yet/, 30_000);
+      });
+      for (const [name, uiRole, area] of [
+        ['keyholder-1', 'key holder', 'keyholder'],
         ['centre-1', 'centre', 'centre'],
       ] as const) {
         const a = await actor(name, uiRole);
         await a.flow('register', async () => {
-          const { url } = link(published.examId, role, role === 'setter' ? undefined : `${name}-owner.${demoParent}`);
-          await a.page.goto(url);
-          await a.page.getByRole('button', { name: button.register }).waitFor();
-          await a.shot(`10-${role}-register`);
-          await a.page.getByRole('button', { name: button.register }).click();
-          await a.see(/security key is registered|You are registered|Nothing to do yet/, 30_000).catch(async (e) => {
-            throw new Error(`${role} after register: ${(await a.text()).slice(0, 400)} ${String(e).slice(0, 80)}`);
-          });
-          await a.shot(`11-${role}-registered`);
+          await registerName(a, published, `${name}-owner.${demoParent}`, area);
+          await a.see(/You are registered/, 30_000);
+          await a.shot(`11-${area}-registered`);
           // A reload comes back to the same place, from the stored credential.
           await a.page.reload();
-          await a.see(/security key is registered|You are registered|Nothing to do yet/, 30_000);
+          await a.see(/You are registered/, 30_000);
         });
       }
       expect(lab().tee.state.registrations.length).toBeGreaterThanOrEqual(3);
+    });
+
+    it('a key that is not on the name is refused on this page, before the TEE [stub tee]', async () => {
+      const a = await actor('keyholder-1', 'key holder');
+      const stranger = await actor('stranger', 'key holder');
+      const published = await exam(timings.future);
+      await a.flow('wrong key', async () => {
+        const owner = `taken.${demoParent}`;
+        publish(owner, await keyCard(stranger));
+        await a.page.goto(`${lab().web.url}/#/exam?exam=${published.examId}`);
+        await a.page.getByLabel(field.partyName).fill(owner);
+        await a.page.getByRole('button', { name: button.registerByName }).click();
+        await a.see(/No security key answered|not the security key on that name/, 30_000);
+        await a.shot('12-wrong-key');
+        expect(lab().tee.state.registrations.some((r) => r.owner === owner)).toBe(false);
+      });
     });
 
     it('registration refused by the TEE shows a plain failure [stub tee]', async () => {
@@ -109,9 +204,12 @@ export function holderTests(lab: () => Lab): void {
       const published = await exam(timings.future);
       lab().tee.state.registerMode = 'refuse';
       await a.flow('refused', async () => {
-        await a.page.goto(link(published.examId, 'keyholder', `refused-person.${demoParent}`).url);
-        await a.page.getByRole('button', { name: button.register }).click();
-        await a.see(/refused|Something went wrong/i);
+        const owner = `refused-person.${demoParent}`;
+        publish(owner, await keyCard(a));
+        await a.page.goto(`${lab().web.url}/#/exam?exam=${published.examId}`);
+        await a.page.getByLabel(field.partyName).fill(owner);
+        await a.page.getByRole('button', { name: button.registerByName }).click();
+        await a.see(/did not accept|Something went wrong/i);
         await a.shot('12-register-refused');
       });
       lab().tee.state.registerMode = 'accept';
@@ -123,13 +221,13 @@ export function holderTests(lab: () => Lab): void {
         ['keyholder-1', 'keyholder', 'keyholder'],
         ['centre-1', 'centre', 'centre'],
       ] as const) {
-        const a = actor(name, role);
-        const who = await a;
+        const who = await actor(name, role);
         await who.flow('ended', async () => {
           lab().tee.state.stage = 'released';
-          await who.page.goto(link(over.examId, role, `late-person.${demoParent}`).url);
+          await who.page.goto(`${lab().web.url}/#/exam?exam=${over.examId}`);
+          await who.page.reload();
           await who.seeHeading(text.endedHeading, 30_000);
-          expect(await who.page.getByRole('button', { name: button.register }).count()).toBe(0);
+          expect(await who.page.getByRole('button', { name: button.registerByName }).count()).toBe(0);
           await who.shot(`13-${area}-ended`);
         });
       }
@@ -144,7 +242,7 @@ export function holderTests(lab: () => Lab): void {
         tee.state.stage = stage;
         tee.state.released = [];
         tee.state.mode = 'ok';
-        const me = await enroll(kh, published, 'keyholder', `neutral-kim.${demoParent}`);
+        const me = await registerName(kh, published, `neutral-kim.${demoParent}`, 'keyholder');
         if (post !== 'none') await postListDirect(chain, published.examId, listWith(post === 'list-with-me' ? { neutral: me } : {}));
         return { published, me };
       };
@@ -205,7 +303,7 @@ export function holderTests(lab: () => Lab): void {
       await kh.flow('no exam published', async () => {
         await kh.page.goto(`${lab().web.url}/#/keyholder?exam=0x${'12'.repeat(32)}`);
         await kh.page.reload();
-        await kh.see(/Register|invitation link|not been published/i, 30_000);
+        await kh.see(/Register|not been published/i, 30_000);
         await kh.shot('30-unknown-exam');
       });
     });
@@ -218,7 +316,7 @@ export function holderTests(lab: () => Lab): void {
         tee.state.stage = stage;
         tee.state.released = [];
         tee.state.mode = 'ok';
-        const me = await enroll(c, published, 'centre', `north-centre.${demoParent}`);
+        const me = await registerName(c, published, `north-centre.${demoParent}`, 'centre');
         await postListDirect(chain, published.examId, listWith(share ? { centreHolder: me } : { centre: me }));
         if (build) await postBuildDirect(chain, published.examId, published.criteriaHash);
         return { published, me };
@@ -272,7 +370,7 @@ export function holderTests(lab: () => Lab): void {
         await s.seeHeading(/Nothing to do yet/, 30_000);
         await s.shot('50-not-open');
         tee.state.stage = 'onboard';
-        const reg = await enroll(s, open, 'setter');
+        const reg = await registerSetter(s, open);
         await s.page.goto(`${lab().web.url}/#/setter?exam=${open.examId}`);
         await s.page.reload();
         await s.seeHeading(/Nothing to do yet/, 30_000);

@@ -58,7 +58,7 @@ const api = {
       const k = await keys.generateKey({ id: fromHex(userIdHex), name });
       return { credentialId: toHex(k.credentialId), passkeyPublicKey: toHex(k.passkeyPublicKey) };
     }),
-  getPublicKey: (credentialIdHex: string) => attempt(async () => toHex(await keys.getPublicKey(fromHex(credentialIdHex)))),
+  getPublicKey: (credentialIdHex: string, examIdHex: string) => attempt(async () => toHex(await keys.getPublicKey(fromHex(credentialIdHex), fromHex(examIdHex)))),
   releaseShare: (credentialIdHex: string, examIdHex: string, messageHex: string, sealedHex: string) =>
     attempt(async () => {
       const r = await keys.releaseShare(

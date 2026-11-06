@@ -72,7 +72,7 @@ export async function startLab(): Promise<Lab> {
     await warm.goto(base);
     await warm.waitForLoadState('networkidle');
     if (base === web.url) {
-      for (const area of ['board', 'setter', 'keyholder', 'centre', 'join']) {
+      for (const area of ['board', 'setter', 'keyholder', 'centre', 'join', 'enrol', 'exam']) {
         await warm.goto(`${base}/#/${area}`);
         await warm.waitForLoadState('networkidle');
       }
