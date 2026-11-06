@@ -1,5 +1,5 @@
 import type { KeyCard } from '@paperseal/protocol';
-import { createPublicClient, http, type Address } from 'viem';
+import { createPublicClient, http, type Address, type Hex } from 'viem';
 import { sepolia } from 'viem/chains';
 
 import { directoryCall, partyCalls, type RecordCall } from '../../deploy/ens/records.mjs';
@@ -24,6 +24,20 @@ export async function writeNameRecords(cards: readonly { name: string; card: Key
   const resolver = (await client.getEnsResolver({ name: partyParent })) as Address;
   for (const { what, data } of nameRecordCalls(cards)) {
     say(`writing ${what}`);
-    await castSend(data, resolver);
+    await sendRecord(data, resolver);
+  }
+}
+
+/** A public RPC is several nodes, and the next one asked can be a block behind. A record is safe to write twice. */
+async function sendRecord(data: Hex, resolver: Address): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await castSend(data, resolver);
+      return;
+    } catch (error) {
+      const stale = /nonce too low|already known|underpriced/i.test(String(error));
+      if (!stale || attempt >= 8) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 6000));
+    }
   }
 }
