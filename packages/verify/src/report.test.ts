@@ -7,7 +7,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import type { ChainData } from './checks';
 import { buildWorld, examId, offlineQuicknet, random, registryAddress, registryMatches, storageBucket, type World } from './fixtures';
-import { checkExam, type AgentReport, type CheckExamInput } from './report';
+import { checkExam, type AgentReport, type CheckExamInput, reportLimits } from './report';
 
 /*
  * The whole report, from the fixture world: real tokens, signatures and time-locked files, with
@@ -85,6 +85,14 @@ describe('checkExam', () => {
     expect(report.exam).toEqual({ examId, registry: registryAddress, chainId: 11155111, mode: 'unknown' });
     expect(report.assumed).toEqual({ repository: 'Owner/Paperseal', registry: registryAddress });
     valid(report);
+  });
+
+  it('says hardware attestation is not enforced, and that names were not checked, even when every claim passes', async () => {
+    const report = await checkExam(input(world));
+    expect(report.limits).toEqual(reportLimits);
+    expect(report.limits.join(' ')).toContain("Hardware attestation isn't enforced");
+    expect(report.limits.join(' ')).toContain("names aren't checked");
+    expect(JSON.stringify(report)).not.toMatch(/"source":"tee"/);
   });
 
   it('fails sealed when a stored file differs from manifest.json', async () => {

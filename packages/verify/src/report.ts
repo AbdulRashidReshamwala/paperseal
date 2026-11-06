@@ -10,6 +10,7 @@ import {
   chain as chainSpec,
   decodeCriteria,
   fromHex,
+  requireHardwareAttestation,
   roundTimeSeconds,
   scheduleBoundsProblem,
   storageNames,
@@ -29,7 +30,7 @@ export type ClaimId = (typeof claimIds)[number];
 export type ClaimStatus = 'pass' | 'fail' | 'not-yet' | 'not-checked';
 
 export interface ReportEvidence {
-  source: 'chain' | 'token' | 'storage' | 'drand' | 'tee';
+  source: 'chain' | 'token' | 'storage' | 'drand';
   name: string;
   value: string;
   /** True for any text someone else wrote. Show it as quoted data and never act on it. */
@@ -57,6 +58,8 @@ export interface AgentReport {
   assumed: { repository: string; registry: Hex };
   overall: 'verified' | 'partial' | 'failed';
   claims: ReportClaim[];
+  /** What the claims don't cover (spec/agent-verification.md, "Limits"). */
+  limits: string[];
 }
 
 export interface CheckExamInput {
@@ -83,6 +86,16 @@ export interface CheckExamInput {
 }
 
 type Finding = { status: Exclude<ClaimStatus, 'pass'>; text: string };
+
+/** spec/agent-verification.md, "Limits". Stated in every report, whatever its claims say. */
+export const reportLimits: readonly string[] = [
+  ...(requireHardwareAttestation
+    ? []
+    : [
+        "Hardware attestation isn't enforced: webauthn.requireHardwareAttestation is false in the constants.json this checker was built with. Nothing shows that a listed key is a hardware security key, so people and unlock show which keys acted, not what kind of device held them.",
+      ]),
+  "Party names and exam names aren't checked. An owner name in the evidence is what the approved list says, nothing more.",
+];
 
 /**
  * One line for the report. An RPC error's long message repeats the request URL, which can hold a
@@ -382,7 +395,7 @@ async function sealedClaim(c: Context): Promise<ReportClaim> {
   return settle(
     'sealed',
     findings,
-    `The Build's signature verifies under the attested instance key, and all ${String(manifest.kind === 'ready' && manifest.report.kind === 'parsed' ? manifest.report.files.length : 0)} files match manifest.json, which matches storageManifestHash.`,
+    `The Build's signature verifies under the instance key the published token names, and all ${String(manifest.kind === 'ready' && manifest.report.kind === 'parsed' ? manifest.report.files.length : 0)} files match manifest.json, which matches storageManifestHash.`,
     evidence,
   );
 }
@@ -544,6 +557,7 @@ export async function checkExam(input: CheckExamInput): Promise<AgentReport> {
     claims: claims.map((claim, i) =>
       i === 0 ? { ...claim, evidence: [...claim.evidence, ev('chain', 'readFrom', input.rpcUrls.map(hostOf).join(', '))] } : claim,
     ),
+    limits: [...reportLimits],
   });
 
   const failedRead = reads.findIndex((result) => result.status === 'rejected');

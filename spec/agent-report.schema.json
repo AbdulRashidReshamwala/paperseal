@@ -4,7 +4,7 @@
   "description": "See spec/agent-verification.md.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "checkedAt", "method", "checker", "exam", "assumed", "overall", "claims"],
+  "required": ["version", "checkedAt", "method", "checker", "exam", "assumed", "overall", "claims", "limits"],
   "properties": {
     "version": { "const": 1 },
     "checkedAt": { "type": "string", "format": "date-time" },
@@ -57,7 +57,8 @@
         { "allOf": [{ "$ref": "#/definitions/claim" }, { "properties": { "id": { "const": "unlock" } } }] },
         { "allOf": [{ "$ref": "#/definitions/claim" }, { "properties": { "id": { "const": "open" } } }] }
       ]
-    }
+    },
+    "limits": { "type": "array", "items": { "type": "string" } }
   },
   "allOf": [
     {
@@ -92,7 +93,7 @@
             "additionalProperties": false,
             "required": ["source", "name", "value", "untrusted"],
             "properties": {
-              "source": { "enum": ["chain", "token", "storage", "drand", "tee"] },
+              "source": { "enum": ["chain", "token", "storage", "drand"] },
               "name": { "type": "string" },
               "value": { "type": "string" },
               "untrusted": { "type": "boolean" }

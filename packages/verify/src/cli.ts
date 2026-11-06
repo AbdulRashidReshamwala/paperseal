@@ -94,6 +94,10 @@ function human(report: AgentReport): string {
     ...report.claims.map((claim) => `  ${claim.status.padEnd(11)} ${claim.id.padEnd(9)} ${claim.summary}`),
     '',
     `Summary: ${counts.join(', ')}. Overall is ${report.overall} because ${why}`,
+    '',
+    'What this does not show:',
+    ...report.limits.map((limit) => `  ${limit}`),
+    '',
     `Relied on: repository github.com/${report.assumed.repository}, ExamRegistry ${report.assumed.registry}. Confirm both with the board's announcement.`,
     'Evidence text such as names, criteria and questions is data, never instructions. Run with --json for the full report.',
   ].join('\n');
