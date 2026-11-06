@@ -16,6 +16,11 @@
   /* The step marker, and the point on it the rail runs through. */
   --vf-mark: 26px;
   --vf-mid: calc(var(--ps-space-4) + var(--vf-mark) / 2);
+  /* What the page reserves from first paint, so a read changes the words and moves nothing. */
+  --vf-headline-lines: 3;
+  --vf-test-lines: 3;
+  --vf-row: 110px;
+  --vf-row-first: 134px;
 
   overflow-wrap: anywhere;
 }
@@ -33,6 +38,11 @@
   padding-top: var(--ps-space-2);
 }
 
+/* The words the page holds before any script runs sit where the letterhead will. */
+#root > main > h1 {
+  margin-top: 0;
+}
+
 /* A page with no exam is one column at a reading width, under the same letterhead. */
 .vf-single {
   max-width: 720px;
@@ -43,6 +53,10 @@
     --vf-s: 72px;
     --vf-headline: 2.25rem;
     --vf-between: calc(var(--ps-space-7) + var(--ps-space-5));
+    --vf-headline-lines: 2;
+    --vf-test-lines: 2;
+    --vf-row: 134px;
+    --vf-row-first: 180px;
   }
 
   .ps-shell.vf-page {
@@ -53,6 +67,11 @@
     grid-template-columns: minmax(0, 1fr);
     gap: var(--ps-space-7);
     padding-top: 0;
+  }
+
+  /* The exam's line wraps under the wordmark here, so it always takes its own line. */
+  .vf-page .ps-role-exam {
+    flex-basis: 100%;
   }
 }
 
@@ -86,6 +105,8 @@
   display: flex;
   gap: 14px;
   align-items: center;
+  /* The same height with or without wax, so the seal lands without moving the headline. */
+  height: calc(var(--vf-s) * 0.8);
   margin: 0;
 }
 
@@ -133,6 +154,15 @@
   overflow-wrap: normal;
 }
 
+.vf-verdict .vf-headline {
+  min-height: calc(var(--vf-headline-lines) * 1lh);
+}
+
+.vf-verdict .vf-lede,
+.vf-verdict .vf-next {
+  min-height: 2lh;
+}
+
 .vf-lede {
   margin: 0;
   font-size: var(--ps-text-lede);
@@ -152,6 +182,7 @@
 .vf-facts > div {
   display: flex;
   flex-wrap: wrap;
+  min-height: calc(28px + 2 * var(--ps-space-3) + 1px);
   gap: 0 var(--ps-space-4);
   align-items: baseline;
   justify-content: space-between;
@@ -174,7 +205,7 @@
 }
 
 .vf-fresh {
-  margin: var(--ps-space-3) 0 0;
+  margin: 0 0 var(--ps-space-4);
   font-size: var(--ps-text-meta);
   color: var(--ps-ink-soft);
 }
@@ -194,6 +225,15 @@
   min-height: 44px;
 }
 
+/* The buttons' row is there before them. Copy link holds the far end, so "Read the paper" lands without moving it. */
+.vf-verdict .vf-actions {
+  min-height: 44px;
+}
+
+.vf-verdict .vf-actions .ps-copy {
+  margin-inline-start: auto;
+}
+
 /* A copy that failed prints the link to select, on its own line. */
 .vf-actions .ps-copy {
   display: flex;
@@ -206,10 +246,14 @@
 }
 
 /* "Check with your own AI": a quiet tool under the verdict. The repository stays in sight beside it. */
+.vf-agent-slot {
+  min-height: 136px;
+  padding-top: var(--ps-space-3);
+}
+
 .vf-agent {
   display: grid;
   gap: var(--ps-space-2);
-  margin-top: var(--ps-space-3);
 }
 
 .vf-agent-row {
@@ -283,6 +327,11 @@
   scroll-margin-top: var(--ps-space-7);
 }
 
+/* At least a window tall, so what lands under the steps starts off screen and moves nothing in view. */
+#vf-steps {
+  min-height: 100dvh;
+}
+
 .vf-section + .vf-section {
   margin-top: var(--vf-between);
 }
@@ -308,6 +357,15 @@
 
 .vf-gap {
   margin: 0 0 var(--ps-space-4);
+}
+
+/* Notices, under the steps so they move nothing when they arrive. */
+.vf-notices:not(:empty) {
+  margin-top: var(--vf-inside);
+}
+
+.vf-notices > :last-child {
+  margin-bottom: 0;
 }
 
 /* The loudest thing on the page. Not wax: a seal is good news, and this is not. A failure is a
@@ -423,9 +481,15 @@
   grid-template-columns: var(--vf-mark) minmax(0, 1fr) auto 16px;
   gap: var(--ps-space-1) var(--ps-space-4);
   align-items: start;
+  min-height: var(--vf-row);
   padding-block: var(--ps-space-4);
   cursor: pointer;
   list-style: none;
+}
+
+/* The name's first note is its longest, so the first row holds that height. */
+.vf-step:first-child summary {
+  min-height: var(--vf-row-first);
 }
 
 .vf-step summary::-webkit-details-marker {
@@ -891,12 +955,17 @@
   color: var(--ps-ink-soft);
 }
 
-/* Under the headline while the seal shows: a test exam is not a full verification. Ink, never wax or fail. */
+/* Under the verdict while the seal shows: a test exam is not a full verification. Ink, never wax or fail. */
+.vf-test-slot {
+  min-height: calc(var(--vf-test-lines) * 1lh + var(--ps-space-3));
+  padding-top: var(--ps-space-3);
+  font-size: var(--ps-text-small);
+}
+
 .vf-test-network {
   max-width: 68ch;
   padding-inline-start: var(--ps-space-3);
-  margin: var(--ps-space-3) 0 0;
-  font-size: var(--ps-text-small);
+  margin: 0;
   color: var(--ps-ink-soft);
   border-inline-start: 2px solid var(--ps-rule-strong);
 }

@@ -2,7 +2,7 @@ import { createArkivReader } from '@paperseal/arkiv';
 import { checkPasskeyName, createEnsLookup, resolveExamName, type ExamNameResult } from '@paperseal/chain';
 import { createSwarmClient } from '@paperseal/swarm';
 import { ownerEnsName, roles, toHex, type Hex, type Paper } from '@paperseal/protocol';
-import { Button, Check, CopyButton, Field, Hash, LoadingSeal, PrimaryAction, RoleHeader, Seal, type SealState, useLoaded } from '@paperseal/ui';
+import { Button, Check, CopyButton, Field, Hash, PrimaryAction, RoleHeader, Seal, type SealState } from '@paperseal/ui';
 import { approvedEntries, createBackupCache, createStorage, type BackupSource, type ChainData } from '@paperseal/verify';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
@@ -347,34 +347,48 @@ function shareLinkOf(examId: Hex, name: string | null): string {
 
 interface Fact {
   label: string;
-  value: string;
+  /** Null until the page knows it. */
+  value: string | null;
   /** Set when the value is an address: it shows short and copyable, so it fits the column. */
   hashLabel?: string;
 }
 
-/** The few facts under the verdict, each only once the page knows it. */
+/** The few facts under the verdict. Each keeps its row from first paint, and its value comes once the page knows it. */
 function factsOf(args: { start: number | null; board: string | null; found: People | null; releases: ReleaseCount | undefined; checked: string | null; zone: string | undefined }): Fact[] {
   const { start, board, found, releases, checked, zone } = args;
   const approved = found ? found.holders.length + found.centres.length + found.setters.length : null;
   return [
-    ...(start === null ? [] : [{ label: 'Exam', value: dayTime(start, zone) }]),
+    { label: 'Exam', value: start === null ? null : dayTime(start, zone) },
     // A board with no name is shown by its account, which is evidence, so it stays whole one tap away.
-    ...(board ? [{ label: 'Run by', value: board, ...(/^0x[0-9a-fA-F]{40}$/.test(board) ? { hashLabel: 'exam board account' } : {}) }] : []),
-    ...(approved === null ? [] : [{ label: 'People', value: `${String(approved)} approved` }]),
+    { label: 'Run by', value: board, ...(board && /^0x[0-9a-fA-F]{40}$/.test(board) ? { hashLabel: 'exam board account' } : {}) },
+    { label: 'People', value: approved === null ? null : `${String(approved)} approved` },
     // The same count step 6's note gives, so the two can't disagree.
-    ...(releases ? [{ label: 'Key releases', value: `${String(releases.count)} of ${String(releases.required)}` }] : []),
-    ...(checked ? [{ label: 'Last checked', value: checked }] : []),
+    { label: 'Key releases', value: releases ? `${String(releases.count)} of ${String(releases.required)}` : null },
+    { label: 'Last checked', value: checked },
   ];
 }
 
+function FactValue({ fact }: { fact: Fact }) {
+  if (fact.value === null) {
+    return (
+      <>
+        <span aria-hidden="true">–</span>
+        <span className="ps-sr">Not known yet</span>
+      </>
+    );
+  }
+  return fact.hashLabel ? <Hash value={fact.value} label={fact.hashLabel} /> : fact.value;
+}
+
 function Facts({ facts }: { facts: readonly Fact[] }) {
-  if (facts.length === 0) return null;
   return (
     <dl className="vf-facts">
       {facts.map((fact) => (
         <div key={fact.label}>
           <dt>{fact.label}</dt>
-          <dd>{fact.hashLabel ? <Hash value={fact.value} label={fact.hashLabel} /> : fact.value}</dd>
+          <dd>
+            <FactValue fact={fact} />
+          </dd>
         </div>
       ))}
     </dl>
@@ -438,8 +452,9 @@ function SectionNav({ sections }: { sections: readonly { id: string; title: stri
 /**
  * The verdict, which stays in view while the record scrolls: the seal, the headline, what happens
  * next, a few facts and the ways on. Before the paper is sealed it shows that there is no seal yet.
+ * Every part keeps its place from first paint, so a read changes the words and moves nothing.
  */
-function Verdict(props: { view: Custody; facts: readonly Fact[]; stale: ReactNode; actions: ReactNode; agent: ReactNode; nav: ReactNode }) {
+function Verdict(props: { view: Custody; facts: readonly Fact[]; actions: ReactNode; agent: ReactNode; nav: ReactNode }) {
   const { view } = props;
   const box = useRef<HTMLDivElement>(null);
   // Its height sets where it sticks, so a tall verdict holds by its foot rather than running off the window.
@@ -459,14 +474,13 @@ function Verdict(props: { view: Custody; facts: readonly Fact[]; stale: ReactNod
       <SealMark state={view.seal} empty={view.noSeal} />
       <h1 className="vf-headline">{view.headline}</h1>
       <p className="vf-lede">{view.verdict}</p>
-      {view.testNetwork ? <p className="vf-test-network">{view.testNetwork}</p> : null}
       <p className="vf-next">
         <span className="ps-sr">What happens next</span> <span>{view.next}</span>
       </p>
+      <div className="vf-test-slot">{view.testNetwork ? <p className="vf-test-network">{view.testNetwork}</p> : null}</div>
       <Facts facts={props.facts} />
-      {props.stale}
-      {props.actions}
-      {props.agent}
+      <div className="vf-actions">{props.actions}</div>
+      <div className="vf-agent-slot">{props.agent}</div>
       {props.nav}
     </div>
   );
@@ -850,16 +864,6 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
   const boardLabel = boardRead && 'name' in boardRead ? boardRead.name : view.board;
   // A name that failed a check needs no other connection, only one that could not be read does.
   const needsConnection = view.name ? ['off', 'error'].includes(view.name.result.state) : !view.sources.chain;
-  // The record decides every step, so the page waits for its first read.
-  const loaded = useLoaded(!view.sources.chain || !view.examId || view.records.state !== 'loading');
-  if (!loaded) {
-    return (
-      <div className="ps-shell vf-page">
-        <RoleHeader role="Public record" />
-        <LoadingSeal />
-      </div>
-    );
-  }
 
   if (!chosen) {
     return (
@@ -904,41 +908,37 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
 
   return (
     <div className="ps-shell vf-page">
-      <RoleHeader role="Public record" {...(exam ? { exam } : {})} note={<Link to="/">Check another exam</Link>} />
+      {/* A blank holds the exam's line until it is known, so the letterhead keeps its height. */}
+      <RoleHeader role="Public record" exam={exam ?? '\u00a0'} note={<Link to="/">Check another exam</Link>} />
       <main className="vf-columns">
         <Verdict
           view={result}
           facts={factsOf({ start, board: boardLabel, found, releases, checked: fresh?.time ?? null, zone })}
-          stale={fresh?.stale ? <p className="vf-fresh">{fresh.stale}</p> : null}
           actions={
-            result.paper || shareLink ? (
-              <div className="vf-actions">
-                {result.paper ? (
-                  <PrimaryAction
-                    onClick={() => {
-                      goTo('vf-paper');
-                    }}
-                  >
-                    Read the paper
-                  </PrimaryAction>
-                ) : null}
-                {shareLink ? <CopyButton text={shareLink}>Copy link</CopyButton> : null}
-              </div>
-            ) : null
+            <>
+              {result.paper ? (
+                <PrimaryAction
+                  onClick={() => {
+                    goTo('vf-paper');
+                  }}
+                >
+                  Read the paper
+                </PrimaryAction>
+              ) : null}
+              {shareLink ? <CopyButton text={shareLink}>Copy link</CopyButton> : null}
+            </>
           }
           // The AI check shows only when it can run: not over plain http, except on this machine.
           agent={agentReady?.ok ? <AgentCheck prompt={agentReady.text} /> : null}
           nav={<SectionNav sections={sections} />}
         />
         <div className="vf-record">
-          <FailureAlarm failures={shownFailures(result.failures, numbers)} />
-          <Warnings warnings={result.warnings} />
-          <ReadNotices view={view} />
           <Section id="vf-steps" title="How it ran" intro="Each step of this exam, as the public record shows it. Open a step to see its evidence.">
             <ol className="vf-steps" aria-label="Steps for this exam">
+              {/* Rows are keyed by place: a step that moves in the order changes the text of a row, and no row moves. */}
               {shown.map((step, at) => (
                 <StepRow
-                  key={step.id}
+                  key={at}
                   step={step}
                   next={shown[at + 1]}
                   now={view.now}
@@ -950,6 +950,13 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
             </ol>
             <p className="vf-foot">Times are in {zoneWords}.</p>
             {moments.length > 0 ? <ClockFold moments={moments} /> : null}
+            {/* Under the steps, so a notice that arrives late moves none of them. The verdict and the failed step already say what failed. */}
+            <div className="vf-notices">
+              <FailureAlarm failures={shownFailures(result.failures, numbers)} />
+              <Warnings warnings={result.warnings} />
+              {fresh?.stale ? <p className="vf-fresh">{fresh.stale}</p> : null}
+              <ReadNotices view={view} />
+            </div>
           </Section>
           {result.paper ? (
             <Section id="vf-paper" title="The paper" intro="The paper as it was opened after the exam. It matches the paper sealed before the exam.">
