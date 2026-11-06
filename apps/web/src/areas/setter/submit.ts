@@ -5,6 +5,7 @@ import {
   equalBytes,
   fromHex,
   hashMessage,
+  limits,
   padding,
   questionHash as hashQuestion,
   toHex,
@@ -28,14 +29,42 @@ export interface QuestionCheck {
   error: string | null;
 }
 
+/** The letter for an option's place: A, B, C. */
+export const optionLetter = (index: number): string => String.fromCharCode(65 + index);
+
+/**
+ * Plain-words problems with each option field, by place. An option is blank, or the same as an
+ * earlier one, once trimmed. `null` is a field with nothing wrong.
+ */
+export function optionProblems(options: readonly string[]): (string | null)[] {
+  const seen = new Map<string, number>();
+  return options.map((option, index) => {
+    const value = option.trim();
+    if (value === '') return 'Write this option, or remove it.';
+    const earlier = seen.get(value);
+    if (earlier !== undefined) return `The same as option ${optionLetter(earlier)}. Each option must be different.`;
+    seen.set(value, index);
+    return null;
+  });
+}
+
 /** Client-side validation. The TEE checks again, but this tells the setter first. */
 export function checkQuestion(criteria: Criteria, question: Question): QuestionCheck {
-  const size = encodeQuestion(question).length;
+  const options = question.options;
+  const invalidOptions =
+    options !== undefined && (options.length < limits.questionOptionsMin || options.length > limits.questionOptionsMax
+      ? `Give between ${String(limits.questionOptionsMin)} and ${String(limits.questionOptionsMax)} options.`
+      : optionProblems(options).some((problem) => problem !== null)
+        ? 'Fix the options marked above.'
+        : null);
+  // `encodeQuestion` refuses invalid options, so the size is only measured once they are fine.
+  const size = invalidOptions ? 0 : encodeQuestion(question).length;
   const check = (error: string | null): QuestionCheck => ({ size, limit: maxQuestionBytes, error });
   if (!criteria.topics.some((topic) => topic.name === question.topic)) {
     return check('Choose one of the exam topics.');
   }
   if (question.text.trim() === '') return check('Enter the question text.');
+  if (invalidOptions) return check(invalidOptions);
   if (size > maxQuestionBytes) {
     return check(
       `The question is ${String(size)} bytes and only ${String(maxQuestionBytes)} fit in the ${String(padding.questionBytes)} byte padded size.`,

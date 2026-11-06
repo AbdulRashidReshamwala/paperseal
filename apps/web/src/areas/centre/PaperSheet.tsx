@@ -22,7 +22,16 @@ export function PaperSheet(props: { paper: Paper }) {
             <h3>{topic}</h3>
             <ol start={start}>
               {inTopic.map((question, index) => (
-                <li key={index}>{question.text}</li>
+                <li key={index}>
+                  {question.text}
+                  {question.options ? (
+                    <ol className="paper-options" type="A" aria-label="Options">
+                      {question.options.map((option, at) => (
+                        <li key={at}>{option}</li>
+                      ))}
+                    </ol>
+                  ) : null}
+                </li>
               ))}
             </ol>
           </section>

@@ -205,3 +205,91 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* Written or Multiple choice: two plain choices, with Written already picked. */
+.ss-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-2);
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+.ss-kinds legend,
+.ss-options legend {
+  padding: 0;
+  margin-bottom: var(--ps-space-2);
+  font-size: var(--ps-text-small);
+  font-weight: 600;
+  color: var(--ps-ink-soft);
+}
+.ss-kind {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: var(--ps-space-2) var(--ps-space-4);
+  font-weight: 600;
+  color: var(--ps-ink);
+  cursor: pointer;
+  border: 1px solid var(--ps-rule-strong);
+  border-radius: var(--ps-radius);
+}
+.ss-kind:hover {
+  background: var(--ps-paper-deep);
+}
+.ss-kind input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  cursor: inherit;
+  opacity: 0;
+}
+.ss-kind:has(input:checked) {
+  color: var(--ps-paper);
+  background: var(--ps-ink);
+  border-color: var(--ps-ink);
+}
+.ss-kind:has(input:focus-visible) {
+  outline: 2px solid var(--ps-ink);
+  outline-offset: 2px;
+}
+.ss-kind:has(input:disabled) {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.ss-options {
+  display: grid;
+  gap: var(--ps-space-2);
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+}
+.ss-option {
+  display: grid;
+  grid-template-columns: 1.5em minmax(0, 1fr) auto;
+  gap: var(--ps-space-1) var(--ps-space-2);
+  align-items: center;
+}
+.ss-option-letter {
+  font-weight: 600;
+  text-align: center;
+}
+.ss-option-error {
+  grid-column: 2 / -1;
+  margin: 0;
+  font-size: var(--ps-text-small);
+  font-weight: 600;
+  color: var(--ps-fail);
+}
+.ss-option-add {
+  justify-self: start;
+}
+.ss-option-note {
+  margin: 0;
+  font-size: var(--ps-text-small);
+  color: var(--ps-ink-soft);
+}

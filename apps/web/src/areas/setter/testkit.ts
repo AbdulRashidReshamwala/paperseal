@@ -72,6 +72,8 @@ export interface World {
   encryptionPublicKey: Hex;
   /** Passkey signatures requested, as the message each one covered. */
   signed: Uint8Array[];
+  /** The question plaintext the TEE opened, in the order sent. */
+  opened: Uint8Array[];
   teeQuestion: ReturnType<typeof vi.fn>;
   stage: { current: StatusResponse['stage'] };
   /** What the chain stores as the list hash. */
@@ -102,6 +104,7 @@ export async function makeWorld(options: WorldOptions = {}): Promise<World> {
   const chainListHash = { current: options.chainListHashOverride ?? listHash };
   const stage: World['stage'] = { current: 'submit' };
   const signed: Uint8Array[] = [];
+  const opened: Uint8Array[] = [];
   const build: World['build'] = { current: null };
 
   const instanceKeySignature = await signer.sign(
@@ -116,7 +119,7 @@ export async function makeWorld(options: WorldOptions = {}): Promise<World> {
     // The TEE opens a question with `examId || passkeyPublicKey` as aad, so a ciphertext sealed for
     // another passkey is refused here as it is by the real TEE.
     try {
-      await hpkeOpen(encryption, fromHex(body.ciphertext), hpkeContext('question', fromHex(examId), fromHex(body.passkeyPublicKey)));
+      opened.push(await hpkeOpen(encryption, fromHex(body.ciphertext), hpkeContext('question', fromHex(examId), fromHex(body.passkeyPublicKey))));
     } catch {
       throw new TeeApiError(400, 'decryption_failed', 'the question did not decrypt');
     }
@@ -207,7 +210,7 @@ export async function makeWorld(options: WorldOptions = {}): Promise<World> {
     buildPollMs: 10,
     ...(options.realAttestation ? {} : { verifyToken: verifyToken as never }),
   };
-  return { env, tee: env.tee as NonNullable<SetterEnv['tee']>, chain: env.chain as NonNullable<SetterEnv['chain']>, signer, encryption, encryptionPublicKey, signed, teeQuestion, stage, chainListHash, build, verifyToken };
+  return { env, tee: env.tee as NonNullable<SetterEnv['tee']>, chain: env.chain as NonNullable<SetterEnv['chain']>, signer, encryption, encryptionPublicKey, signed, opened, teeQuestion, stage, chainListHash, build, verifyToken };
 }
 
 /** A receipt the world's TEE really signed, as a past seal would have left in storage. */

@@ -1,4 +1,4 @@
-import { requireHardwareAttestation, type Criteria, type Question } from '@paperseal/protocol';
+import { limits, requireHardwareAttestation, type Criteria, type Question } from '@paperseal/protocol';
 import { TeeApiError } from '@paperseal/tee-client';
 import { Check, Hash, KeyTouch, PrimaryAction, Row, Rows, Stage, Stamp } from '@paperseal/ui';
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
@@ -11,6 +11,8 @@ import { nextTopic, saveTopic, topicProgress, type ReceiptChecks } from './state
 import {
   AlreadyHeldError,
   checkQuestion,
+  optionLetter,
+  optionProblems,
   ConfirmationLostError,
   ReceiptInvalidError,
   sealAndSubmit,
@@ -27,12 +29,21 @@ export interface Draft {
   setText: (text: string) => void;
   topic: string;
   setTopic: (topic: string) => void;
+  /** True for a multiple choice question. A written question is the default. */
+  choice: boolean;
+  setChoice: (choice: boolean) => void;
+  /** What is typed in each option field, kept while the setter switches back to Written. */
+  options: string[];
+  setOptions: (options: string[]) => void;
   /** The attempt whose result is unknown. A retry resends exactly this ciphertext. */
   pending: RefObject<PendingSubmission | null>;
   /** True while `pending` holds an attempt. The draft can't change, or a retry would send the old words. */
   unsure: boolean;
   setUnsure: (unsure: boolean) => void;
 }
+
+/** Two empty fields, which is where a multiple choice question starts. */
+export const emptyOptions = (): string[] => Array.from({ length: limits.questionOptionsMin }, () => '');
 
 type Problem = { kind: 'key'; error: unknown } | { kind: 'trouble'; text: string; detail: string[] };
 
@@ -69,7 +80,7 @@ export function Composer(props: {
   blocked?: { title: string; lede: string; panel: ReactNode };
 }) {
   const { criteria, draft, receipts, checks, topics, onSealed, blocked } = props;
-  const { text, setText, topic, setTopic, pending, unsure, setUnsure } = draft;
+  const { text, setText, topic, setTopic, choice, setChoice, options, setOptions, pending, unsure, setUnsure } = draft;
   const session = useSession();
   const { confirmed, credential, env, examId } = session;
 
@@ -80,6 +91,9 @@ export function Composer(props: {
   const [leaving, setLeaving] = useState<{ id: number; text: string } | null>(null);
   const [heldHashes, setHeldHashes] = useState<StoredReceipt['questionHash'][]>([]);
   const writing = useRef<HTMLTextAreaElement>(null);
+  const optionFields = useRef<(HTMLInputElement | null)[]>([]);
+  // Fields the setter has left, so an empty one is only called out once they have passed it.
+  const [visited, setVisited] = useState<ReadonlySet<number>>(new Set());
 
   useEffect(() => {
     writing.current?.focus();
@@ -101,11 +115,38 @@ export function Composer(props: {
   const selected = topic || nextTopic(progress);
   const chosen = progress.find((entry) => entry.name === selected);
 
-  const question: Question = { topic: selected, text };
+  // Options are sent trimmed, so what the setter sees is what the paper holds.
+  const question: Question = choice
+    ? { topic: selected, text, options: options.map((option) => option.trim()) }
+    : { topic: selected, text };
+  const problems = choice ? optionProblems(options) : [];
   const check = checkQuestion(criteria, question);
   const over = check.size - check.limit;
   // The button only reflects this: `sealAndSubmit` can't run at all without a `Confirmed`.
   const canSeal = confirmed !== null && credential !== null && check.error === null && !busy;
+
+  const clearOptions = () => {
+    setOptions(emptyOptions());
+    setVisited(new Set());
+  };
+
+  const changeOption = (index: number, value: string) => {
+    setOptions(options.map((option, i) => (i === index ? value : option)));
+    setProblem(null);
+    setNotice('');
+  };
+
+  const addOption = () => {
+    setOptions([...options, '']);
+    // The new field is where the setter types next.
+    setTimeout(() => optionFields.current[options.length]?.focus(), 0);
+  };
+
+  const removeOption = (index: number) => {
+    setOptions(options.filter((_, i) => i !== index));
+    setVisited(new Set());
+    setTimeout(() => optionFields.current[Math.max(0, index - 1)]?.focus(), 0);
+  };
 
   const seal = async () => {
     if (!canSeal || sealing.current || !env.tee || !examId) return;
@@ -130,6 +171,7 @@ export function Composer(props: {
       // Sealed: the receipt is kept, and the words leave the page.
       setLeaving({ id: receipt.sealedAt, text });
       setText('');
+      clearOptions();
       setNotice(`Question sealed. Your receipt is below. ${count(sealed.length + 1)} sealed so far.`);
       onSealed();
     } catch (error) {
@@ -144,6 +186,7 @@ export function Composer(props: {
         // It is in the bank, so it must not be sent again, but it has no receipt to count.
         setHeldHashes((hashes) => [...hashes, error.questionHash]);
         setText('');
+        clearOptions();
       } else if (error instanceof ReceiptInvalidError) {
         setProblem({
           kind: 'trouble',
@@ -175,7 +218,7 @@ export function Composer(props: {
     }
   };
 
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
       void seal();
@@ -264,6 +307,30 @@ export function Composer(props: {
             </p>
           ) : null}
 
+          <fieldset className="ss-kinds" disabled={locked}>
+            <legend>Kind of question</legend>
+            {[
+              { name: 'Written', value: false },
+              { name: 'Multiple choice', value: true },
+            ].map((kind) => (
+              <label key={kind.name} className="ss-kind">
+                <input
+                  type="radio"
+                  name="kind"
+                  checked={choice === kind.value}
+                  onChange={() => {
+                    setChoice(kind.value);
+                    setProblem(null);
+                  }}
+                  onClick={(event) => {
+                    if (event.detail > 0) writing.current?.focus();
+                  }}
+                />
+                <span>{kind.name}</span>
+              </label>
+            ))}
+          </fieldset>
+
           <label className="ss-sheet">
             <span className="ss-sheet-label">Your question</span>
             <span className="ss-sheet-page">
@@ -292,6 +359,67 @@ export function Composer(props: {
               ) : null}
             </span>
           </label>
+          {choice ? (
+            <fieldset className="ss-options" disabled={locked}>
+              <legend>Options, in the order they will print</legend>
+              {options.map((option, index) => {
+                const message = visited.has(index) || option.trim() !== '' ? problems[index] : null;
+                return (
+                  <div key={index} className="ss-option">
+                    <span className="ss-option-letter" aria-hidden="true">
+                      {optionLetter(index)}
+                    </span>
+                    <input
+                      ref={(element) => {
+                        optionFields.current[index] = element;
+                      }}
+                      className="ps-input"
+                      type="text"
+                      value={option}
+                      readOnly={locked}
+                      aria-label={`Option ${optionLetter(index)}`}
+                      aria-invalid={message ? true : undefined}
+                      aria-describedby={message ? `ss-option-${String(index)}` : undefined}
+                      onChange={(event) => {
+                        changeOption(index, event.target.value);
+                      }}
+                      onBlur={() => {
+                        setVisited((seen) => new Set(seen).add(index));
+                      }}
+                      onKeyDown={onKeyDown}
+                    />
+                    {options.length > limits.questionOptionsMin ? (
+                      <button
+                        type="button"
+                        className="ps-button ss-option-remove"
+                        aria-label={`Remove option ${optionLetter(index)}`}
+                        onClick={() => {
+                          removeOption(index);
+                        }}
+                      >
+                        Remove
+                      </button>
+                    ) : null}
+                    {message ? (
+                      <p id={`ss-option-${String(index)}`} className="ss-option-error">
+                        {message}
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              })}
+              {options.length < limits.questionOptionsMax ? (
+                <button type="button" className="ps-button ss-option-add" onClick={addOption}>
+                  Add an option
+                </button>
+              ) : (
+                <p className="ss-option-note">That is the most options a question can have ({String(limits.questionOptionsMax)}).</p>
+              )}
+              <p className="ss-option-note">
+                The answer key isn’t sent, because the paper becomes public.
+              </p>
+            </fieldset>
+          ) : null}
           <p id="ss-size" className="ss-size" data-over={over > 0 ? 'true' : undefined}>
             {over > 0
               ? `Too long by about ${count(over)} characters. Shorten it to seal it.`

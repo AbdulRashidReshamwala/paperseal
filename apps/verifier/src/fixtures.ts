@@ -148,7 +148,7 @@ export const paper: Paper = {
   questions: [
     { topic: 'Maths', text: 'Differentiate x squared.' },
     { topic: 'Maths', text: 'Integrate 2x.' },
-    { topic: 'Physics', text: 'State Newton’s second law.' },
+    { topic: 'Physics', text: 'Which law relates force and acceleration?', options: ['First law', 'Second law', 'Third law'] },
   ],
 };
 

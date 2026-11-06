@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { credentialIsForInvite, useInvite } from '../../shared/invite';
 import { Register, Trouble } from '../../shared/Register';
 import { Closed } from './Closed';
-import { Composer, type Draft } from './Composer';
+import { Composer, emptyOptions, type Draft } from './Composer';
 import type { ConfirmOutcome } from './confirm';
 import { loadReceipts, verifyReceipt, type StoredReceipt } from './receipts';
 import { useSession } from './session';
@@ -120,9 +120,11 @@ export function SetterFlow() {
   // held in memory only: a question's text is never stored.
   const [text, setText] = useState('');
   const [topic, setTopic] = useState('');
+  const [choice, setChoice] = useState(false);
+  const [options, setOptions] = useState<string[]>(() => emptyOptions());
   const [unsure, setUnsure] = useState(false);
   const pending = useRef<PendingSubmission | null>(null);
-  const draft: Draft = { text, setText, topic, setTopic, pending, unsure, setUnsure };
+  const draft: Draft = { text, setText, topic, setTopic, choice, setChoice, options, setOptions, pending, unsure, setUnsure };
 
   const [receipts, setReceipts] = useState<StoredReceipt[]>(() => (examId ? loadReceipts(examId) : []));
   const [topics, setTopics] = useState<Record<string, string>>(() => (examId ? loadTopics(examId) : {}));

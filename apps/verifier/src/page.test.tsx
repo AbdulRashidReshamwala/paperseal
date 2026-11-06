@@ -387,6 +387,11 @@ describe('step 7, proof', () => {
     open(1000);
     expect(await screen.findByText('Differentiate x squared.', {}, { timeout: 5000 })).toBeTruthy();
     expect(screen.getByText('Integrate 2x.')).toBeTruthy();
+    // A multiple choice question shows its options as a lettered list, in the paper's order.
+    const options = screen.getByRole('list', { name: 'Options' });
+    expect(options.getAttribute('type')).toBe('A');
+    expect([...options.querySelectorAll('li')].map((item) => item.textContent)).toEqual(['First law', 'Second law', 'Third law']);
+    expect(screen.getAllByRole('list', { name: 'Options' })).toHaveLength(1);
     const step = stepNamed(/^7\. Exam ends and paper opens$/);
     expect(within(step).getAllByText('Pass')).toHaveLength(7);
     expect(within(step).queryByText('Fail')).toBeNull();

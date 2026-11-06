@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fromHex, padding, setterOwner } from '@paperseal/protocol';
+import { fromHex, padding, parseQuestion, setterOwner, unpadQuestion } from '@paperseal/protocol';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -282,6 +282,108 @@ describe('sealing', () => {
     await waitFor(() => {
       expect(loadReceipts(examId)).toHaveLength(1);
     });
+  });
+});
+
+describe('multiple choice', () => {
+  beforeEach(registered);
+
+  const kind = (name: string) => screen.getByRole('radio', { name }) as HTMLInputElement;
+  const option = (letter: string) => screen.getByLabelText(`Option ${letter}`) as HTMLInputElement;
+  const type = (letter: string, value: string) => {
+    fireEvent.change(option(letter), { target: { value } });
+  };
+
+  it('starts on Written with no option fields, and one click shows two', async () => {
+    const world = await makeWorld();
+    mount(world);
+    await ready();
+    expect(kind('Written').checked).toBe(true);
+    expect(screen.queryByLabelText('Option A')).toBeNull();
+    fireEvent.click(kind('Multiple choice'));
+    expect(option('A').value).toBe('');
+    expect(option('B').value).toBe('');
+    expect(screen.queryByLabelText('Option C')).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Remove option/ })).toBeNull();
+    expect(screen.getByText(/answer key isn’t sent, because the paper becomes public/)).toBeTruthy();
+    expect(screen.queryByText(/correct answer/i)).toBeNull();
+    expect(screen.getAllByRole('button').filter((button) => button.className.includes('ps-primary'))).toHaveLength(1);
+  });
+
+  it('adds up to the most options and removes down to two, with plain messages', async () => {
+    const world = await makeWorld();
+    mount(world);
+    await ready();
+    fireEvent.click(kind('Multiple choice'));
+    for (let i = 2; i < 6; i++) fireEvent.click(screen.getByRole('button', { name: 'Add an option' }));
+    expect(option('F')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Add an option' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove option F' }));
+    expect(screen.queryByLabelText('Option F')).toBeNull();
+    for (const letter of ['E', 'D', 'C']) fireEvent.click(screen.getByRole('button', { name: `Remove option ${letter}` }));
+    expect(screen.queryByRole('button', { name: /^Remove option/ })).toBeNull();
+  });
+
+  it('refuses a blank or repeated option inline, and keeps sealing shut until they are fixed', async () => {
+    const world = await makeWorld();
+    mount(world);
+    await ready();
+    await write('Which is a unit of force?');
+    fireEvent.click(kind('Multiple choice'));
+    type('A', 'Newton');
+    expect(sealButton()?.disabled).toBe(true);
+    fireEvent.blur(option('B'));
+    expect(screen.getByText('Write this option, or remove it.')).toBeTruthy();
+    expect(option('B').getAttribute('aria-invalid')).toBe('true');
+    type('B', ' Newton ');
+    expect(screen.getByText('The same as option A. Each option must be different.')).toBeTruthy();
+    expect(sealButton()?.disabled).toBe(true);
+    type('B', 'Joule');
+    expect(screen.queryByText(/The same as option/)).toBeNull();
+    expect(sealButton()?.disabled).toBe(false);
+  });
+
+  it('seals a multiple choice question with trimmed options in order, then resets the fields', async () => {
+    const world = await makeWorld();
+    mount(world);
+    await ready();
+    await write('Which is a unit of force?');
+    fireEvent.click(kind('Multiple choice'));
+    type('A', ' Joule');
+    type('B', 'Newton ');
+    fireEvent.click(screen.getByRole('button', { name: 'Add an option' }));
+    type('C', 'Watt');
+    fireEvent.click(sealButton() as HTMLButtonElement);
+    await waitFor(() => {
+      expect(loadReceipts(examId)).toHaveLength(1);
+    });
+    expect(parseQuestion(unpadQuestion(world.opened[0] as Uint8Array))).toEqual({
+      topic: 'Mechanics',
+      text: 'Which is a unit of force?',
+      options: ['Joule', 'Newton', 'Watt'],
+    });
+    await waitFor(() => {
+      expect(option('A').value).toBe('');
+    });
+    expect(screen.queryByLabelText('Option C')).toBeNull();
+    expect(kind('Multiple choice').checked).toBe(true);
+  });
+
+  it('seals a written question with no options key, even after trying multiple choice', async () => {
+    const world = await makeWorld();
+    mount(world);
+    await ready();
+    fireEvent.click(kind('Multiple choice'));
+    type('A', 'left over');
+    fireEvent.click(kind('Written'));
+    await write('What is momentum?');
+    fireEvent.click(sealButton() as HTMLButtonElement);
+    await waitFor(() => {
+      expect(loadReceipts(examId)).toHaveLength(1);
+    });
+    expect(new TextDecoder().decode(unpadQuestion(world.opened[0] as Uint8Array))).toBe(
+      '{"topic":"Mechanics","text":"What is momentum?"}',
+    );
   });
 });
 

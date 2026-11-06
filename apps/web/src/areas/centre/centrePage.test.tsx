@@ -173,6 +173,24 @@ describe('CentreView', () => {
     vi.unstubAllGlobals();
   });
 
+  it('shows a multiple choice question with its options as A, B, C in the paper’s order', () => {
+    const mixed: Paper = {
+      ...paper,
+      questions: [
+        { topic: 'Mechanics', text: 'Which is a unit of force?', options: ['Joule', 'Newton', 'Watt'] },
+        { topic: 'Mechanics', text: 'Define momentum.' },
+      ],
+    };
+    view(atRelease, ready, { ...idleOpen, paper: mixed });
+    const lists = screen.getAllByRole('list', { name: 'Options' });
+    expect(lists).toHaveLength(1);
+    expect(lists[0]?.getAttribute('type')).toBe('A');
+    expect([...(lists[0]?.querySelectorAll('li') ?? [])].map((item) => item.textContent)).toEqual(['Joule', 'Newton', 'Watt']);
+    // The written question has no list under it, and the numbering still runs 1, 2.
+    expect(document.querySelectorAll('.paper-sheet > section > ol > li')).toHaveLength(2);
+    expect(document.querySelectorAll('.paper-sheet > section > ol > li:last-child .paper-options')).toHaveLength(0);
+  });
+
   it('refuses a failed paper with no paper on screen, no retry, and who to contact and why', () => {
     const refusal = refusalFor('check', new PaperHashMismatchError());
     view(atRelease, ready, { ...idleOpen, phase: { name: 'failed', refusal } });

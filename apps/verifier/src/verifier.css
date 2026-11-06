@@ -154,3 +154,10 @@
 .vf-connection form {
   margin-top: var(--ps-space-3);
 }
+
+/* Options under a published question, lettered A, B, C in the order the paper holds them. */
+.vf-options {
+  padding-left: 1.75em;
+  margin: var(--ps-space-1) 0 var(--ps-space-2);
+  list-style-type: upper-alpha;
+}

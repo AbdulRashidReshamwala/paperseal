@@ -92,6 +92,14 @@
   white-space: pre-wrap;
 }
 
+/* Options sit under their question as A, B, C, in the order the paper holds them. */
+.paper-sheet .paper-options {
+  gap: var(--ps-space-2);
+  padding-left: 2em;
+  margin-top: var(--ps-space-2);
+  list-style-type: upper-alpha;
+}
+
 @media print {
   @page {
     margin: 18mm;
@@ -140,5 +148,9 @@
 
   .paper-sheet li {
     break-inside: avoid;
+  }
+
+  .paper-sheet .paper-options {
+    gap: 2pt;
   }
 }

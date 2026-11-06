@@ -194,7 +194,16 @@ function PaperView({ paper }: { paper: Paper }) {
             {paper.questions
               .filter((q) => q.topic === topic)
               .map((q, i) => (
-                <li key={i}>{q.text}</li>
+                <li key={i}>
+                  {q.text}
+                  {q.options ? (
+                    <ol className="vf-options" type="A" aria-label="Options">
+                      {q.options.map((option, at) => (
+                        <li key={at}>{option}</li>
+                      ))}
+                    </ol>
+                  ) : null}
+                </li>
               ))}
           </ol>
         </section>
