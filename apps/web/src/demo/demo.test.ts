@@ -3,12 +3,12 @@ import type { EnsLookup } from '@paperseal/chain';
 import { createWebAuthnKeys } from '@paperseal/keys';
 import { plantedKey, plantedRecords } from '@paperseal/keys/demo';
 import { fromHex, hashMessage, utf8ToBytes, type Hex } from '@paperseal/protocol';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ensRecords } from '../../../../e2e/demo/cards';
 import { ownerNameOf, roster } from '../../../../e2e/live/roster';
 import { demoCredentials } from './credentials';
-import { activePersona, changePersona, personas, type Persona } from './personas';
+import { activePersona, changePersona, personas, scopeStorage, type Persona } from './personas';
 import { newUserAction, setTouchEnabled, touchEnabled, touchForShow } from './touch';
 import { registerName } from '../shared/RegisterByName';
 
@@ -22,8 +22,13 @@ function realKey(result: (options: { signal?: AbortSignal }) => Promise<unknown>
   return key;
 }
 
+beforeAll(() => {
+  scopeStorage();
+});
+
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
   newUserAction();
 });
 
@@ -51,6 +56,13 @@ describe('personas', () => {
     expect(localStorage.getItem('paperseal.board.drafts')).toBeNull();
     changePersona(person('board'));
     expect(localStorage.getItem('paperseal.board.drafts')).toBe('[1]');
+  });
+
+  it('keeps a person per tab, so one tab switching leaves another alone', () => {
+    const otherTab = { getItem: vi.fn(() => 'centre-2') } as unknown as Storage;
+    changePersona(person('setter-1'));
+    expect(activePersona().id).toBe('setter-1');
+    expect(activePersona(otherTab).id).toBe('centre-2');
   });
 
   it('keeps each person’s credentials, registrations and drafts away from the others', () => {

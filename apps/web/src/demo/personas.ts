@@ -1,10 +1,10 @@
 import { directoryName } from '../shared/names';
 
 /*
- * The people one tab can act as: e2e/live/roster.ts, plus the exam board. Everything the app keeps in
- * this browser sits under `paperseal.`, so a person is that set of keys. Switching puts one person's set
- * away and brings the next one's back, then reloads, which also clears everything held in memory. The
- * app's own storage code stays as it is, and never knows.
+ * The people a tab can act as: e2e/live/roster.ts, plus the exam board. Each tab has its own person, held
+ * in sessionStorage. Everything the app keeps in this browser sits under `paperseal.`, so `scopeStorage`
+ * files those keys under the tab's person. Switching changes the person and reloads, which also clears
+ * everything held in memory. The app's own storage code stays as it is, and never knows.
  */
 
 export interface Persona {
@@ -38,35 +38,65 @@ const prefix = 'paperseal.';
 /** Which exam this tab shows. It is only a pointer to public data, and every person follows the same exam. */
 const shared = new Set(['paperseal.examId']);
 
-export function activePersona(storage: Storage = globalThis.localStorage): Persona {
-  const id = storage.getItem(activeKey);
-  return personas.find((persona) => persona.id === id) ?? defaultPersona;
+const byId = (id: string | null) => personas.find((persona) => persona.id === id);
+const scopedKey = (persona: Persona, key: string) =>
+  key.startsWith(prefix) && !shared.has(key) ? `paperseal-demo.of.${persona.id}.${key}` : key;
+
+export function activePersona(tab: Storage = globalThis.sessionStorage): Persona {
+  return byId(tab.getItem(activeKey)) ?? defaultPersona;
+}
+
+/** Keeps a browser's data from when one person was shared by every tab. */
+function adoptOldStorage(local: Storage, set: Storage['setItem'], get: Storage['getItem'], remove: Storage['removeItem']): void {
+  const keys = Array.from({ length: local.length }, (_, index) => local.key(index)).filter((key) => key !== null);
+  const old = byId(get.call(local, activeKey)) ?? defaultPersona;
+  for (const key of keys) {
+    if (key.startsWith(prefix) && !shared.has(key)) {
+      set.call(local, scopedKey(old, key), get.call(local, key) ?? '');
+      remove.call(local, key);
+    }
+  }
+  for (const persona of personas) {
+    const slot = get.call(local, slotKey(persona.id));
+    if (slot === null) continue;
+    try {
+      const entries = Object.entries(JSON.parse(slot) as Record<string, string>);
+      for (const [key, value] of entries) set.call(local, scopedKey(persona, key), value);
+    } catch {
+      // A slot that can't be read holds nothing worth keeping.
+    }
+    remove.call(local, slotKey(persona.id));
+  }
+  remove.call(local, activeKey);
+}
+
+/** Runs once, before the app first touches storage. From here each tab's `paperseal.` keys are its person's. */
+export function scopeStorage(): void {
+  const local = globalThis.localStorage;
+  const { getItem, setItem, removeItem } = Storage.prototype;
+  adoptOldStorage(local, setItem, getItem, removeItem);
+  const key = (store: Storage, name: string) => (store === local ? scopedKey(activePersona(), name) : name);
+  Storage.prototype.getItem = function (name) {
+    return getItem.call(this, key(this, name));
+  };
+  Storage.prototype.setItem = function (name, value) {
+    setItem.call(this, key(this, name), value);
+  };
+  Storage.prototype.removeItem = function (name) {
+    removeItem.call(this, key(this, name));
+  };
+  seedPerson(activePersona(), local);
 }
 
 /** A person starts with their name filled in, as if they had used it here before. */
-const firstVisit = (persona: Persona): Record<string, string> => (persona.owner ? { 'paperseal.party-name': persona.owner } : {});
-
-function readSlot(storage: Storage, persona: Persona): Record<string, string> {
-  try {
-    return (JSON.parse(storage.getItem(slotKey(persona.id)) ?? 'null') as Record<string, string> | null) ?? firstVisit(persona);
-  } catch {
-    return firstVisit(persona);
-  }
+function seedPerson(persona: Persona, local: Storage): void {
+  if (persona.owner && local.getItem('paperseal.party-name') === null) local.setItem('paperseal.party-name', persona.owner);
 }
 
-/** Puts the active person's storage away and brings out `next`'s. */
-export function changePersona(next: Persona, storage: Storage = globalThis.localStorage): void {
-  const keys = Array.from({ length: storage.length }, (_, index) => storage.key(index)).filter(
-    (key): key is string => key?.startsWith(prefix) === true && !shared.has(key),
-  );
-  const leaving: Record<string, string> = {};
-  for (const key of keys) {
-    leaving[key] = storage.getItem(key) ?? '';
-    storage.removeItem(key);
-  }
-  storage.setItem(slotKey(activePersona(storage).id), JSON.stringify(leaving));
-  for (const [key, value] of Object.entries(readSlot(storage, next))) storage.setItem(key, value);
-  storage.setItem(activeKey, next.id);
+/** Makes this tab `next`. Other tabs keep their own person. */
+export function changePersona(next: Persona, tab: Storage = globalThis.sessionStorage): void {
+  tab.setItem(activeKey, next.id);
+  seedPerson(next, globalThis.localStorage);
 }
 
 /** Becomes `next`, on their page. The reload drops whatever the last person had in memory. */

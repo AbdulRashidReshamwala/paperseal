@@ -126,7 +126,7 @@ Each person has a planted key, fixed and derived from a public seed in `packages
 3. As **Exam board**, connect MetaMask and publish the exam. Copy the exam's setter links.
 4. Switch to **Setter 1**, paste that setter's link in the address bar and register. Do the same for **Setter 2**.
 5. Switch to each **Key holder** and **Centre**. Their page has their name filled in, and one click registers them.
-6. Carry on as each person when the exam needs them. Switching reloads the page. Each person has their own browser storage, the exam board's drafts stay with the exam board, and only the current exam is shared.
+6. Carry on as each person when the exam needs them. Switching reloads the page. Each tab has its own person, so you can keep one tab per person. Each person has their own browser storage, the exam board's drafts stay with the exam board, and only the current exam is shared.
 
 **Ask for a touch** in the bar asks a plugged-in security key for a touch, at most once per click. The first touch makes a throwaway credential on it. The touch is only for show: its result is thrown away and never used for any key. If no key answers or you press Cancel, the planted key carries on, after 30 seconds at most. Untick it to skip the touch.
 

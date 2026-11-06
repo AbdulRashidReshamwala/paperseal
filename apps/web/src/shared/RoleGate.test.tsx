@@ -273,7 +273,7 @@ describe('the key holder and centre pages', () => {
 
 describe('demo keys', () => {
   const become = (id: string) => {
-    localStorage.setItem(activeKey, id);
+    sessionStorage.setItem(activeKey, id);
   };
 
   it.each([
