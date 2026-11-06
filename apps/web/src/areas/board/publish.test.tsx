@@ -450,7 +450,10 @@ describe('step 2, review and publish', () => {
     expect(node.sent).toHaveLength(1);
     expect(getCurrentExamId()).toBe(examId);
     // The draft is gone once it has become an exam.
+    expect(JSON.parse(localStorage.getItem('paperseal.board.drafts') ?? '[]')).toEqual([]);
     expect(localStorage.getItem('paperseal.board.draft')).toBeNull();
+    // The exam is kept with its name, so the board can open it again later.
+    expect(JSON.parse(localStorage.getItem('paperseal.board.exams') ?? '[]')).toEqual([{ id: examId, name }]);
   });
 
   it('asks the wallet for an account as part of the same action', async () => {
@@ -501,16 +504,18 @@ describe('step 2, review and publish', () => {
   it('keeps the form through a reload, and not after publishing', async () => {
     const { env } = environment();
     await toReview(env);
-    expect(JSON.parse(localStorage.getItem('paperseal.board.draft') ?? 'null')).toMatchObject({ draftStep: 'review', plan: { name } });
+    const saved = JSON.parse(localStorage.getItem('paperseal.board.drafts') ?? '[]') as { id: string }[];
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({ draftStep: 'review', plan: { name } });
     cleanup();
-    renderBoard(env);
+    renderBoard(env, `/board/draft/${saved[0]?.id ?? ''}`);
     expect(await screen.findByText('Review and publish')).toBeTruthy();
     fireEvent.click(button('Change the details'));
     expect((field('Exam name') as HTMLInputElement).value).toBe(name);
   });
 
   it('starts empty when the saved form is damaged or storage is unavailable', () => {
-    localStorage.setItem('paperseal.board.draft', '{"plan":{"name":3}}');
+    localStorage.setItem('paperseal.board.drafts', '[{"id":"a","plan":{"name":3}}]');
     const { env } = environment();
     renderBoard(env);
     expect((field('Exam name') as HTMLInputElement).value).toBe('');

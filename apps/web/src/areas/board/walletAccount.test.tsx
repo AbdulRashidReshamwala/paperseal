@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
+import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { currentAccount, onWalletChange } from '../../shared/wallet';
@@ -59,7 +60,9 @@ function wrapperFor(provider: unknown) {
     getProvider: () => provider,
     createRegistry: () => ({ board: () => Promise.resolve(board) }),
   } as unknown as PublishEnvironment;
-  return ({ children }: { children: ReactNode }) => <BoardFormProvider environment={environment}>{children}</BoardFormProvider>;
+  return ({ children }: { children: ReactNode }) => <MemoryRouter>
+      <BoardFormProvider environment={environment}>{children}</BoardFormProvider>
+    </MemoryRouter>;
 }
 
 afterEach(() => {

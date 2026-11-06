@@ -1,13 +1,15 @@
 import type { TeeClient } from '@paperseal/tee-client';
 import { Page, RoleHeader, Stage } from '@paperseal/ui';
 import { useEffect, useMemo, type ReactNode } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
+import type { Hex } from '@paperseal/protocol';
 
 import { Area, type AreaScreen } from '../../shared/Area';
 import { useCurrentExamId } from '../../shared/currentExam';
 import { TEE_STATUS_POLL_MS } from '../../shared/TeeStatus';
 import './board.css';
 import { BoardFormProvider, useBoardForm, useEvaluated, useReader } from './BoardForm';
+import { BoardLists } from './BoardLists';
 import { BuildStep } from './BuildStep';
 import { CreateStep } from './CreateStep';
 import { decideStep, readSnapshot, type Snapshot } from './examState';
@@ -26,7 +28,8 @@ import { WaitStep } from './WaitStep';
 const step = (n: number) => `Step ${String(n)} of 6`;
 
 /** Steps 1 and 2, before there is an exam. They live in the browser until the exam is published. */
-function Draft(props: { review: boolean; otherExam: boolean }) {
+function Draft(props: { review: boolean }) {
+  const { draftId } = useBoardForm();
   const { publish, draftStep, setDraftStep } = useBoardForm();
   const { blueprint, schedule } = useEvaluated();
   const releases = useReleases(publish.version);
@@ -43,18 +46,16 @@ function Draft(props: { review: boolean; otherExam: boolean }) {
   const screen = draftScreen(draftStep, { create: created });
   return (
     <>
-      {props.otherExam ? (
-        <p className="board-note">
-          Another exam is under way. <Link to="/board">Go back to it</Link>, or set up a new one here.
-        </p>
-      ) : null}
       {screen === 'create' ? (
-        <CreateStep
-          eyebrow={step(1)}
-          onContinue={() => {
-            setDraftStep('review');
-          }}
-        />
+        <>
+          <CreateStep
+            eyebrow={step(1)}
+            onContinue={() => {
+              setDraftStep('review');
+            }}
+          />
+          <BoardLists key={draftId ?? 'new'} exceptDraftId={draftId} />
+        </>
       ) : null}
       {screen === 'review' ? (
         <ReviewStep
@@ -69,8 +70,7 @@ function Draft(props: { review: boolean; otherExam: boolean }) {
   );
 }
 
-function useExamState() {
-  const examId = useCurrentExamId();
+function useExamState(examId: Hex | null) {
   const reader = useReader();
   const { tee } = useBoardForm();
   const load = useMemo(
@@ -78,7 +78,7 @@ function useExamState() {
     [reader, tee, examId],
   );
   const poll = usePoll(load, TEE_STATUS_POLL_MS);
-  return { examId, reader, ...poll };
+  return { reader, ...poll };
 }
 
 function Waiting(props: { title: string; lede?: string; next: string; details?: string }) {
@@ -93,15 +93,39 @@ function Waiting(props: { title: string; lede?: string; next: string; details?: 
   );
 }
 
-/** One screen, chosen by the exam's state. `route` only asks for a new exam, or for its review. */
-function BoardFlow(props: { route?: 'draft' | 'review' }) {
+const asExamId = (text: string | null | undefined): Hex | null => (text && /^0x[0-9a-fA-F]{64}$/.test(text) ? (text.toLowerCase() as Hex) : null);
+
+/*
+ * What a route asks for. `new` is the create page with an empty form, `review` its review, `draft`
+ * a saved draft named in the route, `exam` the exam named in the route and `current` an old link to
+ * the exam this browser last published.
+ */
+type Mode = 'new' | 'review' | 'draft' | 'exam' | 'current';
+
+/** One screen. Without an exam in the route that is the create page, never a restored draft. */
+function BoardFlow(props: { mode: Mode }) {
   const navigate = useNavigate();
   const form = useBoardForm();
-  const { examId, reader, value, problem, pending, reload } = useExamState();
+  const params = useParams();
+  const [search] = useSearchParams();
+  const stored = useCurrentExamId();
+  const { mode } = props;
+  // `?exam=` on the start page names an exam too, so a link to one still works.
+  const examId = asExamId(mode === 'exam' ? params.examId : mode === 'current' ? stored : mode === 'new' ? search.get('exam') : null);
+  const { reader, value, problem, pending, reload } = useExamState(examId);
   const decided = value ? decideStep(value) : null;
   const page = (children: ReactNode) => (
     <Page header={<RoleHeader role="Exam board" {...(form.examName ? { exam: form.examName } : {})} />}>{children}</Page>
   );
+  const withLink = (children: ReactNode) =>
+    page(
+      <>
+        {children}
+        <p className="board-quiet">
+          <Link to="/board">All your exams and drafts</Link>
+        </p>
+      </>,
+    );
 
   if (form.held) {
     return page(
@@ -118,11 +142,11 @@ function BoardFlow(props: { route?: 'draft' | 'review' }) {
       />,
     );
   }
-  if (props.route || !examId || decided === 'draft') {
-    return page(<Draft review={props.route === 'review'} otherExam={Boolean(decided && decided !== 'draft')} />);
-  }
+  if (mode === 'draft' && form.draftMissing) return <Navigate to="/board" replace />;
+  if ((mode === 'exam' || mode === 'current') && !examId) return <Navigate to="/board" replace />;
+  if (!examId) return page(<Draft review={mode === 'review'} />);
   if (!reader) {
-    return page(
+    return withLink(
       <Waiting
         title="This page is not ready to use yet"
         lede="Ask whoever installed Paper Seal to finish setting it up."
@@ -132,7 +156,7 @@ function BoardFlow(props: { route?: 'draft' | 'review' }) {
     );
   }
   if (!value) {
-    return page(
+    return withLink(
       pending ? (
         <Waiting title="Loading your exam" next="The next step appears here by itself. It is safe to close this page." />
       ) : (
@@ -145,24 +169,36 @@ function BoardFlow(props: { route?: 'draft' | 'review' }) {
       ),
     );
   }
-  if (decided === 'people') return page(<PeopleStep eyebrow={step(3)} snapshot={value} onPosted={reload} />);
-  if (decided === 'wait') return page(<WaitStep eyebrow={step(4)} snapshot={value} />);
-  if (decided === 'post-build') return page(<BuildStep eyebrow={step(5)} snapshot={value} onPosted={reload} />);
-  return page(<StatusStep eyebrow={step(6)} snapshot={value} />);
+  if (decided === 'draft') {
+    return withLink(
+      <Waiting
+        title="We cannot find this exam"
+        lede="It may not be on the public record yet, or this may be the wrong exam."
+        next="This page looks again by itself. It is safe to close it and come back later."
+      />,
+    );
+  }
+  if (decided === 'people') return withLink(<PeopleStep eyebrow={step(3)} snapshot={value} onPosted={reload} />);
+  if (decided === 'wait') return withLink(<WaitStep eyebrow={step(4)} snapshot={value} />);
+  if (decided === 'post-build') return withLink(<BuildStep eyebrow={step(5)} snapshot={value} onPosted={reload} />);
+  return withLink(<StatusStep eyebrow={step(6)} snapshot={value} />);
 }
 
 /*
- * Every route shows the same flow, so old links keep working. `blueprint` and `schedule` are how a
- * new exam starts, because a board that already has an exam has no other way to ask for one.
+ * `/board` is always the create page, and an exam or draft is reached by its own route. The old
+ * `blueprint`, `schedule` and `publish` links still start a new exam or open its review, and the old
+ * `onboarding`, `list` and `outbox` links open the exam this browser last published.
  */
 export const screens: AreaScreen[] = [
-  { path: '', element: <BoardFlow /> },
-  { path: 'blueprint', element: <BoardFlow route="draft" /> },
-  { path: 'schedule', element: <BoardFlow route="draft" /> },
-  { path: 'publish', element: <BoardFlow route="review" /> },
-  { path: 'onboarding', element: <BoardFlow /> },
-  { path: 'list', element: <BoardFlow /> },
-  { path: 'outbox', element: <BoardFlow /> },
+  { path: '', element: <BoardFlow mode="new" /> },
+  { path: 'draft/:draftId', element: <BoardFlow mode="draft" /> },
+  { path: 'exam/:examId', element: <BoardFlow mode="exam" /> },
+  { path: 'blueprint', element: <BoardFlow mode="new" /> },
+  { path: 'schedule', element: <BoardFlow mode="new" /> },
+  { path: 'publish', element: <BoardFlow mode="review" /> },
+  { path: 'onboarding', element: <BoardFlow mode="current" /> },
+  { path: 'list', element: <BoardFlow mode="current" /> },
+  { path: 'outbox', element: <BoardFlow mode="current" /> },
 ];
 
 export default function BoardArea(props: { environment?: PublishEnvironment; tee?: TeeClient | null }) {

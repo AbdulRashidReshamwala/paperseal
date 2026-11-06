@@ -157,7 +157,7 @@ async function seeded(upTo: 'exam' | 'list' | 'build', options: Partial<FakeChai
   return { node, env };
 }
 
-function renderBoard(env: PublishEnvironment | undefined, tee: TeeClient | null, path = '/board') {
+function renderBoard(env: PublishEnvironment | undefined, tee: TeeClient | null, path = `/board/exam/${examId}`) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
@@ -607,27 +607,51 @@ describe('step 7, exam status', () => {
     renderBoard(env, fakeTee());
     fireEvent.click(await screen.findByText('Set up another exam'));
     expect(await screen.findByText('Create the exam')).toBeTruthy();
-    expect(screen.getByText(/Another exam is under way/)).toBeTruthy();
+    expect((screen.getByLabelText(/^Exam name/) as HTMLInputElement).value).toBe('');
   });
 });
 
 describe('deep links', () => {
-  it.each(['', '/blueprint', '/schedule', '/publish', '/onboarding', '/list', '/outbox'])('/board%s starts a new exam when there is none', (path) => {
+  it.each(['', '/blueprint', '/schedule', '/publish'])('/board%s starts a new exam when there is none', (path) => {
     renderBoard(environment().env, null, `/board${path}`);
     expect(screen.getByText('Create the exam')).toBeTruthy();
     expect(screen.queryByRole('navigation')).toBeNull();
   });
 
-  it.each(['', '/onboarding', '/list', '/outbox'])('/board%s shows what the exam needs now', async (path) => {
+  it.each(['/onboarding', '/list', '/outbox'])('/board%s shows what the last published exam needs now', async (path) => {
     const { env } = await seeded('list');
     renderBoard(env, fakeTee(), `/board${path}`);
     expect(await screen.findByText(/Setters can start sending questions in about 20 minutes/)).toBeTruthy();
   });
 
-  it('treats an exam pointer the chain has never heard of as no exam', async () => {
-    setCurrentExamId(examId);
-    renderBoard(environment().env, fakeTee());
+  it('opens the create page at /board even when this browser has an exam, and /board/exam/<id> opens the exam', async () => {
+    const { env } = await seeded('list');
+    renderBoard(env, fakeTee(), '/board');
     expect(await screen.findByText('Create the exam')).toBeTruthy();
+    cleanup();
+    renderBoard(env, fakeTee(), `/board/exam/${examId}`);
+    expect(await screen.findByText(/Setters can start sending questions in about 20 minutes/)).toBeTruthy();
+    expect(screen.queryByText('Create the exam')).toBeNull();
+  });
+
+  it('opens an exam named by ?exam= on the start page', async () => {
+    const { env } = await seeded('list');
+    renderBoard(env, fakeTee(), `/board?exam=${examId}`);
+    expect(await screen.findByText(/Setters can start sending questions in about 20 minutes/)).toBeTruthy();
+  });
+
+  it('says so when the chain has never heard of the exam in the route, and offers the way back', async () => {
+    renderBoard(environment().env, fakeTee(), `/board/exam/${examId}`);
+    expect(await screen.findByText('We cannot find this exam')).toBeTruthy();
+    expect(screen.getByText('All your exams and drafts')).toBeTruthy();
+  });
+
+  it('goes to the create page for an exam id that is not one, or an old link with no exam', () => {
+    renderBoard(environment().env, null, '/board/exam/nonsense');
+    expect(screen.getByText('Create the exam')).toBeTruthy();
+    cleanup();
+    renderBoard(environment().env, null, '/board/list');
+    expect(screen.getByText('Create the exam')).toBeTruthy();
   });
 });
 

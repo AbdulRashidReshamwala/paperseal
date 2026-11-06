@@ -163,3 +163,49 @@
   outline: 2px solid var(--ps-ink);
   outline-offset: 2px;
 }
+
+.board-list {
+  max-width: 34em;
+  margin-top: var(--ps-space-6);
+}
+
+.board-list h2 {
+  margin-bottom: var(--ps-space-1);
+  font-size: var(--ps-text-body);
+}
+
+.board-list ul {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.board-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-2) var(--ps-space-4);
+  align-items: center;
+  justify-content: space-between;
+  padding-block: var(--ps-space-3);
+  border-top: 1px solid var(--ps-rule);
+}
+
+.board-list-text {
+  display: grid;
+  gap: var(--ps-space-1);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.board-list-text span,
+.board-list-actions span {
+  font-size: var(--ps-text-small);
+  color: var(--ps-ink-soft);
+}
+
+.board-list-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-2);
+  align-items: center;
+}

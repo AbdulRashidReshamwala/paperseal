@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router';
 
 import { setCurrentExamId } from '../../shared/currentExam';
 import { useBoardForm, useEvaluated } from './BoardForm';
+import { rememberExam } from './examsStore';
 import { evaluatePublish, evaluateSchedule, formatClock } from './form';
 import { useBoardWallet, walletStageLabels, type WalletStage } from './hooks';
 import { Fold, Problem, WalletProblem } from './Parts';
@@ -52,13 +53,16 @@ export function ReviewStep(props: { eyebrow: string; releases: Releases; onBack:
         setProgress({ state: 'running', stage });
       });
       // The pointer follows the exam only when ExamRegistry returns what was sent. A mismatch leaves it where it was.
-      if (outcome.matches) setCurrentExamId(request.examId);
+      if (outcome.matches) {
+        setCurrentExamId(request.examId);
+        rememberExam({ id: request.examId, name: plan.name });
+      }
       addReceipt({ kind: 'publish', outcome, version: request.fields.version, name: plan.name });
       setProgress({ state: 'idle' });
       // A correct read-back goes straight on to the invites. Only a mismatch stops on a receipt.
       if (outcome.matches) {
         resetDraft();
-        void navigate('/board');
+        void navigate(`/board/exam/${request.examId}`);
       }
     } catch (error) {
       setProgress({ state: 'failed', message: explainError(error) });
