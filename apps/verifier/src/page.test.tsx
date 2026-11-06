@@ -105,7 +105,7 @@ describe('one page', () => {
     arrange(world);
     open(1000);
     await findStep(/^1\. Exam published$/);
-    expect(screen.getByRole('list', { name: 'Chain of custody' }).children).toHaveLength(7);
+    expect(screen.getByRole('list', { name: 'Steps for this exam' }).children).toHaveLength(7);
     expect(screen.queryByRole('navigation')).toBeNull();
     expect(document.body.textContent).not.toMatch(/sign in/i);
   });
@@ -119,7 +119,7 @@ describe('one page', () => {
 
   it('with an exam but no connection, says it is not connected', () => {
     open(1000, { rpcUrl: '', registryAddress: '' });
-    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Not connected to the public record.');
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('This page cannot read the public record yet.');
     expect(screen.queryByText('Pass')).toBeNull();
   });
 
@@ -127,11 +127,11 @@ describe('one page', () => {
     const world = await buildWorld();
     arrange(world);
     open(1000);
-    const heading = await screen.findByRole('heading', { name: 'Check against your own RPC' });
+    const heading = await screen.findByRole('heading', { name: 'Check it yourself' });
     const section = heading.closest('section') as HTMLElement;
     expect(section.textContent).toMatch(/host your own copy/);
-    expect(within(section).getByText('TEE URL (optional)')).toBeTruthy();
-    const steps = screen.getByRole('list', { name: 'Chain of custody' });
+    expect(within(section).getByText('Live machine address (optional)')).toBeTruthy();
+    const steps = screen.getByRole('list', { name: 'Steps for this exam' });
     expect(steps.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
@@ -167,7 +167,7 @@ describe('choosing an exam', () => {
     open(1000, {}, '/exam/not-an-exam');
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('This link does not name an exam.');
     expect(screen.queryByText('Pass')).toBeNull();
-    expect(screen.getByText('The link did not hold a valid exam ID.')).toBeTruthy();
+    expect(screen.getByText('This link does not hold a valid exam ID. Ask your exam board for the right one.')).toBeTruthy();
   });
 
   it('opens an exam someone types in, and refuses anything else', async () => {
@@ -176,7 +176,7 @@ describe('choosing an exam', () => {
     open(1000, { examId: '' });
     fireEvent.change(screen.getByLabelText(/Exam ID/), { target: { value: 'nonsense' } });
     fireEvent.click(screen.getByRole('button', { name: 'Open this exam' }));
-    expect(screen.getByText('Enter a 32-byte ID starting with 0x.')).toBeTruthy();
+    expect(screen.getByText('Enter an exam ID: 0x followed by 64 letters or digits.')).toBeTruthy();
     fireEvent.change(screen.getByLabelText(/Exam ID/), { target: { value: other } });
     fireEvent.click(screen.getByRole('button', { name: 'Open this exam' }));
     await findStep(/^1\. Exam published$/);
@@ -189,7 +189,7 @@ describe('step evidence', () => {
     const world = await buildWorld();
     arrange(world);
     open(1000);
-    const step = await findStep(/^2\. Sealed machine/);
+    const step = await findStep(/^2\. Paper Seal runs the published code$/);
     await within(step).findByText("Token signature, up to Google's root");
     // The test PKI does not lead to Google's pinned root, so the signature must fail, and so must the whole token.
     await waitFor(() => {
@@ -267,10 +267,12 @@ describe('failures', () => {
     open(1000);
     const alarm = await screen.findByRole('alert');
     expect(alarm.textContent).toMatch(/Step 3, People approved/);
-    expect(alarm.textContent).toMatch(/do not hash to the on-chain listHash/);
+    expect(alarm.textContent).toMatch(/does not match its fingerprint/);
+    expect(alarm.textContent).not.toMatch(/listHash/);
     const step = stepNamed(/^3\. People approved$/);
     expect(stateOf(step)).toBe('failed');
-    expect(step.querySelector('.ps-step-note')?.textContent).toMatch(/do not hash to the on-chain listHash/);
+    expect(step.querySelector('.ps-step-note')?.textContent).toMatch(/does not match its fingerprint/);
+    expect(step.textContent).toMatch(/do not hash to the on-chain listHash/);
     // The top of the page comes before the headline.
     expect(alarm.compareDocumentPosition(screen.getByRole('heading', { level: 1 })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
@@ -283,7 +285,7 @@ describe('failures', () => {
     open(1);
     await findStep(/^3\. People approved$/);
     await waitFor(() => {
-      expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Setting up. The approved list is not published yet.');
+      expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Setting up. The list of approved people is not published yet.');
     });
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.queryByText('Fail')).toBeNull();
@@ -295,13 +297,13 @@ describe('step 6, unlock', () => {
     const world = await buildWorld();
     arrange(world);
     open(1000);
-    const step = await findStep(/^6\. Unlock$/);
+    const step = await findStep(/^6\. Paper unlocks for centres$/);
     expect(await within(step).findByText('8 of 8 needed (not verified)')).toBeTruthy();
     const released = within(step).getAllByText('Released');
     expect(released).toHaveLength(8);
     for (const badge of released) expect(badge.getAttribute('data-tone')).toBe('neutral');
-    const warning = within(step).getByText(/nothing says which TEE signed this/);
-    const rows = within(step).getByText('Holders released').closest('ul');
+    const warning = within(step).getByText(/nothing says who signed this/);
+    const rows = within(step).getByText('Key holders released').closest('ul');
     expect(warning.compareDocumentPosition(rows ?? warning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
@@ -310,12 +312,12 @@ describe('step 6, unlock', () => {
     const world = await buildWorld();
     arrange(world);
     open(1000);
-    const step = await findStep(/^6\. Unlock$/);
+    const step = await findStep(/^6\. Paper unlocks for centres$/);
     expect(await within(step).findByText('8 of 8 needed')).toBeTruthy();
     const released = within(step).getAllByText('Released');
     for (const badge of released) expect(badge.getAttribute('data-tone')).toBe('ok');
-    expect(within(step).getAllByText('Not released')).toHaveLength(2);
-    expect(within(step).queryByText(/nothing says which TEE signed this/)).toBeNull();
+    expect(within(step).getAllByText('Not released yet')).toHaveLength(2);
+    expect(within(step).queryByText(/nothing says who signed this/)).toBeNull();
     expect(stateOf(step)).toBe('done');
   });
 
@@ -323,9 +325,9 @@ describe('step 6, unlock', () => {
     const world = await buildWorld();
     arrange(world);
     open(1000);
-    const step = await findStep(/^6\. Unlock$/);
+    const step = await findStep(/^6\. Paper unlocks for centres$/);
     expect(await within(step).findByRole('timer')).toBeTruthy();
-    expect(within(step).getByText('Public clock round 200')).toBeTruthy();
+    expect(within(step).getByText('Paper unlocks for centres, round 200')).toBeTruthy();
   });
 
   it('is neutral when no log is published yet', async () => {
@@ -333,7 +335,7 @@ describe('step 6, unlock', () => {
     arrange(world);
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('no', { status: 404 }))));
     open(1000);
-    const step = await findStep(/^6\. Unlock$/);
+    const step = await findStep(/^6\. Paper unlocks for centres$/);
     await within(step).findByText(/release-log.json is not in storage yet/);
     expect(within(step).queryByText('Fail')).toBeNull();
   });
@@ -358,14 +360,14 @@ describe('step 6, unlock', () => {
         }),
       );
       open(1000, { teeUrl: 'https://tee.example' });
-      const step = await findStep(/^6\. Unlock$/);
-      await within(step).findByText('Live from the sealed machine, optional');
+      const step = await findStep(/^6\. Paper unlocks for centres$/);
+      await within(step).findByText('Live from the machine, optional');
       return step;
     }
 
     it('is neutral, with the warning above the rows, when the fresh attestation is not trusted', async () => {
       const step = await openLive(false);
-      const warning = await within(step).findByText(/has not passed attestation/);
+      const warning = await within(step).findByText(/has not passed its check/);
       expect(within(step).getByText('unlock (not verified)')).toBeTruthy();
       const rows = within(step).getByText('unlock (not verified)').closest('ul');
       expect(warning.compareDocumentPosition(rows ?? warning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -373,9 +375,9 @@ describe('step 6, unlock', () => {
 
     it('shows progress as evidence when the fresh attestation is trusted', async () => {
       const step = await openLive(true);
-      await within(step).findByText('TEE attestation passes, so its answers can be trusted');
+      await within(step).findByText('The machine passed its check, so its answers can be trusted');
       expect(within(step).getByText('unlock')).toBeTruthy();
-      expect(within(step).queryByText(/has not passed attestation/)).toBeNull();
+      expect(within(step).queryByText(/has not passed its check/)).toBeNull();
     });
   });
 });
@@ -392,7 +394,7 @@ describe('step 7, proof', () => {
     expect(options.getAttribute('type')).toBe('A');
     expect([...options.querySelectorAll('li')].map((item) => item.textContent)).toEqual(['First law', 'Second law', 'Third law']);
     expect(screen.getAllByRole('list', { name: 'Options' })).toHaveLength(1);
-    const step = stepNamed(/^7\. Exam ends and paper opens$/);
+    const step = stepNamed(/^7\. Paper opens to everyone$/);
     expect(within(step).getAllByText('Pass')).toHaveLength(7);
     expect(within(step).queryByText('Fail')).toBeNull();
     expect(stateOf(step)).toBe('done');
@@ -403,19 +405,19 @@ describe('step 7, proof', () => {
     const world = await buildWorld({ wrongSaltedHash: true });
     arrange(world);
     open(1000);
-    const step = await findStep(/^7\. Exam ends and paper opens$/);
+    const step = await findStep(/^7\. Paper opens to everyone$/);
     await within(step).findByText('Paper withheld', {}, { timeout: 5000 });
     expect(screen.queryByText('Differentiate x squared.')).toBeNull();
     expect(stateOf(step)).toBe('failed');
-    expect(screen.getByRole('alert').textContent).toMatch(/not the paper the Build committed to/);
+    expect(screen.getByRole('alert').textContent).toMatch(/not the paper recorded for this exam/);
   });
 
   it('says no copy exists when the unlock never happened', async () => {
     const world = await buildWorld({ unlocked: false });
     arrange(world);
     open(1000);
-    const step = await findStep(/^7\. Exam ends and paper opens$/);
-    await within(step).findByText(/No copy exists/, { selector: '.ps-step-note' }, { timeout: 5000 });
+    const step = await findStep(/^7\. Paper opens to everyone$/);
+    await within(step).findByText(/The paper cannot be opened/, { selector: '.ps-step-note' }, { timeout: 5000 });
     expect(stateOf(step)).toBe('not-applicable');
     expect(screen.queryByText('Differentiate x squared.')).toBeNull();
   });
@@ -424,8 +426,8 @@ describe('step 7, proof', () => {
     const world = await buildWorld({ endRound: 99_999_999 });
     arrange(world);
     open(1000);
-    const step = await findStep(/^7\. Exam ends and paper opens$/);
-    expect(await within(step).findByText(/opens when the public clock publishes round 99999999/)).toBeTruthy();
+    const step = await findStep(/^7\. Paper opens to everyone$/);
+    expect(await within(step).findByText(/opens when the public clock reaches round 99999999/)).toBeTruthy();
     expect(screen.queryByText('Differentiate x squared.')).toBeNull();
   });
 });

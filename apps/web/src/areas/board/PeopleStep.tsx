@@ -1,15 +1,17 @@
 import { entriesFor, listRolesFor, matchInvites, roles, threshold, type InviteRole, type InviteState } from '@paperseal/protocol';
 import type { RegistrationEntry, TeeClient } from '@paperseal/tee-client';
-import { Button, Check, Field, Hash, Panel, Row, Rows, Stage } from '@paperseal/ui';
+import { Button, Check, Field, Hash, Panel, Row, Rows, Stage, Stamp } from '@paperseal/ui';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 
 import { useCurrentExamId } from '../../shared/currentExam';
 import { TEE_STATUS_POLL_MS } from '../../shared/TeeStatus';
 import { useBoardForm, useReader } from './BoardForm';
 import { usePoll } from './hooks';
+import { withDetails } from './details';
 import { ExamRecord } from './ExamRecord';
 import type { Snapshot } from './examState';
-import { Fold, PostAction } from './Parts';
+import { InviteBackup } from './InviteBackup';
+import { Fold, PostAction, ReadBackRows } from './Parts';
 import { centreRoles, createInvite, inviteRoleNames, linkFor, reissueInvite, type BoardInvite } from './invites';
 import { bankNeeded } from './plan';
 import { checkPostTarget, type PostGate } from './postGate';
@@ -86,7 +88,7 @@ function CopyLink(props: { who: string; url: string }) {
       </Button>
       {copy === 'failed' ? (
         <>
-          <span role="status">Copy failed. Select the link below.</span>
+          <span role="status">The link could not be copied. Select it below and copy it yourself.</span>
           <span className="ps-mono">{props.url}</span>
         </>
       ) : null}
@@ -132,7 +134,7 @@ function AddInvite(props: { invites: readonly BoardInvite[]; onAdd: (invite: Boa
         </select>
       </label>
       <Field
-        label={role === 'setter' ? 'Your own note (never published, optional)' : 'Name for the approved list'}
+        label={role === 'setter' ? 'A note for yourself (optional, kept private)' : 'Name to show on the public list'}
         value={text}
         error={error}
         onChange={(value) => {
@@ -148,7 +150,7 @@ function AddInvite(props: { invites: readonly BoardInvite[]; onAdd: (invite: Boa
 const stateWords: Record<InviteState['kind'], string> = {
   waiting: 'Waiting for them to register',
   matched: 'Registered',
-  conflict: 'Two security keys used this invite. Neither is on the list.',
+  conflict: 'Two security keys used this invite, so neither is on the list.',
 };
 
 /** One invite: who it is for, where it stands, and what the board can do about it. */
@@ -185,8 +187,8 @@ function InviteRow(props: {
         ) : null}
         {state.kind === 'waiting' ? <CopyLink who={who} url={props.link} /> : null}
         {state.kind === 'conflict' ? (
-          <Button aria-label={`Reissue the invite for ${who}`} onClick={props.onReissue}>
-            Reissue invite
+          <Button aria-label={`Make a new link for ${who}`} onClick={props.onReissue}>
+            Make a new link
           </Button>
         ) : null}
       </span>
@@ -209,7 +211,8 @@ const expected = /^expected \d+ neutral and \d+ centre key holders/;
 
 /** Step 4: invites to send, then the list composed from whoever registered with one. */
 export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPosted: () => void }) {
-  const { environment, tee, addReceipt } = useBoardForm();
+  const { environment, tee, addReceipt, receipts } = useBoardForm();
+  const published = receipts.find((receipt) => receipt.kind === 'publish' && receipt.outcome.matches);
   const examId = useCurrentExamId();
   const reader = useReader();
   const gate = usePostGate(tee);
@@ -236,19 +239,19 @@ export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPoste
   const counts = (role: number) => entries.filter((entry) => entry.role === role).length;
   const conflicts = matching.rows.filter(({ state }) => state.kind === 'conflict').length;
   const blocked = !tee
-    ? 'The sealed machine is not connected, so nobody can register yet.'
+    ? 'Paper Seal is not connected, so nobody can register yet. Reload this page. If it stays like this, contact whoever runs Paper Seal.'
     : !examId
-      ? 'No exam is selected.'
+      ? 'No exam is open. Go back to the exam board page and open your exam.'
       : entries.length === 0
         ? invites.length === 0
           ? 'Add an invite for each person, then send them their link.'
-          : 'Waiting for people to register.'
+          : 'Waiting for people to register. You can close this page and come back.'
         : composed && !composed.ok
           ? expected.test(composed.reason)
-            ? `The list needs exactly ${String(threshold.neutrals)} neutral parties and ${String(threshold.centres)} centres with keys.`
-            : composed.reason
+            ? `The list needs exactly ${String(threshold.neutrals)} key holders and ${String(threshold.centres)} centres holding part of the key.`
+            : withDetails('The list is not complete yet. Check the numbers under "On the list".', composed.reason)
           : gate.state === 'checking'
-            ? 'Checking the sealed machine before the list can be posted.'
+            ? 'Checking that Paper Seal is ready for the list.'
             : gate.state === 'blocked'
               ? gate.reason
               : null;
@@ -263,10 +266,23 @@ export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPoste
   return (
     <Stage
       eyebrow={props.eyebrow}
-      title="Bring people in"
-      lede="Add an invite for each person and send them their link. The list builds itself from whoever registers with one. When everyone is in, post it."
+      title="Invite people"
+      lede="Add an invite for each person and send them their link. When everyone has registered, post the list."
       action={
         <>
+          {published ? (
+            <div className="board-section">
+              <p className="board-stamp">
+                <Stamp press>Published</Stamp>
+              </p>
+              <p>Your exam is saved on the public record, and it matches what you entered.</p>
+              {published.outcome.rows.length > 0 ? (
+                <Fold summary="Details">
+                  <ReadBackRows rows={published.outcome.rows} />
+                </Fold>
+              ) : null}
+            </div>
+          ) : null}
           <Panel title="Invites">
             {examId ? (
               <AddInvite
@@ -298,16 +314,16 @@ export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPoste
                 })}
               </Rows>
             ) : null}
+            {examId ? <InviteBackup examId={examId} invites={invites} onRestore={update} /> : null}
             <p className="board-note">
-              Each link works for one person and carries a secret, so send it privately. Invites are kept in this browser, so
-              open the board here to see who has registered.
+              Each link works for one person only, so send it to them privately. It is safe to close this page while you wait.
             </p>
           </Panel>
           <Panel title="On the list">
             <Rows>
-              <Count label="Neutral parties" have={counts(roles.neutral)} need={threshold.neutrals} />
-              <Count label="Centres with keys" have={counts(roles.centreKeyHolder)} need={threshold.centres} />
-              <Row label="Centres without keys">{counts(roles.centre)}</Row>
+              <Count label="Key holders" have={counts(roles.neutral)} need={threshold.neutrals} />
+              <Count label="Centres holding part of the key" have={counts(roles.centreKeyHolder)} need={threshold.centres} />
+              <Row label="Centres getting the key at unlock">{counts(roles.centre)}</Row>
               <Row label="Setters">
                 {counts(roles.setter)}
                 {needs ? `, at least ${String(needs.setters)} needed` : ''}
@@ -315,10 +331,10 @@ export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPoste
             </Rows>
           </Panel>
           <div className="board-section" aria-live="polite">
-            {problem ? <p className="board-blocked">The registrations could not be read. This page keeps trying.</p> : null}
+            {problem ? <p className="board-blocked">Who has registered cannot be loaded right now. This page keeps trying.</p> : null}
             {conflicts > 0 ? (
               <p className="board-problem" role="alert">
-                <Check status="fail">An invite was used by two security keys, so neither is on the list. Reissue it, then send the new link.</Check>
+                <Check status="fail">An invite was used by two security keys, so neither is on the list. Make a new link for that invite, then send it to the right person.</Check>
               </p>
             ) : null}
             {matching.unmatched.length > 0 ? (
@@ -326,7 +342,7 @@ export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPoste
                 {matching.unmatched.map((registration) => (
                   <Row key={registration.passkeyPublicKey} label="Not invited">
                     <span className="board-link">
-                      <Check status="fail">Registered without one of your invites. Not on the list.</Check>
+                      <Check status="fail">This person registered without one of your invites, so they are not on the list.</Check>
                       <Hash value={registration.passkeyPublicKey} label="security key" />
                     </span>
                   </Row>
@@ -338,8 +354,8 @@ export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPoste
             label="Post the list"
             blocked={blocked}
             post={async (onStage) => {
-              if (!examId || !composed?.ok) throw new Error('There is no list to post.');
-              if (!tee || !reader) throw new Error('The sealed machine and the public record must be connected to post.');
+              if (!examId || !composed?.ok) throw new Error('The list is not ready to post yet. Check the numbers under "On the list".');
+              if (!tee || !reader) throw new Error('Paper Seal is not connected, so the list cannot be posted. Reload this page and try again.');
               // Checked again right before sending: the result on screen may be minutes old.
               await checkPostTarget({ tee, registry: reader, examId });
               return postApprovedListFlow(environment, { examId, entries: composed.list.encoded }, onStage);
@@ -351,16 +367,16 @@ export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPoste
           />
         </>
       }
-      next="The list can be posted only once. The sealed machine then reads it, and setters can send questions."
+      next="You can post the list only once, so wait until everyone has registered. Setters can then send questions, usually about 20 minutes later."
     >
       <ExamRecord snapshot={props.snapshot}>
         {gate.state === 'ok' ? (
-          <Row label="Sealed machine">
-            <Check status="pass">Running the published code for this exam, ready for the list</Check>
+          <Row label="Paper Seal">
+            <Check status="pass">Ready for the list</Check>
           </Row>
         ) : null}
         {gate.state === 'ok' ? (
-          <Row label="Instance key">
+          <Row label="Paper Seal key">
             <Hash value={gate.target.instancePublicKey} label="instance key" />
           </Row>
         ) : null}

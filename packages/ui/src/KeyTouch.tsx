@@ -78,7 +78,7 @@ export function KeyTouch(props: {
     state === 'idle'
       ? { title: purpose ? `Use your security key ${purpose}` : 'Use your security key', body: 'Have it plugged in and ready.' }
       : state === 'waiting'
-        ? { title: 'Touch your security key now', body: 'Your browser may ask you to choose it first.' }
+        ? { title: 'Touch your security key', body: 'Your browser may ask you to choose it first. Keep this page open.' }
         : state === 'success'
           ? { title: 'Security key confirmed', body: null }
           : { title: failure?.title ?? '', body: props.failureText ?? failure?.body ?? null };

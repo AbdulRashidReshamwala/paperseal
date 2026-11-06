@@ -800,6 +800,8 @@ a:hover {
 .ps-check {
   display: inline-flex;
   flex-wrap: wrap;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   gap: 0 var(--ps-space-2);
   align-items: center;
 }
@@ -809,6 +811,7 @@ a:hover {
 }
 
 .ps-check-detail {
+  min-width: 0;
   color: var(--ps-ink-soft);
 }
 

@@ -1,4 +1,5 @@
 import type { Hex } from '@paperseal/protocol';
+import { useSyncExternalStore } from 'react';
 import { useLocation } from 'react-router';
 
 import { isExamId } from './settings';
@@ -21,11 +22,35 @@ export function examLink(url: { search: string; routePath: string; routeSearch: 
   return isExamId(id) ? { kind: 'exam', id: id as Hex } : { kind: 'invalid' };
 }
 
+/** The route a `#/path?query` address holds, or null when the address has no route. */
+export function routeOfHash(hash: string): { routePath: string; routeSearch: string } | null {
+  if (!hash.startsWith('#/')) return null;
+  const rest = hash.slice(1);
+  const at = rest.indexOf('?');
+  return at === -1 ? { routePath: rest, routeSearch: '' } : { routePath: rest.slice(0, at), routeSearch: rest.slice(at) };
+}
+
+const subscribe = (listener: () => void) => {
+  globalThis.addEventListener('hashchange', listener);
+  globalThis.addEventListener('popstate', listener);
+  return () => {
+    globalThis.removeEventListener('hashchange', listener);
+    globalThis.removeEventListener('popstate', listener);
+  };
+};
+const currentHash = () => (globalThis.location as Location | undefined)?.hash ?? '';
+
+/**
+ * The link in the address bar. The address itself is read on every hash change, so moving to
+ * another exam, or to a bad link, is shown straight away and never waits on a reload. Without a
+ * route in the address (as in a test with a memory router) the router's own location is used.
+ */
 export function useExamLink(): ExamLink {
   const location = useLocation();
+  const hash = useSyncExternalStore(subscribe, currentHash, () => '');
+  const route = routeOfHash(hash) ?? { routePath: location.pathname, routeSearch: location.search };
   return examLink({
     search: (globalThis.location as Location | undefined)?.search ?? '',
-    routePath: location.pathname,
-    routeSearch: location.search,
+    ...route,
   });
 }

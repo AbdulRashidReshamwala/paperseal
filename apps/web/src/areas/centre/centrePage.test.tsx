@@ -11,8 +11,8 @@ import { CentreView } from './CentreArea';
 import type { Downloaded } from './download';
 import { centreStage, sealFor, type CentreInputs } from './stage';
 import { isUnavailable, type Files } from './useDownload';
-import { refusalFor, useOpenPaper, type OpenPaper } from './useOpenPaper';
-import { PaperHashMismatchError, unlockPaper, UnlockError } from './unlock';
+import { EARLY_TTL_MS, refusalFor, useOpenPaper, type OpenPaper } from './useOpenPaper';
+import { PaperHashMismatchError, prepareUnlock, unlockPaper, UnlockError } from './unlock';
 import { StorageVerificationError } from '../../shared/storage';
 
 vi.mock('../../shared/registry', () => ({
@@ -25,7 +25,9 @@ vi.mock('../../shared/holder', () => ({
   listEntryFor: vi.fn(() => Promise.resolve({ role: 3, derivedPublicKey: new Uint8Array(65).fill(1) })),
   useHolderCredential: vi.fn(),
 }));
-vi.mock('./unlock', async (original) => ({ ...(await original<typeof import('./unlock')>()), unlockPaper: vi.fn() }));
+vi.mock('./unlock', async (original) => ({ ...(await original<typeof import('./unlock')>()), unlockPaper: vi.fn(),
+  prepareUnlock: vi.fn(() => Promise.resolve({ kPub: new Uint8Array(32).fill(7), sealedKeyPriv: new Uint8Array(1), preparedAt: Date.now() })),
+}));
 
 afterEach(cleanup);
 
@@ -38,7 +40,7 @@ const paper: Paper = {
   ],
 };
 const ready: Files = { state: 'ready', downloaded: {} as Downloaded };
-const idleOpen: OpenPaper = { phase: { name: 'idle' }, paper: null, start: vi.fn() };
+const idleOpen: OpenPaper = { phase: { name: 'idle' }, paper: null, start: vi.fn(), prepare: vi.fn() };
 const inputs = (overrides: Partial<CentreInputs> = {}): CentreInputs => ({
   filesReady: true,
   filesRefused: false,
@@ -123,7 +125,7 @@ describe('CentreView', () => {
 
   it('checks the files by itself: one line, one check, and no download button', () => {
     view({});
-    expect(screen.getByText('Sealed paper downloaded and checked')).toBeTruthy();
+    expect(screen.getByText('The sealed paper is downloaded and checked')).toBeTruthy();
     expect(document.querySelectorAll('.ps-check')).toHaveLength(1);
     expect(screen.queryByRole('button')).toBeNull();
     expect(screen.getByRole('timer')).toBeTruthy();
@@ -138,13 +140,13 @@ describe('CentreView', () => {
 
   it('refuses files that fail, and says who to contact and why', () => {
     view({}, { state: 'refused', detail: 'paper.bin does not match the paper hash in the Build.' });
-    expect(screen.getByRole('heading', { name: 'The sealed paper failed its check' })).toBeTruthy();
-    expect(screen.getByText(/does not match the public record.*Contact your exam board now/)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'The sealed paper did not pass its check' })).toBeTruthy();
+    expect(screen.getByText(/is not the one that was published.*Contact your exam board now/)).toBeTruthy();
   });
 
   it('offers the release in place for a centre with a share', () => {
     view({ chain: asShareholder, reached: true, status: tee(status('unlock')) });
-    expect(screen.getByRole('heading', { name: /can't be released/ })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /can't release your part of the key/ })).toBeTruthy();
     view({ chain: asCentre, reached: true, status: tee(status('unlock')) });
     expect(screen.getByRole('heading', { name: 'Waiting for key holders' })).toBeTruthy();
   });
@@ -154,6 +156,16 @@ describe('CentreView', () => {
     expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Open the paper']);
     expect(screen.queryByRole('article')).toBeNull();
     expect(screen.getByRole('img', { name: 'Opening' })).toBeTruthy();
+  });
+
+  it('gets what needs no security key as soon as the paper can be opened, and never starts the touch itself', () => {
+    const open: OpenPaper = { phase: { name: 'idle' }, paper: null, start: vi.fn(), prepare: vi.fn() };
+    view({ chain: asCentre, reached: true, status: tee(status('unlock')) }, ready, open);
+    expect(open.prepare).not.toHaveBeenCalled();
+    cleanup();
+    view(atRelease, ready, open);
+    expect(open.prepare).toHaveBeenCalled();
+    expect(open.start).not.toHaveBeenCalled();
   });
 
   it('shows the paper, numbered through, with the seal open and a print button', () => {
@@ -195,7 +207,7 @@ describe('CentreView', () => {
     const refusal = refusalFor('check', new PaperHashMismatchError());
     view(atRelease, ready, { ...idleOpen, phase: { name: 'failed', refusal } });
     expect(screen.getByRole('heading', { name: 'This paper failed its check and is not shown' })).toBeTruthy();
-    expect(screen.getByText(/does not match the fingerprint/)).toBeTruthy();
+    expect(screen.getByText(/does not match the published record/)).toBeTruthy();
     expect(screen.getByText(/Contact your exam board now/)).toBeTruthy();
     expect(screen.queryByRole('article')).toBeNull();
     expect(screen.queryByRole('button')).toBeNull();
@@ -279,6 +291,54 @@ describe('useOpenPaper', () => {
     await waitFor(() => {
       expect(result.current.paper).toEqual(paper);
     });
+  });
+
+  it('uses what was got ahead of the press, so the press goes straight to the touch', async () => {
+    const preparedUnlock = vi.mocked(prepareUnlock);
+    preparedUnlock.mockClear();
+    mocked.mockResolvedValue(paper);
+    const { result } = opener();
+    act(() => {
+      result.current.prepare();
+    });
+    await waitFor(() => {
+      expect(preparedUnlock).toHaveBeenCalledOnce();
+    });
+    expect(mocked).not.toHaveBeenCalled();
+    act(() => {
+      result.current.start();
+    });
+    await waitFor(() => {
+      expect(result.current.paper).toEqual(paper);
+    });
+    expect(mocked.mock.calls[0]?.[0].prepared).toBeDefined();
+    expect(preparedUnlock).toHaveBeenCalledOnce();
+  });
+
+  it('gets everything again at the press when what was got ahead is too old', async () => {
+    const preparedUnlock = vi.mocked(prepareUnlock);
+    preparedUnlock.mockClear();
+    mocked.mockResolvedValue(paper);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const { result } = opener();
+      act(() => {
+        result.current.prepare();
+      });
+      await vi.waitFor(() => {
+        expect(preparedUnlock).toHaveBeenCalledOnce();
+      });
+      vi.setSystemTime(Date.now() + EARLY_TTL_MS + 1000);
+      act(() => {
+        result.current.start();
+      });
+      await vi.waitFor(() => {
+        expect(mocked).toHaveBeenCalledOnce();
+      });
+      expect(mocked.mock.calls[0]?.[0].prepared).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('holds no paper when the hash check fails', async () => {

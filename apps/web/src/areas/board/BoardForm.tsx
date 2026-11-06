@@ -1,16 +1,18 @@
 import type { ExamRegistry } from '@paperseal/chain';
 import type { TeeClient } from '@paperseal/tee-client';
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import { tee as defaultTee } from '../../shared/tee';
+import { clearDraft, loadDraft, saveDraft } from './draftStore';
 import { emptyPublish, type PublishInput } from './form';
 import { defaultPlan, defaultRpcHost, evaluatePlan, type DraftStep, type PlanInput } from './plan';
 import type { PostOutcome } from './postFlow';
 import { defaultEnvironment, type PublishEnvironment, type PublishOutcome } from './publishFlow';
 
 /*
- * The form lives here, in the board route area, so moving between steps keeps what was typed.
- * Nothing is stored anywhere else. Receipts are this session's read-backs of what was posted.
+ * The form lives here, in the board route area, so moving between steps keeps what was typed. It is
+ * also kept in this browser (`draftStore.ts`) until the exam is published, so a reload loses nothing.
+ * Receipts are this session's read-backs of what was posted.
  */
 
 export type Receipt =
@@ -39,16 +41,22 @@ interface BoardForm {
 
 const BoardFormContext = createContext<BoardForm | null>(null);
 
-const mustBeSeen = (receipt: Receipt) => receipt.kind === 'publish' || !receipt.outcome.matches;
+/** Only a write that did not read back correctly stops the flow. A correct one moves straight on. */
+const mustBeSeen = (receipt: Receipt) => !receipt.outcome.matches;
 
 export function BoardFormProvider(props: {
   environment?: PublishEnvironment | undefined;
   tee?: TeeClient | null | undefined;
   children: ReactNode;
 }) {
-  const [plan, setPlan] = useState(defaultPlan);
-  const [publish, setPublish] = useState<PublishInput>(() => ({ ...emptyPublish, rpcHost: defaultRpcHost() }));
-  const [draftStep, setDraftStep] = useState<DraftStep>('create');
+  const [saved] = useState(loadDraft);
+  const [plan, setPlan] = useState<PlanInput>(saved?.plan ?? defaultPlan);
+  const [publish, setPublish] = useState<PublishInput>(() => ({
+    ...emptyPublish,
+    ...(saved?.publish ?? {}),
+    rpcHost: saved?.publish.rpcHost || defaultRpcHost(),
+  }));
+  const [draftStep, setDraftStep] = useState<DraftStep>(saved?.draftStep ?? 'create');
   const [receipts, setReceipts] = useState<readonly Receipt[]>([]);
   const [held, setHeld] = useState<Receipt | null>(null);
   const [examName, setExamName] = useState<string | null>(null);
@@ -56,7 +64,14 @@ export function BoardFormProvider(props: {
   const environment = useMemo(() => given ?? defaultEnvironment(), [given]);
   const tee = givenTee === undefined ? defaultTee : givenTee;
 
+  // A draft that is back to its start is not kept, which is also how a published exam clears it.
+  useEffect(() => {
+    if (plan === defaultPlan && draftStep === 'create' && publish.version === '') clearDraft();
+    else saveDraft({ plan, publish, draftStep });
+  }, [plan, publish, draftStep]);
+
   const resetDraft = useCallback(() => {
+    clearDraft();
     setPlan(defaultPlan);
     setPublish((previous) => ({ ...previous, version: '' }));
     setDraftStep('create');

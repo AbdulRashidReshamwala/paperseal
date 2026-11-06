@@ -12,7 +12,8 @@ import {
 } from 'viem';
 import { sepolia } from 'viem/chains';
 
-import { currentAccount, injectedProvider, walletChainId, walletClientFor, type EIP1193Provider } from '../../shared/wallet';
+import { currentAccount, injectedProvider, switchToSepolia, walletChainId, walletClientFor, type EIP1193Provider } from '../../shared/wallet';
+import { withDetails } from './details';
 import type { PublishFields, ScheduleSettings } from './form';
 
 /*
@@ -117,7 +118,7 @@ export async function readBack(
     await wait(1000);
   }
   if (!exam || (!criteriaHex && !criteriaMismatch)) {
-    throw new Error('The transaction was mined, but ExamRegistry does not return the exam yet. Reload and check the overview.');
+    throw new Error('The exam was sent, but it does not show yet. Wait a minute, then reload this page to see it.');
   }
   const expected = settingsArgs(request);
   const { settings } = exam;
@@ -162,22 +163,27 @@ export async function publishExam(
   const { registryAddress, publicClient, createRegistry } = environment;
   onStage('checking');
   const provider = environment.getProvider();
-  if (!provider) throw new PublishBlockedError('No browser wallet was found. Install one in this Chromium browser and reload.');
+  if (!provider) throw new PublishBlockedError('Your wallet was not found. Install a wallet extension in Chrome, then reload this page.');
   if (!registryAddress || !publicClient || !createRegistry) {
-    throw new PublishBlockedError('Set VITE_RPC_URL and VITE_REGISTRY_ADDRESS to publish.');
+    throw new PublishBlockedError('Publishing is not set up on this page. Ask whoever installed Paper Seal to finish the setup, then reload.');
   }
   const account = await currentAccount(provider);
-  if (!account) throw new PublishBlockedError('Connect your wallet first.');
+  if (!account) throw new PublishBlockedError('Connect your wallet, then press the button again.');
 
+  // A wallet on the wrong network is asked to switch. If it declines or can't, the instruction below is shown.
+  await switchToSepolia(provider);
   const [walletChain, rpcChain] = [await walletChainId(provider), await publicClient.getChainId()];
   if (walletChain !== chain.chainId) {
     throw new PublishBlockedError(
-      `Your wallet is on chain ${String(walletChain)}. Switch it to Sepolia (chain ${String(chain.chainId)}) and try again.`,
+      'Your wallet is on the wrong network. Switch it to Sepolia in your wallet, then try again.',
     );
   }
   if (rpcChain !== chain.chainId) {
     throw new PublishBlockedError(
-      `VITE_RPC_URL points to chain ${String(rpcChain)}, not Sepolia (chain ${String(chain.chainId)}).`,
+      withDetails(
+        'This page is connected to the wrong network. Ask whoever installed Paper Seal to fix the setup, then reload.',
+        `The page reads from chain ${String(rpcChain)}, not Sepolia (chain ${String(chain.chainId)}).`,
+      ),
     );
   }
 
@@ -185,11 +191,14 @@ export async function publishExam(
   const board = await reader.board();
   if (board.toLowerCase() !== account.toLowerCase()) {
     throw new PublishBlockedError(
-      `The connected account ${account} is not the board address. ExamRegistry only accepts writes from ${board}. Switch accounts in your wallet.`,
+      withDetails(
+        'This wallet account is not the exam board’s account. Switch to the board’s account in your wallet, then try again.',
+        `Connected: ${account}. Board: ${board}.`,
+      ),
     );
   }
   if (await reader.getExam(request.examId)) {
-    throw new PublishBlockedError('An exam with this name is already published. Published exams cannot be replaced, so use another name.');
+    throw new PublishBlockedError('An exam with this name is already published. A published exam cannot be changed or replaced. Go back and use another name.');
   }
 
   const settings = settingsArgs(request);
@@ -220,7 +229,12 @@ export async function publishExam(
   onStage('mining');
   const receipt = await publicClient.waitForTransactionReceipt({ hash: transactionHash });
   if (receipt.status !== 'success') {
-    throw new Error(`The transaction ${transactionHash} was mined but reverted, so nothing was published.`);
+    throw new Error(
+      withDetails(
+        'The public record refused the exam, so nothing was published. Try again. If this happens again, contact whoever runs Paper Seal.',
+        `Transaction ${transactionHash} was reverted.`,
+      ),
+    );
   }
 
   onStage('reading');
@@ -229,19 +243,21 @@ export async function publishExam(
 }
 
 const revertMessages: Record<string, (args: readonly unknown[]) => string> = {
-  NotBoard: ([caller]) => `Only the board address can publish. ${String(caller)} is not it.`,
-  ZeroBoardAddress: () => 'The registry has no board address.',
-  ZeroValue: () => 'A required value is zero or empty: the exam ID, commit hash, image digest, criteria hash, Δ, RPC host or criteria.',
-  InvalidRounds: () => 'The rounds must satisfy lock < unlock < end, and the lock round cannot be zero.',
-  InvalidExamStart: () => 'The exam start minus Δ must be after the drand quicknet genesis.',
-  InvalidEndRound: () => 'The end round must be produced after the exam start.',
-  ExamAlreadyExists: () => 'An exam with this ID is already published. Published exams cannot be replaced.',
-  UnlockRoundMismatch: ([expected, actual]) =>
-    `The unlock round must be ${String(expected)}, the first round at or after T − Δ, but ${String(actual)} was sent.`,
-  CriteriaHashMismatch: () => 'The criteria bytes do not hash to the criteria hash.',
+  NotBoard: () => 'Only the exam board’s account can publish. Switch to that account in your wallet, then try again.',
+  ZeroBoardAddress: () => 'Publishing is not set up correctly. Ask whoever installed Paper Seal to fix it.',
+  ZeroValue: () => 'Something required is missing. Go back, check every detail, then try again.',
+  InvalidRounds: () => 'The times do not fit together. Questions must close before the paper is released, and the paper before the exam ends. Go back and change the times.',
+  InvalidExamStart: () => 'The exam date is too early. Go back and choose a later date.',
+  InvalidEndRound: () => 'The exam must end after it starts. Go back and check the length.',
+  ExamAlreadyExists: () => 'An exam with this name is already published. A published exam cannot be replaced. Go back and use another name.',
+  UnlockRoundMismatch: () => 'The release time was not accepted. Go back, check the times, then try again.',
+  CriteriaHashMismatch: () => 'The topics did not save correctly. Go back and try again.',
 };
 
-/** Turns a viem or wallet error into a sentence for the board. */
+const somethingWentWrong =
+  'Something went wrong, and nothing was published. Try again. If it keeps happening, contact whoever runs Paper Seal.';
+
+/** Turns a viem or wallet error into a sentence for the board, with the original message folded behind it. */
 export function explainError(error: unknown): string {
   if (error instanceof PublishBlockedError) return error.message;
   if (error instanceof BaseError) {
@@ -250,14 +266,14 @@ export function explainError(error: unknown): string {
       const name = reverted.data?.errorName;
       if (name) {
         const explain = revertMessages[name];
-        return explain ? explain(reverted.data?.args ?? []) : `ExamRegistry rejected the exam: ${name}.`;
+        return explain ? explain(reverted.data?.args ?? []) : withDetails('The public record did not accept the exam. Go back, check the details, then try again.', name);
       }
-      return `ExamRegistry rejected the exam${reverted.reason ? `: ${reverted.reason}` : ' without a reason'}.`;
+      return withDetails('The public record did not accept the exam. Go back, check the details, then try again.', reverted.reason ?? '');
     }
     if (error.walk((cause) => cause instanceof UserRejectedRequestError)) {
-      return 'You rejected the request in your wallet. Nothing was sent.';
+      return 'You declined in your wallet, so nothing was published. Press the button to try again.';
     }
-    return error.shortMessage;
+    return withDetails(somethingWentWrong, error.shortMessage);
   }
-  return error instanceof Error ? error.message : String(error);
+  return withDetails(somethingWentWrong, error instanceof Error ? error.message : String(error));
 }

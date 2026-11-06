@@ -18,6 +18,7 @@ import {
 } from '@paperseal/protocol';
 
 import type { TeeRelease } from '../../shared/teeReleases';
+import { withDetails } from './details';
 
 /** A release whose commit was checked against its tag on GitHub. */
 type VerifiedRelease = TeeRelease;
@@ -68,39 +69,39 @@ export interface BlueprintResult {
 
 const wholeNumber = /^[0-9]+$/;
 
-function parseUint(text: string, label: string): { value: number } | { error: string } {
-  if (text.trim() === '') return { error: `${label} is required.` };
-  if (!wholeNumber.test(text.trim())) return { error: `${label} must be a whole number.` };
+function parseUint(text: string): { value: number } | { error: string } {
+  if (text.trim() === '') return { error: 'Enter a number.' };
+  if (!wholeNumber.test(text.trim())) return { error: 'Enter a whole number.' };
   const value = Number(text.trim());
-  if (!Number.isSafeInteger(value)) return { error: `${label} is too large.` };
+  if (!Number.isSafeInteger(value)) return { error: 'That number is too large.' };
   return { value };
 }
 
 export function evaluateBlueprint(input: BlueprintInput): BlueprintResult {
   let nameError: string | null = null;
-  if (input.name === '') nameError = 'Name the exam.';
+  if (input.name === '') nameError = 'Enter a name for the exam.';
   else if (input.name !== input.name.trim()) {
-    nameError = 'The name must not start or end with a space, because the exam ID hashes it exactly.';
+    nameError = 'The name cannot start or end with a space.';
   }
   const examId = nameError === null ? examIdFromName(input.name) : null;
 
-  const percent = parseUint(input.maxSetterPercent, 'Max setter percent');
-  const multiple = parseUint(input.minBankMultiple, 'Min bank multiple');
+  const percent = parseUint(input.maxSetterPercent);
+  const multiple = parseUint(input.minBankMultiple);
   let percentError = 'error' in percent ? percent.error : null;
   if ('value' in percent && (percent.value < 1 || percent.value > 100)) {
-    percentError = 'Max setter percent must be from 1 to 100.';
+    percentError = 'Enter a number from 1 to 100.';
   }
   let multipleError = 'error' in multiple ? multiple.error : null;
-  if ('value' in multiple && multiple.value < 2) multipleError = 'Min bank multiple must be at least 2.';
+  if ('value' in multiple && multiple.value < 2) multipleError = 'Enter a number, 2 or more.';
 
   const topics: Topic[] = [];
   const seen = new Set<string>();
   const topicErrors = input.topics.map((topic) => {
     const row = { name: null as string | null, questions: null as string | null };
-    if (topic.name === '') row.name = 'Topic name is required.';
-    else if (seen.has(topic.name)) row.name = 'Topic names must be unique.';
+    if (topic.name === '') row.name = 'Enter the topic name.';
+    else if (seen.has(topic.name)) row.name = 'Each topic needs its own name.';
     seen.add(topic.name);
-    const questions = parseUint(topic.questions, 'Questions');
+    const questions = parseUint(topic.questions);
     if ('error' in questions) row.questions = questions.error;
     else if (questions.value < 1) row.questions = 'Each topic needs at least 1 question.';
     topics.push({ name: topic.name, questions: 'value' in questions ? questions.value : 0 });
@@ -132,7 +133,10 @@ export function evaluateBlueprint(input: BlueprintInput): BlueprintResult {
     checkCriteria(criteria);
   } catch (error) {
     if (!(error instanceof CriteriaError)) throw error;
-    return { ...base, criteriaError: error.message };
+    return {
+      ...base,
+      criteriaError: withDetails('The paper would be too long. Use fewer questions in total, then continue.', error.message),
+    };
   }
   const bytes = encodeCriteria(criteria);
   return {
@@ -224,7 +228,7 @@ function roundAt(unixSeconds: number): RoundAtTime {
   return { entered: unixSeconds, round, producedAt: roundTimeSeconds(round) };
 }
 
-const timeHint = 'Use YYYY-MM-DD HH:mm, for example 2027-03-14 09:30.';
+const timeHint = 'Enter the date and time like this: 2027-03-14 09:30.';
 
 /**
  * `lockRound` and `endRound` are the first rounds at or after the entered
@@ -236,16 +240,16 @@ export function evaluateSchedule(input: ScheduleInput, nowSeconds = Math.floor(D
   const start = parseLocalTime(input.examStart);
   const lockTime = parseLocalTime(input.lockTime);
   const endTime = parseLocalTime(input.endTime);
-  if (input.examStart.trim() === '') errors.examStart = 'Enter the exam start, T.';
+  if (input.examStart.trim() === '') errors.examStart = 'Enter the exam date and time.';
   else if (start === null) errors.examStart = timeHint;
-  if (input.lockTime.trim() === '') errors.lockTime = 'Enter the lock time.';
+  if (input.lockTime.trim() === '') errors.lockTime = 'Enter when questions close.';
   else if (lockTime === null) errors.lockTime = timeHint;
-  if (input.endTime.trim() === '') errors.endTime = 'Enter the end time.';
+  if (input.endTime.trim() === '') errors.endTime = 'Enter when the exam ends.';
   else if (endTime === null) errors.endTime = timeHint;
   let delta: number | null = null;
   const minutes = input.deltaMinutes.trim();
-  if (minutes === '') errors.deltaMinutes = 'Enter Δ in minutes.';
-  else if (!wholeNumber.test(minutes) || Number(minutes) < 1) errors.deltaMinutes = 'Δ must be a whole number of minutes, at least 1.';
+  if (minutes === '') errors.deltaMinutes = 'Enter how many minutes before the exam the paper is released.';
+  else if (!wholeNumber.test(minutes) || Number(minutes) < 1) errors.deltaMinutes = 'Enter a whole number of minutes, at least 1.';
   else delta = Number(minutes) * 60;
 
   const empty: ScheduleResult = {
@@ -268,7 +272,7 @@ export function evaluateSchedule(input: ScheduleInput, nowSeconds = Math.floor(D
     unlock = roundAt(start - delta);
     end = roundAt(endTime);
   } catch (error) {
-    if (error instanceof RangeError) return { ...empty, scheduleError: 'A time is before the drand quicknet genesis.' };
+    if (error instanceof RangeError) return { ...empty, scheduleError: 'That date is too far in the past.' };
     throw error;
   }
   const found: ScheduleResult = { ...empty, lock, unlock, end };
@@ -287,7 +291,7 @@ export function evaluateSchedule(input: ScheduleInput, nowSeconds = Math.floor(D
     return { ...found, scheduleError: scheduleMessage(error) };
   }
   if (lockTime <= nowSeconds) {
-    return { ...found, scheduleError: 'The lock time has already passed. Choose a time in the future.' };
+    return { ...found, scheduleError: 'Questions would close in the past. Choose a later time.' };
   }
   return { ...found, settings };
 }
@@ -295,13 +299,13 @@ export function evaluateSchedule(input: ScheduleInput, nowSeconds = Math.floor(D
 function scheduleMessage(error: ScheduleError): string {
   switch (error.code) {
     case 'round_order':
-      return 'The lock time must come before the unlock time (T − Δ), and the unlock time before the end time.';
+      return 'Questions must close before the paper is released to centres.';
     case 'end_round':
-      return 'The end time must be after the exam start, T.';
+      return 'The exam must end after it starts.';
     case 'before_genesis':
-      return 'T − Δ is before the drand quicknet genesis.';
+      return 'That date is too far in the past.';
     case 'delta_zero':
-      return 'Δ must not be zero.';
+      return 'Enter a whole number of minutes, at least 1.';
     default:
       return error.message;
   }
@@ -340,10 +344,10 @@ const hostname = /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9](
  */
 export function evaluatePublish(input: Pick<PublishInput, 'rpcHost'>, release: VerifiedRelease | null): PublishResult {
   const errors: PublishResult['errors'] = {};
-  if (!release) errors.release = 'Select a version whose commit matches its tag.';
+  if (!release) errors.release = 'Choose a version to use.';
   const host = input.rpcHost.trim();
   if (!hostname.test(host)) {
-    errors.rpcHost = 'Enter the hostname only, with no scheme, port or path, such as sepolia.example.org.';
+    errors.rpcHost = 'Enter the address only, such as sepolia.example.org. Leave out https:// and anything after the name.';
   }
   if (!release || errors.rpcHost) return { errors, fields: null };
   return {

@@ -43,7 +43,7 @@ export function Gate(props: { stage: GateStage; role: RegisterRole; progress: Ho
     case 'unreachable':
       return (
         <Stage
-          title="The public record can't be reached"
+          title="Can't connect right now"
           lede="Check this computer's internet connection. This page keeps trying by itself."
           next="If this stays for more than a few minutes, contact your exam board."
         >
@@ -53,22 +53,23 @@ export function Gate(props: { stage: GateStage; role: RegisterRole; progress: Ho
     case 'no-exam':
       return (
         <Stage
-          title="This exam has not been published yet"
-          next="Your exam board publishes it. This page moves on by itself, so you can leave it open."
+          title="Nothing to do yet"
+          lede="Your exam board has not set up this exam yet."
+          next="This page moves on by itself, so you can leave it open or come back to this link later."
         />
       );
     case 'awaiting-list':
       return (
         <Stage
           title="You are registered. Nothing to do yet."
-          lede="Your exam board is still finishing the approved list."
-          next="This page moves on by itself once the list is published. To use a different security key, ask your exam board for a new invitation link."
+          lede="Your exam board is still finishing the list of people for this exam."
+          next="This page moves on by itself once the list is ready. To use a different security key, ask your exam board for a new invitation link."
         />
       );
     case 'not-on-list':
       return (
         <Stage
-          title="Your security key is not on the approved list"
+          title="Your security key is not on the list for this exam"
           lede={`Contact your exam board and give them the name you registered under: ${progress.credential?.owner ?? 'unknown'}.`}
           next="Nothing can go ahead on this page until your exam board has sorted this out."
         />

@@ -2,7 +2,36 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { Connected, Countdown, Hash, KeyTouch, PrimaryAction } from './index';
+import { ChromiumGate, Connected, Countdown, Hash, KeyTouch, PrimaryAction } from './index';
+
+describe('ChromiumGate copy link', () => {
+  const firefox = { userAgentData: { brands: [{ brand: 'Firefox' }] } };
+
+  it('copies the whole address, fragment included', async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    render(
+      <ChromiumGate nav={firefox} href="https://paperseal.example/setter#invite=abc">
+        inside
+      </ChromiumGate>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+    await screen.findByRole('button', { name: 'Copied' });
+    expect(writeText).toHaveBeenCalledWith('https://paperseal.example/setter#invite=abc');
+  });
+
+  it('shows the address to select when copying is not allowed', () => {
+    vi.stubGlobal('navigator', {});
+    render(
+      <ChromiumGate nav={firefox} href="https://paperseal.example/x#y">
+        inside
+      </ChromiumGate>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+    expect(screen.getByRole('status').textContent).toContain('copy it yourself');
+    expect(screen.getByText('https://paperseal.example/x#y')).toBeTruthy();
+  });
+});
 
 afterEach(() => {
   cleanup();

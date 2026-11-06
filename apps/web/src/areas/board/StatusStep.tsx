@@ -1,14 +1,17 @@
 import { roundTimeSeconds } from '@paperseal/protocol';
-import { Check, Countdown, Row, Rows, Stage, type SealState } from '@paperseal/ui';
+import { Check, Countdown, CopyButton, Row, Rows, Stage, type SealState } from '@paperseal/ui';
 import { Link } from 'react-router';
+
+import { useCurrentExamId } from '../../shared/currentExam';
 
 import { useBoardForm } from './BoardForm';
 import { ExamRecord } from './ExamRecord';
 import type { Snapshot } from './examState';
 import { useNow } from './hooks';
+import { sayOf } from './details';
 import { formatTimeOnly, plainWords, verifierUrl } from './plan';
 
-/** Time alone opens the seal, so the state follows the rounds' scheduled times. */
+/** Time alone opens the seal, so the state follows the scheduled times. */
 export function sealStateAt(nowMs: number, unlockMs: number, endMs: number): SealState {
   if (nowMs < unlockMs) return 'sealed';
   return nowMs < endMs ? 'opening' : 'open';
@@ -26,24 +29,25 @@ export function StatusStep(props: { eyebrow: string; snapshot: Snapshot }) {
   const endSeconds = roundTimeSeconds(endRound);
   const seal = sealStateAt(now, unlockSeconds * 1000, endSeconds * 1000);
   const { status, teeProblem } = snapshot;
-  const verifier = verifierUrl();
+  const examId = useCurrentExamId();
+  const verifier = verifierUrl(undefined, examId);
   const justSealed = receipts.some((receipt) => receipt.kind === 'build' && receipt.outcome.matches);
 
   const copy: Record<SealState, { title: string; lede: string; next: string }> = {
     sealed: {
       title: `Sealed. Nothing to do until ${formatTimeOnly(unlockSeconds)}`,
-      lede: 'The paper is sealed and its record is public. No one person can open it.',
-      next: 'At that time, key holders release their parts of the key and centres can open the paper.',
+      lede: 'The paper is sealed and its record is public. No one person can open it before then.',
+      next: 'At that time, key holders release their parts of the key, and centres can open the paper. You do not need to do anything, and you can close this page.',
     },
     opening: {
-      title: 'Key holders are releasing the paper',
-      lede: 'The time seal has opened. Centres can open the paper once enough key holders have released.',
-      next: `The paper opens to the public at ${formatTimeOnly(endSeconds)}.`,
+      title: 'Key holders are releasing their parts of the key',
+      lede: 'The paper can now be opened. Centres open it once enough key holders have released their parts of the key.',
+      next: `Nothing to do. The paper opens to everyone at ${formatTimeOnly(endSeconds)}.`,
     },
     open: {
       title: 'The exam is over',
-      lede: 'The end time has passed, so anyone can now open the paper and check it.',
-      next: 'The public verifier shows the full proof for this exam.',
+      lede: 'The exam has ended, so the paper is now open to everyone.',
+      next: 'The public page shows the full record for this exam.',
     },
   };
 
@@ -54,18 +58,21 @@ export function StatusStep(props: { eyebrow: string; snapshot: Snapshot }) {
       <Rows>
         <Row label="Key holders released">
           {status ? (
-            `${String(status.release.released.length)} of the ${String(status.release.required)} needed`
+            `${String(status.release.released.length)} of ${String(status.release.required)} needed`
           ) : (
-            <Check status="not-checked">{teeProblem ? plainWords(teeProblem) : 'The sealed machine has not answered yet.'}</Check>
+            <Check status="not-checked">{teeProblem ? plainWords(sayOf(teeProblem)) : 'Paper Seal has not answered yet.'}</Check>
           )}
         </Row>
-        <Row label="Public verifier">
+        <Row label="Public page">
           {verifier ? (
-            <a href={verifier} target="_blank" rel="noreferrer">
-              Open the public verifier
-            </a>
+            <span className="board-link">
+              <a href={verifier} target="_blank" rel="noreferrer">
+                Open the public page
+              </a>
+              <CopyButton text={verifier}>Copy public link</CopyButton>
+            </span>
           ) : (
-            <Check status="not-checked">Its address is not set. Set VITE_VERIFIER_URL to link it.</Check>
+            <Check status="not-checked">The link is not set up yet. Ask whoever installed Paper Seal to add it.</Check>
           )}
         </Row>
       </Rows>

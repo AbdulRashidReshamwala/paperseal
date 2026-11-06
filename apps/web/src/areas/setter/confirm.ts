@@ -33,6 +33,9 @@ export interface TrustPolicy {
 /** A confirmation is good for 5 minutes. After that the TEE must be checked again before anything is sealed. */
 export const CONFIRMATION_TTL_MS = 5 * 60 * 1000;
 
+/** When a still-open page checks again, so a slow writer never meets the expiry above. */
+export const CONFIRMATION_REFRESH_MS = 4 * 60 * 1000;
+
 export interface ConfirmDeps {
   examId: Hex;
   /** The ExamRegistry address this app uses. The token's settings must name it. */

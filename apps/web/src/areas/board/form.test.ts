@@ -53,7 +53,7 @@ describe('evaluateBlueprint', () => {
   it('rejects zero questions, repeated topics and an empty topic list', () => {
     expect(evaluateBlueprint(blueprint({ topics: [{ name: 'A', questions: '0' }] })).topicErrors[0]?.questions).toBeTruthy();
     const repeated = evaluateBlueprint(blueprint({ topics: [{ name: 'A', questions: '1' }, { name: 'A', questions: '1' }] }));
-    expect(repeated.topicErrors[1]?.name).toMatch(/unique/);
+    expect(repeated.topicErrors[1]?.name).toMatch(/own name/);
     expect(repeated.criteria).toBeNull();
     expect(evaluateBlueprint(blueprint({ topics: [] })).criteriaError).toMatch(/at least one topic/);
   });
@@ -62,6 +62,7 @@ describe('evaluateBlueprint', () => {
     const result = evaluateBlueprint(
       blueprint({ topics: [{ name: 'A', questions: '4294967295' }, { name: 'B', questions: '4294967295' }] }),
     );
+    expect(result.criteriaError).toMatch(/too long/);
     expect(result.criteriaError).toMatch(/uint32/);
     expect(result.criteriaHash).toBeNull();
   });
@@ -96,9 +97,9 @@ describe('evaluateSchedule', () => {
   });
 
   it('rejects a lock time after unlock, an end before T, and a past lock time', () => {
-    expect(evaluateSchedule({ ...input, lockTime: '2027-03-14 09:20' }, now).scheduleError).toMatch(/lock time must come before/);
+    expect(evaluateSchedule({ ...input, lockTime: '2027-03-14 09:20' }, now).scheduleError).toMatch(/Questions must close before/);
     expect(evaluateSchedule({ ...input, endTime: '2027-03-14 09:00' }, now).scheduleError).toBeTruthy();
-    expect(evaluateSchedule(input, parseLocalTime('2027-03-02 00:00') ?? 0).scheduleError).toMatch(/already passed/);
+    expect(evaluateSchedule(input, parseLocalTime('2027-03-02 00:00') ?? 0).scheduleError).toMatch(/in the past/);
     expect(evaluateSchedule({ ...input, deltaMinutes: '0' }, now).errors.deltaMinutes).toBeTruthy();
   });
 

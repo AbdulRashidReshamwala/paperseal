@@ -64,7 +64,7 @@ describe('KeyholderView', () => {
 
   it('waits calmly, with a countdown and nothing to press', () => {
     view({});
-    expect(screen.getByRole('heading', { name: 'Nothing to do yet. Your share is safe.' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Nothing to do yet. Your part of the key is safe.' })).toBeTruthy();
     expect(screen.getByRole('timer')).toBeTruthy();
     expect(screen.queryByRole('button')).toBeNull();
     expect(screen.queryByRole('tab')).toBeNull();
@@ -72,20 +72,20 @@ describe('KeyholderView', () => {
 
   it('does not call a share safe before any share exists', () => {
     view({ chain: chain(facts(roles.neutral, { buildPosted: false })) });
-    expect(screen.queryByText(/share is safe/)).toBeNull();
+    expect(screen.queryByText(/part of the key is safe/)).toBeNull();
   });
 
   it('shows one action and the live count at unlock', () => {
     view({ reached: true, status: tee(status('unlock', Array.from({ length: 6 }, () => '0x01'))) });
-    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Release my share']);
-    expect(screen.getByText('6 of 8 released')).toBeTruthy();
+    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Release my part of the key']);
+    expect(screen.getByText('6 of 8 parts of the key released')).toBeTruthy();
   });
 
   it('stamps it, says they can close the tab, and keeps the count', () => {
     view({ reached: true, status: tee(status('unlock', [passkey])) }, true);
     expect(screen.getByRole('heading', { name: 'Done. You can close this tab.' })).toBeTruthy();
     expect(screen.getByText('Released').getAttribute('data-press')).toBe('true');
-    expect(screen.getByText('1 of 8 released')).toBeTruthy();
+    expect(screen.getByText('1 of 8 parts of the key released')).toBeTruthy();
     expect(screen.queryByRole('button')).toBeNull();
   });
 
@@ -97,7 +97,7 @@ describe('KeyholderView', () => {
 
   it('says who to contact when the sealed machine has failed', () => {
     view({ status: tee(status('failed')) });
-    expect(screen.getByRole('heading', { name: 'The sealed machine has stopped' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Paper Seal has stopped' })).toBeTruthy();
     expect(screen.getByText(/Contact your exam board now/)).toBeTruthy();
   });
 
