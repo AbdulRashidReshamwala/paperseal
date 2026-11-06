@@ -21,7 +21,8 @@ import { SettingsProvider, type Settings } from './settings';
 const writer: Address = '0x1111111111111111111111111111111111111111';
 const idOf = (n: number): Hex => `0x${n.toString(16).padStart(64, '0')}`;
 const criteriaOf = (n: number): Hex => `0x${n.toString(16).padStart(64, 'c')}`;
-const startOf = (n: number) => BigInt(1_900_000_000 + n * 86_400);
+/** Exams 5 to 7 started long ago. */
+const startOf = (n: number) => BigInt(n >= 5 ? 1_600_000_000 + n : 1_900_000_000 + n * 86_400);
 
 let reader: { examRows: Mock<HistoryReader['examRows']>; participantRows: Mock<HistoryReader['participantRows']> } | null = null;
 let readersMade = 0;
@@ -97,9 +98,10 @@ function participantRow(n: number, over: Partial<ParticipantRow> = {}): Particip
   };
 }
 
-/** Exams 1 to 4 are on the registry. 1 is built, 2 and 3 have their list, 4 only exists. */
+/** Exams 1 to 7 are on the registry. 1 and 6 are built, 2, 3 and 5 have their list, 4 and 7 only exist. 5 to 7 started long ago. */
 function arrange(rows: { exams: ExamRow[]; participants?: ParticipantRow[] }) {
-  const onChain = new Set([1, 2, 3, 4].map(idOf));
+  const onChain = new Set([1, 2, 3, 4, 5, 6, 7].map(idOf));
+  const hasList = (id: number) => id <= 3 || id === 5 || id === 6;
   const n = (examId: Hex) => Number(BigInt(examId));
   reader = {
     examRows: vi.fn<HistoryReader['examRows']>(() => Promise.resolve(rows.exams)),
@@ -110,12 +112,12 @@ function arrange(rows: { exams: ExamRow[]; participants?: ParticipantRow[] }) {
     getExam: vi.fn((examId: Hex) =>
       Promise.resolve(onChain.has(examId) ? { createdAt: 1n, createdBlock: 1n, settings: { examStart: startOf(n(examId)), criteriaHash: criteriaOf(n(examId)) } } : null),
     ),
-    getApprovedList: vi.fn((examId: Hex) => Promise.resolve(onChain.has(examId) && n(examId) <= 3 ? { listHash: '0x', postedAt: 1n, postedBlock: 1n } : null)),
-    getBuild: vi.fn((examId: Hex) => Promise.resolve(n(examId) === 1 ? { paperHash: '0x', postedAt: 1n } : null)),
+    getApprovedList: vi.fn((examId: Hex) => Promise.resolve(onChain.has(examId) && hasList(n(examId)) ? { listHash: '0x', postedAt: 1n, postedBlock: 1n } : null)),
+    getBuild: vi.fn((examId: Hex) => Promise.resolve(n(examId) === 1 || n(examId) === 6 ? { paperHash: '0x', postedAt: 1n } : null)),
     // Exam 3's list does not hold the centre.
     getApprovedListEntries: vi.fn((examId: Hex) =>
       Promise.resolve(
-        onChain.has(examId) && n(examId) <= 3
+        onChain.has(examId) && hasList(n(examId))
           ? toHex(encodeApprovedList(n(examId) === 3 ? entries.map((entry) => (entry === centre ? { ...entry, owner: 'Someone else' } : entry)) : entries))
           : null,
       ),
@@ -250,6 +252,36 @@ describe('the exam history', () => {
     expect(screen.queryByText('Could not be read yet.')).toBeNull();
   });
 
+  it('leaves out exams that never ran, with no fold or count, and keeps built and upcoming ones', async () => {
+    arrange({ exams: [examRow(1), examRow(4), examRow(5), examRow(6), examRow(7)] });
+    open();
+    const links = await within(panel('Exams on this record')).findAllByRole('link');
+    const hrefs = links.map((link) => link.getAttribute('href'));
+    expect(hrefs).toContain(`/exam/${idOf(6)}`);
+    expect(hrefs).toContain(`/exam/${idOf(4)}`);
+    expect(hrefs).toContain(`/exam/${idOf(1)}`);
+    expect(hrefs).not.toContain(`/exam/${idOf(5)}`);
+    expect(hrefs).not.toContain(`/exam/${idOf(7)}`);
+    expect(screen.queryByText(/never ran/i)).toBeNull();
+    expect(screen.queryByText(/No paper was built/)).toBeNull();
+    expect(screen.queryByRole('option', { name: 'Never ran' })).toBeNull();
+    expect(screen.queryByText(/ignored/)).toBeNull();
+  });
+
+  it('shows no empty-list hint when every exam never ran', async () => {
+    arrange({ exams: [examRow(5), examRow(7)] });
+    open();
+    await screen.findByText(/have not indexed any exam/);
+    expect(screen.queryByText(/never ran/i)).toBeNull();
+  });
+
+  it('still opens a hidden exam by a direct link', async () => {
+    arrange({ exams: [examRow(5)] });
+    open({}, `/exam/${idOf(5)}`);
+    expect(await screen.findByRole('list', { name: 'Steps for this exam' })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Exam history', level: 1 })).toBeNull();
+  });
+
   it('says when it could not be read', async () => {
     arrange({ exams: [] });
     reader?.examRows.mockImplementation(() => Promise.reject(new Error('Arkiv is down')));
@@ -311,6 +343,24 @@ describe('finding exams by person', () => {
     await waitFor(() => {
       expect(results.getAllByText('Centre holding part of the key')).toHaveLength(2);
     });
+  });
+
+  it('leaves out abandoned exams from a search, keeps a built one, and keeps one whose Build could not be read', async () => {
+    arrange({ exams: [], participants: [participantRow(1), participantRow(5), participantRow(6), participantRow(2)] });
+    const getBuild = registry?.getBuild as HistoryRegistry['getBuild'];
+    if (registry) {
+      registry.getBuild = vi.fn((examId: Hex) => (examId === idOf(2) ? Promise.reject(new Error('429')) : getBuild(examId)));
+    }
+    open();
+    fireEvent.change(screen.getByLabelText(/Name on the list/), { target: { value: centre.owner } });
+    fireEvent.click(screen.getByRole('button', { name: 'Find exams' }));
+    const found = await within(panel('Find exams by person')).findAllByRole('link');
+    const hrefs = found.map((link) => link.getAttribute('href'));
+    expect(hrefs).toContain(`/exam/${idOf(6)}`);
+    expect(hrefs).toContain(`/exam/${idOf(1)}`);
+    expect(hrefs).toContain(`/exam/${idOf(2)}`);
+    expect(hrefs).not.toContain(`/exam/${idOf(5)}`);
+    expect(screen.queryByText(/never ran/i)).toBeNull();
   });
 
   it('asks for a name before searching', () => {

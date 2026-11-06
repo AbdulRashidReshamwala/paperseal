@@ -238,6 +238,13 @@ export interface ParticipantExam {
   /** The role column, which matched the entry on the registry's list. */
   role: string;
   examStart: bigint | null;
+  /** Whether the registry has a Build. Null if it could not be read, which hides nothing. */
+  built: boolean | null;
+}
+
+/** An exam whose start has passed with no Build never ran. The history leaves it out; its own page still opens. */
+export function isAbandoned(exam: { examStart: bigint | null; built: boolean | null }, now: number): boolean {
+  return exam.built === false && exam.examStart !== null && now >= Number(exam.examStart);
 }
 
 export interface IgnoredParticipantRows {
@@ -340,7 +347,11 @@ export async function findParticipant(args: {
       (exam) => exam?.settings.examStart ?? null,
       () => null,
     );
-    return [...roles].map((role) => ({ examId, role, examStart }));
+    const built = await registry.getBuild(examId).then(
+      (build) => build !== null,
+      () => null,
+    );
+    return [...roles].map((role) => ({ examId, role, examStart, built }));
   });
 
   const start = (exam: ParticipantExam) => exam.examStart ?? -1n;
