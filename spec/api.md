@@ -47,6 +47,29 @@ The startup arguments are one `--<name>=<value>` each, in the order of this tabl
 
 The TEE has no board key. Its settings name `ExamRegistry`, and that contract's immutable `board` address is the only writer.
 
+## Registry Code
+
+An address on its own doesn't show that a contract is `ExamRegistry`, so every reader that trusts one checks the code there against one pin. `spec/registry.json` holds it, and `make abi` writes it from the Foundry build:
+
+| Field | Meaning |
+| --- | --- |
+| `runtimeCodeHash` | SHA-256 of the executable code, with each `board` word zeroed |
+| `executableBytes` | The length of the executable code |
+| `boardOffsets` | Byte offsets of the 32-byte `board` words, which the constructor fills in |
+
+A reader takes the bytes `eth_getCode` returns, then:
+
+1. Removes the CBOR metadata that solc appends. Its length is the code's last two bytes, big-endian, plus those two bytes. It never runs, and it hashes the source including comments, so a comment edit would otherwise change the pin. The live contract was built from older comments, so its metadata differs from a new build and only its executable code matches.
+2. Checks that `executableBytes` bytes remain.
+3. Checks that every `board` word holds the same value, and that the value is a non-zero address left-padded with zeros. That address is the board.
+4. Zeroes those words, and compares the SHA-256 of the result with `runtimeCodeHash`.
+
+The TEE reads the code at the `chain.readBlock` block, once, before it trusts any read from `registry`. Code that differs fails the exam. No code at all, or a failed read, is retried and never fails the exam, because at `finalized` a new contract isn't visible yet and a lagging node answers the same way. Nothing from the address is used in the meantime.
+
+The verifier makes the same check on every read of the public record, and fails the exam's first step if the code differs or is missing. It reads nothing else from that address, and it shows the board address the code holds. The Exam Names check uses the same pin.
+
+A redeploy needs `make abi`, a new TEE release, and a new `spec/fixtures/registry-code.json`, the deployed code that the tests compare with the pin. Code can't show how storage was set at deployment. See the note in Exam Names, check 2.
+
 ## TEE Releases
 
 A tag `v<major>.<minor>.<patch>` on the repository makes `.github/workflows/repro.yml` build the image twice. If the digests match, it publishes a GitHub release for that tag. The release notes hold one fenced `json` block:
@@ -259,7 +282,7 @@ A board may give an exam an ENS name `<name>.<parent>`, where `parent` is the bo
 A reader checks a name with the viewer's own RPC, on-chain only (`ens.ccipRead` is `false`, so no offchain gateway is asked), and fails unless all of these hold:
 
 1. The whole name is normalised, its first label is a valid exam name, and that label's `labelhash` is the `examId` used for every other check.
-2. The name's `addr` record is set, and the code at that address is exactly `ExamRegistry`'s deployed bytecode with its `board` immutable filled in by the address `board()` returns. The CBOR metadata that solc appends to the end of the code is left out of the comparison. Its length is the code's last two bytes, plus those two bytes. It never runs, and it hashes the source including comments, so a comment edit would otherwise change it. After deployment, only that board can write to a contract running this code. Answering `board()` alone isn't enough, because any contract can return the real board's address. Code can't show how storage was set at deployment, because a custom constructor can fill it before returning this code, so whoever can set the name's `addr` record must be trusted as much as the board.
+2. The name's `addr` record is set, the code at that address passes the check in [Registry Code](#registry-code), and the board it holds is the address `board()` returns. After deployment, only that board can write to a contract running this code. Answering `board()` alone isn't enough, because any contract can return the real board's address. Code can't show how storage was set at deployment, because a custom constructor can fill it before returning this code, so whoever can set the name's `addr` record must be trusted as much as the board.
 3. That board address's primary name, read by reverse resolution, is exactly `parent`.
 4. `parent`'s own `addr` record is that board address, so the primary name is verified both ways.
 

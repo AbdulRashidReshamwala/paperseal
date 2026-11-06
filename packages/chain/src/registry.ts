@@ -107,6 +107,8 @@ export function createExamRegistry(options: ExamRegistryOptions) {
   return {
     address,
     board: () => client.readContract({ address, abi, functionName: 'board' }),
+    /** The deployed code here, or undefined when there is none. For `checkRegistryCode`. */
+    code: () => client.getCode({ address }),
 
     getExam: async (examId: ExamId) => {
       const exam = await client.readContract({

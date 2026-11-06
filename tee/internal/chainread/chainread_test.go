@@ -56,7 +56,10 @@ type chain struct {
 	entries     []byte
 	listHash    [32]byte
 	logBlock    uint64 // the block the log is served in
+	code        string // the eth_getCode result, the live contract's by default
+	codeErr     bool   // eth_getCode answers with an RPC error
 	extraLogs   int
+	removedLogs int // 1: the node serves only a removed log. 2: a removed log, then the real one.
 	calls       []string
 	tags        []any
 	logQueries  []map[string]any
@@ -66,7 +69,7 @@ type chain struct {
 const createdBlock, postedBlock = 1000, 2000
 
 func newChain(t *testing.T, exam settings.Exam) *chain {
-	c := &chain{t: t, exam: exam, chainID: "0xaa36a7", createdAt: 5, criteria: []byte("criteria-bytes"), entries: []byte("entries-bytes"), logBlock: postedBlock}
+	c := &chain{t: t, exam: exam, chainID: "0xaa36a7", code: liveCode(t).Code, createdAt: 5, criteria: []byte("criteria-bytes"), entries: []byte("entries-bytes"), logBlock: postedBlock}
 	c.exampleSig = make([]byte, 64)
 	return c
 }
@@ -86,6 +89,16 @@ func (c *chain) handler(w http.ResponseWriter, r *http.Request) {
 	switch req.Method {
 	case "eth_chainId":
 		reply(c.chainID)
+	case "eth_getCode":
+		if req.Params[0] != "0x"+strings.Repeat("33", 20) {
+			c.t.Errorf("eth_getCode at %v", req.Params[0])
+		}
+		c.tags = append(c.tags, req.Params[1])
+		if c.codeErr {
+			json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "error": map[string]any{"code": -32000, "message": "busy"}})
+			return
+		}
+		reply(c.code)
 	case "eth_call":
 		call := req.Params[0].(map[string]any)
 		c.tags = append(c.tags, req.Params[1])
@@ -161,6 +174,18 @@ func (c *chain) handler(w http.ResponseWriter, r *http.Request) {
 		logs := []any{log}
 		for i := 0; i < c.extraLogs; i++ {
 			logs = append(logs, log)
+		}
+		if c.removedLogs > 0 {
+			gone := map[string]any{}
+			for k, v := range log {
+				gone[k] = v
+			}
+			gone["removed"] = true
+			if c.removedLogs == 1 {
+				logs = []any{gone}
+			} else {
+				logs = []any{gone, log}
+			}
 		}
 		reply(logs)
 	default:
@@ -242,12 +267,12 @@ func TestReadBlockIsTheCallTag(t *testing.T) {
 			if _, err := r.Build(ctx); err != nil {
 				t.Fatalf("build: %v", err)
 			}
-			if len(c.tags) != 4 {
-				t.Fatalf("%d eth_calls, want 4", len(c.tags))
+			if len(c.tags) != 5 {
+				t.Fatalf("%d tagged reads, want one eth_getCode and four eth_calls", len(c.tags))
 			}
 			for _, got := range c.tags {
 				if got != tag {
-					t.Errorf("eth_call block tag %v, want %s", got, tag)
+					t.Errorf("block tag %v, want %s", got, tag)
 				}
 			}
 			want := []string{"0x3e8", "0x7d0"}
@@ -279,6 +304,28 @@ func TestRecordWithoutItsLogIsRetryable(t *testing.T) {
 	c.logBlock = postedBlock
 	if _, err := r.ApprovedList(ctx); err != nil {
 		t.Fatalf("retry: %v", err)
+	}
+}
+
+// A reorg marks a log `removed`. It isn't on the chain any more, so it can't count
+// as the record's log, and the read is retried.
+func TestRemovedLogsDoNotCount(t *testing.T) {
+	c, r, _ := setup(t)
+	c.listPosted = true
+	c.entries = []byte("the-list")
+	c.listHash = listHashFor(t, c.exam, c.entries)
+	c.removedLogs = 1
+	ctx := context.Background()
+	if _, err := r.ApprovedList(ctx); err == nil || errors.Is(err, ErrNotPosted) || !strings.Contains(err.Error(), "found 0") {
+		t.Fatalf("only a removed log: got %v", err)
+	}
+	c.removedLogs = 2
+	list, err := r.ApprovedList(ctx)
+	if err != nil {
+		t.Fatalf("removed log beside the real one: %v", err)
+	}
+	if string(list.Entries) != "the-list" {
+		t.Fatalf("entries %q", list.Entries)
 	}
 }
 

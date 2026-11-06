@@ -1,9 +1,13 @@
 import spec from '../../../spec/constants.json';
+import registryCode from '../../../spec/registry.json';
 
 /** spec/constants.json, imported rather than copied. */
 export const constants = spec;
 
 export const { threshold, drand, chain, crypto, padding, attestation, webauthn, domainTags, limits } = spec;
+
+/** spec/registry.json, the code pin `make abi` writes. See "Registry Code" in spec/api.md. */
+export { registryCode };
 
 export type DomainTagName = keyof typeof spec.domainTags;
 

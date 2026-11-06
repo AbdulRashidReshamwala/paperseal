@@ -10,13 +10,15 @@ import {
   type Hex,
 } from 'viem';
 import { sepolia } from 'viem/chains';
-import { ens, passkeyRecordValue } from '@paperseal/protocol';
+import { ens, registryCode as registryPin, passkeyRecordValue } from '@paperseal/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   checkPasskeyName,
   createEnsLookup,
   examRegistryAbi,
+  checkRegistryCode,
+  examRegistryBoard,
   examRegistryRuntime,
   isExamRegistryCode,
   lookupPartyName,
@@ -27,6 +29,8 @@ import {
 const name = 'jee-main-2026.paperseal-mumbai.eth';
 const parent = 'paperseal-mumbai.eth';
 const examId: Hex = '0xa8ec8fb4eda3d90b6190127d877227895bcd634a849e7f3a355311ed10637556';
+import deployedRegistry from '../../../spec/fixtures/registry-code.json';
+
 const registry: Address = '0x00000000000000000000000000000000000000aa';
 const board: Address = '0x00000000000000000000000000000000000000bB';
 const records: Record<string, string> = {
@@ -76,6 +80,40 @@ const needsGateway = () =>
     new ContractFunctionRevertedError({ abi: [], data: offchainLookup, functionName: 'resolveWithGateways' }),
     { abi: [], functionName: 'resolveWithGateways', contractAddress: universalResolver },
   );
+
+describe('the code pin in spec/registry.json', () => {
+  const live = deployedRegistry as { address: Address; board: Address; code: Hex };
+
+  it('matches the live contract, whose metadata differs from a fresh build', () => {
+    expect(examRegistryBoard(live.code)).toBe(live.board);
+    expect(isExamRegistryCode(live.code, live.board)).toBe(true);
+    expect(checkRegistryCode(live.code)).toEqual({ state: 'match', board: live.board });
+    expect(live.code.slice(-106)).not.toBe(examRegistryRuntime.bytecode.slice(-106));
+  });
+
+  it('matches the code `make abi` generated, and any board', () => {
+    expect(examRegistryBoard(registryCode(board))?.toLowerCase()).toBe(board.toLowerCase());
+    expect(registryPin.boardOffsets).toEqual(examRegistryRuntime.boardOffsets);
+  });
+
+  it('tells no code from other code', () => {
+    expect(checkRegistryCode(undefined)).toEqual({ state: 'none' });
+    expect(checkRegistryCode('0x')).toEqual({ state: 'none' });
+    expect(checkRegistryCode('0x6080')).toEqual({ state: 'different' });
+    expect(checkRegistryCode(examRegistryRuntime.bytecode)).toEqual({ state: 'different' });
+  });
+
+  it('refuses code whose board words disagree, or do not hold an address', () => {
+    const [first] = registryPin.boardOffsets;
+    const at = 2 + (first ?? 0) * 2;
+    const word = (digits: string) => (live.code.slice(0, at) + digits + live.code.slice(at + 64)) as Hex;
+    expect(examRegistryBoard(word(`${'0'.repeat(24)}${'ab'.repeat(20)}`))).toBeNull();
+    expect(examRegistryBoard(word('ff'.repeat(32)))).toBeNull();
+    let dirty: string = live.code;
+    for (const offset of registryPin.boardOffsets) dirty = `${dirty.slice(0, 2 + offset * 2)}ff${dirty.slice(4 + offset * 2)}`;
+    expect(examRegistryBoard(dirty as Hex)).toBeNull();
+  });
+});
 
 describe('isExamRegistryCode', () => {
   // The live Sepolia registry 0x3Cb1AD8BCeB9bAeCE0000E6C4D5b9d7c283dc043 matches exactly with its board

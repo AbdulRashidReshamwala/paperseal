@@ -1,5 +1,6 @@
-// Package spec embeds a copy of spec/constants.json, so the image builds from
-// tee/ alone. TestConstantsMatchRoot fails if the copy drifts from the root.
+// Package spec embeds copies of spec/constants.json and spec/registry.json, so
+// the image builds from tee/ alone. TestConstantsMatchRoot and
+// TestRegistryMatchesRoot fail if a copy drifts from the root.
 package spec
 
 import (
@@ -9,9 +10,13 @@ import (
 )
 
 //go:generate cp ../../../spec/constants.json constants.json
+//go:generate cp ../../../spec/registry.json registry.json
 
 //go:embed constants.json
 var raw []byte
+
+//go:embed registry.json
+var rawRegistry []byte
 
 // The two values of chain.readBlock. See "Dev Mode" in spec/api.md: latest is
 // for development, and a real exam must use finalized.
@@ -102,6 +107,44 @@ type Constants struct {
 		ShareRelease       string `json:"shareRelease"`
 		ReleaseLog         string `json:"releaseLog"`
 	} `json:"domainTags"`
+}
+
+// Registry mirrors spec/registry.json, the code pin of "Registry Code" in
+// spec/api.md. `make abi` writes it.
+type Registry struct {
+	RuntimeCodeHash string `json:"runtimeCodeHash"`
+	ExecutableBytes int    `json:"executableBytes"`
+	BoardOffsets    []int  `json:"boardOffsets"`
+}
+
+// R holds the embedded code pin. Like C, a bad value panics before main runs.
+var R = mustParseRegistry(rawRegistry)
+
+func mustParseRegistry(b []byte) Registry {
+	var r Registry
+	if err := json.Unmarshal(b, &r); err != nil {
+		panic("spec: embedded registry.json: " + err.Error())
+	}
+	if err := r.validate(); err != nil {
+		panic("spec: embedded registry.json: " + err.Error())
+	}
+	return r
+}
+
+// validate refuses a pin no code could match, so it can't slice out of range.
+func (r Registry) validate() error {
+	if len(r.RuntimeCodeHash) != 66 {
+		return fmt.Errorf("runtimeCodeHash must be 32 bytes of 0x hex, got %q", r.RuntimeCodeHash)
+	}
+	if len(r.BoardOffsets) == 0 {
+		return fmt.Errorf("boardOffsets is empty")
+	}
+	for _, offset := range r.BoardOffsets {
+		if offset < 0 || offset+32 > r.ExecutableBytes {
+			return fmt.Errorf("board offset %d is outside the %d executable bytes", offset, r.ExecutableBytes)
+		}
+	}
+	return nil
 }
 
 // C holds the embedded constants. An image with invalid constants panics here,

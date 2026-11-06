@@ -299,9 +299,10 @@ func (m *Machine) acceptList(entries []approvedlist.Entry, list chainread.List) 
 }
 
 // classify treats chain errors as retryable, except those that show the chain
-// holds a different exam than the attested settings.
+// holds a different exam than the attested settings, or that the attested
+// address isn't ExamRegistry at all.
 func (m *Machine) classify(err error) error {
-	if errors.Is(err, chainread.ErrWrongExam) {
+	if errors.Is(err, chainread.ErrWrongExam) || errors.Is(err, chainread.ErrWrongRegistry) {
 		return fail("%w", err)
 	}
 	return err

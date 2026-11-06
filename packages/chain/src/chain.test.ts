@@ -9,6 +9,7 @@ import {
   encodeAbiParameters,
   encodeEventTopics,
   encodeFunctionResult,
+  sha256,
   zeroAddress,
   type Hex,
 } from 'viem';
@@ -376,9 +377,10 @@ describe('createExamRegistry', () => {
 describe('sync-abi.mjs', () => {
   const dir = mkdtempSync(join(tmpdir(), 'sync-abi-'));
   const output = join(dir, 'abi.ts');
+  const pin = join(dir, 'registry.json');
 
   it('fails clearly when the artifact is missing', () => {
-    const run = spawnSync('node', [script, join(dir, 'missing.json'), output], {
+    const run = spawnSync('node', [script, join(dir, 'missing.json'), output, pin], {
       encoding: 'utf8',
     });
     expect(run.status).toBe(1);
@@ -388,7 +390,7 @@ describe('sync-abi.mjs', () => {
   it('fails clearly when the artifact has no ABI', () => {
     const artifact = join(dir, 'empty.json');
     writeFileSync(artifact, '{}');
-    const run = spawnSync('node', [script, artifact, output], {
+    const run = spawnSync('node', [script, artifact, output, pin], {
       encoding: 'utf8',
     });
     expect(run.status).toBe(1);
@@ -402,7 +404,7 @@ describe('sync-abi.mjs', () => {
   const runWith = (file: string, contents: unknown) => {
     const artifact = join(dir, file);
     writeFileSync(artifact, JSON.stringify(contents));
-    return spawnSync('node', [script, artifact, output], { encoding: 'utf8' });
+    return spawnSync('node', [script, artifact, output, pin], { encoding: 'utf8' });
   };
 
   it('fails clearly unless the code has exactly one immutable, each use one word long', () => {
@@ -439,5 +441,20 @@ describe('sync-abi.mjs', () => {
     expect(source).toContain('export const examRegistryAbi');
     expect(source).toContain(`bytecode: '${code.toLowerCase()}'`);
     expect(source).toContain('boardOffsets: [2, 38]');
+  });
+
+  it('writes the pin over the executable code only, with the board words zeroed', () => {
+    const references = { 7: [{ start: 38, length: 32 }, { start: 2, length: 32 }] };
+    const hashed = (object: string) => {
+      expect(runWith('pin.json', { abi, deployedBytecode: deployedBytecode(references, object) }).status).toBe(0);
+      return JSON.parse(readFileSync(pin, 'utf8')) as { runtimeCodeHash: string; executableBytes: number; boardOffsets: number[] };
+    };
+    const written = hashed(code);
+    expect(written.executableBytes).toBe(70);
+    expect(written.boardOffsets).toEqual([2, 38]);
+    expect(written.runtimeCodeHash).toBe(sha256(`0x6080${'00'.repeat(32)}aabb${'00'.repeat(34)}`));
+    // A comment edit changes only the metadata, so the pin stays.
+    expect(hashed(`${code.slice(0, -12)}b1b2b3b40004`).runtimeCodeHash).toBe(written.runtimeCodeHash);
+    expect(hashed(code.replace('aabb', 'aabc')).runtimeCodeHash).not.toBe(written.runtimeCodeHash);
   });
 });
