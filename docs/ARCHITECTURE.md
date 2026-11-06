@@ -15,7 +15,8 @@ How the design in the [README](../README.md) maps onto this repository. The READ
 | `packages/attestation` | TypeScript | Confidential Space token checks |
 | `packages/chain` | TypeScript | `ExamRegistry` reads and writes through viem, and the on-chain ENS name check (`resolveExamName`) |
 | `packages/arkiv` | TypeScript | The Arkiv mirror's schemas, a reader that returns only published writers' rows, and a writer that skips rows it already wrote (`spec/arkiv.md`) |
-| `relay/` | TypeScript | CLI that mirrors an exam's signed release log and Unlock token from the TEE or storage to Arkiv, and indexes a registry's exams and approved lists from its events |
+| `packages/swarm` | TypeScript | A small Bee HTTP client: upload an unencrypted collection, read a file, and manage postage batches (`spec/arkiv.md`, "Backups") |
+| `relay/` | TypeScript | CLI that mirrors an exam's signed release log and Unlock token from the TEE or storage to Arkiv, indexes a registry's exams and approved lists from its events, and backs up an exam's files to Swarm |
 | `packages/tee-client` | TypeScript | Typed client for the TEE HTTP API |
 | `packages/ui` | React | Shared components, tokens and the Chromium gate |
 | `apps/web` | React | The board-hosted app, with a route area per signed-in role |

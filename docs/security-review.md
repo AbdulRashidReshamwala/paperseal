@@ -35,6 +35,8 @@ A working list for the team at ETHGlobal Mumbai, from a read of the whole reposi
 | S11 | Low | Only PKI attestation tokens are verified. OIDC (`kid` and JWKS) tokens return not-implemented. The TEE only issues PKI tokens. | [token.ts](../packages/attestation/src/token.ts) | Accepted |
 | S13 | Medium | In the demo, the Arkiv relay signs with the board wallet, so the board's key decrypts into the relay's memory on every run. A leak would also expose the wallet that controls `ExamRegistry` and the ENS name. | [relay/](../relay) | Accepted for the prototype. Use a separate relay wallet for a real exam |
 | S14 | Low | Arkiv readers trust writers by `$creator` only for spam control. Every row is checked anyway, but a writer can stay silent. Heartbeats only show whether a writer is alive and are not signed evidence. Writers come from the exam's ENS name or the build, so a board can leave out a neutral relay that viewers would want. | [spec/arkiv.md](../spec/arkiv.md) | Accepted. Viewers can add relays they trust |
+| S15 | Low | Swarm backups are on the Sepolia testnet, so reading one needs a testnet Bee node. The demo batch lasts 3 days, after which the files can disappear unless it is topped up. | [arkiv/swarm.md](../arkiv/swarm.md) | Accepted for the demo. Production uses mainnet and a batch for the exam season |
+| S16 | Low | Nothing on-chain hashes `key-priv.tlock` or `key-priv/*`, so a backup gives them availability only. A changed copy fails to decrypt, and the paper's salted hash catches a wrong key. | [spec/arkiv.md](../spec/arkiv.md), "Backups" | Accepted |
 | S12 | Low | The keyholder boundary lint rule bans fewer names than its test, and doesn't cover `apps/web/src/shared/`, which keyholder pages import. | [apps/eslint.config.mjs](../apps/eslint.config.mjs), [boundaries.test.ts](../apps/web/src/boundaries.test.ts) | Open |
 
 ## Open: Bugs and Spec Mismatches
@@ -61,6 +63,7 @@ A working list for the team at ETHGlobal Mumbai, from a read of the whole reposi
 | D7 | Port 8080 is open only to Cloudflare's IP ranges, so the TEE can't be reached directly. | Follow `deploy/README.md` step 4 |
 | D8 | The web app is Chromium only, and passkeys are tied to its domain. Changing the app's host after onboarding locks out every key. | Choose the domain before onboarding |
 | D10 | Arkiv's public RPC is rate limited, and the relay and verifier poll it during unlock. | Set `ARKIV_ACCESS_KEY` for the relay |
+| D11 | The Bee node's first sync on testnet takes about an hour, and needs an RPC that keeps old logs (ethpandaops or Tenderly, not publicnode). | Keep the node's data folder, and it resumes in seconds |
 | D9 | The verifier's main bundle is about 1 MB. | Code-split later |
 
 ## How to Use This List

@@ -17,7 +17,7 @@ import { parseCommand, UsageError, type BackupTarget, type SwarmApi } from './ar
 import { backupFailed, BackupRefused, checkBatch, prepareBackup, readBackUrl, resultLines, sha256Hex, uploadBackup, type BackupRegistry } from './backup';
 import { explorerLinks } from './mirror';
 import { storageObjectUrl, type Fetch } from './storage';
-import { batchQuote, buyStamp, swarmNetworks, swarmStatusLines, type SwarmSnapshot } from './swarm-node';
+import { batchQuote, buyStamp, swarmNetworks, swarmStatusLines, syncing, syncLagBlocks, type SwarmSnapshot } from './swarm-node';
 
 const examId: Hex = `0x${'ab'.repeat(32)}`;
 const registry: Address = '0x6a9f017F374630EcB84e8E3816B1eE9F8Fa2dBE8';
@@ -463,5 +463,15 @@ describe('buy-stamp', () => {
     const outcome = await buyStamp({ api: swarmApi, depth: 19, days: 7, label: undefined, yes: true }, c);
     expect(c.buyStamp).not.toHaveBeenCalled();
     expect(outcome.exitCode).toBe(1);
+  });
+});
+
+describe('syncing', () => {
+  it('allows the few blocks Bee trails the tip by when it is in step, and no more', () => {
+    expect(syncing({ ...chainState, block: 1000, chainTip: 1000 })).toBe(false);
+    expect(syncing({ ...chainState, block: 995, chainTip: 1000 })).toBe(false);
+    expect(syncing({ ...chainState, block: 1000 - syncLagBlocks, chainTip: 1000 })).toBe(false);
+    expect(syncing({ ...chainState, block: 1000 - syncLagBlocks - 1, chainTip: 1000 })).toBe(true);
+    expect(syncing({ ...chainState, block: 6_596_277, chainTip: 12_077_980 })).toBe(true);
   });
 });

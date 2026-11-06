@@ -79,8 +79,14 @@ export function quoteLines(quote: BatchQuote, network: SwarmNetwork): string[] {
   ];
 }
 
-/** Bee hasn't processed the postage contract up to the chain tip, so its price may be stale. */
-export const syncing = (chain: ChainState): boolean => chain.block < chain.chainTip;
+/**
+ * Bee trails the chain tip by a few blocks even when it is in step, because it waits for
+ * confirmations, so a gap this small isn't syncing. On Sepolia it is under 2 minutes.
+ */
+export const syncLagBlocks = 10;
+
+/** Bee hasn't processed the postage contract up to near the chain tip, so its price may be stale. */
+export const syncing = (chain: ChainState): boolean => chain.chainTip - chain.block > syncLagBlocks;
 const syncNote = '          note: Bee is still syncing the postage contract, so this price may change and batches may be unavailable';
 
 type Settled<T> = { ok: true; value: T } | { ok: false; error: string };
