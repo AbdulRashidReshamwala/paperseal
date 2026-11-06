@@ -14,7 +14,10 @@ import {
   encodeQuestion,
   encodeRelease,
   encodeReleaseEntries,
+  encodeReleaseFiles,
   entriesHash,
+  filesHash,
+  FormatError,
   fromHex,
   hashMessage,
   limits,
@@ -25,6 +28,8 @@ import {
   parsePaper,
   parseQuestion,
   releaseEntryFromWire,
+  releaseFileFromWire,
+  sortReleaseFiles,
   requireHardwareAttestation,
   stages,
   storageManifestHash,
@@ -291,7 +296,7 @@ describe('release entries', () => {
 
   it('feeds the releaseLog message', () => {
     const examId = bytes(32, 9);
-    expect(hashMessage('releaseLog', { examId, entriesHash: entriesHash(entries) })).toHaveLength(32);
+    expect(hashMessage('releaseLog', { examId, entriesHash: entriesHash(entries), filesHash: filesHash([]) })).toHaveLength(32);
   });
 
   const first = { passkeyPublicKey: point(1), shareHash: bytes(32, 5), round: 123n };
@@ -302,6 +307,56 @@ describe('release entries', () => {
     expect(() => releaseEntryFromWire({ ...wire, round: '01' })).toThrow('decimal');
     expect(() => encodeReleaseEntries([{ ...first, shareHash: bytes(31, 0) }])).toThrow(RangeError);
     expect(() => encodeReleaseEntries([{ ...first, round: 2n ** 64n }])).toThrow(RangeError);
+  });
+});
+
+describe('release files', () => {
+  const file = (name: string, fill = 1) => ({ name, sha256: bytes(32, fill) });
+
+  it('hashes abi.encode(ReleaseFile[])', () => {
+    const files = [file('key-priv.tlock', 1), file('key-priv/a.bin', 2)];
+    const encoded = fromHex(
+      encodeAbiParameters(
+        [
+          {
+            type: 'tuple[]',
+            components: [
+              { name: 'name', type: 'string' },
+              { name: 'sha256', type: 'bytes32' },
+            ],
+          },
+        ],
+        [files.map((f) => ({ name: f.name, sha256: toHex(f.sha256) }))],
+      ),
+    );
+    expect(encodeReleaseFiles(files)).toEqual(encoded);
+    expect(filesHash(files)).toEqual(sha(encoded));
+  });
+
+  it('sorts a copy in UTF-8 byte order, unlike locale order or UTF-16 order', () => {
+    const names = (list: { name: string }[]) => list.map((f) => f.name);
+    const input = [file('a'), file('Z'), file('key-priv/x'), file('key-priv.tlock')];
+    expect(names(sortReleaseFiles(input))).toEqual(['Z', 'a', 'key-priv.tlock', 'key-priv/x']);
+    expect(names(input)).toEqual(['a', 'Z', 'key-priv/x', 'key-priv.tlock']);
+    // U+FF21 comes before U+1F600 in UTF-8, and after its surrogates in UTF-16.
+    expect(names(sortReleaseFiles([file('\u{1F600}'), file('\uFF21')]))).toEqual(['\uFF21', '\u{1F600}']);
+    // A name that is a prefix of another comes first.
+    expect(names(sortReleaseFiles([file('ab'), file('a')]))).toEqual(['a', 'ab']);
+  });
+
+  it('refuses unsorted or repeated names and a bad hash', () => {
+    expect(() => encodeReleaseFiles([file('b'), file('a')])).toThrow(FormatError);
+    expect(() => encodeReleaseFiles([file('a', 1), file('a', 2)])).toThrow(FormatError);
+    expect(() => filesHash([file('a'), file('Z')])).toThrow('sorted');
+    expect(() => encodeReleaseFiles([{ name: 'a', sha256: bytes(31, 0) }])).toThrow(RangeError);
+  });
+
+  it('reads wire files and rejects a bad hash', () => {
+    const wire = { name: 'a', sha256: toHex(bytes(32, 0xab)) };
+    expect(releaseFileFromWire(wire)).toEqual({ name: 'a', sha256: bytes(32, 0xab) });
+    expect(() => releaseFileFromWire({ ...wire, sha256: toHex(bytes(31, 0)) })).toThrow(FormatError);
+    expect(() => releaseFileFromWire({ ...wire, sha256: `0x${'AB'.repeat(32)}` })).toThrow(FormatError);
+    expect(() => releaseFileFromWire({ ...wire, name: 1 as never })).toThrow(FormatError);
   });
 });
 

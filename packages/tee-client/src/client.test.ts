@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { createTeeClient, isReleaseNotOpen, TeeApiError, type TeeClient } from './index';
+import { createTeeClient, isDeliveryPending, isReleaseNotOpen, TeeApiError, type TeeClient } from './index';
 
 const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
 
@@ -90,5 +90,18 @@ describe('errors', () => {
     expect(isReleaseNotOpen(error)).toBe(true);
     expect(isReleaseNotOpen(new TeeApiError(400, 'bad_share', 'no'))).toBe(false);
     expect(isReleaseNotOpen(new Error('network'))).toBe(false);
+  });
+
+  it('recognises the delivery_pending refusal of the release log', async () => {
+    const { tee } = client(
+      () => new Response(JSON.stringify({ error: { code: 'delivery_pending', message: 'not yet' } }), { status: 503 }),
+    );
+    const error = await tee.releaseLog().catch((e: unknown) => e);
+    expect(error).toMatchObject({ status: 503, code: 'delivery_pending', message: 'not yet' });
+    expect(isDeliveryPending(error)).toBe(true);
+    expect(isReleaseNotOpen(error)).toBe(false);
+    expect(isDeliveryPending(new TeeApiError(503, 'unavailable', 'no'))).toBe(false);
+    expect(isDeliveryPending(new TeeApiError(503, 'invalid_response', 'TEE returned 503'))).toBe(false);
+    expect(isDeliveryPending(new Error('network'))).toBe(false);
   });
 });

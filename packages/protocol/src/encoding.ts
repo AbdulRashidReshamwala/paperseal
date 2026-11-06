@@ -77,6 +77,7 @@ export const messageSchemas = {
   releaseLog: [
     ['examId', 'bytes32'],
     ['entriesHash', 'bytes32'],
+    ['filesHash', 'bytes32'],
   ],
 } as const satisfies Record<DomainTagName, Schema>;
 

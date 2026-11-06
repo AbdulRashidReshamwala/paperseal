@@ -127,8 +127,8 @@ describe('abi.encode messages', () => {
     expect(toHex(encodeMessage('shareRelease', { examId, challenge }))).toBe(
       toHex(abi(['string', 'bytes32', 'bytes'], ['paperseal/v1/share-release', toHex(examId), toHex(challenge)])),
     );
-    expect(toHex(encodeMessage('releaseLog', { examId, entriesHash: fill(9) }))).toBe(
-      toHex(abi(['string', 'bytes32', 'bytes32'], ['paperseal/v1/release-log', toHex(examId), toHex(fill(9))])),
+    expect(toHex(encodeMessage('releaseLog', { examId, entriesHash: fill(9), filesHash: fill(10) }))).toBe(
+      toHex(abi(['string', 'bytes32', 'bytes32', 'bytes32'], ['paperseal/v1/release-log', toHex(examId), toHex(fill(9)), toHex(fill(10))])),
     );
   });
 
@@ -145,13 +145,14 @@ describe('abi.encode messages', () => {
   });
 
   it('separates messages by tag', () => {
-    expect(hashMessage('releaseLog', { examId: fill(1), entriesHash: fill(2) })).not.toEqual(
+    expect(hashMessage('releaseLog', { examId: fill(1), entriesHash: fill(2), filesHash: fill(3) })).not.toEqual(
       hashMessage('shareRelease', { examId: fill(1), challenge: fill(2) }),
     );
   });
 
   it('rejects malformed fields', () => {
-    expect(() => encodeMessage('releaseLog', { examId: fill(1, 31), entriesHash: fill(2) })).toThrow('examId must be 32 bytes');
+    expect(() => encodeMessage('releaseLog', { examId: fill(1, 31), entriesHash: fill(2), filesHash: fill(3) })).toThrow('examId must be 32 bytes');
+    expect(() => encodeMessage('releaseLog', { examId: fill(1), entriesHash: fill(2), filesHash: fill(3, 31) })).toThrow('filesHash must be 32 bytes');
     const build = { examId: fill(1), approvedListHash: fill(1), paperHash: fill(1), storageManifestHash: fill(1), saltedPaperHash: fill(1), bankSize: 1, criteriaHash: fill(1) };
     expect(() => encodeMessage('build', { ...build, selected: -1 })).toThrow(RangeError);
     expect(() => encodeMessage('build', { ...build, selected: 2 ** 32 })).toThrow(RangeError);
