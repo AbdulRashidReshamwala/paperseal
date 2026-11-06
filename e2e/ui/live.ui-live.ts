@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { createExamRegistry } from '@paperseal/chain';
@@ -13,7 +13,7 @@ import { castSend } from '../live/cast';
 import { deployed, rpcHost } from '../live/config';
 import { liveCriteria, liveQuestion, questionsPerSetterPerTopic } from '../live/schedule';
 import { castWalletScript } from './castWallet';
-import { Actor, launchUiChrome, openActor, proxyGithubIfLimited, UI_DIR, writeReport } from './kit';
+import { Actor, launchUiChrome, openActor, proxyGithubIfLimited, report, UI_DIR, writeReport } from './kit';
 import { button, centre as centreText, composer, field, fold, hashOf, radio, stepStates, text, unfold } from './selectors';
 
 /*
@@ -41,6 +41,12 @@ const MINUTES_TO_LOCK = Number(process.env.UI_LIVE_LOCK_MINUTES ?? 10);
 const UNLOCK_AFTER_LOCK = 4; // minutes: Build, post it, centre downloads
 const DELTA = 1; // minutes
 const DURATION = 4; // minutes of exam: the shares and every centre open within this
+
+// Videos: each window of the people worth watching is recorded, then cut by e2e/scripts/cut-videos.mjs.
+const RECORD = process.env.UI_RECORD !== '0';
+const RECORDED = new Set(['board', 'setter-1', 'neutral-1', 'centre-1', 'centre-8', 'verifier']);
+const VIDEO_RAW = resolve(UI_DIR, 'video-raw');
+const videoDirFor = (who: string) => (RECORD && RECORDED.has(who) ? resolve(VIDEO_RAW, who) : undefined);
 
 const repo = resolve(import.meta.dirname, '../..');
 const logFile = resolve(UI_DIR, 'live-run.log');
@@ -83,8 +89,26 @@ async function untilUnix(unix: number): Promise<void> {
   while (Date.now() / 1000 < unix) await sleep(500);
 }
 
+let videosFinished = false;
+/** Closes every recorded window, so its video is complete, and writes where each video is and when things happened in it. */
+async function finishVideos(): Promise<void> {
+  if (videosFinished || !RECORD) return;
+  videosFinished = true;
+  const plan: { who: string; file: string | null; startedAt: number; marks: { name: string; at: number }[] }[] = [];
+  for (const [who, entry] of report.actors) {
+    const actor = entry.actor;
+    if (!actor.videoDir) continue;
+    const video = actor.page.video();
+    await actor.person.context.close().catch(() => undefined);
+    plan.push({ who, file: video ? await video.path().catch(() => null) : null, startedAt: actor.videoStartedAt, marks: actor.marks });
+  }
+  mkdirSync(UI_DIR, { recursive: true });
+  writeFileSync(resolve(UI_DIR, 'video-plan.json'), `${JSON.stringify(plan, null, 2)}\n`);
+}
+
 describe('real exam through the screens', () => {
   afterAll(async () => {
+    await finishVideos();
     writeReport('live', { results, notDrivenInUi, bugs });
     writeFileSync(resolve(UI_DIR, 'live-results.json'), `${JSON.stringify({ results, notDrivenInUi, bugs }, null, 2)}\n`);
     await stopAll();
@@ -105,6 +129,7 @@ describe('real exam through the screens', () => {
     };
     const verifierApp = await startApp('apps/verifier', { ...env }, { host: 'localhost' });
     const web = await startApp('apps/web', { ...env, VITE_VERIFIER_URL: verifierApp.url }, { host: 'localhost' });
+    if (RECORD) rmSync(VIDEO_RAW, { recursive: true, force: true });
     const browser = await launchUiChrome();
     for (const base of [web.url, verifierApp.url]) {
       const warm = await browser.newPage();
@@ -124,6 +149,7 @@ describe('real exam through the screens', () => {
 
     const board = await openActor(browser, 'board', null, {
       role: 'board',
+      ...(videoDirFor('board') ? { videoDir: videoDirFor('board') as string } : {}),
       wallet: castWalletScript(deployed.rpcUrl, BOARD_ADDRESS),
       bindings: { __castSend: (data: Hex, to: Hex) => castSend(data, to) },
     });
@@ -132,10 +158,14 @@ describe('real exam through the screens', () => {
     if (githubProxied) notes.push('STUB (proxy): the board\'s calls to api.github.com were answered with real GitHub data fetched through the gh CLI, because the unauthenticated quota was used up.');
 
     // ---------------------------------------------------------------- board: create, version, review, publish
-    if (!RESUME) await board.flow('create, choose version, publish', async () => {
+    const publishedOk = RESUME || (await step('board creates, reviews and publishes the exam (UI, wallet signature via cast)', () => board.flow('create, review, publish', async () => {
+      board.paced = true;
+      board.mark('create-start');
       await bp.goto(`${web.url}/#/board/blueprint`);
       await board.seeHeading(text.createHeading);
+      await board.say('Exam board: create the exam');
       await board.type(bp.getByLabel(field.examName).first(), name);
+      board.paced = false;
       await board.type(bp.getByLabel(field.examStart).first(), localInput(examStart));
       await board.type(bp.getByLabel(field.length).first(), String(DURATION));
       await board.type(bp.getByLabel(field.releaseMinutes).first(), String(DELTA));
@@ -150,8 +180,11 @@ describe('real exam through the screens', () => {
       await board.type(bp.getByLabel(field.questionsClose).first(), localInput(lockAt));
       await board.type(bp.getByLabel(field.rpcHost).first(), rpcHost);
       await board.shot('live-01-create');
+      await board.beat(2500);
       await bp.getByRole('button', { name: button.continue }).click();
-      await board.seeHeading(text.versionHeading);
+      await board.seeHeading(text.reviewHeading, 60_000);
+      await board.say('Exam board: review, then publish');
+      // The version is a row in the review. The newest checked one is already chosen.
       const other = bp.locator('summary', { hasText: fold.differentVersion });
       await other.waitFor({ timeout: 60_000 }).catch(async () => {
         await board.shot('live-02-version-stuck');
@@ -159,31 +192,26 @@ describe('real exam through the screens', () => {
       });
       await other.click();
       await bp.locator('details', { has: other }).locator('select').selectOption({ label: RELEASE });
-      const use = bp.getByRole('button', { name: new RegExp(`^Use ${RELEASE}$`) });
-      await use.waitFor({ timeout: 60_000 });
-      await board.shot('live-02-version');
-      await use.click();
-      await board.seeHeading(text.reviewHeading);
+      await bp.getByText(new RegExp(`^${RELEASE.replace(/\./g, '\\.')}, the version you chose`)).first().waitFor({ timeout: 90_000 });
       await board.shot('live-03-review');
+      await board.beat(3000);
       await bp.getByRole('button', { name: button.publish }).click();
-      await bp
-        .waitForFunction(() => /The exam is published|read-back differs/.test(document.body.innerText), undefined, { timeout: 180_000 })
-        .catch(async () => {
-          await board.shot('live-04-publish-stuck');
-          throw new Error(`publish did not finish. Page: ${(await board.text()).slice(0, 500)}`);
-        });
-      await board.seeHeading(text.publishedHeading, 5_000).catch(async () => {
-        throw new Error(`publish read-back: ${(await board.text()).slice(0, 600)}`);
+      await board.seeHeading(text.peopleHeading, 180_000).catch(async () => {
+        await board.shot('live-04-publish-stuck');
+        throw new Error(`publish did not finish. Page: ${(await board.text()).slice(0, 600)}`);
       });
+      await board.see(text.publishedStamp, 10_000);
+      await board.say('Exam board: published, now invite people');
       await board.shot('live-04-published');
-      await bp.getByRole('button', { name: button.bringPeople }).click();
-    });
-    if (!RESUME) record('board published the exam through the UI (wallet signature via cast)', true);
+      await board.beat(2500);
+      board.mark('published');
+    })));
+    // Nothing after this can work without a published exam, so this is the one place the run stops.
+    if (!publishedOk) throw new Error('the exam was not published through the UI, so there is nothing more to run. See live-results.json.');
 
     // ---------------------------------------------------------------- start the TEE from what the chain holds
-    const examId = RESUME
-      ? (keccak256(toBytes(RESUME)) as Hex)
-      : ((await bp.evaluate(() => localStorage.getItem('paperseal.examId'))) as Hex);
+    // The exam ID is the hash of the name, the same rule the app uses, so it needs no reading from the page.
+    const examId = keccak256(toBytes(RESUME || name)) as Hex;
     const exam = await registry.getExam(examId);
     if (!exam) throw new Error('the exam is not on the chain');
     const settings = {
@@ -231,18 +259,21 @@ describe('real exam through the screens', () => {
       ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ who: `centre-${String(n)}`, role: 'centre', label: `Centre ${String(n)}` })),
     ];
     const links: Record<string, string> = {};
-    await board.flow('invites: add and copy 13 links', async () => {
-      await board.seeHeading(text.peopleHeading, 60_000);
-      for (const person of roster) {
-        await bp.getByLabel(field.inviteRole).selectOption(person.role);
-        await board.type(bp.getByLabel(field.inviteName), person.label);
-        await bp.getByRole('button', { name: button.addInvite }).click();
-        await bp.getByRole('button', { name: new RegExp(`Copy the link for ${person.label} `) }).click();
-        links[person.who] = await bp.evaluate(() => navigator.clipboard.readText());
-      }
-      await board.shot('live-05-invites-waiting');
-    });
-    record('board made 13 invites and copied each link', Object.keys(links).length === 13);
+    await step('board makes 13 invites and copies each link (UI)', () =>
+      board.flow('invites: add and copy 13 links', async () => {
+        await board.seeHeading(text.peopleHeading, 60_000);
+        for (const person of roster) {
+          await bp.getByLabel(field.inviteRole).selectOption(person.role);
+          await board.type(bp.getByLabel(field.inviteName), person.label);
+          await bp.getByRole('button', { name: button.addInvite }).click();
+          await bp.getByRole('button', { name: new RegExp(`^Copy the link for ${person.label} \\(`) }).click();
+          links[person.who] = await bp.evaluate(() => navigator.clipboard.readText());
+        }
+        await board.shot('live-05-invites-waiting');
+        if (Object.keys(links).length !== 13) throw new Error(`only ${String(Object.keys(links).length)} links copied`);
+        return '13 links';
+      }),
+    );
 
     // ---------------------------------------------------------------- wait until the TEE is up for this exam
     await step('the VM restarted and the TEE answers at Onboard', async () => {
@@ -260,11 +291,13 @@ describe('real exam through the screens', () => {
     // ---------------------------------------------------------------- everyone opens their link and registers
     const people: Record<string, Actor> = {};
     const open = async (who: string, role: string) => {
-      people[who] = await openActor(browser, who, null, { role });
+      const videoDir = videoDirFor(who);
+      people[who] = await openActor(browser, who, null, { role, ...(videoDir ? { videoDir } : {}) });
     };
     for (const p of roster) await open(p.who, p.role === 'keyholder' ? 'key holder' : p.role);
-    people.verifier = await openActor(browser, 'verifier', null, { role: 'verifier' });
+    await open('verifier', 'verifier');
     const verifier = people.verifier;
+    if (!verifier) throw new Error('no verifier window');
 
     await Promise.all(
       roster.map((p) =>
@@ -277,7 +310,7 @@ describe('real exam through the screens', () => {
             expect(invite.examId).toBe(examId);
             await a.page.goto(link.replace(/^https?:\/\/[^#]+/, `${web.url}/`));
             await a.page.getByRole('button', { name: button.register }).click({ timeout: 60_000 });
-            await a.see(/security key is registered|You are registered|Waiting for your exam board/, 60_000);
+            await a.see(/security key is registered|You are registered|Nothing to do yet/, 60_000);
           });
           if (p.who === 'setter-1' || p.who === 'centre-1' || p.who === 'neutral-1') await a.shot('live-10-registered');
         }),
@@ -291,16 +324,23 @@ describe('real exam through the screens', () => {
         await board.seeHeading(text.peopleHeading, 60_000);
         await board.see('Registered', 60_000);
         await board.shot('live-11-people-registered');
-        // The eighth centre has no share. A default that already says so leaves this alone.
-        const eighth = bp.getByLabel('Role for Centre 8');
-        if (await eighth.count()) {
-          const current = await eighth.inputValue();
-          if (current !== '4') await eighth.selectOption({ label: 'Centre without a key' });
+        // Seven centres hold part of the key and the eighth gets the key at unlock. The screen's default is not relied on.
+        for (let n = 1; n <= 8; n++) {
+          const pick = bp.getByLabel(`Role for Centre ${String(n)}`);
+          await pick.waitFor({ timeout: 60_000 });
+          await pick.selectOption({ label: n === 8 ? 'Centre getting the key at unlock' : 'Centre holding part of the key' });
         }
+        await board.shot('live-11b-people-places');
+        board.mark('post-list-start');
+        await board.say('Exam board: post the list of people');
+        await board.beat(2500);
         const post = bp.getByRole('button', { name: button.postList });
         await post.click({ timeout: 120_000 });
-        await board.see(/The list is posted|posted/i, 180_000).catch(() => undefined);
+        // After the post the board has nothing to do until the questions close.
+        await board.seeHeading(/Nothing to do until|The paper is being built/, 240_000);
         await board.shot('live-12-list-posted');
+        await board.beat(2500);
+        board.mark('list-posted');
       });
     });
     if (!listPosted) {
@@ -313,144 +353,250 @@ describe('real exam through the screens', () => {
         const a = people[who];
         if (!a) throw new Error('no window');
         const page = a.page;
-        await a.flow('wait for the composer', async () => {
-          await page.goto(`${web.url}/#/setter`);
-          await a.seeHeading(text.writeHeading, 10 * 60_000);
-        });
-        if (index === 0) {
-          await a.flow('option validation (nothing sealed)', async () => {
-            await page.getByRole('radio', { name: radio.multipleChoice }).check();
-            await a.shot('live-20-composer-choice');
-            await a.type(page.getByLabel(composer.question), 'A draft with a blank and a repeated option');
-            await a.type(page.getByRole('textbox', { name: field.option('A') }), 'Same');
-            await a.type(page.getByRole('textbox', { name: field.option('B') }), 'Same');
-            await page.getByRole('textbox', { name: field.option('A') }).focus();
-            await page.locator(composer.optionError).first().waitFor({ timeout: 10_000 });
-            const sealDisabled = await page.getByRole('button', { name: button.seal }).isDisabled();
-            if (!sealDisabled) throw new Error('Seal stays open with a repeated option');
-            await a.shot('live-21-composer-repeated-option');
-            await a.type(page.getByRole('textbox', { name: field.option('B') }), '');
-            await page.getByRole('textbox', { name: field.option('A') }).focus();
-            await a.shot('live-22-composer-blank-option');
-            for (const letter of ['C', 'D', 'E', 'F']) {
-              await page.getByRole('button', { name: button.addOption }).click();
-              await a.type(page.getByRole('textbox', { name: field.option(letter) }), `Option ${letter}`);
-            }
-            if (await page.getByRole('button', { name: button.addOption }).count()) throw new Error('more than six options are offered');
-            await a.shot('live-23-composer-six-options');
-            await page.getByRole('button', { name: button.removeOption('F') }).click();
-            await page.getByRole('radio', { name: radio.written }).check();
-            await a.type(page.getByLabel(composer.question), '');
-          });
-        }
         let sealed = 0;
-        await a.flow('write and seal', async () => {
-          for (const topic of liveCriteria.topics) {
-            for (let k = 1; k <= questionsPerSetterPerTopic; k++) {
-              const q = liveQuestion(topic.name, index * questionsPerSetterPerTopic + k);
-              await page.getByRole('radio', { name: composer.topicRadio(topic.name) }).check();
-              const wantChoice = Array.isArray(q.options);
-              await page.getByRole('radio', { name: wantChoice ? radio.multipleChoice : radio.written }).check();
-              await a.type(page.getByLabel(composer.question), q.text);
-              if (q.options) {
-                for (const [i, option] of q.options.entries()) {
-                  const letter = String.fromCharCode(65 + i);
-                  if (i >= 2) await page.getByRole('button', { name: button.addOption }).click();
-                  await a.type(page.getByRole('textbox', { name: field.option(letter) }), option);
-                }
+        try {
+          await a.flow('wait for the composer', async () => {
+            await page.goto(`${web.url}/#/setter`);
+            await a.seeHeading(text.writeHeading, 10 * 60_000);
+            a.mark('composer');
+            await a.say('Setter: the page is ready for questions');
+            await a.beat(2500);
+          });
+          if (index === 0) {
+            await a.flow('option validation (nothing sealed)', async () => {
+              a.paced = true;
+              await a.say('Setter: a multiple choice question needs its options, each different');
+              await page.getByRole('radio', { name: radio.multipleChoice }).check();
+              await a.shot('live-20-composer-choice');
+              await a.beat();
+              await a.type(page.getByLabel(composer.question), 'A draft with a repeated option');
+              await a.type(page.getByRole('textbox', { name: field.option('A'), exact: true }), 'Same');
+              await a.type(page.getByRole('textbox', { name: field.option('B'), exact: true }), 'Same');
+              await page.getByRole('textbox', { name: field.option('A'), exact: true }).focus();
+              await page.locator(composer.optionError).first().waitFor({ timeout: 10_000 });
+              const sealDisabled = await page.getByRole('button', { name: button.seal }).isDisabled();
+              if (!sealDisabled) throw new Error('Seal stays open with a repeated option');
+              await a.shot('live-21-composer-repeated-option');
+              await a.beat(2500);
+              await a.type(page.getByRole('textbox', { name: field.option('B'), exact: true }), '');
+              await page.getByRole('textbox', { name: field.option('A'), exact: true }).focus();
+              await a.shot('live-22-composer-blank-option');
+              a.paced = false;
+              for (const letter of ['C', 'D', 'E', 'F']) {
+                await page.getByRole('button', { name: button.addOption, exact: true }).click();
+                await a.type(page.getByRole('textbox', { name: field.option(letter), exact: true }), `Option ${letter}`);
               }
-              await page.getByRole('button', { name: button.seal }).click();
-              sealed += 1;
-              await page.getByText(composer.sealedSoFar(sealed)).first().waitFor({ timeout: 90_000 });
-              if (sealed === 1) await a.shot('live-24-first-receipt');
-            }
+              if (await page.getByRole('button', { name: button.addOption, exact: true }).count()) throw new Error('more than six options are offered');
+              await a.shot('live-23-composer-six-options');
+              await page.getByRole('button', { name: button.removeOption('F'), exact: true }).click();
+              await page.getByRole('radio', { name: radio.written }).check();
+              await a.type(page.getByLabel(composer.question), '');
+            });
           }
-          await a.shot('live-25-all-sealed');
-        });
+          await a.flow('write and seal', async () => {
+            for (const topic of liveCriteria.topics) {
+              for (let k = 1; k <= questionsPerSetterPerTopic; k++) {
+                const q = liveQuestion(topic.name, index * questionsPerSetterPerTopic + k);
+                // The first setter's first written and first multiple choice question are paced for the video.
+                a.paced = index === 0 && topic === liveCriteria.topics[0] && (k === 1 || k === 3);
+                await page.getByRole('radio', { name: composer.topicRadio(topic.name) }).check();
+                const wantChoice = Array.isArray(q.options);
+                await a.say(wantChoice ? 'Setter: a multiple choice question with lettered options' : 'Setter: a written question');
+                await page.getByRole('radio', { name: wantChoice ? radio.multipleChoice : radio.written }).check();
+                await a.type(page.getByLabel(composer.question), q.text);
+                if (q.options) {
+                  for (const [i, option] of q.options.entries()) {
+                    const letter = String.fromCharCode(65 + i);
+                    if (i >= 2) await page.getByRole('button', { name: button.addOption, exact: true }).click();
+                    await a.type(page.getByRole('textbox', { name: field.option(letter), exact: true }), option);
+                  }
+                }
+                if (a.paced) await a.beat(1500);
+                await a.say('Setter: seal the question. It leaves this page and a receipt is kept');
+                await page.getByRole('button', { name: button.seal }).click();
+                sealed += 1;
+                await page.getByText(composer.sealedSoFar(sealed)).first().waitFor({ timeout: 90_000 });
+                if (sealed === 1) await a.shot('live-24-first-receipt');
+                if (a.paced) await a.beat(3500);
+                if (index === 0 && topic === liveCriteria.topics[0] && k === 3) a.mark('sealed-choice');
+              }
+            }
+            a.paced = false;
+            await a.shot('live-25-all-sealed');
+            a.mark('all-sealed');
+          });
+        } catch (error) {
+          await a.shot(`live-2x-${who}-failed`).catch(() => undefined);
+          throw new Error(`${String(sealed)} sealed before it stopped: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`);
+        }
         return `${String(sealed)} sealed`;
       }),
     );
     await Promise.all(setterTasks);
 
     // ---------------------------------------------------------------- board: wait, then post the Build
-    await step('board posts the sealed paper record (UI, wallet signature via cast)', async () => {
+    await step('board posts the paper’s record (UI, wallet signature via cast)', async () => {
       await board.flow('post the Build', async () => {
-        await board.seeHeading(/Nothing to do until|building the paper/, 60_000).catch(() => undefined);
+        await board.seeHeading(/Nothing to do until|The paper is being built/, 60_000).catch(() => undefined);
         await board.shot('live-30-wait');
-        await board.seeHeading(text.recordBuildHeading, Math.max(60_000, (lockUnix + 240 - Date.now() / 1000) * 1000));
+        await board.seeHeading(text.recordBuildHeading, Math.max(60_000, (lockUnix + 300 - Date.now() / 1000) * 1000));
+        board.mark('paper-ready');
+        await board.say('Exam board: the paper is ready, post its record');
         await board.shot('live-31-record-build');
+        await board.beat(3000);
         await bp.getByRole('button', { name: button.postBuild }).click();
-        await board.seeHeading(/Sealed\. Nothing to do until|Key holders are releasing/, 180_000).catch(async () => {
-          await board.see(/posted|Posted/, 60_000);
-        });
+        await board.seeHeading(/Sealed\. Nothing to do until|Key holders are releasing/, 240_000);
         await board.shot('live-32-status');
+        await board.say('Exam board: sealed, nothing more to do until unlock');
+        await board.beat(3000);
+        board.mark('build-posted');
       });
     });
 
     // ---------------------------------------------------------------- verifier before unlock
     await step('verifier, live exam before unlock', async () => {
       await verifier.flow('before unlock', async () => {
+        verifier.mark('before-unlock');
         await verifier.page.goto(`${verifierApp.url}/#/exam/${examId}`);
+        await verifier.say('Public verifier: the exam so far');
         await verifier.page.locator('li[data-state]').first().waitFor({ timeout: 60_000 });
         await sleep(20_000);
         const states = await stepStates(verifier.page);
         await verifier.shot('live-40-verifier-before-unlock');
-        return void notes.push(`verifier before unlock: ${states.map((s) => `${s.label}=${s.state}`).join(' | ')}`);
+        notes.push(`verifier before unlock: ${states.map((s) => `${s.label}=${s.state}`).join(' | ')}`);
       });
     });
 
-    // ---------------------------------------------------------------- unlock window: key holders release, centres open
-    await untilUnix(unlockUnix + 2);
-    const holders = [...['neutral-1', 'neutral-2', 'neutral-3'], ...['centre-1', 'centre-2', 'centre-3', 'centre-4', 'centre-5', 'centre-6', 'centre-7']];
-    await Promise.all([
-      ...holders.map((who) =>
-        step(`${who} releases their share with one touch`, async () => {
-          const a = people[who];
-          if (!a) throw new Error('no window');
-          await a.flow('release', async () => {
-            if (who.startsWith('neutral')) await a.page.goto(`${web.url}/#/keyholder`);
-            else await a.page.goto(`${web.url}/#/centre`);
-            const releaseBtn = a.page.getByRole('button', { name: button.release });
-            await releaseBtn.click({ timeout: 120_000 });
-            if (who === 'neutral-1' || who === 'centre-1') await a.shot('live-50-release-sent');
-            await a.see(/Done|Released|Waiting for key holders|Open the paper|0? ?of 8 released|of 8 released/, 120_000);
-          });
-        }),
-      ),
-    ]);
+    // ---------------------------------------------------------------- everyone with a task at unlock gets to their page first
+    const holders = ['neutral-1', 'centre-1', 'neutral-2', 'centre-2', 'neutral-3', 'centre-3', 'centre-4', 'centre-5', 'centre-6', 'centre-7'];
+    const allCentres = ['centre-1', 'centre-2', 'centre-3', 'centre-4', 'centre-5', 'centre-6', 'centre-7', 'centre-8'];
+    const onTheirPage = new Set<string>();
     await Promise.all(
-      ['neutral-1', 'neutral-2', 'neutral-3'].map((who) =>
-        step(`${who} sees Done`, async () => {
+      [...holders, 'centre-8'].map((who) =>
+        step(`${who} is on their page before unlock`, async () => {
           const a = people[who];
           if (!a) throw new Error('no window');
-          await a.seeHeading(/Done/, 60_000);
-          if (who === 'neutral-1') await a.shot('live-51-keyholder-done');
+          await a.page.goto(`${web.url}/#/${who.startsWith('neutral') ? 'keyholder' : 'centre'}`);
+          await a.page.waitForLoadState('networkidle').catch(() => undefined);
+          a.mark('waiting');
+          await a.say(who.startsWith('neutral') ? 'Key holder: waiting for the unlock time' : 'Centre: waiting for the unlock time');
+          if (who === 'centre-8') await a.shot('live-49-centre-waiting');
+          onTheirPage.add(who);
         }),
       ),
     );
+
+    // ---------------------------------------------------------------- unlock window: key holders release, centres open
+    await untilUnix(unlockUnix + 2);
     await Promise.all(
-      ['centre-1', 'centre-2', 'centre-3', 'centre-4', 'centre-5', 'centre-6', 'centre-7', 'centre-8'].map((who) =>
+      holders.map((who, order) =>
+        step(`${who} releases their part of the key with one touch`, async () => {
+          const a = people[who];
+          if (!a) throw new Error('no window');
+          if (!onTheirPage.has(who)) await a.page.goto(`${web.url}/#/${who.startsWith('neutral') ? 'keyholder' : 'centre'}`);
+          await a.flow('release', async () => {
+            // One after another, so the count on the waiting pages visibly goes up.
+            await sleep(order * 2500);
+            const releaseBtn = a.page.getByRole('button', { name: button.release });
+            await releaseBtn.waitFor({ timeout: 120_000 });
+            a.mark('release-visible');
+            await a.say(who.startsWith('neutral') ? 'Key holder: release your part of the key' : 'Centre holding part of the key: release it');
+            if (who === 'neutral-1' || who === 'centre-1') {
+              await a.shot('live-50-release');
+              await a.beat(3000);
+            }
+            await releaseBtn.click();
+            a.mark('release-sent');
+            await a.see(/Done\. You can close this tab|parts of the key released|Waiting for key holders|Open the paper/, 120_000);
+            if (who === 'neutral-1') await a.shot('live-51-keyholder-done');
+          });
+        }),
+      ),
+    );
+    await step('neutral-1 watches the count of released parts go up to eight', async () => {
+      const a = people['neutral-1'];
+      if (!a) throw new Error('no window');
+      await a.say('Key holder: done. The count shows how many parts have been released');
+      await a.page.getByText(/^(8|9|10) of 8 parts of the key released$/).waitFor({ timeout: 120_000 }).catch(async () => {
+        throw new Error(`the count never read 8 of 8. Page: ${(await a.text()).slice(0, 300)}`);
+      });
+      await a.beat(4000);
+      a.mark('count-8');
+    });
+    await Promise.all(
+      ['neutral-2', 'neutral-3'].map((who) =>
+        step(`${who} sees Done`, async () => {
+          const a = people[who];
+          if (!a) throw new Error('no window');
+          await a.seeHeading(text.keyHolderDone, 60_000);
+        }),
+      ),
+    );
+
+    await Promise.all(
+      allCentres.map((who) =>
         step(`${who} opens the paper with one touch`, async () => {
           const a = people[who];
           if (!a) throw new Error('no window');
           await a.flow('open the paper', async () => {
             if (who === 'centre-8') {
-              await a.page.goto(`${web.url}/#/centre`);
               await a.seeHeading(/Waiting for key holders|Open the paper/, 120_000);
               await a.shot('live-52-centre-without-share-waiting');
+              a.mark('holders-waiting');
+              await a.say('Centre: waiting while key holders release their parts. The count goes up');
+              await a.page.getByText(/^(8|9|10) of 8 parts of the key released$/).waitFor({ timeout: 120_000 }).catch(() => undefined);
+              await a.beat(3000);
             }
             const openBtn = a.page.getByRole('button', { name: centreText.openPaper });
-            await openBtn.click({ timeout: 4 * 60_000 });
+            await openBtn.waitFor({ timeout: 4 * 60_000 });
+            a.mark('open-visible');
+            await a.say('Centre: open the paper with one touch of the security key');
+            await a.beat(3000);
+            await openBtn.click();
             await a.seeHeading(centreText.paperOpenHeading, 120_000);
+            a.mark('paper-open');
+            await a.say('Centre: the paper is open, with lettered options');
             if (who === 'centre-1' || who === 'centre-8') {
               await a.shot(`live-53-paper-open-${who}`);
-              const sheet = await a.page.locator('ol[type="A"], .paper-sheet, .centre-paper').count();
-              const body = await a.text();
-              const lettered = /\bA\b[\s\S]*\bB\b/.test(body) && (await a.page.locator('ol[type="A"]').count()) > 0;
-              record(`${who}: the paper shows lettered options`, lettered, `${String(sheet)} paper blocks`);
-              const log = await a.page.getByText(/unlock log|Unlock log|released/i).count();
-              record(`${who}: the unlock log is on the page`, log > 0);
+              const options = await a.page.locator('ol[type="A"] li').count();
+              record(`${who}: the paper shows lettered options`, options > 0, `${String(options)} option lines`);
+              await a.page.locator('ol[type="A"]').first().scrollIntoViewIfNeeded().catch(() => undefined);
+              await a.beat(5000);
+              const log = a.page.locator('summary', { hasText: 'Unlock log' });
+              record(`${who}: the unlock log is on the page`, (await log.count()) > 0);
+              await a.page.evaluate(() => window.scrollTo(0, 0));
+              a.mark('paper-shown');
             }
+          });
+        }),
+      ),
+    );
+
+    // ---------------------------------------------------------------- the centre hands out the paper (simulated delivery)
+    await Promise.all(
+      ['centre-1', 'centre-8'].map((who) =>
+        step(`${who} hands out the paper (demo delivery, nothing sent)`, async () => {
+          const a = people[who];
+          if (!a) throw new Error('no window');
+          await a.flow('hand out', async () => {
+            a.paced = true;
+            a.mark('handout-start');
+            await a.page.getByRole('button', { name: centreText.handOut }).click();
+            await a.seeHeading(centreText.handOutHeading, 15_000);
+            await a.say('Centre: hand out the paper. This is a demo, nothing is sent to any room');
+            await a.see(centreText.demoLabel, 5_000);
+            await a.shot(`live-54-handout-${who}`);
+            await a.beat(3000);
+            await a.type(a.page.getByLabel(centreText.copiesFor('Room 1')), '35');
+            await a.beat(1000);
+            await a.page.getByRole('button', { name: centreText.sendToRooms }).click();
+            await a.page.getByText(centreText.sentInDemo).nth(2).waitFor({ timeout: 30_000 });
+            await a.shot(`live-55-handed-out-${who}`);
+            const body = await a.text();
+            if (/delivered|received|arrived/i.test(body)) throw new Error('the hand out page claims a real delivery');
+            await a.beat(4000);
+            a.paced = false;
+            a.mark('handout-end');
           });
         }),
       ),
@@ -460,13 +606,16 @@ describe('real exam through the screens', () => {
     await untilUnix(endUnix + 45);
     await step('verifier, finished exam with the full proof', async () => {
       await verifier.flow('after the end', async () => {
+        verifier.mark('after-end');
         await verifier.page.reload();
+        await verifier.say('Public verifier: the finished exam');
         await verifier.page.locator('li[data-state]').first().waitFor({ timeout: 60_000 });
         await sleep(40_000);
         const states = await stepStates(verifier.page);
         await verifier.shot('live-60-verifier-finished');
         notes.push(`verifier finished: ${states.map((s) => `${s.label}=${s.state}`).join(' | ')}`);
         if (states.some((s) => s.state === 'failed')) throw new Error(`a step failed: ${states.map((s) => `${s.label}=${s.state}`).join(', ')}`);
+        verifier.mark('verifier-shown');
       });
     });
     await step('setter closed screen shows the receipts check', async () => {
@@ -475,7 +624,7 @@ describe('real exam through the screens', () => {
       await a.page.reload();
       await a.seeHeading(/Your questions are sealed/, 60_000);
       await a.shot('live-61-setter-closed');
-      await a.see(/went to the sealed system that built the paper/, 60_000);
+      await a.see(/Your receipts match the paper that was built/, 60_000);
     });
     // Late registration offer: a finished exam offers none.
     await step('no registration is offered after the exam ends', async () => {
@@ -492,6 +641,7 @@ describe('real exam through the screens', () => {
       'The board wallet signatures (createExam, postApprovedList, postBuild) are produced by `cast send` with the Foundry keystore, behind the injected wallet. The buttons were clicked in the UI.',
       'The TEE VM start (run-tee.sh --reset) is run by this driver, not by a screen.',
     );
+    await finishVideos();
     await browser.close();
     await verifierApp.stop();
     await web.stop();
