@@ -3,7 +3,7 @@ import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 import { createExamRegistry } from '@paperseal/chain';
-import { decodeInviteFragment, firstRoundAtOrAfter, roundTimeSeconds, startupArgs, type Hex } from '@paperseal/protocol';
+import { decodeInviteFragment, examNameProblem, firstRoundAtOrAfter, roundTimeSeconds, startupArgs, type Hex } from '@paperseal/protocol';
 import { keccak256, toBytes } from 'viem';
 import { afterAll, describe, expect, it } from 'vitest';
 
@@ -144,7 +144,10 @@ describe('real exam through the screens', () => {
     const lockAt = Math.ceil((now + MINUTES_TO_LOCK * 60) / 60) * 60;
     const examStart = lockAt + (UNLOCK_AFTER_LOCK + DELTA) * 60;
     const endAt = examStart + DURATION * 60;
-    const name = `Paper Seal UI live ${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')}`;
+    // The board's form accepts lowercase letters, digits and hyphens only.
+    const name = `paperseal-ui-live-${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'z').toLowerCase()}`;
+    const nameProblem = examNameProblem(name);
+    if (nameProblem) throw new Error(`the exam name is not accepted by the app's own rule: ${nameProblem}`);
     log(`exam "${name}": lock ${localInput(lockAt)}, T ${localInput(examStart)}, delta ${String(DELTA)} min, end ${localInput(endAt)}`);
 
     const board = await openActor(browser, 'board', null, {
