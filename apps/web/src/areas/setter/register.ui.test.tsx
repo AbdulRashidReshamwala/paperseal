@@ -80,7 +80,7 @@ describe('Register by role', () => {
     render(<Register role="setter" examId={examId} tee={tee} keys={makeKeys()} invite={invite('setter')} />);
     fireEvent.click(button());
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toContain('The sealed system refused this');
+    expect(alert.textContent).toContain('Contact your exam board');
     expect(alert.textContent).toContain('registration is closed');
     expect(loadCredential(examId, 'setter')).toBeNull();
     expect(button()).toBeTruthy();
