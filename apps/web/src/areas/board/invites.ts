@@ -1,7 +1,9 @@
 import {
   checkInvite,
   encodeInviteLink,
+  ensNameProblem,
   InviteError,
+  looksLikeEnsName,
   newInviteSecret,
   ownerProblem,
   roles,
@@ -26,6 +28,8 @@ export interface BoardInvite {
   /** What the board calls this invite. For a setter it is the board's own note, never published. */
   label: string;
   inviteSecret: Hex;
+  /** A key holder with an ENS name whose record is not confirmed, put on the list anyway by the board's choice. */
+  goAhead?: boolean;
 }
 
 const storageKey = (examId: Hex) => `paperseal.invites.${examId.toLowerCase()}`;
@@ -51,7 +55,16 @@ export function validInvites(examId: Hex, parsed: unknown): BoardInvite[] {
       if (error instanceof InviteError) return [];
       throw error;
     }
-    return [{ id: value.id, role: invite.role, label: value.label, inviteSecret: invite.inviteSecret, ...(invite.owner === undefined ? {} : { owner: invite.owner }) }];
+    return [
+      {
+        id: value.id,
+        role: invite.role,
+        label: value.label,
+        inviteSecret: invite.inviteSecret,
+        ...(invite.owner === undefined ? {} : { owner: invite.owner }),
+        ...(value.goAhead === true && invite.role === 'keyholder' ? { goAhead: true } : {}),
+      },
+    ];
   });
 }
 
@@ -81,7 +94,8 @@ export const inviteRoleNames: Record<InviteRole, string> = {
 
 /**
  * A new invite, or the reason it can't be made. Key holders and centres need a name that fits the
- * public list and isn't already invited. A setter's text is only the board's own note, and may be empty.
+ * public list and isn't already invited. A name written like an ENS name must be a normalised one
+ * (spec/api.md, "Party Names"), and anything else is kept as a plain name. A setter's text is only the board's own note, and may be empty.
  */
 export function createInvite(
   existing: readonly BoardInvite[],
@@ -97,6 +111,8 @@ export function createInvite(
   if (name === '') return { ok: false, reason: 'Enter the name to show on the public list.' };
   const problem = ownerProblem(name);
   if (problem) return { ok: false, reason: problem };
+  const ensProblem = looksLikeEnsName(name) ? ensNameProblem(name) : null;
+  if (ensProblem) return { ok: false, reason: ensProblem };
   if (existing.some((invite) => invite.owner === name)) return { ok: false, reason: `${name} already has an invite.` };
   return { ok: true, invite: { id, role, owner: name, label: name, inviteSecret: newInviteSecret() } };
 }
@@ -140,7 +156,8 @@ export function mergeInvites(existing: readonly BoardInvite[], restored: readonl
 
 /** The same invite with a new secret, so the old link and any key registered with it stop counting. */
 export function reissueInvite(invite: BoardInvite): BoardInvite {
-  return { ...invite, inviteSecret: newInviteSecret() };
+  const { goAhead: _goAhead, ...rest } = invite;
+  return { ...rest, inviteSecret: newInviteSecret() };
 }
 
 export function linkFor(base: string, examId: Hex, invite: BoardInvite): string {

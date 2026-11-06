@@ -157,13 +157,13 @@ export const paper: Paper = {
 };
 
 /** The list holds a setter only as the hash of its own passkey public key, and never as a name. */
-export function approvedList(): ApprovedListEntry[] {
+export function approvedList(ownerOf: (name: string) => string = (name) => name): ApprovedListEntry[] {
   const key = (n: number) => Uint8Array.from([0x04, n, ...random(63)]);
   const entry = (role: number, name: string, n: number): ApprovedListEntry => {
     const passkeyPublicKey = key(n);
     return {
       role,
-      owner: role === 1 ? setterOwner(passkeyPublicKey) : name,
+      owner: role === 1 ? setterOwner(passkeyPublicKey) : ownerOf(name),
       passkeyPublicKey,
       derivedPublicKey: role === 1 ? new Uint8Array(0) : key(n + 100),
     };
@@ -193,6 +193,8 @@ export interface WorldOptions {
   selected?: number;
   /** What the signed log lists, given the files really written. It is signed for real either way. */
   logFiles?: (files: ReleaseFile[]) => ReleaseFile[];
+  /** The `owner` each key holder or centre is listed under, given its default name. */
+  ownerOf?: (name: string) => string;
 }
 
 /** A whole exam: chain records, storage files, a PKI token and a release log. */
@@ -201,7 +203,7 @@ export async function buildWorld(options: WorldOptions = {}) {
   const client = offlineQuicknet();
   const examBytes = fromHex(examId);
   const signing = await p256();
-  const entries = approvedList();
+  const entries = approvedList(options.ownerOf);
   const entriesBytes = encodeApprovedList(entries);
   const criteriaBytes = encodeCriteria(criteria);
   const thePaper = options.paper ?? paper;

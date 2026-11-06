@@ -1,4 +1,13 @@
-import { ens, examIdFromName, examNameProblem, splitExamEnsName, type Hex } from '@paperseal/protocol';
+import {
+  ens,
+  ensNameProblem,
+  examIdFromName,
+  examNameProblem,
+  looksLikeEnsName,
+  passkeyRecordValue,
+  splitExamEnsName,
+  type Hex,
+} from '@paperseal/protocol';
 import {
   BaseError,
   ContractFunctionRevertedError,
@@ -319,5 +328,97 @@ export async function resolveExamName(
   } catch (error) {
     if (error instanceof CheckFailure) return fail(error.check, error.message);
     return fail('unreadable', `The RPC failed before the name could be checked: ${messageOf(error)}`);
+  }
+}
+
+/* -------------------------------------------------------------- Party names */
+
+/**
+ * What a party's ENS name says about its passkey, from "Party Names" in spec/api.md.
+ * `confirmed`: the `ens.records.passkey` record is the hash of this passkey's public key.
+ * `mismatch`: the record is set to something else. `missing`: no record is set yet.
+ * `refused`: the chain would not answer on chain, an offchain lookup included, so the name says nothing.
+ * `unreadable`: the RPC failed. `invalid`: not a normalised ENS name.
+ */
+export type PasskeyNameState = 'confirmed' | 'mismatch' | 'missing' | 'refused' | 'unreadable' | 'invalid';
+
+export interface PasskeyNameResult {
+  state: PasskeyNameState;
+  name: string;
+  /** What the record must hold for this passkey. */
+  expected: Hex;
+  /** What the record holds. Null when unset, and absent when it could not be read. */
+  found?: string | null;
+  reason: string;
+}
+
+/**
+ * Reads `name`'s `ens.records.passkey` record on chain, with CCIP-Read off and the viewer's own RPC, and
+ * compares it with `passkeyRecordValue(passkeyPublicKey)`. A label and a proof of who holds this key,
+ * never a check anything depends on: every state other than `confirmed` only means "not confirmed".
+ * Never throws for a chain or RPC failure.
+ */
+export async function checkPasskeyName(
+  name: string,
+  passkeyPublicKey: Hex,
+  options: EnsOptions & { lookup?: EnsLookup },
+): Promise<PasskeyNameResult> {
+  const expected = passkeyRecordValue(passkeyPublicKey);
+  const result = (state: PasskeyNameState, reason: string, found?: string | null): PasskeyNameResult => ({
+    state,
+    name,
+    expected,
+    reason,
+    ...(found === undefined ? {} : { found }),
+  });
+  const problem = looksLikeEnsName(name) ? ensNameProblem(name) : 'The name is not written like an ENS name.';
+  if (problem) return result('invalid', problem);
+  const lookup = options.lookup ?? createEnsLookup(options);
+  const key = ens.records.passkey;
+  let found: string | null;
+  try {
+    found = await lookup.text(name, key);
+  } catch (error) {
+    const failure = readFailure(error);
+    if (failure === 'unreadable') return result('unreadable', `The RPC failed before ${name} could be read: ${messageOf(error)}`);
+    return result(
+      'refused',
+      failure === 'offchain'
+        ? `The ${key} record of ${name} needs an offchain gateway, and this reader reads ENS on chain only.`
+        : `The ${key} record of ${name} could not be read on chain: ${messageOf(error)}`,
+    );
+  }
+  const value = found?.trim() ?? '';
+  if (value === '') return result('missing', `${name} has no ${key} record yet.`, null);
+  if (value.toLowerCase() === expected) return result('confirmed', `The ${key} record of ${name} matches this key.`, value);
+  return result('mismatch', `The ${key} record of ${name} is ${value}, not ${expected}.`, value);
+}
+
+/** What reading a party's name itself found: `found` has the name's `addr` record, `unset` has none. Other states are as for `PasskeyNameState`. */
+export type PartyNameLookup =
+  | { state: 'found'; name: string; address: Address }
+  | { state: 'unset' | 'refused' | 'unreadable' | 'invalid'; name: string; reason: string };
+
+/** Whether a name a board typed resolves at all, on chain and with the viewer's own RPC. Never throws for a chain or RPC failure. */
+export async function lookupPartyName(name: string, options: EnsOptions & { lookup?: EnsLookup }): Promise<PartyNameLookup> {
+  const problem = looksLikeEnsName(name) ? ensNameProblem(name) : 'The name is not written like an ENS name.';
+  if (problem) return { state: 'invalid', name, reason: problem };
+  const lookup = options.lookup ?? createEnsLookup(options);
+  try {
+    const address = await lookup.address(name);
+    return address
+      ? { state: 'found', name, address }
+      : { state: 'unset', name, reason: `${name} has no address record yet.` };
+  } catch (error) {
+    const failure = readFailure(error);
+    if (failure === 'unreadable') return { state: 'unreadable', name, reason: `The RPC failed before ${name} could be read: ${messageOf(error)}` };
+    return {
+      state: 'refused',
+      name,
+      reason:
+        failure === 'offchain'
+          ? `${name} needs an offchain gateway, and this reader reads ENS on chain only.`
+          : `${name} could not be read on chain: ${messageOf(error)}`,
+    };
   }
 }

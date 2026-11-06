@@ -1,7 +1,7 @@
 import { createWebAuthnKeys, KeyError, type Keys, type Registration } from '@paperseal/keys';
-import { fromHex, NotImplementedError, requireHardwareAttestation, toHex, type Hex, type Invite } from '@paperseal/protocol';
+import { ens, fromHex, NotImplementedError, ownerEnsName, passkeyRecordValue, requireHardwareAttestation, toHex, type Hex, type Invite } from '@paperseal/protocol';
 import { TeeApiError, type TeeClient } from '@paperseal/tee-client';
-import { Check, KeyTouch, securityKeyProblem, Stage, type KeyTouchState } from '@paperseal/ui';
+import { Button, Check, KeyTouch, securityKeyProblem, Stage, type KeyTouchState } from '@paperseal/ui';
 import { useState, type ReactNode } from 'react';
 
 import { useCurrentExamId } from './currentExam';
@@ -159,6 +159,42 @@ const roleCopy: Record<RegisterRole, { lede: (owner: string | undefined) => stri
   },
 };
 
+/**
+ * For a key holder invited under their own ENS name: the one record that lets anyone see the name
+ * belongs to this security key. Setting it is optional, and the exam does not depend on it.
+ */
+export function NameRecord(props: { owner: string; passkeyPublicKey: Hex }) {
+  const [copy, setCopy] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const value = passkeyRecordValue(props.passkeyPublicKey);
+  const onClick = () => {
+    const written = (globalThis.navigator as Navigator | undefined)?.clipboard?.writeText(value);
+    if (!written) {
+      setCopy('failed');
+      return;
+    }
+    written.then(
+      () => {
+        setCopy('copied');
+      },
+      () => {
+        setCopy('failed');
+      },
+    );
+  };
+  return (
+    <div className="register-name-record">
+      <p>
+        To confirm {props.owner}, add a text record named <span className="ps-mono">{ens.records.passkey}</span> to it, with this value.
+      </p>
+      <p className="ps-mono">{value}</p>
+      <Button aria-label="Copy the value for your name" onClick={onClick}>
+        {copy === 'copied' ? 'Copied' : 'Copy the value'}
+      </Button>
+      {copy === 'failed' ? <p role="status">The value could not be copied. Select it above and copy it yourself.</p> : null}
+    </div>
+  );
+}
+
 const newKey = 'To use a different security key, ask your exam board for a new invitation link.';
 
 export interface RegisterProps {
@@ -249,7 +285,9 @@ export function Register(props: RegisterProps) {
         title="Your security key is registered"
         {...(role !== 'setter' ? { lede: `Registered as ${done.owner}.` } : {})}
         next={`${copy.next} ${newKey}`}
-      />
+      >
+        {role === 'keyholder' && ownerEnsName(done.owner) ? <NameRecord owner={done.owner} passkeyPublicKey={done.passkeyPublicKey} /> : null}
+      </Stage>
     );
   }
 

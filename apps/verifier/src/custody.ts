@@ -1,14 +1,16 @@
 import type { ClaimCheck } from '@paperseal/attestation';
-import type { ExamNameCheck, ExamNameResult, ResolvedExamName } from '@paperseal/chain';
+import type { ExamNameCheck, ExamNameResult, PasskeyNameResult, ResolvedExamName } from '@paperseal/chain';
 import {
   decodeApprovedList,
   decodeCriteria,
   fromHex,
+  ownerEnsName,
   requireHardwareAttestation,
   roles,
   roundAtSeconds,
   roundTimeSeconds,
   storageNames,
+  toHex,
   type ApprovedListEntry,
   type Hex,
   type Paper,
@@ -136,6 +138,11 @@ export interface View {
   invalidLink: boolean;
   /** Only on a name route. The exam ID and registry then come from the name, once it passes. */
   name?: NameView;
+  /**
+   * What each listed party's ENS name says about its security key, by passkey public key. A label and a
+   * proof of who holds a key, never a check the exam depends on. Absent where names are not read.
+   */
+  partyNames?: Polled<Record<string, PasskeyNameResult>>;
   sources: { chain: boolean; storage: boolean; tee: boolean };
   records: Polled<Records>;
   live: Polled<LiveReport | Neutral>;
@@ -569,16 +576,53 @@ function listSummary(entries: readonly ApprovedListEntry[]): string {
   return `${people} approved: ${plural(setters, 'setter')}, ${parties} and ${plural(centres, 'centre')}.`;
 }
 
-function entryRows(bytes: Uint8Array): { items: Item[]; entries: ApprovedListEntry[] | null } {
+const ensNote =
+  'A name marked "Name confirmed" has a record, set by whoever controls that name, that names this security key. That shows who holds the key. It is not something the exam depends on, so a name that is not confirmed never fails a check. A centre\'s name is one the board can change, so it shows who the centre is called, not that it is independent.';
+
+/** One party whose `owner` is an ENS name. Rows are labels and proofs, never checks, so none of them can fail the step. */
+function ensRows(entry: ApprovedListEntry, name: string, names: View['partyNames']): Item[] {
+  const label = roleNames[entry.role] ?? `Unknown role ${String(entry.role)}`;
+  const result = names?.state === 'ready' ? names.value[toHex(entry.passkeyPublicKey)] : undefined;
+  if (result?.state === 'confirmed') {
+    return [{ kind: 'tag', label, value: name, tone: 'ok', tag: 'Name confirmed' }];
+  }
+  const holdsKey = entry.role === roles.neutral;
+  const pending = result === undefined && (names === undefined || names.state === 'off' || names.state === 'loading');
+  if (pending) {
+    const off = names === undefined || names.state === 'off';
+    return [
+      { kind: 'tag', label, value: name, tone: 'neutral', tag: off ? 'Not checked' : 'Reading' },
+      ...(off ? [{ kind: 'text', text: `${name} was not read. Add where to read the public record under "Check it yourself".` } as const] : []),
+    ];
+  }
+  const why =
+    result === undefined || result.state === 'refused' || result.state === 'unreadable' || result.state === 'invalid'
+      ? `${name} could not be read just now.`
+      : result.state === 'mismatch'
+        ? `The record on ${name} names a different security key.`
+        : `${name} has no record for this security key yet.`;
+  return [
+    { kind: 'tag', label, value: name, tone: holdsKey ? 'warn' : 'neutral', tag: holdsKey ? 'Not confirmed' : 'Label only' },
+    { kind: 'text', text: holdsKey ? why : `${why} ${name} is a name the board chose for this centre. It does not show that the centre is independent.` },
+  ];
+}
+
+function entryRows(bytes: Uint8Array, names?: View['partyNames']): { items: Item[]; entries: ApprovedListEntry[] | null } {
   try {
     const entries = decodeApprovedList(bytes);
+    const named = entries.some((entry) => entry.role !== roles.setter && ownerEnsName(entry.owner) !== null);
     return {
       entries,
-      items: entries.map((entry) =>
-        entry.role === roles.setter
-          ? { kind: 'hash', label: 'Setter', value: entry.owner }
-          : { kind: 'fact', label: roleNames[entry.role] ?? `Unknown role ${String(entry.role)}`, value: entry.owner },
-      ),
+      items: [
+        ...entries.flatMap((entry): Item[] => {
+          if (entry.role === roles.setter) return [{ kind: 'hash', label: 'Setter', value: entry.owner }];
+          const ens = ownerEnsName(entry.owner);
+          return ens
+            ? ensRows(entry, ens, names)
+            : [{ kind: 'fact', label: roleNames[entry.role] ?? `Unknown role ${String(entry.role)}`, value: entry.owner }];
+        }),
+        ...(named ? [{ kind: 'text', text: `${ensNote} ${sepoliaName}` } as const] : []),
+      ],
     };
   } catch (error) {
     const message = (error as Error).message;
@@ -610,7 +654,7 @@ function peopleStep(c: Context): Draft {
   const bytes = fromHex(chain.entries);
   const computed = computedListHash(view.examId, bytes);
   const hashOk = c.checks?.list === 'pass';
-  const rows = entryRows(bytes);
+  const rows = entryRows(bytes, view.partyNames);
   return {
     ...base,
     complete: hashOk && rows.entries !== null,

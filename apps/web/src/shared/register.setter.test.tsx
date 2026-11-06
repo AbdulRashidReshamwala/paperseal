@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fromHex, inviteTag, setterOwner, toHex, type Hex, type Invite } from '@paperseal/protocol';
+import { fromHex, inviteTag, passkeyRecordValue, setterOwner, toHex, type Hex, type Invite } from '@paperseal/protocol';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -173,5 +173,43 @@ describe('credential storage', () => {
   it('is read per exam, so another exam never gets this exam key', () => {
     saveCredential(examId, { owner: 'Centre', role: 'centre', credentialId: '0x02', passkeyPublicKey: '0x04bb' });
     expect(holderCredential('centre', `0x${'22'.repeat(32)}`)).toBeNull();
+  });
+});
+
+describe('Register, a key holder with an ENS name', () => {
+  const mount = (role: 'keyholder' | 'centre', owner: string) =>
+    render(<Register role={role} examId={examId} tee={makeTee()} keys={makeKeys()} invite={inviteFor(role, owner)} />);
+
+  it('shows the exact record value and one instruction once registered', async () => {
+    mount('keyholder', 'dr-rao.eth');
+    fireEvent.click(screen.getByRole('button', { name: 'Register your security key' }));
+    await screen.findByText('Registered as dr-rao.eth.');
+    expect(screen.getByText(/add a text record named/)).toBeTruthy();
+    expect(screen.getByText('paperseal.passkey')).toBeTruthy();
+    expect(screen.getByText(passkeyRecordValue(passkey))).toBeTruthy();
+  });
+
+  it('copies the value', async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    mount('keyholder', 'dr-rao.eth');
+    fireEvent.click(screen.getByRole('button', { name: 'Register your security key' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy the value for your name' }));
+    await screen.findByText('Copied');
+    expect(writeText).toHaveBeenCalledWith(passkeyRecordValue(passkey));
+    vi.unstubAllGlobals();
+  });
+
+  it('shows nothing about a record for a plain name, or for a centre', async () => {
+    mount('keyholder', 'Dr Rao');
+    fireEvent.click(screen.getByRole('button', { name: 'Register your security key' }));
+    await screen.findByText('Registered as Dr Rao.');
+    expect(screen.queryByText(/text record/)).toBeNull();
+    cleanup();
+    localStorage.clear();
+    mount('centre', 'north.centres.maths-board.eth');
+    fireEvent.click(screen.getByRole('button', { name: 'Register your security key' }));
+    await screen.findByText('Registered as north.centres.maths-board.eth.');
+    expect(screen.queryByText(/text record/)).toBeNull();
   });
 });

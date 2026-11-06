@@ -1,4 +1,4 @@
-import { entriesFor, listRolesFor, matchInvites, roles, threshold, type InviteRole, type InviteState } from '@paperseal/protocol';
+import { ensNameProblem, entriesFor, listRolesFor, looksLikeEnsName, matchInvites, roles, threshold, type InviteRole, type InviteState } from '@paperseal/protocol';
 import type { RegistrationEntry, TeeClient } from '@paperseal/tee-client';
 import { Button, Check, Field, Hash, Panel, Row, Rows, Stage, Stamp } from '@paperseal/ui';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
@@ -15,6 +15,7 @@ import { Fold, PostAction, ReadBackRows } from './Parts';
 import { centreRoles, createInvite, inviteRoleNames, linkFor, reissueInvite, type BoardInvite } from './invites';
 import { bankNeeded } from './plan';
 import { checkPostTarget, type PostGate } from './postGate';
+import { inviteEnsName, mayBeListed, nameStanding, usePartyNames, type InviteNames, type NameStanding } from './partyNames';
 import { postApprovedListFlow, type PostOutcome } from './postFlow';
 import { explainError } from './publishFlow';
 import { roleNames, tryCompose } from './registrations';
@@ -98,6 +99,15 @@ function CopyLink(props: { who: string; url: string }) {
 
 const inviteRoleOptions: InviteRole[] = ['keyholder', 'centre', 'setter'];
 
+/** Under the name field: a plain name is fine, and an ENS name is recognised as one. */
+function hintFor(text: string): string {
+  const name = text.trim();
+  if (looksLikeEnsName(name) && ensNameProblem(name) === null) {
+    return 'This is an ENS name. It is read once they register, and the public list shows it as typed.';
+  }
+  return 'A plain name, or an ENS name such as dr-rao.eth. A person without an ENS name can use a plain name.';
+}
+
 /** Makes one invite: a role and a name, then a link to copy. Setters need no name, and any note stays here. */
 function AddInvite(props: { invites: readonly BoardInvite[]; onAdd: (invite: BoardInvite) => void }) {
   const [role, setRole] = useState<InviteRole>('keyholder');
@@ -135,6 +145,7 @@ function AddInvite(props: { invites: readonly BoardInvite[]; onAdd: (invite: Boa
       </label>
       <Field
         label={role === 'setter' ? 'A note for yourself (optional, kept private)' : 'Name to show on the public list'}
+        {...(role === 'setter' ? {} : { hint: hintFor(text) })}
         value={text}
         error={error}
         onChange={(value) => {
@@ -153,21 +164,110 @@ const stateWords: Record<InviteState['kind'], string> = {
   conflict: 'Two security keys used this invite, so neither is on the list.',
 };
 
+const lookupWords: Record<string, string> = {
+  found: 'Name found',
+  unset: 'This name has no address yet',
+  refused: 'This name could not be read, so it is not confirmed',
+  unreadable: 'This name could not be read right now. This page keeps trying.',
+  invalid: 'This is not a name that can be read',
+};
+
+/** What a registered key holder's ENS name says, and what the board can do about it. */
+function NameLine(props: {
+  who: string;
+  name: string;
+  standing: NameStanding;
+  names: InviteNames | undefined;
+  goAhead: boolean;
+  onGoAhead: (go: boolean) => void;
+  onReissue: () => void;
+}) {
+  const { standing, name } = props;
+  const reason = props.names?.passkey?.reason;
+  const details = reason ? (
+    <Fold summary="Details">
+      <p>{reason}</p>
+    </Fold>
+  ) : null;
+  switch (standing.kind) {
+    case 'plain':
+      return null;
+    case 'reading':
+      return <Check status="pending">Reading {name}</Check>;
+    case 'confirmed':
+      return <Check status="pass">Name confirmed</Check>;
+    case 'mismatch':
+      return (
+        <>
+          <Check status="fail">
+            The record on {name} is for a different security key, so they are not on the list. Ask them to set the record shown on their registration screen, or make a new link.
+          </Check>
+          <Button aria-label={`Make a new link for ${props.who}`} onClick={props.onReissue}>
+            Make a new link
+          </Button>
+          {details}
+        </>
+      );
+    case 'unconfirmed':
+      return (
+        <>
+          <Check status={props.goAhead ? 'not-checked' : 'pending'}>
+            {props.goAhead
+              ? `On the list, but ${name} is not confirmed.`
+              : standing.why === 'missing'
+                ? `Waiting for ${name} to be set up with their security key.`
+                : standing.why === 'unavailable'
+                  ? `${name} can't be read from this page.`
+                  : `${name} can't be read right now. This page keeps trying.`}
+          </Check>
+          <Button
+            aria-label={`${props.goAhead ? 'Wait for the name for' : 'Go ahead without the name for'} ${props.who}`}
+            onClick={() => {
+              props.onGoAhead(!props.goAhead);
+            }}
+          >
+            {props.goAhead ? 'Wait for the name' : 'Go ahead without it'}
+          </Button>
+          {details}
+        </>
+      );
+  }
+}
+
 /** One invite: who it is for, where it stands, and what the board can do about it. */
 function InviteRow(props: {
   invite: BoardInvite;
   state: InviteState;
   link: string;
   role: number | undefined;
+  names: InviteNames | undefined;
+  standing: NameStanding;
   onRole: (role: number | null) => void;
   onReissue: () => void;
+  onGoAhead: (go: boolean) => void;
 }) {
-  const { invite, state } = props;
+  const { invite, state, standing } = props;
   const who = `${invite.label} (${inviteRoleNames[invite.role]})`;
+  const ensName = inviteEnsName(invite);
+  // A key holder's ENS name decides where they stand. A centre's is a label, whatever it says.
+  const gated = state.kind === 'matched' && invite.role === 'keyholder' && ensName !== null;
+  const lookup = props.names?.lookup;
   return (
     <Row label={who}>
       <span className="board-link">
-        <Check status={state.kind === 'matched' ? 'pass' : state.kind === 'conflict' ? 'fail' : 'pending'}>{stateWords[state.kind]}</Check>
+        {gated && ensName ? (
+          <NameLine
+            who={who}
+            name={ensName}
+            standing={standing}
+            names={props.names}
+            goAhead={invite.goAhead === true}
+            onGoAhead={props.onGoAhead}
+            onReissue={props.onReissue}
+          />
+        ) : (
+          <Check status={state.kind === 'matched' ? 'pass' : state.kind === 'conflict' ? 'fail' : 'pending'}>{stateWords[state.kind]}</Check>
+        )}
         {state.kind === 'matched' && invite.role === 'centre' ? (
           <select
             className="ps-input board-role"
@@ -185,6 +285,14 @@ function InviteRow(props: {
             ))}
           </select>
         ) : null}
+        {state.kind === 'matched' && invite.role === 'centre' && ensName ? (
+          props.names?.passkey?.state === 'confirmed' ? (
+            <Check status="pass">Name confirmed</Check>
+          ) : (
+            <span className="board-note">{ensName} is a name for the list. It does not show that this centre is independent.</span>
+          )
+        ) : null}
+        {state.kind === 'waiting' && ensName && lookup ? <span className="board-note">{lookupWords[lookup.state]}</span> : null}
         {state.kind === 'waiting' ? <CopyLink who={who} url={props.link} /> : null}
         {state.kind === 'conflict' ? (
           <Button aria-label={`Make a new link for ${who}`} onClick={props.onReissue}>
@@ -207,6 +315,11 @@ function Count(props: { label: string; have: number; need: number }) {
   );
 }
 
+function withoutGoAhead(invite: BoardInvite): BoardInvite {
+  const { goAhead: _goAhead, ...rest } = invite;
+  return rest;
+}
+
 const expected = /^expected \d+ neutral and \d+ centre key holders/;
 
 /** Step 4: invites to send, then the list composed from whoever registered with one. */
@@ -224,15 +337,33 @@ export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPoste
   const matching = useMemo(() => matchInvites(invites, registrations), [invites, registrations]);
   // `null` is the board leaving a centre out. Anything not touched keeps its default.
   const [touched, setTouched] = useState<Record<string, number | null>>({});
+  // ENS names are read through the board's own connection. They label people and prove who holds a key,
+  // and nothing else depends on them, so an unread name never blocks anything but a key holder's own place.
+  const names = usePartyNames(
+    environment.ensLookup,
+    matching.rows.flatMap(({ invite, state }) => {
+      const name = inviteEnsName(invite);
+      if (!name) return [];
+      return [{ id: invite.id, name, ...(state.kind === 'matched' ? { passkey: state.registration.passkeyPublicKey } : {}) }];
+    }),
+  );
+  const canReadNames = Boolean(environment.ensLookup);
+  const standings = useMemo(
+    () => Object.fromEntries(invites.map((invite) => [invite.id, nameStanding(invite, names[invite.id], canReadNames)])),
+    [invites, names, canReadNames],
+  );
   const picked = useMemo(() => {
     const merged: Record<string, number | undefined> = listRolesFor(matching);
     for (const { invite, state } of matching.rows) {
-      if (invite.role !== 'centre' || state.kind !== 'matched') continue;
+      if (state.kind !== 'matched') continue;
       const key = state.registration.passkeyPublicKey;
-      if (key in touched) merged[key] = touched[key] ?? undefined;
+      if (invite.role === 'centre' && key in touched) merged[key] = touched[key] ?? undefined;
+      // A key holder whose ENS name isn't confirmed, or names another key, waits off the list.
+      const standing = standings[invite.id];
+      if (standing && !mayBeListed(invite, standing)) merged[key] = undefined;
     }
     return merged;
-  }, [matching, touched]);
+  }, [matching, touched, standings]);
   const entries = useMemo(() => entriesFor(matching, picked), [matching, picked]);
   const composed = useMemo(() => (examId && entries.length > 0 ? tryCompose(examId, entries) : null), [examId, entries]);
 
@@ -303,6 +434,11 @@ export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPoste
                       state={state}
                       link={linkFor(base, examId, invite)}
                       role={key ? picked[key] : undefined}
+                      names={names[invite.id]}
+                      standing={standings[invite.id] ?? { kind: 'plain' }}
+                      onGoAhead={(go) => {
+                        changeInvite(go ? { ...invite, goAhead: true } : withoutGoAhead(invite));
+                      }}
                       onRole={(role) => {
                         if (key) setTouched({ ...touched, [key]: role });
                       }}
@@ -315,6 +451,11 @@ export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPoste
               </Rows>
             ) : null}
             {examId ? <InviteBackup examId={examId} invites={invites} onRestore={update} /> : null}
+            {invites.some((invite) => inviteEnsName(invite)) ? (
+              <p className="board-note">
+                ENS names are read on Sepolia, a test network, where anyone can register a similar name. Here a name is a label and, for a key holder, a sign of who holds the key. Nothing else depends on it.
+              </p>
+            ) : null}
             <p className="board-note">
               Each link works for one person only, so send it to them privately. It is safe to close this page while you wait.
             </p>

@@ -1,4 +1,4 @@
-import { createExamRegistry, examRegistryAbi, OnChainBytesError, type ExamRegistry } from '@paperseal/chain';
+import { createEnsLookup, createExamRegistry, examRegistryAbi, OnChainBytesError, type EnsLookup, type ExamRegistry } from '@paperseal/chain';
 import { chain, decodeCriteria, fromHex, type Criteria, type Hex } from '@paperseal/protocol';
 import {
   BaseError,
@@ -29,6 +29,8 @@ export interface PublishEnvironment {
   publicClient: PublicClient | null;
   /** A registry on `packages/chain`; with a wallet client it can write. */
   createRegistry: ((wallet?: WalletClient) => ExamRegistry) | null;
+  /** Reads of ENS names, on chain only and over the same RPC. Null when it is not set, so names are left unread. */
+  ensLookup?: EnsLookup | null;
 }
 
 export function defaultEnvironment(
@@ -42,6 +44,7 @@ export function defaultEnvironment(
     publicClient: rpcUrl ? createPublicClient({ chain: sepolia, transport: http(rpcUrl) }) : null,
     createRegistry:
       rpcUrl && address ? (wallet) => createExamRegistry({ address, rpcUrl, ...(wallet ? { wallet } : {}) }) : null,
+    ensLookup: rpcUrl ? createEnsLookup({ rpcUrl }) : null,
   };
 }
 
