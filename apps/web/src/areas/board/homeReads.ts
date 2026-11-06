@@ -12,17 +12,35 @@ export const HOME_READ_LIMIT = 3;
 /** How long the home list waits for its first reads before showing the rows anyway. */
 export const HOME_LIST_DEADLINE_MS = 8_000;
 
+/** How long one exam's read may take before it counts as failed, so a hung read cannot stop the list. */
+export const HOME_READ_TIMEOUT_MS = 12_000;
+
+/** `read`, or a rejection once `ms` have passed. The read itself carries on. */
+export function withDeadline<T>(read: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`No answer after ${String(ms / 1000)} seconds.`));
+    }, ms);
+  });
+  return Promise.race([read, deadline]).finally(() => {
+    clearTimeout(timer);
+  });
+}
+
 /**
- * Reads each exam in `ids` with at most `limit` reads at once, one failing read never stopping the
- * rest, then reads them all again `ms` after the last one finishes. A failed read keeps the row's
- * last good value, so a blip never replaces a status with a complaint. `load` is given that last
- * value, so what ExamRegistry never changes is not read again.
+ * Reads each exam in `ids` with at most `limit` reads at once, one failing or hung read never
+ * stopping the rest, then reads them all again `ms` after the last one finishes. A read that takes
+ * longer than `timeoutMs` counts as failed. A failed read keeps the row's last good value, so a
+ * blip never replaces a status with a complaint. `load` is given that last value, so what
+ * ExamRegistry never changes is not read again.
  */
 export function useRowReads(
   ids: readonly Hex[],
   load: ((id: Hex, previous: Snapshot | null) => Promise<Snapshot>) | null,
   ms: number,
   limit = HOME_READ_LIMIT,
+  timeoutMs = HOME_READ_TIMEOUT_MS,
 ): ReadonlyMap<Hex, RowRead> {
   const [reads, setReads] = useState<ReadonlyMap<Hex, RowRead>>(new Map());
   const key = ids.join(',');
@@ -35,8 +53,12 @@ export function useRowReads(
     let timer: ReturnType<typeof setTimeout> | undefined;
     const readOne = async (id: Hex) => {
       try {
-        const snapshot = await load(id, last.current.get(id) ?? null);
-        last.current.set(id, snapshot);
+        // A read that answers after its deadline still saves the next one some work.
+        const read = load(id, last.current.get(id) ?? null).then((snapshot) => {
+          last.current.set(id, snapshot);
+          return snapshot;
+        });
+        const snapshot = await withDeadline(read, timeoutMs);
         if (live) setReads((previous) => new Map(previous).set(id, { state: 'ready', snapshot }));
       } catch {
         const kept = last.current.get(id);
@@ -56,7 +78,7 @@ export function useRowReads(
       live = false;
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [key, load, ms, limit]);
+  }, [key, load, ms, limit, timeoutMs]);
 
   return reads;
 }
