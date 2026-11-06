@@ -6,7 +6,7 @@ import { checkPublishedToken, checkRecordToken, type Build, type FreshVerdict } 
 import { approvedEntries, checkManifest, holdersOf } from './commitments';
 import { clockTime, custody, inWords, repository, type Custody, type CustodyStep, type Item, type NameView, type StepId, type View } from './custody';
 import { buildWorld, examId, registryAddress, type World } from './fixtures';
-import type { LiveReport, ProofRun, Records } from './load';
+import type { ArkivReport, LiveReport, ProofRun, Records } from './load';
 import type { ProofChecks, ProofState } from './proof';
 import { checkReleaseLog, parseReleaseLog, releaseProgress } from './unlock';
 
@@ -88,17 +88,19 @@ interface Scene {
   chain?: Partial<Records['chain']>;
   records?: Partial<Records>;
   live?: LiveReport;
+  arkiv?: View['arkiv'];
   proof?: ProofRun;
 }
 
-function sceneView({ round = LOCK - 1, chain, records, live, proof }: Scene = {}): View {
+function sceneView({ round = LOCK - 1, chain, records, live, arkiv, proof }: Scene = {}): View {
   const value = { ...fullRecords, ...records, chain: { ...fullRecords.chain, ...chain } };
   return {
     examId,
     invalidLink: false,
-    sources: { chain: true, storage: true, tee: live !== undefined },
+    sources: { chain: true, storage: true, tee: live !== undefined, arkiv: arkiv !== undefined },
     records: { state: 'ready', value, readAt: 0 },
     live: live ? { state: 'ready', value: live, readAt: 0 } : { state: 'off' },
+    arkiv: arkiv ?? { state: 'off' },
     latest: { round, error: null },
     now: roundTimeSeconds(round),
     proof: proof ?? null,
@@ -480,6 +482,118 @@ describe('step 6, unlock', () => {
   });
 });
 
+describe('step 6, the copy on Arkiv', () => {
+  const noLog = { log: { kind: 'neutral' as const, message: 'no log' } };
+  const entityKey: Hex = `0x${'0e'.repeat(32)}`;
+  const writer: Hex = '0x1111111111111111111111111111111111111111';
+  const down = (): LiveReport => ({ ...liveReport(true), fresh: { ok: false, message: 'fetch failed' }, status: { ok: false, message: 'fetch failed' } });
+  const progressOf = (count: number) => {
+    const holders = holdersOf(approvedEntries(world.entriesHex) ?? []);
+    return releaseProgress(holders, world.releaseLog.entries.slice(0, count).map((e) => e.passkeyPublicKey));
+  };
+  const report = (count: number | null, newestAt = roundTimeSeconds(UNLOCK) - 30, over: Partial<ArkivReport> = {}): View['arkiv'] => ({
+    state: 'ready',
+    readAt: 0,
+    value: {
+      writers: [writer],
+      read: { logs: count === null ? 0 : 1, tokens: 1 },
+      log:
+        count === null
+          ? null
+          : {
+              entityKey,
+              creator: writer,
+              createdAtBlock: 1n,
+              writtenAt: newestAt,
+              entries: count,
+              instancePublicKey: world.releaseLog.instancePublicKey,
+              verdict: { examId: 'pass', entriesHash: 'pass', signature: 'pass' },
+              progress: progressOf(count),
+            },
+      ignored: { tokens: 0, unreadable: 0, unattested: 0, failed: 0 },
+      newestAt,
+      ...over,
+    },
+  });
+
+  it('keeps showing progress from Arkiv when the live machine cannot be reached', () => {
+    const s = step(scene({ round: UNLOCK, records: noLog, live: down(), arkiv: report(5) }), 'unlock');
+    expect(s.state).toBe('current');
+    expect(s.failures).toEqual([]);
+    expect(s.note).toBe('Unlocked. 5 of the 8 needed key holders have released.');
+    expect(s.aside).toMatch(/^Read from the copy on Arkiv/);
+    expect(s.items).toContainEqual({ kind: 'fact', label: 'Progress shown is from', value: 'The copy on Arkiv' });
+    expect(s.items).toContainEqual({ kind: 'hash', label: 'Entity key of the log shown', value: entityKey });
+    expect(s.items).toContainEqual(expect.objectContaining({ kind: 'link', href: `https://rabdi.explorer.arkiv.network/entity/${entityKey}` }));
+    expect(s.items).toContainEqual({ kind: 'fact', label: 'Writers read', value: writer });
+    expect(s.items).toContainEqual(expect.objectContaining({ status: 'pass', label: 'Release log signed by a key a passing release token attests' }));
+    expect(s.items).toContainEqual({ kind: 'fact', label: 'Rows ignored', value: 'None' });
+    const released = s.items.filter((item) => item.kind === 'tag' && item.tag === 'Released');
+    expect(released).toHaveLength(5);
+    for (const item of released) expect(item).toMatchObject({ tone: 'ok' });
+  });
+
+  it('is done when the Arkiv log shows enough key holders', () => {
+    const s = step(scene({ round: UNLOCK, records: noLog, arkiv: report(8) }), 'unlock');
+    expect(s.state).toBe('done');
+    expect(s.note).toBe('8 of the 8 needed key holders have released.');
+  });
+
+  it('shows whichever verified source has more releases, and says which', () => {
+    const live = { ...liveReport(true), progress: progressOf(3) };
+    const arkivWins = step(scene({ round: UNLOCK, records: noLog, live, arkiv: report(5) }), 'unlock');
+    expect(arkivWins.note).toBe('Unlocked. 5 of the 8 needed key holders have released.');
+    expect(arkivWins.aside).toMatch(/copy on Arkiv/);
+    const teeWins = step(scene({ round: UNLOCK, records: noLog, live: { ...live, progress: progressOf(6) }, arkiv: report(5) }), 'unlock');
+    expect(teeWins.note).toBe('Unlocked. 6 of the 8 needed key holders have released.');
+    expect(teeWins.aside).toMatch(/live machine/);
+    expect(teeWins.items).toContainEqual({ kind: 'fact', label: 'Progress shown is from', value: 'The live machine' });
+  });
+
+  it('never counts rows that did not verify, and says how many were ignored', () => {
+    const ignored = { tokens: 1, unreadable: 0, unattested: 2, failed: 0 };
+    const s = step(scene({ round: UNLOCK, records: noLog, arkiv: report(null, undefined, { ignored, read: { logs: 2, tokens: 1 } }) }), 'unlock');
+    expect(s.note).toBe('Unlocked. No release has been verified yet.');
+    expect(s.failures).toEqual([]);
+    expect(s.aside).toBeUndefined();
+    expect(s.items).toContainEqual({
+      kind: 'fact',
+      label: 'Rows ignored',
+      value: '1 release token that did not pass the check, 2 release logs not signed by a key a passing token attests',
+    });
+    expect(s.items).toContainEqual(expect.objectContaining({ label: 'Release log', status: 'not-checked', detail: 'No release log on Arkiv has passed its check yet' }));
+  });
+
+  it('warns when the copy stops updating while unlock is not over', () => {
+    const now = roundTimeSeconds(UNLOCK);
+    const stale = step(scene({ round: UNLOCK, records: noLog, arkiv: report(5, now - 600) }), 'unlock');
+    expect(stale.items).toContainEqual({
+      kind: 'text',
+      tone: 'warn',
+      text: 'The Arkiv copy stopped updating 10 minutes ago. That does not mean no one has released since. This page keeps reading it.',
+    });
+    expect(stale.failures).toEqual([]);
+    const fresh = step(scene({ round: UNLOCK, records: noLog, arkiv: report(5, now - 60) }), 'unlock');
+    expect(fresh.items.some((item) => item.kind === 'text' && item.tone === 'warn')).toBe(false);
+    const finished = step(scene({ round: UNLOCK, arkiv: report(5, now - 600) }), 'unlock');
+    expect(finished.state).toBe('done');
+    expect(finished.items.some((item) => item.kind === 'text' && /stopped updating/.test(item.text))).toBe(false);
+  });
+
+  it('is neutral when Arkiv cannot be read', () => {
+    const s = step(scene({ round: UNLOCK, records: noLog, arkiv: { state: 'error', message: 'rate limited' } }), 'unlock');
+    expect(s.state).toBe('current');
+    expect(s.failures).toEqual([]);
+    expect(s.items).toContainEqual({ kind: 'check', label: 'Copy on Arkiv', status: 'not-checked', detail: 'Could not be read: rate limited' });
+  });
+
+  it('says how to turn it on when no writers are set', () => {
+    const s = step(scene({ round: UNLOCK, records: noLog }), 'unlock');
+    expect(s.items).toContainEqual({ kind: 'heading', text: 'Copy on Arkiv, optional' });
+    expect(s.items).toContainEqual({ kind: 'text', text: expect.stringMatching(/^Add who may write the copy on Arkiv/) });
+  });
+});
+
 describe('step 7, exam ends and paper opens', () => {
   it('waiting behind an earlier step, saying when, and the proof has not run', () => {
     const s = step(scene(beforeBuild), 'open');
@@ -552,9 +666,10 @@ describe('step 7, exam ends and paper opens', () => {
     const base: View = {
       examId,
       invalidLink: false,
-      sources: { chain: true, storage: true, tee: false },
+      sources: { chain: true, storage: true, tee: false, arkiv: false },
       records: { state: 'ready', value: fullRecords, readAt: 0 },
       live: { state: 'off' },
+      arkiv: { state: 'off' },
       latest: { round: END - 1, error: null },
       now: roundTimeSeconds(END) + 600,
       proof: null,
@@ -634,9 +749,10 @@ describe('before there is an exam to show', () => {
   const base: View = {
     examId: null,
     invalidLink: false,
-    sources: { chain: false, storage: false, tee: false },
+    sources: { chain: false, storage: false, tee: false, arkiv: false },
     records: { state: 'off' },
     live: { state: 'off' },
+    arkiv: { state: 'off' },
     latest: { round: null, error: null },
     now: 0,
     proof: null,

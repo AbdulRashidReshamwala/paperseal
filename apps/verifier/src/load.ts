@@ -1,3 +1,4 @@
+import { arkiv, type ArkivReader } from '@paperseal/arkiv';
 import { decodeToken } from '@paperseal/attestation';
 import type { ChainClient } from '@paperseal/crypto';
 import { roundTimeSeconds, storageNames, type Hex } from '@paperseal/protocol';
@@ -196,6 +197,158 @@ export async function loadLive(args: {
     progress: list && status.ok ? releaseProgress(holdersOf(list), status.value.release.released) : null,
     // Only a log signed by the key that just passed attestation is checked under that key.
     log: log ? await checkReleaseLog(log, examId, trusted && log.instancePublicKey === trusted ? trusted : null) : null,
+  };
+}
+
+/** Rabdi makes a block every 2 seconds, so a row's age is its distance from the latest block. */
+export const ARKIV_BLOCK_SECONDS = 2;
+
+/** How long the mirror may go without a new row before the page says it has stopped. */
+export const ARKIV_STALE_AFTER_SECONDS = arkiv.staleAfterSeconds;
+
+/** The verified release log from Arkiv with the most entries, and the row it came from. */
+export interface ArkivLog {
+  entityKey: Hex;
+  creator: Hex;
+  createdAtBlock: bigint;
+  /** Unix seconds, worked out from how many blocks ago the row was created. */
+  writtenAt: number;
+  entries: number;
+  instancePublicKey: Hex;
+  verdict: LogVerdict;
+  progress: ReleaseProgress | null;
+}
+
+/** Rows from published writers that did not count, by why. Never a failure of the exam. */
+export interface ArkivIgnored {
+  /** Tokens that attest none of the keys the logs name. */
+  tokens: number;
+  /** Logs whose body is not a release log. */
+  unreadable: number;
+  /** Logs signed by a key no passing token attests. */
+  unattested: number;
+  /** Logs signed by an attested key that still fail their check. */
+  failed: number;
+}
+
+export interface ArkivReport {
+  writers: readonly Hex[];
+  read: { logs: number; tokens: number };
+  /** Null until a log passes every check. */
+  log: ArkivLog | null;
+  ignored: ArkivIgnored;
+  /** When the newest row from these writers was written, in Unix seconds, or null with none. */
+  newestAt: number | null;
+}
+
+/** The two reads `loadArkiv` makes. `createArkivReader` from `@paperseal/arkiv` gives both. */
+export type ArkivSource = Pick<ArkivReader, 'releaseRows' | 'latestBlock'>;
+
+const verifiedLog = (verdict: LogVerdict) =>
+  verdict.examId === 'pass' && verdict.entriesHash === 'pass' && verdict.signature === 'pass';
+
+/**
+ * Reads the Arkiv mirror as spec/arkiv.md "Reading" says. A token row counts only once it passes
+ * the same check as `release-token.jwt` in storage, and a log row only once it passes under a key
+ * such a token attests. Everything else is counted as ignored and shown nowhere. A failed read
+ * throws, so the page says the mirror could not be read and nothing more.
+ */
+export async function loadArkiv(args: {
+  reader: ArkivSource;
+  chain: () => ChainData | null;
+  examId: Hex;
+  registry: Hex;
+  writers: readonly Hex[];
+  bucket?: string;
+  /** A DER root in place of Google's. Tests only. */
+  trustedRoot?: Uint8Array;
+}): Promise<ArkivReport | Neutral> {
+  const { reader, examId, registry, writers, bucket } = args;
+  const chain = args.chain();
+  const exam = chain?.exam;
+  if (!exam) return neutral('The exam is not on the public record yet.');
+  const [{ logs, tokens }, latest] = await Promise.all([reader.releaseRows(examId, writers), reader.latestBlock()]);
+  const writtenAt = (block: bigint) => latest.time - Number(latest.number - block) * ARKIV_BLOCK_SECONDS;
+  const ignored: ArkivIgnored = { tokens: 0, unreadable: 0, unattested: 0, failed: 0 };
+
+  const parsed = logs.map((row) => {
+    try {
+      return { row, log: parseReleaseLog(row.body) };
+    } catch {
+      return { row, log: null };
+    }
+  });
+  // A token binds its instance key only through a hash, so it is checked against each key a log names.
+  const keys = [...new Set(parsed.flatMap(({ log }) => (log ? [log.instancePublicKey] : [])))];
+  const attested = new Set<Hex>();
+  for (const row of tokens) {
+    const token = utf8Text(row.body).trim();
+    let passed = false;
+    for (const instancePublicKey of keys) {
+      const verdict = await checkRecordToken({
+        token,
+        exam,
+        examId,
+        registry,
+        instancePublicKey,
+        ...bucketOf(bucket),
+        ...(args.trustedRoot ? { trustedRoot: args.trustedRoot } : {}),
+      }).catch(() => null);
+      if (verdict?.verified) {
+        attested.add(instancePublicKey);
+        passed = true;
+        break;
+      }
+    }
+    // With no log to pair it with, a token has nothing to attest yet, and is not counted against.
+    if (!passed && keys.length > 0) ignored.tokens += 1;
+  }
+
+  const list = approvedEntries(chain.entries);
+  let best: ArkivLog | null = null;
+  for (const { row, log } of parsed) {
+    if (!log) {
+      ignored.unreadable += 1;
+      continue;
+    }
+    if (!attested.has(log.instancePublicKey)) {
+      ignored.unattested += 1;
+      continue;
+    }
+    const verdict = await checkReleaseLog(log, examId, log.instancePublicKey);
+    if (!verifiedLog(verdict)) {
+      ignored.failed += 1;
+      continue;
+    }
+    // Logs only grow, so a verified log with fewer entries is an earlier snapshot.
+    const larger = !best || log.entries.length > best.entries || (log.entries.length === best.entries && row.createdAtBlock > best.createdAtBlock);
+    if (larger) {
+      best = {
+        entityKey: row.entityKey,
+        creator: row.creator,
+        createdAtBlock: row.createdAtBlock,
+        writtenAt: writtenAt(row.createdAtBlock),
+        entries: log.entries.length,
+        instancePublicKey: log.instancePublicKey,
+        verdict,
+        progress: list
+          ? releaseProgress(
+              holdersOf(list),
+              log.entries.map((entry) => entry.passkeyPublicKey),
+            )
+          : null,
+      };
+    }
+  }
+
+  const blocks = [...logs, ...tokens].map((row) => row.createdAtBlock);
+  const newest = blocks.reduce<bigint | null>((max, block) => (max === null || block > max ? block : max), null);
+  return {
+    writers,
+    read: { logs: logs.length, tokens: tokens.length },
+    log: best,
+    ignored,
+    newestAt: newest === null ? null : writtenAt(newest),
   };
 }
 

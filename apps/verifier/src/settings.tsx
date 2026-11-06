@@ -1,8 +1,10 @@
+import { arkiv, createArkivReader } from '@paperseal/arkiv';
 import { createExamRegistry } from '@paperseal/chain';
 import { quicknetClient, type ChainClient } from '@paperseal/crypto';
 import type { Hex } from '@paperseal/protocol';
 import { createTeeClient } from '@paperseal/tee-client';
 import { createContext, use, useMemo, useState, type ReactNode } from 'react';
+import { isAddress } from 'viem';
 
 import { createStorage } from './storage';
 
@@ -14,6 +16,10 @@ export interface Settings {
   storageUrl: string;
   registryAddress: string;
   examId: string;
+  /** The Arkiv node the evidence mirror is read from. */
+  arkivRpcUrl: string;
+  /** The Arkiv writers this viewer trusts to find rows, comma-separated. Empty turns Arkiv off. */
+  arkivWriters: string;
 }
 
 const STORAGE_KEY = 'paperseal.verifier.settings';
@@ -27,7 +33,29 @@ export const defaultSettings: Settings = {
   storageUrl: env.VITE_STORAGE_URL ?? '',
   registryAddress: env.VITE_REGISTRY_ADDRESS ?? '',
   examId: env.VITE_EXAM_ID ?? '',
+  arkivRpcUrl: arkiv.network.rpcUrl,
+  arkivWriters: env.VITE_ARKIV_WRITERS ?? '',
 };
+
+/** The writer addresses in `arkivWriters`, in the order given. Empty entries are skipped. */
+export const arkivWriterList = (text: string): Hex[] =>
+  text
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part !== '') as Hex[];
+
+/** Each writer must be an address, and one written in mixed case must have a valid checksum. */
+function writerError(text: string): string | undefined {
+  for (const writer of arkivWriterList(text)) {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(writer)) {
+      return 'Enter each address as 0x followed by 40 letters or digits, with commas between them.';
+    }
+    if (!isAddress(writer, { strict: true })) {
+      return `${writer} has a typing mistake in its capital letters. Copy it again, or write it all in lower case.`;
+    }
+  }
+  return undefined;
+}
 
 export type SettingsErrors = Partial<Record<keyof Settings, string>>;
 
@@ -51,6 +79,11 @@ export function validateSettings(settings: Settings): SettingsErrors {
   if (settings.registryAddress && !/^0x[0-9a-fA-F]{40}$/.test(settings.registryAddress)) {
     errors.registryAddress = 'Enter 0x followed by 40 letters or digits.';
   }
+  if (settings.arkivRpcUrl && !isHttpUrl(settings.arkivRpcUrl)) {
+    errors.arkivRpcUrl = 'Enter a web address that starts with http:// or https://.';
+  }
+  const writers = writerError(settings.arkivWriters);
+  if (writers) errors.arkivWriters = writers;
   if (settings.examId && !isExamId(settings.examId)) {
     errors.examId = 'Enter an exam ID: 0x followed by 64 letters or digits.';
   }
@@ -100,7 +133,7 @@ export function clearSettings(storage = browserStorage()): void {
  * follow an offchain lookup to a gateway: `ExamRegistry` never asks for one, and on a name route its
  * address came from ENS.
  */
-export function endpoints(settings: Settings) {
+export function endpoints(settings: Pick<Settings, 'rpcUrl' | 'teeUrl' | 'storageUrl' | 'registryAddress' | 'examId'>) {
   const { rpcUrl, teeUrl, storageUrl, registryAddress, examId } = settings;
   return {
     /** The public files. Needs the exam ID too, because they live under it. */
@@ -114,10 +147,22 @@ export function endpoints(settings: Settings) {
   };
 }
 
+/**
+ * The Arkiv mirror, read with the viewer's own node and writers. Off, with nothing read, until both
+ * are set. A name route uses it too, because an exam name never sets who may write the mirror.
+ */
+export function arkivSource(settings: Pick<Settings, 'arkivRpcUrl' | 'arkivWriters'>) {
+  const writers = arkivWriterList(settings.arkivWriters);
+  return settings.arkivRpcUrl && writers.length > 0
+    ? { reader: createArkivReader({ rpcUrl: settings.arkivRpcUrl }), writers }
+    : null;
+}
+
 /** Clients for the viewer's own endpoints. Each is null until its settings are present. */
 export function connect(settings: Settings) {
   return {
     ...endpoints(settings),
+    arkiv: arkivSource(settings),
     /** drand quicknet, pinned to the chain hash and public key in spec/constants.json. */
     drand: quicknetClient(),
   };

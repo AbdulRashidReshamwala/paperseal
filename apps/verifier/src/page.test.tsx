@@ -8,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { teeStorageBucket } from './attest';
 import { VerifierPage } from './page';
-import { buildWorld, examId, offlineQuicknet, registryAddress, type World } from './fixtures';
+import { buildWorld, examId, offlineQuicknet, registryAddress, signedReleaseLog, type World } from './fixtures';
+import type { ArkivSource } from './load';
 import { SettingsProvider, type Settings } from './settings';
 
 let chainData: unknown;
@@ -35,6 +36,21 @@ vi.mock('@paperseal/chain', async (original) => {
     resolveExamName: (name: string, options: { rpcUrl?: string }) => {
       nameReads.push({ name, rpcUrl: options.rpcUrl });
       return nameAnswer ? Promise.resolve(nameAnswer(name)) : real.resolveExamName(name, options);
+    },
+  };
+});
+
+/** The Arkiv reader the page gets, and the options it asked for one with. */
+let arkivReader: ArkivSource | null = null;
+let arkivReaders: { rpcUrl?: string }[] = [];
+vi.mock('@paperseal/arkiv', async (original) => {
+  const real = await original<typeof import('@paperseal/arkiv')>();
+  return {
+    ...real,
+    createArkivReader: (options: { rpcUrl?: string }) => {
+      arkivReaders.push(options);
+      if (!arkivReader) throw new Error('no Arkiv reader in this test');
+      return arkivReader;
     },
   };
 });
@@ -73,6 +89,8 @@ const settings: Settings = {
   storageUrl: 'https://files.example/bucket',
   registryAddress,
   examId,
+  arkivRpcUrl: 'https://arkiv.example',
+  arkivWriters: '',
 };
 
 function arrange(world: World, files: Record<string, Uint8Array> = {}) {
@@ -130,6 +148,8 @@ afterEach(() => {
   nameAnswer = null;
   nameReads = [];
   buckets = [];
+  arkivReader = null;
+  arkivReaders = [];
 });
 
 describe('one page', () => {
@@ -415,6 +435,95 @@ describe('step 6, unlock', () => {
   });
 });
 
+describe('step 6, the copy on Arkiv', () => {
+  const writer = '0x1111111111111111111111111111111111111111';
+  const latest = () => ({ number: 10_000n, time: Math.floor(Date.now() / 1000) });
+
+  /** A world with no release log in storage and a live machine that does not answer. */
+  async function silentBoard() {
+    const world = await buildWorld({ endRound: 99_999_999 });
+    const token = world.files.get('release-token.jwt');
+    if (!token) throw new Error('no release token');
+    world.files.delete('release-log.json');
+    world.files.delete('release-token.jwt');
+    arrange(world);
+    const storageFetch = vi.mocked(fetch).getMockImplementation() as (i: string | URL | Request) => Promise<Response>;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request) =>
+        String(input).startsWith('https://tee.example/') ? Promise.reject(new TypeError('fetch failed')) : storageFetch(input),
+      ),
+    );
+    return { world, token };
+  }
+
+  const row = (n: number, body: Uint8Array) => ({
+    entityKey: `0x${n.toString(16).padStart(64, '0')}` as const,
+    creator: writer as `0x${string}`,
+    createdAtBlock: 9_995n,
+    examId,
+    registry: registryAddress,
+    body,
+  });
+
+  it('is off with no writers, and reads nothing from Arkiv', async () => {
+    const releaseRows = vi.fn();
+    arkivReader = { releaseRows, latestBlock: vi.fn() } as never;
+    const world = await buildWorld({ endRound: 99_999_999 });
+    arrange(world);
+    open(1000);
+    const step = await findStep(/^6\. Paper unlocks for centres$/);
+    await within(step).findByText(/^Add who may write the copy on Arkiv/);
+    expect(arkivReaders).toEqual([]);
+    expect(releaseRows).not.toHaveBeenCalled();
+  });
+
+  it('keeps showing progress from Arkiv when the live machine goes silent', async () => {
+    tokenVerified = true;
+    const { world, token } = await silentBoard();
+    const log = await signedReleaseLog(world, 5);
+    const releaseRows = vi.fn(() =>
+      Promise.resolve({
+        tokens: [{ ...row(1, token), instanceKeyHash: '0x' }],
+        logs: [{ ...row(2, new TextEncoder().encode(JSON.stringify(log))), entriesHash: log.entriesHash }],
+      }),
+    );
+    arkivReader = { releaseRows, latestBlock: () => Promise.resolve(latest()) };
+    open(1000, { teeUrl: 'https://tee.example', arkivWriters: writer, arkivRpcUrl: 'https://arkiv.example/rpc' });
+    const step = await findStep(/^6\. Paper unlocks for centres$/);
+    await within(step).findByText('Unlocked. 5 of the 8 needed key holders have released.', { exact: false }, { timeout: 5000 });
+    expect(within(step).getByText(/^Read from the copy on Arkiv/)).toBeTruthy();
+    expect(within(step).getByText('The copy on Arkiv')).toBeTruthy();
+    expect(within(step).getByText('Open this row in the Arkiv explorer')).toBeTruthy();
+    expect(stateOf(step)).toBe('current');
+    // token.jwt never traces back to Google's root in these tests, so only step 6 is looked at.
+    expect(screen.queryByRole('alert')?.textContent ?? '').not.toMatch(/Step 6/);
+    expect(arkivReaders).toEqual([{ rpcUrl: 'https://arkiv.example/rpc' }]);
+    expect(releaseRows).toHaveBeenCalledWith(examId, [writer]);
+  });
+
+  it('is neutral when Arkiv cannot be read', async () => {
+    await silentBoard();
+    arkivReader = { releaseRows: () => Promise.reject(new Error('rate limited')), latestBlock: () => Promise.resolve(latest()) };
+    open(1000, { arkivWriters: writer });
+    const step = await findStep(/^6\. Paper unlocks for centres$/);
+    await within(step).findByText(/Could not be read: rate limited/, {}, { timeout: 5000 });
+    expect(stateOf(step)).not.toBe('failed');
+    // token.jwt never traces back to Google's root in these tests, so only step 6 is looked at.
+    expect(screen.queryByRole('alert')?.textContent ?? '').not.toMatch(/Step 6/);
+  });
+
+  it('refuses a writer that is not an address in "Check it yourself"', async () => {
+    const world = await buildWorld({ endRound: 99_999_999 });
+    arrange(world);
+    open(1000);
+    fireEvent.change(screen.getByLabelText(/^Who may write the copy on Arkiv/), { target: { value: '0x1234' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText(/Enter each address as 0x followed by 40 letters or digits/)).toBeTruthy();
+    expect(arkivReaders).toEqual([]);
+  });
+});
+
 describe('step 7, proof', () => {
   it('opens the paper after the end round and shows each of the 7 checks as Pass', async () => {
     const world = await buildWorld();
@@ -644,7 +753,8 @@ describe('verify by name', () => {
       expect(noteOf(step)).toMatch(/^Can't read ENS\./);
     });
     expect(stateOf(step)).toBe('current');
-    expect(screen.queryByRole('alert')).toBeNull();
+    // token.jwt never traces back to Google's root in these tests, so only step 6 is looked at.
+    expect(screen.queryByRole('alert')?.textContent ?? '').not.toMatch(/Step 6/);
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('The exam name could not be read.');
     expect(document.querySelector('.ps-seal')).toBeNull();
     expect(chainReads).toEqual([]);

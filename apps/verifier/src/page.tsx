@@ -20,7 +20,7 @@ import { clockTime, custody, dayTime, REPOSITORY, type Custody, type CustodyStep
 import { Evidence } from './evidence';
 import { useExamLink } from './link';
 import { useLatestRound, useNow } from './live';
-import { loadLive, loadRecords, useProof, type Records } from './load';
+import { loadArkiv, loadLive, loadRecords, useProof, type Records } from './load';
 import { usePoll, type Polled } from './poll';
 import { createStorage } from './storage';
 import {
@@ -58,7 +58,7 @@ function useExamName(name: string | null, rpcUrl: string, everyMs: number): Poll
 
 function useExamView(pollMs: { records: number; live: number; proofRetry?: number }) {
   const connections = useConnections();
-  const { drand, settings, examId: savedExam } = connections;
+  const { drand, settings, examId: savedExam, arkiv } = connections;
   const link = useExamLink();
   const name = useExamName(link.kind === 'name' ? link.name : null, settings.rpcUrl, pollMs.records);
   const resolved = name?.state === 'ready' && name.value.ok ? name.value.value : null;
@@ -108,6 +108,14 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
   }, [tee, registry, examId, examPublished, bucket]);
   const live = usePoll(loadLiveNow, pollMs.live);
 
+  // The Arkiv mirror is read as often as the live TEE, and only from the writers the viewer trusts.
+  const loadArkivNow = useMemo(() => {
+    if (!arkiv || !registry || !examId || !examPublished) return null;
+    return () =>
+      loadArkiv({ reader: arkiv.reader, writers: arkiv.writers, chain: () => chainRef.current, examId, registry: registry.address as Hex, bucket });
+  }, [arkiv, registry, examId, examPublished, bucket]);
+  const arkivRead = usePoll(loadArkivNow, pollMs.live);
+
   const proof = useProof({
     storage,
     examId,
@@ -122,9 +130,10 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
     examId,
     invalidLink: link.kind === 'invalid',
     ...(link.kind === 'name' && name ? { name: { name: link.name, result: name, used: { teeUrl, storageUrl, bucket } } } : {}),
-    sources: { chain: registry !== null, storage: storage !== null, tee: tee !== null },
+    sources: { chain: registry !== null, storage: storage !== null, tee: tee !== null, arkiv: arkiv !== null },
     records,
     live,
+    arkiv: arkivRead,
     latest,
     now,
     proof,
@@ -361,6 +370,20 @@ function OwnConnection({ open }: { open: boolean }) {
           value={draft.registryAddress}
           error={errors.registryAddress}
           onChange={edit('registryAddress')}
+        />
+        <Field
+          label="Where to read the copy on Arkiv (optional)"
+          hint="The web address of an Arkiv node (the Arkiv RPC URL). A copy of the record of releases is kept there, so progress still shows when the live machine cannot be reached. It must allow requests from this page."
+          value={draft.arkivRpcUrl}
+          error={errors.arkivRpcUrl}
+          onChange={edit('arkivRpcUrl')}
+        />
+        <Field
+          label="Who may write the copy on Arkiv (optional)"
+          hint="The writer addresses your exam board publishes, with commas between them (the Arkiv writer addresses). Rows from anyone else are never read, and every row is checked before it counts. Leave this empty to turn the copy off."
+          value={draft.arkivWriters}
+          error={errors.arkivWriters}
+          onChange={edit('arkivWriters')}
         />
         <div className="vf-actions">
           <Button type="submit">Save</Button>

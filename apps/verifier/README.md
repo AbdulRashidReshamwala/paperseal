@@ -13,3 +13,18 @@ The Overview leads with chain checks, which need only the RPC URL, registry addr
 `#/name/<ENS name>`, or a name typed into the exam box, such as `jee-main-2026.board.eth`, checks the exam by name first, as in "Exam Names" in `spec/api.md`. Step 1, Exam name, reads ENS on-chain through the viewer's own RPC and fails unless the whole name is normalised and the exam part is a valid exam name, the code at the name's address is exactly `ExamRegistry`'s with that registry's board filled in, and that board has the parent as its primary name both ways. Its failures are titled "Not a valid name", "No registry", "Primary name differs", "Not verified both ways" and "Can't read ENS". Every chain read has CCIP-Read off, the later `ExamRegistry` reads included, so no offchain gateway is ever asked. Only then does the page read the exam, with the name's registry and its exam ID, the labelhash of the exam part. The name's TEE, storage and bucket records are used for that view only, and any it leaves out fall back to the viewer's own settings and, for the bucket, `VITE_TEE_STORAGE_BUCKET`. Nothing from a name is saved. A Sepolia name is only a demo, because anyone can register a look-alike there.
 
 `VITE_STORAGE_URL` is the public bucket's base URL, and files are read from `<URL>/<exam ID>/`. It adds the published attestation token, the storage manifest, the release log and the post-exam proof. drand is read from `api.drand.sh`, pinned to quicknet's chain hash and public key.
+
+## Arkiv copy
+
+The page can also read the release evidence that a relay copies to Arkiv, as in "Reading" in `spec/arkiv.md`. Arkiv is only a copy, so unlock progress keeps showing when the TEE can't be reached, and nothing from Arkiv counts until it passes the checks below.
+
+`VITE_ARKIV_WRITERS` holds the writer addresses the board publishes, comma-separated, as the build-time default. When it is empty, the Arkiv copy is off and nothing is read from Arkiv. The Arkiv RPC URL defaults to `network.rpcUrl` in `spec/arkiv.json`, Rabdi's public RPC, which allows cross-origin reads without a key. Viewers can change both under "Check it yourself". A writer written in mixed case must have a valid checksum.
+
+Once an exam ID is known and writers are set, the page reads the exam's `release-token` and `release-log` rows from those writers only, as often as the live TEE:
+
+- Each token row's body is checked exactly like `release-token.jwt` in storage, with the same claims from the exam on `ExamRegistry`. A token that passes attests the instance key of a log it is checked against.
+- Each log row's body is parsed like `release-log.json`, and counts only if its `teeSignature`, `entriesHash` and exam ID pass under a key that a passing token attested.
+- The verified log with the most entries is shown. Rows that don't verify are counted under "Rows ignored", never shown as progress, and never fail the exam. The indexed columns are only used to find rows.
+- Step 6 shows the verified progress with the most releases among the TEE, storage and Arkiv, and says which one it came from. Its evidence lists the writers, the log's entity key with a link to the Arkiv explorer, when it was written, and the rows ignored.
+- The newest row's age comes from its block and Arkiv's latest block, at 2 seconds a block. If it is older than `staleAfterSeconds` in `spec/arkiv.json` and unlock isn't over, the step warns that the copy has stopped updating. Silence is never treated as proof that nothing happened.
+- An Arkiv read that fails shows as not read, never as a failed check.
