@@ -29,7 +29,7 @@ describe('LogView', () => {
   it('shows entries as fact when the verdict passes', () => {
     render(<LogView log={log} owners={owners} problem={null} verdict={verdict(true)} />);
     expect(screen.getByText('Centre One').closest('li')?.getAttribute('data-muted')).toBeNull();
-    expect(screen.queryByText(/not shown as fact/)).toBeNull();
+    expect(screen.queryByText(/do not rely on the entries/)).toBeNull();
     expect(screen.getAllByText('Pass')).toHaveLength(4);
     expect(screen.queryByText('Fail')).toBeNull();
   });
@@ -37,7 +37,7 @@ describe('LogView', () => {
   it('mutes entries and says why when the verdict fails', () => {
     render(<LogView log={log} owners={owners} problem={null} verdict={verdict(false)} />);
     expect(screen.getByText('Centre One').closest('li')?.getAttribute('data-muted')).toBe('true');
-    expect(screen.getByText(/not shown as fact/)).toBeTruthy();
+    expect(screen.getByText(/do not rely on the entries/)).toBeTruthy();
     expect(screen.getAllByText('Fail').length).toBeGreaterThan(0);
   });
 

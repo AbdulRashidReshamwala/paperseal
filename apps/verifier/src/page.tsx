@@ -190,14 +190,11 @@ function FailureAlarm({ failures }: { failures: readonly Failure[] }) {
   );
 }
 
-const round = (value: number) => `Round ${value.toLocaleString('en-GB')}`;
-
 function When({ step, now }: { step: CustodyStep; now: number }) {
   if (step.at === null) return null;
   return (
     <span className="vf-when">
       <span>{clockTime(step.at, now)}</span>
-      {step.round === null ? null : <span>{round(step.round)}</span>}
     </span>
   );
 }
@@ -268,8 +265,8 @@ function Freshness({ records }: { records: Polled<Records> }) {
   return (
     <p className="vf-fresh">
       {records.stale
-        ? `The public record could not be read again, so this shows what was read at ${time}. This page keeps trying.`
-        : `Read at ${time}. This page updates by itself.`}
+        ? `The public record could not be read again, so this shows what it said at ${time}. This page keeps trying.`
+        : `Last read at ${time}. This page updates by itself.`}
     </p>
   );
 }
@@ -291,7 +288,7 @@ function ExamPicker({ current, invalid }: { current: boolean; invalid: boolean }
     }
     const id = name.toLowerCase();
     if (!isExamId(id)) {
-      setError('Enter a 32-byte ID starting with 0x.');
+      setError('Enter an exam ID: 0x followed by 64 letters or digits.');
       return;
     }
     setError(undefined);
@@ -309,7 +306,7 @@ function ExamPicker({ current, invalid }: { current: boolean; invalid: boolean }
             : 'Your exam board publishes this, usually as a link to this page. It is an ID, or a name such as jee-main-2026.board.eth.'
         }
         value={draft}
-        error={error ?? (invalid ? 'The link did not hold a valid exam ID.' : undefined)}
+        error={error ?? (invalid ? 'This link does not hold a valid exam ID. Ask your exam board for the right one.' : undefined)}
         onChange={setDraft}
       />
       <Button type="submit">Open this exam</Button>
@@ -335,31 +332,32 @@ function OwnConnection({ open }: { open: boolean }) {
 
   return (
     <details className="vf-connection" open={open}>
-      <summary>Change where this page reads from</summary>
+      <summary>Choose where this page reads from</summary>
       <form onSubmit={submit}>
         <Field
-          label="Sepolia RPC URL"
-          hint="Any Sepolia endpoint you trust. It must allow requests from this page."
+          label="Where to read the public record"
+          hint="The web address of a service you trust that serves the Sepolia public record (an RPC URL). It must allow requests from this page."
           value={draft.rpcUrl}
           error={errors.rpcUrl}
           onChange={edit('rpcUrl')}
         />
         <Field
-          label="TEE URL (optional)"
-          hint="Adds fresh attestation and live release progress. The chain checks work without it. The TEE is untrusted until its attestation passes."
+          label="Live machine address (optional)"
+          hint="The web address of the machine that builds the paper (the TEE URL). It adds live progress. Every other check works without it, and what it says counts only after its proof passes."
           value={draft.teeUrl}
           error={errors.teeUrl}
           onChange={edit('teeUrl')}
         />
         <Field
-          label="Storage URL"
-          hint="The public bucket's base URL, with no exam ID. Files are read from <URL>/<exam ID>/. Hashes protect the content, so any copy of the bucket works. It must allow requests from this page."
+          label="Where the public files are kept"
+          hint="The web address of the public file store, without the exam ID (the storage URL). Files are read from <address>/<exam ID>/. Any copy of the store works, because the checks catch changes. It must allow requests from this page."
           value={draft.storageUrl}
           error={errors.storageUrl}
           onChange={edit('storageUrl')}
         />
         <Field
-          label="ExamRegistry address"
+          label="Exam registry location"
+          hint="Where the exam registry lives on the public record: 0x followed by 40 letters or digits (the ExamRegistry address)."
           value={draft.registryAddress}
           error={errors.registryAddress}
           onChange={edit('registryAddress')}
@@ -405,7 +403,13 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
         <Head view={result} zone={zoneName()} />
         {view.records.state === 'error' ? (
           <p className="vf-gap">
-            <Check status="not-checked">Could not be read: {view.records.message}</Check>
+            <Check status="not-checked">
+              The public record could not be read. This page keeps trying.
+              <details>
+                <summary>Details</summary>
+                {view.records.message}
+              </details>
+            </Check>
           </p>
         ) : null}
         {view.latest.error && view.latest.round === null ? (
@@ -428,14 +432,14 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
           </Panel>
         )}
         <section className="ps-panel vf-self-host">
-          <h2>Check against your own RPC</h2>
+          <h2>Check it yourself</h2>
           <p>
             You don&apos;t have to trust this page, or whoever hosts it. It needs no account, and everything it reads is public, so
-            you can read the same records through your own connection, or{' '}
+            you can read the same records from a source you choose, or{' '}
             <a href={`https://github.com/${REPOSITORY}`} target="_blank" rel="noreferrer">
               host your own copy
             </a>
-            . Your settings stay in this browser.
+            . Your choices stay in this browser.
           </p>
           <OwnConnection open={needsConnection} />
         </section>

@@ -38,25 +38,28 @@ function storage(): Storage | null {
   }
 }
 
+/** Keeps the invites that pass `checkInvite` and drops the rest, never half-using one. */
+export function validInvites(examId: Hex, parsed: unknown): BoardInvite[] {
+  if (!Array.isArray(parsed)) return [];
+  return parsed.flatMap((item: unknown) => {
+    const value = item as Partial<BoardInvite> | null;
+    if (!value || typeof value.id !== 'string' || typeof value.label !== 'string') return [];
+    const invite = { examId, role: value.role as InviteRole, inviteSecret: value.inviteSecret as Hex, ...(value.owner === undefined ? {} : { owner: value.owner }) };
+    try {
+      checkInvite(invite);
+    } catch (error) {
+      if (error instanceof InviteError) return [];
+      throw error;
+    }
+    return [{ id: value.id, role: invite.role, label: value.label, inviteSecret: invite.inviteSecret, ...(invite.owner === undefined ? {} : { owner: invite.owner }) }];
+  });
+}
+
 /** Reads this exam's invites. Anything that doesn't pass `checkInvite` is dropped, never half-used. */
 export function loadInvites(examId: Hex): BoardInvite[] {
   try {
     const raw = storage()?.getItem(storageKey(examId));
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.flatMap((item: unknown) => {
-      const value = item as Partial<BoardInvite> | null;
-      if (!value || typeof value.id !== 'string' || typeof value.label !== 'string') return [];
-      const invite = { examId, role: value.role as InviteRole, inviteSecret: value.inviteSecret as Hex, ...(value.owner === undefined ? {} : { owner: value.owner }) };
-      try {
-        checkInvite(invite);
-      } catch (error) {
-        if (error instanceof InviteError) return [];
-        throw error;
-      }
-      return [{ id: value.id, role: invite.role, label: value.label, inviteSecret: invite.inviteSecret, ...(invite.owner === undefined ? {} : { owner: invite.owner }) }];
-    });
+    return raw ? validInvites(examId, JSON.parse(raw) as unknown) : [];
   } catch {
     return [];
   }
@@ -72,7 +75,7 @@ export function saveInvites(examId: Hex, invites: readonly BoardInvite[]): void 
 
 export const inviteRoleNames: Record<InviteRole, string> = {
   setter: 'Setter',
-  keyholder: 'Neutral party',
+  keyholder: 'Key holder',
   centre: 'Centre',
 };
 
@@ -91,11 +94,48 @@ export function createInvite(
     const label = name === '' ? `Setter ${String(existing.filter((invite) => invite.role === 'setter').length + 1)}` : name;
     return { ok: true, invite: { id, role, label, inviteSecret: newInviteSecret() } };
   }
-  if (name === '') return { ok: false, reason: 'Enter the name to put on the approved list.' };
+  if (name === '') return { ok: false, reason: 'Enter the name to show on the public list.' };
   const problem = ownerProblem(name);
   if (problem) return { ok: false, reason: problem };
   if (existing.some((invite) => invite.owner === name)) return { ok: false, reason: `${name} already has an invite.` };
   return { ok: true, invite: { id, role, owner: name, label: name, inviteSecret: newInviteSecret() } };
+}
+
+const BACKUP_KIND = 'paperseal-invites';
+
+/** The backup file: everything needed to bring this exam's invites back. It holds the secret links. */
+export function backupText(examId: Hex, invites: readonly BoardInvite[]): string {
+  return JSON.stringify({ kind: BACKUP_KIND, version: 1, examId: examId.toLowerCase(), invites }, null, 2);
+}
+
+/** The invites in a backup for this exam, each checked again. Another exam's backup is refused. */
+export function parseBackup(text: string, examId: Hex): { ok: true; invites: BoardInvite[] } | { ok: false; reason: string } {
+  let value: { kind?: unknown; examId?: unknown; invites?: unknown } | null;
+  try {
+    value = JSON.parse(text) as typeof value;
+  } catch {
+    value = null;
+  }
+  if (!value || value.kind !== BACKUP_KIND || typeof value.examId !== 'string') {
+    return { ok: false, reason: 'This file is not an invite backup from Paper Seal.' };
+  }
+  if (value.examId.toLowerCase() !== examId.toLowerCase()) {
+    return { ok: false, reason: 'This backup is for a different exam. Open the exam it belongs to, then restore it there.' };
+  }
+  const invites = validInvites(examId, value.invites);
+  if (invites.length === 0) return { ok: false, reason: 'This backup has no invites in it.' };
+  return { ok: true, invites };
+}
+
+/** Adds the backup's invites to what is here. An invite already here, by id, stays as it is. */
+export function mergeInvites(existing: readonly BoardInvite[], restored: readonly BoardInvite[]): BoardInvite[] {
+  const ids = new Set(existing.map((invite) => invite.id));
+  const owners = new Set(existing.flatMap((invite) => (invite.owner === undefined ? [] : [invite.owner])));
+  const secrets = new Set(existing.map((invite) => invite.inviteSecret));
+  const added = restored.filter(
+    (invite) => !ids.has(invite.id) && !secrets.has(invite.inviteSecret) && (invite.owner === undefined || !owners.has(invite.owner)),
+  );
+  return [...existing, ...added];
 }
 
 /** The same invite with a new secret, so the old link and any key registered with it stop counting. */

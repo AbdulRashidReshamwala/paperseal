@@ -57,7 +57,7 @@ describe('checkPostTarget', () => {
 
   it('blocks a TEE whose attestation fails for this exam', async () => {
     verifyTee.mockRejectedValue(new AttestationFailedError(untrusted));
-    await expect(checkPostTarget({ tee: tee('onboard'), registry: registry(), examId })).rejects.toThrow(/not the TEE for this exam/);
+    await expect(checkPostTarget({ tee: tee('onboard'), registry: registry(), examId })).rejects.toThrow(/could not confirm it is ready for this exam/);
   });
 
   it('blocks a TEE that cannot be reached', async () => {
@@ -66,18 +66,18 @@ describe('checkPostTarget', () => {
   });
 
   it.each(['submit', 'lock', 'build', 'released', 'failed'])('blocks the %s stage', async (stage) => {
-    await expect(checkPostTarget({ tee: tee(stage), registry: registry(), examId })).rejects.toThrow(`at the ${stage} stage, not onboard`);
+    await expect(checkPostTarget({ tee: tee(stage), registry: registry(), examId })).rejects.toThrow(`Stage: ${stage}.`);
   });
 
   it('blocks a stale pointer to an exam that is not published', async () => {
     const stale = registry({ getExam: vi.fn(() => Promise.resolve(null)) });
-    await expect(checkPostTarget({ tee: tee('onboard'), registry: stale, examId })).rejects.toThrow(/stale/);
+    await expect(checkPostTarget({ tee: tee('onboard'), registry: stale, examId })).rejects.toThrow(/not on the public record/);
     // The TEE is not even asked: the exam must exist first.
     expect(verifyTee).not.toHaveBeenCalled();
   });
 
   it('blocks when a list is already posted', async () => {
     const posted = registry({ getApprovedList: vi.fn(() => Promise.resolve({ listHash: '0x00', postedAt: 1n, postedBlock: 1n })) });
-    await expect(checkPostTarget({ tee: tee('onboard'), registry: posted, examId })).rejects.toThrow(/write-once/);
+    await expect(checkPostTarget({ tee: tee('onboard'), registry: posted, examId })).rejects.toThrow(/already posted for this exam/);
   });
 });

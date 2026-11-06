@@ -20,7 +20,7 @@ export function createStorage(
     get: async (name) => {
       const response = await send(url(name));
       if (response.status === 404) return null;
-      if (!response.ok) throw new Error(`Storage returned ${String(response.status)} for ${name}.`);
+      if (!response.ok) throw new Error(`The public files returned error ${String(response.status)} for ${name}.`);
       return new Uint8Array(await response.arrayBuffer());
     },
   };

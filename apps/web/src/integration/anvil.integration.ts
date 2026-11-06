@@ -213,7 +213,7 @@ describe('ExamRegistry on anvil', () => {
   it('explains the contract revert for a wrong unlock round before anything is sent', async () => {
     const request = requestFor('integration-exam-c', 1);
     const error = await publishExam(environment(), request).catch((e: unknown) => e);
-    expect(explainError(error)).toMatch(/The unlock round must be \d+, the first round at or after T − Δ, but \d+ was sent\./);
+    expect(explainError(error)).toBe('The release time was not accepted. Go back, check the times, then try again.');
     const registry = createExamRegistry({ address: registryAddress, rpcUrl });
     expect(await registry.getExam(examIdFromName('integration-exam-c'))).toBeNull();
   });
@@ -230,6 +230,6 @@ describe('ExamRegistry on anvil', () => {
     } as EIP1193Provider;
     await expect(
       publishExam({ ...environment(), getProvider: () => provider }, requestFor('integration-exam-d')),
-    ).rejects.toThrow(/not the board address/);
+    ).rejects.toThrow(/not the exam board’s account/);
   });
 });

@@ -7,6 +7,7 @@ import { useCurrentExamId } from '../../shared/currentExam';
 import { useBoardForm, useReader } from './BoardForm';
 import { ExamRecord } from './ExamRecord';
 import type { Snapshot } from './examState';
+import { withDetails } from './details';
 import { OutboxError, verifyOutboxBuild } from './outbox';
 import { PostAction, Problem } from './Parts';
 import { postBuildFlow, type BuildPost, type PostOutcome } from './postFlow';
@@ -39,13 +40,13 @@ function useVerifiedBuild(snapshot: Snapshot): Checked {
             settle({ state: 'ready', build });
           },
           (error: unknown) => {
-            settle({ state: 'blocked', reason: error instanceof OutboxError ? error.message : String(error) });
+            settle({ state: 'blocked', reason: withDetails('The paper’s record did not pass its check, so it cannot be posted. Contact whoever runs Paper Seal.', error instanceof OutboxError ? error.message : String(error)) });
           },
         );
       },
       (error: unknown) => {
         const why = error instanceof Error ? error.message : String(error);
-        settle({ state: 'blocked', reason: `The sealed machine's proof is not trusted, so nothing it signed can be posted. ${why}` });
+        settle({ state: 'blocked', reason: withDetails('Paper Seal could not be confirmed for this exam, so nothing was posted. Wait a minute and try again, or contact whoever runs Paper Seal.', why) });
       },
     );
     return () => {
@@ -66,16 +67,16 @@ export function BuildStep(props: { eyebrow: string; snapshot: Snapshot; onPosted
   return (
     <Stage
       eyebrow={props.eyebrow}
-      title="Record the sealed paper"
-      lede="The sealed machine has built the paper. Posting its record lets anyone check that this is the paper centres receive."
+      title="The paper is ready"
+      lede="Post the paper’s record so that anyone can check it is the paper centres receive."
       action={
         <>
           {checked.state === 'blocked' ? <Problem>{checked.reason}</Problem> : null}
           <PostAction
-            label="Post to the public record"
-            blocked={checked.state === 'checking' ? 'Checking the sealed machine’s signature.' : checked.state === 'blocked' ? 'This record cannot be posted.' : null}
+            label="Post the paper’s record"
+            blocked={checked.state === 'checking' ? 'Checking the paper’s record. This takes a moment.' : checked.state === 'blocked' ? 'This record cannot be posted. Contact whoever runs Paper Seal.' : null}
             post={(onStage) => {
-              if (!build) return Promise.reject(new Error('This Build has not been verified.'));
+              if (!build) return Promise.reject(new Error('The paper’s record has not been checked yet. Wait a moment and try again.'));
               return postBuildFlow(environment, build, onStage);
             }}
             onPosted={(outcome: PostOutcome) => {
@@ -85,15 +86,15 @@ export function BuildStep(props: { eyebrow: string; snapshot: Snapshot; onPosted
           />
         </>
       }
-      next="Centres can then download the sealed paper. Nothing more is needed from you until exam day."
+      next="Centres can then download the sealed paper. You have nothing else to do until the exam, and you can close this page."
     >
       {build ? (
         <Rows>
-          <Row label="Signature">
-            <Check status="pass">From the sealed machine running the published code</Check>
+          <Row label="Record">
+            <Check status="pass">Checked. It comes from Paper Seal for this exam.</Check>
           </Row>
           <Row label="Paper">
-            {build.selected} questions, chosen from a bank of {build.bankSize}
+            {build.selected} questions, chosen from the {build.bankSize} sent in
           </Row>
         </Rows>
       ) : null}

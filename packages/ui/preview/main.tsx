@@ -73,9 +73,9 @@ const custody: Step[] = [
     ),
   },
   { id: 'centres', label: 'Centres confirmed the same paper', state: 'not-applicable', when: 'Not recorded', note: 'This exam has no centre receipts.' },
-  { id: 'time', label: 'Public clock opens the time seal', state: 'current', when: 'Round 33,700,743', note: '6 of 8 key holders have released so far.' },
+  { id: 'time', label: 'Paper becomes ready to open', state: 'current', when: '6 Nov, 09:59', note: '6 of 8 key holders have released so far.' },
   { id: 'unlock', label: 'Paper unlocks at centres', state: 'waiting', when: '6 Nov, 09:59' },
-  { id: 'proof', label: 'Full proof published after the exam', state: 'failed', when: 'Round 33,700,843', note: 'The paper did not match its published fingerprint.' },
+  { id: 'proof', label: 'Full proof published after the exam', state: 'failed', when: '6 Nov, 12:59', note: 'The paper did not match its published fingerprint.' },
 ];
 
 function useTheme() {

@@ -75,8 +75,8 @@ function issuedAt(token: string): number | null {
 
 async function readToken(chain: ChainData, storage: StorageReader, examId: Hex, registry: Hex, bucket?: string) {
   const { exam, build } = chain;
-  if (!exam) return neutral('The exam is not published on the chain yet.');
-  if (!build) return neutral('There is no Build on the chain yet, so there is no instance key to check the token against.');
+  if (!exam) return neutral('The exam is not on the public record yet.');
+  if (!build) return neutral('The paper is not recorded yet, so there is nothing to check the proof against.');
   const bytes = await storage.get(storageNames.token);
   if (!bytes) return neutral(`${storageNames.token} is not in storage yet. It is written before the Build.`);
   const token = utf8Text(bytes).trim();
@@ -182,7 +182,7 @@ export async function loadLive(args: {
   const { tee, examId, registry, bucket } = args;
   const chain = args.chain();
   const exam = chain?.exam;
-  if (!exam) return neutral('The exam is not published on the chain yet.');
+  if (!exam) return neutral('The exam is not on the public record yet.');
   const [fresh, status, log] = await Promise.all([
     attempt(() => checkFreshToken({ tee, exam, examId, registry, ...bucketOf(bucket) })),
     attempt(() => tee.status()),

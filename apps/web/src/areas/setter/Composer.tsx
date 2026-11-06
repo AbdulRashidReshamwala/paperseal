@@ -56,13 +56,17 @@ function ReceiptLine(props: { number: number; topic: string | undefined; receipt
   return (
     <Row label={props.topic ? `Question ${String(props.number)} · ${props.topic}` : `Question ${String(props.number)}`}>
       {verified === undefined ? (
-        'Checking the receipt'
+        'Checking this receipt'
       ) : verified ? (
         <span className="ss-receipt">
-          Sealed at {clock(receipt.sealedAt)} <Hash value={receipt.questionHash} label="receipt" />
+          Sealed at {clock(receipt.sealedAt)}
+          <details>
+            <summary>Receipt code</summary>
+            <Hash value={receipt.questionHash} label="receipt" />
+          </details>
         </span>
       ) : (
-        <Check status="fail">This receipt doesn’t check out</Check>
+        <Check status="fail">This receipt could not be confirmed. Tell your exam board.</Check>
       )}
     </Row>
   );
@@ -178,7 +182,7 @@ export function Composer(props: {
       if (error instanceof ConfirmationLostError) {
         if (confirmationExpired(confirmed, Date.now())) {
           session.expireConfirmation();
-          setNotice('The check had timed out, so it is running again. Your question is still here.');
+          setNotice('The safety check ran out of time and is running again. Your question is still here. Press the button again in a moment.');
         } else {
           session.dropConfirmation(error.message);
         }
@@ -190,11 +194,11 @@ export function Composer(props: {
       } else if (error instanceof ReceiptInvalidError) {
         setProblem({
           kind: 'trouble',
-          text: 'The sealed system’s reply didn’t check out, so this question is not counted as sealed. Tell your exam board.',
+          text: 'We could not confirm that this question was received, so it is not counted as sealed. Tell your exam board.',
           detail: [error.message],
         });
       } else if (error instanceof SubmitBlockedError) {
-        setProblem({ kind: 'trouble', text: 'Questions aren’t being accepted right now.', detail: [error.message] });
+        setProblem({ kind: 'trouble', text: 'Questions are not being accepted right now. Try again in a few minutes, or ask your exam board.', detail: [error.message] });
       } else if (isSecurityKeyError(error)) {
         setProblem({ kind: 'key', error });
       } else {
@@ -202,9 +206,9 @@ export function Composer(props: {
         setProblem({
           kind: 'trouble',
           text: unknown
-            ? 'We couldn’t tell whether this question arrived. Send it again: it can’t be stored twice.'
+            ? 'We couldn’t tell whether this question arrived. Press “Send this question again”. It will not be stored twice.'
             : error instanceof TeeApiError
-              ? 'The sealed system refused this question. Contact your exam board.'
+              ? 'This question was not accepted. Contact your exam board.'
               : plainFailure(error),
           detail: [describeError(error)],
         });
@@ -230,7 +234,7 @@ export function Composer(props: {
   const action = (): ReactNode => {
     if (blocked) return blocked.panel;
     if (!confirmed) {
-      return <p className="ss-checking">Checking this is the genuine sealed system…</p>;
+      return <p className="ss-checking">Getting ready for your questions…</p>;
     }
     if (busy) {
       return (
@@ -302,8 +306,8 @@ export function Composer(props: {
           </fieldset>
           {chosen ? (
             <p className="ss-topic-note">
-              The exam needs at least {count(chosen.needed)} {chosen.name} questions across all setters. No one setter can hold
-              more than {count(criteria.maxSetterPercent)}% of a topic.
+              All setters together need to write at least {count(chosen.needed)} {chosen.name} questions. No one setter can write
+              more than {count(criteria.maxSetterPercent)}% of them.
             </p>
           ) : null}
 
@@ -442,8 +446,11 @@ export function Composer(props: {
           {heldHashes.map((hash) => (
             <Row key={hash} label="An earlier attempt">
               <span className="ss-receipt">
-                The sealed system already has this question, but this browser never got its receipt. It wasn’t sent again.{' '}
-                <Hash value={hash} label="question reference" />
+                Paper Seal already has this question, but this browser never got its receipt. It wasn’t sent again.
+                <details>
+                  <summary>Question reference</summary>
+                  <Hash value={hash} label="question reference" />
+                </details>
               </span>
             </Row>
           ))}

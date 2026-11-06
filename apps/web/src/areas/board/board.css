@@ -52,6 +52,7 @@
 
 .board-problem {
   max-width: 34em;
+  overflow-wrap: anywhere;
   margin: 0 0 var(--ps-space-3);
 }
 
@@ -133,6 +134,34 @@
   .board-invite-form .ps-button {
     margin-top: calc(var(--ps-space-5) + var(--ps-space-1));
   }
+}
+
+.board-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-2) var(--ps-space-3);
+  align-items: center;
+  margin: 0 0 var(--ps-space-3);
+}
+
+.board-file {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.board-file input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.board-file:focus-within {
+  outline: 2px solid var(--ps-ink);
+  outline-offset: 2px;
 }
 
 .board-copy {

@@ -1,5 +1,5 @@
 import { encodeInviteLink, fromHex, newInviteSecret, toHex, type Hex, type Invite, type InviteRole } from '@paperseal/protocol';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import { inviteTag, listWith, postBuildDirect, postListDirect, publishDirect, timings, type PublishedHere, type Timing } from './chainkit';
 import { openActor, type Actor } from './kit';
@@ -23,6 +23,15 @@ interface Enrolled {
 export function holderTests(lab: () => Lab): void {
   describe('join, register and the holder screens', () => {
     const actors: Record<string, Actor> = {};
+    // The stub TEE is shared with the board tests, so every test starts it from the same place.
+    beforeEach(() => {
+      const state = lab().tee.state;
+      state.stage = 'onboard';
+      state.mode = 'ok';
+      state.registerMode = 'accept';
+      state.released = [];
+      state.releaseOpen = false;
+    });
     let n = 0;
     const exam = (timing: Timing) => publishDirect(lab().chain, `UI holders ${String(++n)} ${String(Date.now())}`, timing);
     const link = (examId: Hex, role: InviteRole, owner?: string) => {

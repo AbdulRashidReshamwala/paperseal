@@ -1,14 +1,17 @@
-import { Check, Hash, Row, Rows } from '@paperseal/ui';
+import { roundTimeSeconds } from '@paperseal/protocol';
+import { Hash, Row, Rows } from '@paperseal/ui';
 import type { ReactNode } from 'react';
 
 import type { Snapshot } from './examState';
 import { formatClock } from './form';
-import { EntryRows, Fold, ReceiptRows } from './Parts';
-import { plainWords } from './plan';
+import { splitDetails } from './details';
+import { EntryRows, Fold, Problem, ReceiptRows } from './Parts';
+import { formatWhen } from './plan';
 
 /** The thin fold at the foot of every screen, for the detail an expert or an auditor asks for. */
 export function ExamRecord(props: { snapshot: Snapshot; children?: ReactNode }) {
-  const { found, list, build, status } = props.snapshot;
+  const { found, list, build, status, teeProblem } = props.snapshot;
+  const at = (round: bigint | number | string) => `${formatWhen(roundTimeSeconds(Number(round)))} (round ${String(round)})`;
   return (
     <Fold summary="Exam record">
       <Rows>
@@ -20,23 +23,23 @@ export function ExamRecord(props: { snapshot: Snapshot; children?: ReactNode }) 
             <Row label="Commit">
               <Hash value={found.exam.commitHash} label="commit" />
             </Row>
-            <Row label="Image digest">
-              <Hash value={found.exam.imageDigest} label="image digest" />
+            <Row label="Software image">
+              <Hash value={found.exam.imageDigest} label="software image" />
             </Row>
             <Row label="Exam start">{formatClock(Number(found.exam.settings.examStart))}</Row>
             <Row label="Released to centres">{Number(found.exam.settings.delta) / 60} minutes before</Row>
-            <Row label="Lock round">{String(found.exam.settings.lockRound)}</Row>
-            <Row label="Unlock round">{String(found.exam.settings.unlockRound)}</Row>
-            <Row label="End round">{String(found.exam.settings.endRound)}</Row>
-            <Row label="Public record provider">
+            <Row label="Questions close">{at(found.exam.settings.lockRound)}</Row>
+            <Row label="Paper released to centres">{at(found.exam.settings.unlockRound)}</Row>
+            <Row label="Paper opens to everyone">{at(found.exam.settings.endRound)}</Row>
+            <Row label="Public record address">
               <span className="ps-mono">{found.exam.settings.rpcHost}</span>
             </Row>
-            <Row label="Criteria hash">
+            <Row label="Topics">
               <Hash value={found.exam.settings.criteriaHash} label="criteria hash" />
             </Row>
             {found.criteriaProblem ? (
-              <Row label="Criteria">
-                <Check status="fail">{plainWords(found.criteriaProblem)}</Check>
+              <Row label="Topics">
+                <Problem>{found.criteriaProblem}</Problem>
               </Row>
             ) : null}
             {found.criteria?.topics.map((topic) => (
@@ -46,7 +49,8 @@ export function ExamRecord(props: { snapshot: Snapshot; children?: ReactNode }) 
             ))}
           </>
         ) : null}
-        {status ? <Row label="Sealed machine stage">{status.stage}</Row> : null}
+        {status ? <Row label="Paper Seal stage">{status.stage}</Row> : null}
+        {teeProblem && splitDetails(teeProblem).detail ? <Row label="Paper Seal says">{splitDetails(teeProblem).detail}</Row> : null}
         {list ? (
           <Row label="List fingerprint">
             <Hash value={list.list.listHash} label="list fingerprint" />
@@ -57,10 +61,10 @@ export function ExamRecord(props: { snapshot: Snapshot; children?: ReactNode }) 
             <Row label="Paper fingerprint">
               <Hash value={build.paperHash} label="paper fingerprint" />
             </Row>
-            <Row label="Storage manifest">
+            <Row label="File list fingerprint">
               <Hash value={build.storageManifestHash} label="storage manifest" />
             </Row>
-            <Row label="Instance key">
+            <Row label="Paper Seal key">
               <Hash value={build.instancePublicKey} label="instance key" />
             </Row>
           </>
@@ -68,7 +72,7 @@ export function ExamRecord(props: { snapshot: Snapshot; children?: ReactNode }) 
         {props.children}
         <ReceiptRows />
       </Rows>
-      {list?.problem ? <Check status="fail">{plainWords(list.problem)}</Check> : null}
+      {list?.problem ? <Problem>{list.problem}</Problem> : null}
       {list && !list.problem ? <EntryRows entries={list.entries} /> : null}
     </Fold>
   );

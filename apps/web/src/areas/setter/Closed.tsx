@@ -65,12 +65,12 @@ export function Closed(props: {
           title="Your questions may not be in this paper"
           lede={
             different
-              ? 'The sealed system that built the paper is not the one that gave you these receipts. You may have been routed to a different sealed system, so your questions may never have reached the real one.'
-              : 'A receipt in this browser doesn’t carry a valid signature from the sealed system, so we can’t show that your question was sealed.'
+              ? 'The receipts in this browser do not match the paper that was built. Some of your questions may not be in it.'
+              : 'A receipt in this browser could not be confirmed, so we can’t show that your question was sealed.'
           }
-          next="Tell your exam board now, and quote the receipts below."
+          next="Tell your exam board now, and give them the receipt codes below."
         >
-          <Check status="fail">{different ? 'These receipts don’t match the paper' : 'A receipt doesn’t check out'}</Check>
+          <Check status="fail">{different ? 'These receipts don’t match the paper' : 'A receipt could not be confirmed'}</Check>
           <ReceiptList receipts={verdict.affected} topics={topics} open />
           {unsealed}
         </Stage>
@@ -82,8 +82,8 @@ export function Closed(props: {
     return (
       <Stage
         title="This exam can’t go ahead"
-        lede={`Questions closed, but the question bank didn’t meet the exam’s rules. ${counted > 0 ? sealedLine : ''}`}
-        next="Your exam board will tell you what happens next."
+        lede={`Questions have closed, but the questions sent did not meet the exam’s rules, so no paper could be built. ${counted > 0 ? sealedLine : ''}`}
+        next="Nothing to do. Your exam board will tell you what happens next. It is safe to close this page."
       >
         <Check status="not-checked">No paper was built, so there is nothing to compare your receipts with</Check>
         {unsealed}
@@ -95,8 +95,8 @@ export function Closed(props: {
     return (
       <Stage
         title="Questions have closed"
-        lede="This browser has no sealed questions for this exam. If you sealed some on another computer, their receipts are there."
-        next="There’s nothing more to do here."
+        lede="You have not sealed any questions from this browser. If you sealed some on another computer, their receipts are there."
+        next="Nothing more to do here. It is safe to close this page."
       >
         {unsealed}
       </Stage>
@@ -105,16 +105,16 @@ export function Closed(props: {
 
   const results: Record<typeof verdict.status, { check: ReactNode; next: string }> = {
     pass: {
-      check: <Check status="pass">Your questions went to the sealed system that built the paper</Check>,
-      next: 'There’s nothing more to do. Your exam board will take it from here.',
+      check: <Check status="pass">Your receipts match the paper that was built</Check>,
+      next: 'Nothing more to do. Your exam board takes it from here. It is safe to close this page.',
     },
     pending: {
       check: <Check status="pending">Waiting for the paper to be built</Check>,
-      next: 'Your receipts are checked by themselves once the paper is built. You can come back to this link any time.',
+      next: 'Nothing to do. Your receipts are checked once the paper is built. It is safe to close this page and come back to this link any time.',
     },
     'not-checked': {
       check: <Check status="not-checked">Your receipts can’t be checked just now</Check>,
-      next: 'This page keeps trying by itself, and you can come back to this link any time.',
+      next: 'This page keeps trying. It is safe to close it and come back to this link any time.',
     },
   };
   const result = results[verdict.status];

@@ -113,8 +113,8 @@ export function isSecurityKeyError(error: unknown): boolean {
 
 /** A failure that isn't the key's, in plain words for a primary surface. `describeError` has the detail. */
 export function plainFailure(error: unknown): string {
-  if (error instanceof TypeError) return 'Could not reach the sealed system. Check your internet connection, then try again.';
-  if (error instanceof TeeApiError) return 'The sealed system refused this. Contact your exam board.';
+  if (error instanceof TypeError) return 'Could not connect to Paper Seal. Check your internet connection, then try again.';
+  if (error instanceof TeeApiError) return 'Paper Seal did not accept this. Contact your exam board.';
   return 'Something went wrong. Try again, and contact your exam board if it keeps happening.';
 }
 
@@ -139,23 +139,23 @@ export function Trouble(props: { children: ReactNode; detail?: readonly string[]
 
 const noLink = {
   title: 'Open your invitation link',
-  lede: 'You register from the private link your exam board sent you. It says who you are, so there is nothing to type here.',
+  lede: 'Your exam board sent you a private link. Open that link to register. It says who you are, so there is nothing to type here.',
   next: 'If you can’t find the link, ask your exam board to send it again.',
 };
 
 const roleCopy: Record<RegisterRole, { lede: (owner: string | undefined) => string; next: string }> = {
   setter: {
     lede: () =>
-      'You are registering as a question setter. Your name is never published. The public list shows only a code made from your security key.',
-    next: 'Your exam board publishes the approved list. Then you can write your questions.',
+      'You are registering as a question setter. Your name is not published.',
+    next: 'Then your exam board finishes the list of people for this exam. After that you can write your questions here.',
   },
   keyholder: {
-    lede: (owner) => `You are registering as ${owner ?? 'a key holder'}, a key holder for this exam. Your name appears on the public approved list.`,
-    next: 'Your exam board publishes the approved list. You have nothing else to do until release day.',
+    lede: (owner) => `You are registering as ${owner ?? 'a key holder'}. A key holder keeps part of the key that opens the paper. Your name will be on the public list for this exam.`,
+    next: 'Then you have nothing to do until the paper unlocks. This page shows when. Keep your security key safe.',
   },
   centre: {
-    lede: (owner) => `You are registering ${owner ?? 'your centre'} as an exam centre. The name appears on the public approved list.`,
-    next: 'Your exam board publishes the approved list. You can then download the sealed paper.',
+    lede: (owner) => `You are registering ${owner ?? 'your centre'} as an exam centre. The name will be on the public list for this exam.`,
+    next: 'Then your exam board finishes the list of people for this exam. After that, this page gets the sealed paper ready.',
   },
 };
 

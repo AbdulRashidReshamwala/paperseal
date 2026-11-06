@@ -22,12 +22,12 @@ export const releaseSteps = ['attest', 'listHash', 'fetch', 'challenge', 'releas
 export type ReleaseStep = (typeof releaseSteps)[number];
 
 export const releaseStepLabels: Record<ReleaseStep, string> = {
-  attest: 'Check the TEE attestation',
-  listHash: 'Match the signed list to the chain',
-  fetch: 'Download and check your encrypted share',
-  challenge: 'Get a fresh challenge',
-  release: 'Touch your security key once to sign and open your share',
-  submit: 'Send the share to the TEE',
+  attest: 'Check that this is the real Paper Seal',
+  listHash: 'Check the list of people against the public record',
+  fetch: 'Download your part of the key',
+  challenge: 'Get ready for your security key',
+  release: 'Touch your security key once',
+  submit: 'Send your part of the key',
 };
 
 export class ReleaseAbortedError extends Error {
@@ -59,6 +59,16 @@ export interface ReleaseContext {
   onStep?: (step: ReleaseStep) => void;
 }
 
+/** What the checks that don't need the key found, kept to be used at the touch. */
+export interface PreparedRelease {
+  encryptionPublicKey: Hex;
+  /** The holder's share file, already checked against the manifest and the Build. */
+  sealedShare: Uint8Array;
+  expectedShareHash: Uint8Array;
+  /** When the checks ran, in milliseconds. */
+  preparedAt: number;
+}
+
 /**
  * Confirm and Submit from the README's Share Release. Nothing is signed, opened or sent until the
  * attestation is trusted and the list hash the TEE signed matches the chain. The share is
@@ -67,9 +77,12 @@ export interface ReleaseContext {
  * opens the share in the same WebAuthn request. The share is sealed to the TEE's
  * `encryptionPublicKey`, the key the instance key signed, never to `instancePublicKey`. This flow
  * stops at the holder's own share: K_priv is never handled here.
+ *
+ * `prepareRelease` is every check that does not need the key, so a page can run it as soon as it is
+ * ready. `finishRelease` is the challenge, the touch and the send, and always runs at the press.
  */
-export async function runRelease(context: ReleaseContext): Promise<void> {
-  const { keys, tee, examId, credentialId, passkeyPublicKey, derivedPublicKey } = context;
+export async function prepareRelease(context: ReleaseContext): Promise<PreparedRelease> {
+  const { tee, examId, passkeyPublicKey, derivedPublicKey } = context;
   const step = (name: ReleaseStep) => context.onStep?.(name);
 
   step('attest');
@@ -135,6 +148,17 @@ export async function runRelease(context: ReleaseContext): Promise<void> {
   } catch (error) {
     throw new ReleaseAbortedError('fetch', (error as Error).message);
   }
+  return { encryptionPublicKey, sealedShare, expectedShareHash, preparedAt: Date.now() };
+}
+
+/**
+ * The part that needs the security key: a fresh challenge, the one touch and the send. `prepared`
+ * comes from `prepareRelease`, and is only as good as it is recent.
+ */
+export async function finishRelease(context: ReleaseContext, prepared: PreparedRelease): Promise<void> {
+  const { keys, tee, examId, credentialId, passkeyPublicKey } = context;
+  const { encryptionPublicKey, sealedShare, expectedShareHash } = prepared;
+  const step = (name: ReleaseStep) => context.onStep?.(name);
 
   step('challenge');
   let challenge: Hex;
@@ -170,4 +194,9 @@ export async function runRelease(context: ReleaseContext): Promise<void> {
   } finally {
     share.fill(0);
   }
+}
+
+/** All of it, in order: the checks that don't need the key, then the touch. */
+export async function runRelease(context: ReleaseContext): Promise<void> {
+  await finishRelease(context, await prepareRelease(context));
 }
