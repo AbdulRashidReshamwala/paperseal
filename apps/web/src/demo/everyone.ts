@@ -324,6 +324,13 @@ export async function questionJobs(
   return { jobs, problem: null };
 }
 
+/**
+ * True once the sealed machine holds as many questions as the exam's question bank needs. It counts the
+ * whole bank, so it stands for questions sent from any browser, which this one's receipts can't.
+ */
+export const bankMet = (questionCount: number, criteria: Pick<Criteria, 'topics' | 'minBankMultiple'>): boolean =>
+  questionCount >= criteria.topics.reduce((sum, topic) => sum + topic.questions * criteria.minBankMultiple, 0);
+
 /** True once the sealed machine has all the shares it takes. */
 export const releaseEnough = (status: Pick<StatusResponse, 'stage' | 'release'>): boolean =>
   status.stage === 'released' || status.release.released.length >= status.release.required;
