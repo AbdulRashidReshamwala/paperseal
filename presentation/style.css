@@ -25,18 +25,18 @@ html,body{height:100%;background:#05070d;overflow:hidden}
 .k{font:500 30px var(--mono);letter-spacing:4px;color:var(--soft)}
 
 /* page 1 */
-.p1 .sheet{left:200px;top:70px;width:760px;height:940px;padding:70px 70px;transform:rotate(-2.5deg)}
+.p1 .sheet{left:170px;top:70px;width:840px;height:940px;padding:70px 70px;transform:rotate(-2.5deg)}
 .p1 .k{font-size:24px;letter-spacing:3px}
-.p1 h1{font:700 230px/1 var(--serif);letter-spacing:-4px;margin:18px 0 40px -6px}
+.p1 h1{font:700 215px/1 var(--serif);letter-spacing:-4px;margin:18px 0 40px -6px}
 .p1 .qs{display:flex;flex-direction:column;gap:30px}
 .p1 .q{display:flex;align-items:center;gap:22px}
 .p1 .q i{width:26px;height:26px;border-radius:50%;border:3px solid #aab2c4;flex:none}
 .p1 .q span{height:14px;border-radius:8px;background:#d8dce6;transform-origin:left}
-.p1 .tape{left:270px;top:-34px;transform:rotate(-3deg)}
-.p1 .stamp{left:60px;top:470px;font-size:104px;padding:16px 44px;border-width:13px;transform:rotate(-14deg)}
+.p1 .tape{left:300px;top:-34px;transform:rotate(-3deg)}
+.p1 .stamp{left:90px;top:470px;font-size:104px;padding:16px 44px;border-width:13px;transform:rotate(-14deg)}
 .p1 .stamp::after{inset:-28px;border-width:4px}
-.p1 .side{position:absolute;left:1090px;top:330px;width:640px}
-.p1 .side .n{font:700 210px/1 var(--serif);letter-spacing:-4px;color:var(--paper)}
+.p1 .side{position:absolute;left:1110px;top:330px;width:720px}
+.p1 .side .n{font:700 200px/1 var(--serif);letter-spacing:-4px;color:var(--paper);white-space:nowrap}
 .p1 .side p{font:400 68px/1.2 var(--serif);color:#cfd6e6;margin-top:18px}
 .p1 .side::before{content:"";display:block;width:120px;height:8px;background:var(--wax);margin-bottom:34px}
 
