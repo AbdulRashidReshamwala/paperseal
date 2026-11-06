@@ -25,13 +25,20 @@ html,body{height:100%;background:#05070d;overflow:hidden}
 .k{font:500 30px var(--mono);letter-spacing:4px;color:var(--soft)}
 
 /* page 1 */
-.p1 .sheet{left:190px;top:120px;width:1540px;height:840px;padding:84px 110px;transform:rotate(-1.2deg)}
-.p1 .k{margin-bottom:0}
-.p1 h1{font:700 330px/1 var(--serif);letter-spacing:-6px;margin:0 0 0 -8px}
-.p1 .sub{font:400 58px/1.25 var(--serif);max-width:1300px;margin-top:150px;color:#33405e}
-.p1 .tape{left:640px;top:-34px;transform:rotate(-3deg)}
-.p1 .stamp{left:960px;top:330px;font-size:92px;padding:14px 40px;border-width:12px;transform:rotate(-9deg)}
-.p1 .stamp::after{inset:-26px;border-width:4px}
+.p1 .sheet{left:200px;top:70px;width:760px;height:940px;padding:70px 70px;transform:rotate(-2.5deg)}
+.p1 .k{font-size:24px;letter-spacing:3px}
+.p1 h1{font:700 230px/1 var(--serif);letter-spacing:-4px;margin:18px 0 40px -6px}
+.p1 .qs{display:flex;flex-direction:column;gap:30px}
+.p1 .q{display:flex;align-items:center;gap:22px}
+.p1 .q i{width:26px;height:26px;border-radius:50%;border:3px solid #aab2c4;flex:none}
+.p1 .q span{height:14px;border-radius:8px;background:#d8dce6;transform-origin:left}
+.p1 .tape{left:270px;top:-34px;transform:rotate(-3deg)}
+.p1 .stamp{left:60px;top:470px;font-size:104px;padding:16px 44px;border-width:13px;transform:rotate(-14deg)}
+.p1 .stamp::after{inset:-28px;border-width:4px}
+.p1 .side{position:absolute;left:1090px;top:330px;width:640px}
+.p1 .side .n{font:700 210px/1 var(--serif);letter-spacing:-4px;color:var(--paper)}
+.p1 .side p{font:400 68px/1.2 var(--serif);color:#cfd6e6;margin-top:18px}
+.p1 .side::before{content:"";display:block;width:120px;height:8px;background:var(--wax);margin-bottom:34px}
 
 /* animation: replays every time the slide is shown */
 @keyframes land{0%{transform:translateY(-1100px) rotate(-14deg);opacity:0}60%{opacity:1}100%{transform:translateY(0) rotate(-1.8deg);opacity:1}}
@@ -46,6 +53,9 @@ html,body{height:100%;background:#05070d;overflow:hidden}
 .slide.on .anim-title{animation:rise .7s cubic-bezier(.2,.8,.3,1) 1.05s both}
 .slide.on .anim-stamp{animation:slam .5s cubic-bezier(.3,.9,.4,1) 2s both}
 .slide.on .anim-jolt{animation:land 1s cubic-bezier(.2,.8,.25,1.05) .1s both,jolt .35s ease-out 2.32s}
+@keyframes draw{0%{transform:scaleX(0);opacity:0}100%{transform:none;opacity:1}}
+.slide.on .anim-q{animation:fade .3s ease-out var(--d) both}
+.slide.on .anim-q span{animation:draw .5s ease-out var(--d) both}
 .slide.on .anim-sub{animation:rise .7s cubic-bezier(.2,.8,.3,1) 2.7s both}
 
 #count{position:fixed;right:16px;bottom:10px;font:14px var(--mono);color:#555a70}
