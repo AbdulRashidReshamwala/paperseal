@@ -15,6 +15,7 @@ import { DetailsStep, TopicsStep } from './CreateStep';
 import { DraftShell, ExamShell } from './DraftFrame';
 import { decideStep, readSnapshot, type Snapshot } from './examState';
 import { usePoll } from './hooks';
+import { MachineCheck } from './MachineCheck';
 import { PeopleStep } from './PeopleStep';
 import { Fold } from './Parts';
 import { PartyStep } from './PartyStep';
@@ -208,7 +209,13 @@ function BoardFlow(props: { mode: Mode }) {
       />,
     );
   }
-  const onExam = (children: ReactNode) => withLink(<ExamShell>{children}</ExamShell>);
+  const onExam = (children: ReactNode) =>
+    withLink(
+      <ExamShell>
+        <MachineCheck examId={examId} snapshot={value} />
+        {children}
+      </ExamShell>,
+    );
   if (decided === 'people') return onExam(<PeopleStep examId={examId} snapshot={value} onPosted={reload} />);
   if (decided === 'wait') return onExam(<WaitStep snapshot={value} />);
   if (decided === 'post-build') return onExam(<BuildStep examId={examId} snapshot={value} onPosted={reload} />);
