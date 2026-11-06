@@ -41,7 +41,7 @@ contracts/script/verify.sh              # uses REGISTRY_ADDRESS
 contracts/script/verify.sh 0x...        # or pass the address
 ```
 
-It uses the Etherscan V2 API with chain id 11155111, waits for the result and never prints the key. It is safe to run again: an already verified contract is skipped. The current Sepolia deployment (`0x78EB44959E7ed5d6A45Fb2863c0624c8f2ce9c85`) was built from commit `f5d020c` with solc 0.8.34. The first one (`0x6a9f017F374630EcB84e8E3816B1eE9F8Fa2dBE8`, commit `2ae6cf3`) is retired and only holds the demo exam used by one verifier test.
+It uses the Etherscan V2 API with chain id 11155111, waits for the result and never prints the key. It is safe to run again: an already verified contract is skipped. The current Sepolia deployment (`0xc25F7e0004f0E9B77581CFf6B4B5Ae8b120658eb`) was built from commit `ce53d85` with solc 0.8.34. Two earlier ones are retired: `0x78EB44959E7ed5d6A45Fb2863c0624c8f2ce9c85`, abandoned before the Build had `builtRound`, and the first (`0x6a9f017F374630EcB84e8E3816B1eE9F8Fa2dBE8`, commit `2ae6cf3`) is retired and only holds the demo exam used by one verifier test.
 
 ## 2. Tag a version
 

@@ -20,7 +20,7 @@ export const logPath = resolve(stateDir, 'run.log');
 const env = process.env;
 
 export const deployed = {
-  registry: (env.LIVE_REGISTRY ?? '0x78EB44959E7ed5d6A45Fb2863c0624c8f2ce9c85') as Hex,
+  registry: (env.LIVE_REGISTRY ?? '0xc25F7e0004f0E9B77581CFf6B4B5Ae8b120658eb') as Hex,
   rpcUrl: env.LIVE_RPC_URL ?? 'https://ethereum-sepolia-rpc.publicnode.com',
   teeUrl: (env.LIVE_TEE_URL ?? 'https://tee.abdulrashid.dev').replace(/\/+$/, ''),
   storageUrl: (env.LIVE_STORAGE_URL ?? 'https://storage.googleapis.com/paperseal-demo-paperseal-exams').replace(/\/+$/, ''),
