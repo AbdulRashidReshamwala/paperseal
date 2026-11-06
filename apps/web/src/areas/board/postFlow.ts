@@ -2,7 +2,7 @@ import { examRegistryAbi, OnChainBytesError, type ExamRegistry } from '@papersea
 import { approvedListHash, chain, fromHex, toHex, type Hex } from '@paperseal/protocol';
 import { BaseError, ContractFunctionRevertedError, UserRejectedRequestError, type Address } from 'viem';
 
-import { currentAccount, walletChainId, walletClientFor } from '../../shared/wallet';
+import { currentAccount, switchToSepolia, walletChainId, walletClientFor } from '../../shared/wallet';
 import { withDetails } from './details';
 import { PublishBlockedError, type PublishEnvironment } from './publishFlow';
 
@@ -47,6 +47,8 @@ async function sendFromBoard(
   }
   const account = await currentAccount(provider);
   if (!account) throw new PublishBlockedError('Connect your wallet, then press the button again.');
+  // A wallet on the wrong network is asked to switch. If it declines or can't, the instruction below is shown.
+  await switchToSepolia(provider);
   const [walletChain, rpcChain] = [await walletChainId(provider), await publicClient.getChainId()];
   if (walletChain !== chain.chainId) {
     throw new PublishBlockedError(

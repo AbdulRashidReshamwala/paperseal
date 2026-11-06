@@ -24,6 +24,8 @@ export interface FakeChainOptions {
   /** The wallet's account. Defaults to `board`. */
   account?: Address | null;
   chainId?: number;
+  /** The wallet moves to Sepolia when asked (`true`), or declines (`'decline'`). Unset: it has no such method. */
+  switchable?: boolean | 'decline';
   /** Make `createExam` revert with this contract error. */
   revertWith?: {
     errorName:
@@ -56,6 +58,7 @@ export function fakeChain(options: FakeChainOptions) {
   const builds = new Map<string, Hex[]>();
   const txs = new Map<string, bigint>();
   let block = 100n;
+  let walletChain = options.chainId ?? 11155111;
 
   const created = getAbiItem({ abi: examRegistryAbi, name: 'ExamCreated' });
   const posted = getAbiItem({ abi: examRegistryAbi, name: 'ApprovedListPosted' });
@@ -64,7 +67,14 @@ export function fakeChain(options: FakeChainOptions) {
   const request = (({ method, params }: { method: string; params?: unknown[] }) => {
     switch (method) {
       case 'eth_chainId':
-        return Promise.resolve(`0x${(options.chainId ?? 11155111).toString(16)}`);
+        return Promise.resolve(`0x${walletChain.toString(16)}`);
+      case 'wallet_switchEthereumChain':
+        if (options.switchable === true) {
+          walletChain = Number(BigInt((params as [{ chainId: string }])[0].chainId));
+          return Promise.resolve(null);
+        }
+        if (options.switchable === 'decline') return Promise.reject(new Error('User rejected the request.'));
+        throw new Error(`unexpected ${method}`);
       case 'eth_accounts':
       case 'eth_requestAccounts':
         return Promise.resolve(account ? [account] : []);

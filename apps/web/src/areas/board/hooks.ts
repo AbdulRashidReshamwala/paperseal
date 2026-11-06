@@ -1,7 +1,7 @@
 import { chain } from '@paperseal/protocol';
 import { useCallback, useEffect, useState } from 'react';
 
-import { currentAccount, requestAccount, walletChainId } from '../../shared/wallet';
+import { currentAccount, requestAccount, switchToSepolia, walletChainId } from '../../shared/wallet';
 import { useBoardForm } from './BoardForm';
 import { explainError, PublishBlockedError } from './publishFlow';
 
@@ -114,6 +114,8 @@ export function useBoardWallet() {
     const provider = environment.getProvider();
     if (!provider) throw new PublishBlockedError('Your wallet was not found. Install a wallet extension in Chrome, then reload this page.');
     const account = (await currentAccount(provider)) ?? (await requestAccount(provider));
+    // A wallet on another network is asked to move. If it declines, `problem` keeps the plain instruction.
+    await switchToSepolia(provider);
     await refresh();
     return account;
   }, [environment, refresh]);

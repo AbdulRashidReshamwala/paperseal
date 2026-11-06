@@ -162,6 +162,19 @@ describe('publishExam with a stub wallet', () => {
     expect(node.sent).toHaveLength(0);
   });
 
+  it('asks the wallet to switch to Sepolia, then carries on', async () => {
+    const { node, env } = environment({ chainId: 1, switchable: true });
+    const outcome = await publishExam(env, request(), undefined, { wait: () => Promise.resolve() });
+    expect(outcome.matches).toBe(true);
+    expect(node.sent.length).toBeGreaterThan(0);
+  });
+
+  it('shows the plain instruction when the wallet declines to switch', async () => {
+    const { node, env } = environment({ chainId: 1, switchable: 'decline' });
+    await expect(publishExam(env, request())).rejects.toThrow(/wrong network. Switch it to Sepolia/);
+    expect(node.sent).toHaveLength(0);
+  });
+
   it('sends nothing when no account is connected, or no wallet exists', async () => {
     const { node, env } = environment({ account: null });
     await expect(publishExam(env, request())).rejects.toThrow(/Connect your wallet/);

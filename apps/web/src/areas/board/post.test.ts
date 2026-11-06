@@ -101,6 +101,15 @@ describe('postApprovedListFlow', () => {
     expect(node.sent).toHaveLength(1);
   });
 
+  it('asks the wallet to switch to Sepolia before posting, and shows the instruction if it declines', async () => {
+    const { encoded } = composeApprovedList(examId, entries());
+    const switched = environment({ chainId: 1, switchable: true });
+    expect((await postApprovedListFlow(switched.env, { examId, entries: encoded }, undefined, noWait)).matches).toBe(true);
+    const declined = environment({ chainId: 1, switchable: 'decline' });
+    await expect(postApprovedListFlow(declined.env, { examId, entries: encoded }, undefined, noWait)).rejects.toThrow('wrong network');
+    expect(declined.node.sent).toHaveLength(0);
+  });
+
   it('blocks an account that is not the board', async () => {
     const { node, env } = environment({ account: stranger });
     await expect(postApprovedListFlow(env, { examId, entries: '0x01' }, undefined, noWait)).rejects.toThrow('not the exam board’s account');

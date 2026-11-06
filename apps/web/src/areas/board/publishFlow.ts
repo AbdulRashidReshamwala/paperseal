@@ -12,7 +12,7 @@ import {
 } from 'viem';
 import { sepolia } from 'viem/chains';
 
-import { currentAccount, injectedProvider, walletChainId, walletClientFor, type EIP1193Provider } from '../../shared/wallet';
+import { currentAccount, injectedProvider, switchToSepolia, walletChainId, walletClientFor, type EIP1193Provider } from '../../shared/wallet';
 import { withDetails } from './details';
 import type { PublishFields, ScheduleSettings } from './form';
 
@@ -170,6 +170,8 @@ export async function publishExam(
   const account = await currentAccount(provider);
   if (!account) throw new PublishBlockedError('Connect your wallet, then press the button again.');
 
+  // A wallet on the wrong network is asked to switch. If it declines or can't, the instruction below is shown.
+  await switchToSepolia(provider);
   const [walletChain, rpcChain] = [await walletChainId(provider), await publicClient.getChainId()];
   if (walletChain !== chain.chainId) {
     throw new PublishBlockedError(
