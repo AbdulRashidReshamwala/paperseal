@@ -194,7 +194,7 @@ const onUse = () => {
 
 Pass `failureText` whenever the screen knows better, such as "This key is not on the approved list."
 
-`no-key` and `wrong-key` also show a one-line hint while `demo` is true: the demo's key is Chrome's virtual authenticator, a page cannot enable it, and it is set up in DevTools → WebAuthn. Pass `demo={false}` in production. The screens own that decision, so `packages/ui` doesn't depend on `@paperseal/protocol`.
+`no-key` and `wrong-key` also show a one-line hint while `demo` is true: the demo's key is Chrome's virtual authenticator, a page cannot enable it, and `pnpm demo` opens Chrome with one attached to each person's window (one tab per person, since a virtual key belongs to a single tab). Pass `demo={false}` in production. The screens own that decision, so `packages/ui` doesn't depend on `@paperseal/protocol`.
 
 ### `Stepper`
 
@@ -302,7 +302,7 @@ Seven steps, each with its number in the `Stage` eyebrow. The wallet is not a st
 1. **Register:** opens from the invite link. The role is in the link, so nothing is typed, and the only control is `KeyTouch` to register the security key. Next: wait for the board's list. Without a valid link it shows a plain explanation and no form.
 2. **Waiting for the board:** a wait screen. The page opens for writing by itself.
 3. **Check the machine:** runs by itself, with nothing to press. If it fails, sealing stops and the writing stays on the page.
-4. **Add a question:** the form, with a `PrimaryAction` to seal it. Each question needs one touch, and receipts build up on the same page.
+4. **Add a question:** the form, with a `PrimaryAction` to seal it. Each question needs one touch, and receipts build up on the same page. A choice of Written or Multiple choice sits above the writing area, with Written already picked, so a written question costs no extra click. Multiple choice shows two lettered option fields, with Add an option up to the limit in `spec/constants.json` and Remove once there are more than the minimum. A blank or repeated option is called out beside its field in plain words, and sealing stays shut until it is fixed. There is no field for the correct answer: one short line says the answer key isn’t sent, because the paper becomes public. Options are trimmed and sent in the order shown.
 5. **Closed:** a wait screen. After the Build, the check that the same machine built the paper appears as one `Check`.
 
 ### Centre
@@ -314,7 +314,7 @@ Seven steps, each with its number in the `Stage` eyebrow. The wallet is not a st
 3. **Release, for centres holding a part of the key:** `KeyTouch` with `purpose="to release your part of the key"`, `seal="opening"`. Centres without one skip this.
 4. **Waiting for key holders:** a wait screen with the release count, for a centre with nothing to release.
 5. **Unlock:** `KeyTouch` with `purpose="to open the paper"`, `seal="opening"`.
-6. **Open:** `seal="open"`. The action is to view or print the paper. The unlock log is in `children`.
+6. **Open:** `seal="open"`. The action is to view or print the paper. The unlock log is in `children`. A multiple choice question shows its options under it as a lettered list (A, B, C) in the paper’s order, set for print. A written question has no list. The verifier page shows the published paper the same way.
 
 ### Neutral key holder
 
