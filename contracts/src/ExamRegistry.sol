@@ -2,18 +2,13 @@
 pragma solidity 0.8.30;
 
 /// @title ExamRegistry
-/// @notice Public, write-once record of each exam. Only the board's address can write. Nothing here can be
-///         changed once written, including the exam's start time, `delta` and drand rounds, which set its date.
-/// @dev The approved list and selection criteria are each kept as a hash and emitted in full. Neither is
-///      decoded here, because the board app and the TEE check their content. Each is rejected by length alone
-///      if it is over `limits.entriesBytes` or `limits.criteriaBytes` in spec/constants.json, because ABI offsets
-///      let a small input decode to a huge one. See "Size Limits" in spec/api.md. TEE signatures are stored but
-///      not verified. The attested key only exists off-chain, so apps verify them against the attestation token. The length and format checks here only
-///      stop a mistyped value from filling a write-once slot. They prove nothing about who signed.
-///      Rounds are checked against quicknet's published timing, but never against block time or drand output.
+/// @notice Write-once public record of each exam. Only the board address can write.
+/// @dev The approved list and selection criteria are stored as hashes and emitted in full. Neither is decoded
+///      here; each is only length-capped, since ABI offsets let a small input decode to a huge one. TEE
+///      signatures are stored, not verified, because the attested key exists only off-chain. The length and
+///      format checks only stop a mistyped value from filling a write-once slot. Rounds are checked against
+///      quicknet timing, never against block time or drand output.
 contract ExamRegistry {
-    /// @notice The stored values in "Exam Settings" in spec/api.md.
-    /// @dev `registry` and `chainId` are also exam settings, but they are this contract and its chain.
     struct ExamSettings {
         bytes32 examId;
         uint64 examStart;
@@ -25,10 +20,9 @@ contract ExamRegistry {
         string rpcHost;
     }
 
-    /// @dev `createdAt` and each record's `postedAt` are block timestamps, and zero means not written yet.
-    ///      They are a record of the transaction only. drand remains the only clock.
-    ///      `createdBlock` is the block holding ExamCreated, so clients can read `criteria` with a log query
-    ///      over that one block. Public RPC operators reject wide block ranges.
+    /// @dev `createdAt` and each record's `postedAt` are block timestamps; zero means not written. Neither is a
+    ///      clock for the exam. `createdBlock` and `postedBlock` locate the event, since public RPCs reject
+    ///      wide log ranges.
     struct Exam {
         bytes20 commitHash;
         bytes32 imageDigest;
@@ -37,7 +31,6 @@ contract ExamRegistry {
         ExamSettings settings;
     }
 
-    /// @dev `postedBlock` is the block holding ApprovedListPosted, so clients can read `entries` the same way.
     struct ApprovedList {
         bytes32 listHash;
         uint64 postedAt;
@@ -104,25 +97,23 @@ contract ExamRegistry {
     error EntriesTooLarge();
     error CriteriaTooLarge();
 
-    /// @notice `drand.genesisTime` in spec/constants.json, the Unix time of quicknet round 1.
+    /// @notice Unix time of quicknet round 1.
     uint64 public constant QUICKNET_GENESIS_TIME = 1692803367;
-    /// @notice `drand.periodSeconds` in spec/constants.json.
+    /// @notice Seconds between quicknet rounds.
     uint64 public constant QUICKNET_PERIOD_SECONDS = 3;
 
-    /// @dev `domainTags.criteria` in spec/constants.json.
     string private constant CRITERIA_TAG = "paperseal/v1/criteria";
-    /// @dev `domainTags.approvedList` in spec/constants.json.
     string private constant APPROVED_LIST_TAG = "paperseal/v1/approved-list";
-    /// @dev `limits.entriesBytes` in spec/constants.json, the most bytes `entries` can have.
+    /// @dev Matches `limits.entriesBytes` in spec/constants.json.
     uint256 private constant ENTRIES_BYTES = 327680;
-    /// @dev `limits.criteriaBytes` in spec/constants.json, the most bytes `criteria` can have.
+    /// @dev Matches `limits.criteriaBytes` in spec/constants.json.
     uint256 private constant CRITERIA_BYTES = 16384;
-    /// @dev An uncompressed P-256 public key: 0x04, then x and y.
+    /// @dev Uncompressed P-256 key: 0x04, x, y.
     uint256 private constant PUBLIC_KEY_LENGTH = 65;
-    /// @dev A TEE signature: r || s.
+    /// @dev r || s.
     uint256 private constant SIGNATURE_LENGTH = 64;
 
-    /// @notice The only address that can write. Set at construction and never changes.
+    /// @notice The only address that can write.
     address public immutable board;
 
     mapping(bytes32 examId => Exam) private _exams;
@@ -139,13 +130,11 @@ contract ExamRegistry {
         board = board_;
     }
 
-    /// @notice Publishes the commit, image digest and exam settings before Onboard.
+    /// @notice Publishes the commit, image digest and exam settings.
     /// @param commitHash The git commit the image is built from.
     /// @param imageDigest The SHA-256 digest of the container image.
     /// @param settings The attested exam settings.
-    /// @param criteria The selection criteria as `abi.encode(Criteria)`, from "Selection Criteria" in spec/api.md.
-    ///        Emitted but not stored, and must hash to `settings.criteriaHash`. Reverts with `CriteriaTooLarge`
-    ///        if longer than 16384 bytes, checked by length before anything else reads it.
+    /// @param criteria `abi.encode(Criteria)`. Emitted, not stored; must hash to `settings.criteriaHash`.
     function createExam(
         bytes20 commitHash,
         bytes32 imageDigest,
@@ -186,11 +175,8 @@ contract ExamRegistry {
         );
     }
 
-    /// @notice Posts the encoded approved list. Stores its hash and emits the full bytes.
-    /// @dev The hash is the `approvedList` message in spec/api.md, which the TEE signs into the Build. It covers
-    ///      the posted bytes as they are.
-    /// @param entries The list as `abi.encode(Entry[])`, from "Approved List" in spec/api.md. Reverts with
-    ///        `EntriesTooLarge` if longer than 327680 bytes, checked by length without decoding.
+    /// @notice Stores the hash of the approved list and emits the full bytes.
+    /// @param entries `abi.encode(Entry[])`, hashed as posted.
     function postApprovedList(bytes32 examId, bytes calldata entries) external onlyBoard {
         if (_exams[examId].createdAt == 0) revert ExamNotFound(examId);
         if (_approvedLists[examId].postedAt != 0) revert ApprovedListAlreadyPosted(examId);
@@ -203,9 +189,9 @@ contract ExamRegistry {
         emit ApprovedListPosted(examId, listHash, entries);
     }
 
-    /// @notice Posts the one Build for this exam, after the files are on public storage. Needs the approved list.
-    /// @dev `approvedListHash` and `criteriaHash` must match the on-chain values, so a mistyped Build can't fill
-    ///      the write-once slot with one the verifier page would then have to reject forever.
+    /// @notice Posts the exam's one Build. Requires the approved list.
+    /// @dev `approvedListHash` and `criteriaHash` must match the on-chain values, so a mistyped Build can't
+    ///      fill the write-once slot.
     function postBuild(
         bytes32 examId,
         bytes32 approvedListHash,
@@ -225,7 +211,7 @@ contract ExamRegistry {
         if (selected == 0 || selected > bankSize) revert InvalidSelection();
         _checkTeeOutput(teeSignature, instancePublicKey);
 
-        // Written field by field because a struct literal of this size is too deep for the legacy code generator.
+        // Field by field: a struct literal this size is too deep for the legacy code generator.
         Build storage build = _builds[examId];
         build.approvedListHash = approvedListHash;
         build.paperHash = paperHash;
@@ -252,17 +238,17 @@ contract ExamRegistry {
         );
     }
 
-    /// @notice Returns the exam, with `createdAt` and `createdBlock` zero if it doesn't exist.
+    /// @notice Returns the exam; `createdAt` is zero if it doesn't exist.
     function getExam(bytes32 examId) external view returns (Exam memory) {
         return _exams[examId];
     }
 
-    /// @notice Returns the approved list record, with `postedAt` and `postedBlock` zero if it isn't posted.
+    /// @notice Returns the approved list record; `postedAt` is zero if not posted.
     function getApprovedList(bytes32 examId) external view returns (ApprovedList memory) {
         return _approvedLists[examId];
     }
 
-    /// @notice Returns the Build record, with `postedAt` zero if it isn't posted.
+    /// @notice Returns the Build record; `postedAt` is zero if not posted.
     function getBuild(bytes32 examId) external view returns (Build memory) {
         return _builds[examId];
     }
@@ -279,9 +265,8 @@ contract ExamRegistry {
         return uint64(block.number);
     }
 
-    /// @dev Round r is produced at genesis + (r - 1) * period. The maths is in uint256, so extreme settings
-    ///      revert with these errors, not an arithmetic panic. Round order is checked first, so `endRound` is
-    ///      at least 3 here.
+    /// @dev Round r is produced at genesis + (r - 1) * period. Math is in uint256 so extreme settings revert
+    ///      with these errors, not a panic. Round order is checked first, so `endRound` is at least 3.
     function _checkSchedule(ExamSettings calldata settings) private pure {
         if (
             settings.lockRound == 0 || settings.unlockRound <= settings.lockRound
