@@ -21,6 +21,7 @@ import {
   checkRegistryCode,
   examRegistryBoard,
   examRegistryRuntime,
+  checkPartyNameExists,
   isExamRegistryCode,
   lookupPartyName,
   resolveExamName,
@@ -516,5 +517,20 @@ describe('lookupPartyName', () => {
       await lookupPartyName('dr-rao.eth', { lookup: at(() => Promise.reject(new HttpRequestError({ url: 'https://rpc.example.org', status: 503 }))) }),
     ).toMatchObject({ state: 'unreadable' });
     expect(await lookupPartyName('Dr Rao', { lookup: at(() => Promise.resolve(holder)) })).toMatchObject({ state: 'invalid' });
+  });
+});
+
+describe('checkPartyNameExists', () => {
+  const holder: Address = '0x00000000000000000000000000000000000000dd';
+  const down = () => new HttpRequestError({ url: 'https://rpc.example.org', status: 503 });
+  it('counts an address record or a passkey record, and says when there is neither', async () => {
+    const at = (o: Partial<EnsLookup>) => ({ lookup: lookup({ text: () => Promise.resolve(null), address: () => Promise.resolve(null), ...o }) });
+    expect(await checkPartyNameExists('dr-rao.eth', at({ address: () => Promise.resolve(holder) }))).toEqual({ state: 'exists', name: 'dr-rao.eth' });
+    expect(await checkPartyNameExists('dr-rao.eth', at({ text: () => Promise.resolve(' 0xabc ') }))).toMatchObject({ state: 'exists' });
+    expect(await checkPartyNameExists('dr-rao.eth', at({}))).toMatchObject({ state: 'missing' });
+    expect(await checkPartyNameExists('dr-rao.eth', at({ address: () => Promise.reject(down()) }))).toMatchObject({ state: 'unreadable' });
+    expect(await checkPartyNameExists('dr-rao.eth', at({ address: () => Promise.reject(needsGateway()) }))).toMatchObject({ state: 'refused' });
+    expect(await checkPartyNameExists('dr-rao.eth', at({ text: () => Promise.reject(down()) }))).toMatchObject({ state: 'unreadable' });
+    expect(await checkPartyNameExists('Dr Rao', at({}))).toMatchObject({ state: 'invalid' });
   });
 });

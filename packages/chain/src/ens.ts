@@ -395,3 +395,38 @@ export async function lookupPartyName(name: string, options: EnsOptions & { look
     };
   }
 }
+
+/**
+ * Whether a name exists on the chain. `exists`: it has an address record or a `ens.records.passkey` record.
+ * `missing`: it has neither, so nobody has set the name up. Other states are as for `PartyNameLookup`.
+ */
+export type PartyNameExists =
+  | { state: 'exists'; name: string }
+  | { state: 'missing' | 'refused' | 'unreadable' | 'invalid'; name: string; reason: string };
+
+/**
+ * Reads whether a name a board typed exists, on chain and with the viewer's own RPC. A neutral key holder may
+ * have set only the passkey record, so that counts too. Never throws for a chain or RPC failure.
+ */
+export async function checkPartyNameExists(name: string, options: EnsOptions & { lookup?: EnsLookup }): Promise<PartyNameExists> {
+  const lookup = options.lookup ?? createEnsLookup(options);
+  const found = await lookupPartyName(name, { ...options, lookup });
+  if (found.state === 'found') return { state: 'exists', name };
+  if (found.state !== 'unset') return { state: found.state, name, reason: found.reason };
+  try {
+    const record = (await lookup.text(name, ens.records.passkey))?.trim() ?? '';
+    return record === ''
+      ? { state: 'missing', name, reason: `${name} has no address and no ${ens.records.passkey} record.` }
+      : { state: 'exists', name };
+  } catch (error) {
+    const failure = readFailure(error);
+    return {
+      state: failure === 'unreadable' ? 'unreadable' : 'refused',
+      name,
+      reason:
+        failure === 'unreadable'
+          ? `The RPC failed before ${name} could be read: ${messageOf(error)}`
+          : `${name} could not be read on chain: ${messageOf(error)}`,
+    };
+  }
+}
