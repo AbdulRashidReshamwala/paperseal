@@ -21,15 +21,10 @@ export interface Stage {
   type: (target: Locator, text: string) => Promise<void>;
   /** Brings something into the middle of the view. */
   show: (target: Locator) => Promise<void>;
-  /** Goes back to the top of the page. */
-  top: () => Promise<void>;
   /** Waits, so the viewer can read the screen. */
   hold: (ms: number) => Promise<void>;
-  /**
-   * Ends the finished video on the frame where `selector` first holds `text`, with this caption. Later
-   * steps still run, off camera, so they can check things and fail the run.
-   */
-  endWhen: (selector: string, text: string, caption: string) => Promise<void>;
+  /** Ends the finished video on this moment. Later steps still run, off camera, and can fail the run. */
+  endHere: () => Promise<void>;
   /** Lines for the report, such as an exam ID. */
   notes: Record<string, string>;
 }

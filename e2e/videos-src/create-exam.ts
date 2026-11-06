@@ -7,8 +7,9 @@ import { defineVideo, step, wait, type Stage } from './lib/script';
 import { retry } from './lib/world';
 
 /*
- * The exam board creates an exam on the real system, from its home page to the published exam with
- * its name set. Run it with `pnpm video create-exam`. It spends a little Sepolia ETH.
+ * The exam board creates an exam on the real system. The video runs from its home page to pressing
+ * Publish. The publish, the exam's name and the read-back from the chain then finish off camera, and
+ * any failure there fails the run. Run it with `pnpm video create-exam`. It spends a little Sepolia ETH.
  */
 
 const namePage = (s: Stage) => s.page.locator('.board-exam-name');
@@ -33,6 +34,8 @@ async function tick(s: Stage, names: readonly string[], pace = 100) {
   }, 30, 1000);
   for (const name of names) {
     const box = s.page.getByLabel(`Include ${name}`);
+    // Keeps the name being ticked above the caption.
+    if (((await box.boundingBox())?.y ?? 0) > 480) await s.show(box);
     await box.hover();
     await s.hold(pace);
     await box.check();
@@ -53,7 +56,11 @@ async function publish(s: Stage) {
   const published = () => s.world.registry.getExam(examIdFromName(s.label)).catch(() => null);
   const before = s.world.sent();
   for (let attempt = 0; attempt < 4; attempt += 1) {
+    if (attempt === 0) await s.hold(700);
     await s.click(target);
+    // The video ends here, with the button showing it is working. The rest happens off camera.
+    await s.hold(400);
+    await s.endHere();
     const deadline = Date.now() + 240_000;
     while (Date.now() < deadline && !(await problem.isVisible() && await target.isVisible())) {
       if (s.page.url().includes('#/board/exam/')) return;
@@ -74,8 +81,6 @@ async function publish(s: Stage) {
 
 /** Waits for the name to show as set. It asks the wallet by itself, and a failed attempt offers a button. */
 async function waitForName(s: Stage) {
-  await s.endWhen('.board-exam-name', s.label, 'Published. The exam name is set');
-  await s.top();
   const deadline = Date.now() + 240_000;
   const set = namePage(s).filter({ hasText: s.label });
   while (Date.now() < deadline) {
@@ -147,8 +152,8 @@ export default defineVideo({
     }, { hold: 250 }),
     step('Choose the neutral key holders', async (s) => {
       await s.hold(1500);
-      await tick(s, neutrals, 900);
-      await s.hold(2500);
+      await tick(s, neutrals, 350);
+      await s.hold(800);
       await s.click(s.page.getByRole('button', { name: button.continue, exact: true }));
       await s.board.seeHeading(text.reviewHeading, 60_000);
     }, { hold: 250 }),
@@ -159,9 +164,9 @@ export default defineVideo({
       await s.show(s.page.getByRole('button', { name: button.publish }));
       await s.hold(800);
     }, { hold: 100 }),
-    wait('Publish the exam. Waiting for Sepolia to confirm it', publish, { hold: 300, spends: true }),
-    wait('Now the exam gets its public name. Waiting for Sepolia', waitForName, { hold: 300, spends: true }),
-    // Off camera. The video ends when the name shows, and this fails the run if the record disagrees.
+    wait('Publish the exam', publish, { hold: 300, spends: true }),
+    wait('Setting the exam name', waitForName, { hold: 300, spends: true }),
+    // Off camera, like the name above. This fails the run if the record disagrees.
     wait('Reading the exam back from Sepolia', confirmOnChain, { hold: 0, spends: true }),
   ],
 });

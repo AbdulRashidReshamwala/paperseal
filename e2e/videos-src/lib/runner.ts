@@ -45,11 +45,29 @@ const pointerScript = `(() => {
   addEventListener('mousemove', (e) => { dot().style.transform = 'translate(' + e.clientX + 'px,' + e.clientY + 'px)'; }, true);
 })();`;
 
-/** The caption as a pill at the bottom centre. It overrides the caption bar of src/recorder.ts for every video. */
-const captionPillScript = `(() => {
-  const style = document.createElement('style');
-  style.textContent = '#__ps_caption{left:50%!important;right:auto!important;bottom:20px!important;transform:translateX(-50%);width:max-content;max-width:960px;box-sizing:border-box;padding:10px 26px!important;border:0!important;border-radius:999px;text-align:center;font:600 18px/1.3 system-ui,sans-serif!important;background:rgba(15,23,42,.92)!important;box-shadow:0 6px 20px rgba(15,23,42,.28)}';
-  document.documentElement.appendChild(style);
+/*
+ * The big caption, for every video. An init script runs before the page has a document element, so a
+ * style sheet added there is lost. This styles the caption element itself as soon as it exists, and does
+ * so again if the element is ever rebuilt. The text is kept for the tab, so a full page load shows it
+ * again at once. The space added under the page lets anything scroll clear of the caption.
+ */
+const bigCaptionScript = `(() => {
+  const ID = '__ps_caption';
+  const KEY = '__ps_caption_text';
+  const BLOCK = 'position:fixed;left:5%;right:5%;bottom:40px;z-index:2147483647;box-sizing:border-box;padding:22px 36px;background:#0f172a;color:#fff;font:700 44px/1.2 system-ui,sans-serif;text-align:center;border-radius:14px;pointer-events:none';
+  const store = (text) => { try { sessionStorage.setItem(KEY, text); } catch (e) {} };
+  const stored = () => { try { return sessionStorage.getItem(KEY) || ''; } catch (e) { return ''; } };
+  const style = () => {
+    const el = document.getElementById(ID);
+    if (el && !el.dataset.big) { el.dataset.big = '1'; el.style.cssText = BLOCK; }
+    if (document.body && !document.body.dataset.captionRoom) { document.body.dataset.captionRoom = '1'; document.body.style.paddingBottom = '300px'; }
+  };
+  const show = window.__caption;
+  window.__caption = (text, sub) => { store(text); show(text, sub); style(); };
+  new MutationObserver(() => {
+    style();
+    if (document.body && !window.__captionText && stored()) window.__caption(stored(), '');
+  }).observe(document, { childList: true, subtree: true });
 })();`;
 
 const stamp = (d = new Date()) => {
@@ -86,7 +104,7 @@ async function startWeb(world: World) {
   return { url, stop: () => stop(server), log: () => recentLog(server) };
 }
 
-function stageFor(board: Actor, world: World, label: string, notes: Record<string, string>): Stage {
+function stageFor(board: Actor, world: World, label: string, notes: Record<string, string>, endHere: () => Promise<void>): Stage {
   const { page } = board;
   const show = async (target: Locator) => {
     await target.first().evaluate((el) => {
@@ -101,25 +119,7 @@ function stageFor(board: Actor, world: World, label: string, notes: Record<strin
     label,
     notes,
     show,
-    endWhen: (selector, text, caption) =>
-      page.evaluate(
-        ([where, what, say]) => {
-          const shown = window as unknown as { __caption?: (a: string, b: string) => void; __psEndAt?: number };
-          new MutationObserver((_, observer) => {
-            if (!document.querySelector(where as string)?.textContent?.includes(what as string)) return;
-            observer.disconnect();
-            shown.__caption?.(say as string, '');
-            shown.__psEndAt = Date.now();
-          }).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
-        },
-        [selector, text, caption],
-      ),
-    top: async () => {
-      await page.evaluate(() => {
-        scrollTo({ top: 0, behavior: 'smooth' });
-      });
-      await page.waitForTimeout(350);
-    },
+    endHere,
     hold: (ms) => page.waitForTimeout(ms),
     click: async (target) => {
       await target.waitFor({ state: 'visible', timeout: 60_000 });
@@ -157,22 +157,37 @@ async function play(name: string, video: Video, world: World, dry: boolean): Pro
     mkdirSync(rawDir, { recursive: true });
     const board = await openActor(browser, 'board', null, { role: 'board', videoDir: rawDir, wallet: world.walletScript, bindings: world.bindings });
     await board.person.context.addInitScript(pointerScript);
-    await board.person.context.addInitScript(captionPillScript);
+    await board.person.context.addInitScript(bigCaptionScript);
     await proxyGithubIfLimited(board.person.context);
     const { page } = board;
-    const stage = stageFor(board, world, label, notes);
+    // Only the on-camera part is recorded, so the start and end need no working out from the clock.
+    const raw = resolve(rawDir, 'on-camera.webm');
+    let recording = false;
+    const endHere = async () => {
+      if (!recording) return;
+      recording = false;
+      await page.screencast.stop();
+    };
+    const stage = stageFor(board, world, label, notes, endHere);
     const waits: [number, number][] = [];
     let current = 'opening the page';
     try {
       await page.goto(`${web.url}${video.open}`);
       await video.ready(stage);
+      // The caption is up before the first kept frame, so no frame is without one.
+      const captionOf = (one: Video['steps'][number]) => (typeof one.say === 'string' ? one.say : one.say(stage));
+      const opening = video.steps[0];
+      if (opening) await board.say(captionOf(opening));
+      await page.waitForTimeout(400);
+      await page.screencast.start({ path: raw, size: { width: 1280, height: 800 } });
+      recording = true;
       const firstFrame = Date.now();
       for (const one of video.steps) {
         if (dry && one.spends) {
           console.log('--dry: stopping before the first step that sends anything.');
           break;
         }
-        current = typeof one.say === 'string' ? one.say : one.say(stage);
+        current = captionOf(one);
         console.log(`  ${current}`);
         await board.say(current);
         const started = Date.now();
@@ -181,23 +196,14 @@ async function play(name: string, video: Video, world: World, dry: boolean): Pro
         if (one.wait) waits.push([started, Date.now()]);
         await page.waitForTimeout(one.hold);
       }
-      const endAt = await page.evaluate(() => (window as unknown as { __psEndAt?: number }).__psEndAt ?? null);
-      const recording = page.video();
-      const closedAt = Date.now();
+      await endHere();
       await board.person.context.close();
-      const raw = await recording?.path();
-      if (!raw) throw new Error('Playwright produced no video');
-
-      // The recording starts a moment before `videoStartedAt`, by however much it runs longer than the clock.
       const media = probe(raw);
-      const shift = Math.max(0, media.seconds - (closedAt - board.videoStartedAt) / 1000);
-      const at = (ms: number) => (ms - board.videoStartedAt) / 1000 + shift;
+      const at = (ms: number) => (ms - firstFrame) / 1000;
       const out = resolve(VIDEOS, `${name}${world.kind === 'mock' ? '.mock' : ''}${dry ? '.dry' : ''}.mp4`);
       mkdirSync(dirname(out), { recursive: true });
-      // A small margin past the end mark, so the frame that shows it is the last one kept.
-      const lastFrame = endAt === null ? media.seconds : Math.min(media.seconds, at(endAt) + 0.1);
-      const onCamera = waits.map(([a, b]) => [at(a), Math.min(at(b), lastFrame)] as const).filter(([a]) => a < lastFrame);
-      cut(raw, out, keptRanges(at(firstFrame), lastFrame, onCamera));
+      const onCamera = waits.map(([a, b]) => [at(a), Math.min(at(b), media.seconds)] as const).filter(([a]) => a < media.seconds);
+      cut(raw, out, keptRanges(0, media.seconds, onCamera));
       rmSync(rawDir, { recursive: true, force: true });
       const final = probe(out);
       if (final.width !== 1280 || final.height !== 800) throw new Error(`the video is ${String(final.width)}x${String(final.height)}, not 1280x800`);

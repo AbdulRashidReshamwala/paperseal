@@ -13,7 +13,7 @@ const FPS = 25;
 /** The finished video plays this much faster than real time. Raise it to tighten every video at once. */
 const SPEED = 1.25;
 /** Seconds the last frame stays on screen. */
-const END_HOLD = 2.5;
+const END_HOLD = 1;
 
 export interface Media {
   width: number;
