@@ -165,11 +165,9 @@ export function verifierUrl(
   }
 }
 
-export type DraftStep = 'create' | 'version' | 'review';
+export type DraftStep = 'create' | 'review';
 
-/** The first unfinished step wins, so a value that stops being valid sends the board back to it. */
-export function draftScreen(chosen: DraftStep, ready: { create: boolean; version: boolean }): DraftStep {
-  if (!ready.create || chosen === 'create') return 'create';
-  if (!ready.version || chosen === 'version') return 'version';
-  return 'review';
+/** The exam has to be complete to be reviewed, so a value that stops being valid sends the board back to it. */
+export function draftScreen(chosen: DraftStep, ready: { create: boolean }): DraftStep {
+  return !ready.create || chosen === 'create' ? 'create' : 'review';
 }

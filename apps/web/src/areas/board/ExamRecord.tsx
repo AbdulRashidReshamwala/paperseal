@@ -23,8 +23,8 @@ export function ExamRecord(props: { snapshot: Snapshot; children?: ReactNode }) 
             <Row label="Commit">
               <Hash value={found.exam.commitHash} label="commit" />
             </Row>
-            <Row label="Image digest">
-              <Hash value={found.exam.imageDigest} label="image digest" />
+            <Row label="Software image">
+              <Hash value={found.exam.imageDigest} label="software image" />
             </Row>
             <Row label="Exam start">{formatClock(Number(found.exam.settings.examStart))}</Row>
             <Row label="Released to centres">{Number(found.exam.settings.delta) / 60} minutes before</Row>
@@ -34,7 +34,7 @@ export function ExamRecord(props: { snapshot: Snapshot; children?: ReactNode }) 
             <Row label="Public record address">
               <span className="ps-mono">{found.exam.settings.rpcHost}</span>
             </Row>
-            <Row label="Topics fingerprint">
+            <Row label="Topics">
               <Hash value={found.exam.settings.criteriaHash} label="criteria hash" />
             </Row>
             {found.criteriaProblem ? (

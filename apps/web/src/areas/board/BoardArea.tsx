@@ -21,14 +21,13 @@ import { ReceiptStep } from './ReceiptStep';
 import { useReleases } from './releases';
 import { ReviewStep } from './ReviewStep';
 import { StatusStep } from './StatusStep';
-import { VersionStep } from './VersionStep';
 import { WaitStep } from './WaitStep';
 
-const step = (n: number) => `Step ${String(n)} of 7`;
+const step = (n: number) => `Step ${String(n)} of 6`;
 
-/** Steps 1 to 3, before there is an exam. They live in the browser until the exam is published. */
+/** Steps 1 and 2, before there is an exam. They live in the browser until the exam is published. */
 function Draft(props: { review: boolean; otherExam: boolean }) {
-  const { publish, setPublish, draftStep, setDraftStep } = useBoardForm();
+  const { publish, draftStep, setDraftStep } = useBoardForm();
   const { blueprint, schedule } = useEvaluated();
   const releases = useReleases(publish.version);
   const { review } = props;
@@ -41,7 +40,7 @@ function Draft(props: { review: boolean; otherExam: boolean }) {
   const created = Boolean(
     blueprint.criteria && blueprint.examId && schedule.settings && !evaluatePublish(publish, null).errors.rpcHost,
   );
-  const screen = draftScreen(draftStep, { create: created, version: releases.verified !== null });
+  const screen = draftScreen(draftStep, { create: created });
   return (
     <>
       {props.otherExam ? (
@@ -53,29 +52,13 @@ function Draft(props: { review: boolean; otherExam: boolean }) {
         <CreateStep
           eyebrow={step(1)}
           onContinue={() => {
-            setDraftStep('version');
-          }}
-        />
-      ) : null}
-      {screen === 'version' ? (
-        <VersionStep
-          eyebrow={step(2)}
-          releases={releases}
-          chosen={publish.version}
-          onChoose={(version) => {
-            setPublish({ ...publish, version });
-          }}
-          onContinue={() => {
             setDraftStep('review');
-          }}
-          onBack={() => {
-            setDraftStep('create');
           }}
         />
       ) : null}
       {screen === 'review' ? (
         <ReviewStep
-          eyebrow={step(3)}
+          eyebrow={step(2)}
           releases={releases}
           onBack={() => {
             setDraftStep('create');
@@ -123,7 +106,7 @@ function BoardFlow(props: { route?: 'draft' | 'review' }) {
   if (form.held) {
     return page(
       <ReceiptStep
-        eyebrow={step(form.held.kind === 'publish' ? 3 : form.held.kind === 'list' ? 4 : 6)}
+        eyebrow={step(form.held.kind === 'publish' ? 2 : form.held.kind === 'list' ? 3 : 5)}
         receipt={form.held}
         onContinue={() => {
           if (form.held?.kind === 'publish') {
@@ -162,10 +145,10 @@ function BoardFlow(props: { route?: 'draft' | 'review' }) {
       ),
     );
   }
-  if (decided === 'people') return page(<PeopleStep eyebrow={step(4)} snapshot={value} onPosted={reload} />);
-  if (decided === 'wait') return page(<WaitStep eyebrow={step(5)} snapshot={value} />);
-  if (decided === 'post-build') return page(<BuildStep eyebrow={step(6)} snapshot={value} onPosted={reload} />);
-  return page(<StatusStep eyebrow={step(7)} snapshot={value} />);
+  if (decided === 'people') return page(<PeopleStep eyebrow={step(3)} snapshot={value} onPosted={reload} />);
+  if (decided === 'wait') return page(<WaitStep eyebrow={step(4)} snapshot={value} />);
+  if (decided === 'post-build') return page(<BuildStep eyebrow={step(5)} snapshot={value} onPosted={reload} />);
+  return page(<StatusStep eyebrow={step(6)} snapshot={value} />);
 }
 
 /*

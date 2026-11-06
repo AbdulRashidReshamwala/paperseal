@@ -260,9 +260,9 @@ function settingsItems(exam: Exam, examId: Hex | null): Item[] {
     { kind: 'fact', label: `Unlock round ${String(s.unlockRound)}`, value: utcTime(roundTimeSeconds(Number(s.unlockRound))) },
     { kind: 'fact', label: `End round ${String(s.endRound)}`, value: utcTime(roundTimeSeconds(Number(s.endRound))) },
     { kind: 'hash', label: 'Criteria hash', value: s.criteriaHash },
-    { kind: 'fact', label: 'Public record host the sealed machine reads', value: s.rpcHost },
+    { kind: 'fact', label: 'Public record address Paper Seal uses', value: s.rpcHost },
     { kind: 'hash', label: 'Software version, the commit it was built from', value: exam.commitHash },
-    { kind: 'hash', label: 'Software image digest', value: exam.imageDigest },
+    { kind: 'hash', label: 'Software image', value: exam.imageDigest },
     { kind: 'link', href: `https://github.com/${REPOSITORY}/commit/${exam.commitHash.slice(2)}`, text: 'Read this version of the code' },
   ];
 }

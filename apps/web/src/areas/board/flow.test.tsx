@@ -206,19 +206,30 @@ describe('sealStateAt', () => {
   });
 });
 
-describe('step 4, bring people in', () => {
-  const addInvite = (role: string, text: string) => {
-    fireEvent.change(screen.getByLabelText('Role'), { target: { value: role } });
-    fireEvent.change(screen.getByLabelText(/^(Name to show on the public list|A note for yourself)/), { target: { value: text } });
-    fireEvent.click(button('Add invite'));
+describe('step 3, bring people in', () => {
+  const storedInvites = () => JSON.parse(localStorage.getItem(`paperseal.invites.${examId}`) ?? '[]') as BoardInvite[];
+  const fillHolders = (text: string) => {
+    fireEvent.change(screen.getByLabelText(/^Key holders/), { target: { value: text } });
+  };
+  const fillCentres = (text: string) => {
+    fireEvent.change(screen.getByLabelText(/^Centres/), { target: { value: text } });
+  };
+  const fillSetters = (count: string) => {
+    fireEvent.change(screen.getByLabelText(/^Setters/), { target: { value: count } });
   };
 
-  it('makes an invite per person, keeps it in the browser and copies a link with the secret in the fragment', async () => {
+  it('makes an invite for every name in the box, keeps them in the browser and copies a link with the secret in the fragment', async () => {
     const { env } = await seeded('exam');
     renderBoard(env, fakeTee());
     await screen.findByRole('heading', { name: 'Invite people' });
-    addInvite('keyholder', 'Asha');
-    await screen.findByText('Waiting for them to register');
+    fillHolders('Asha\n  Ben \n\nChen\n');
+    fillCentres('Centre 1\nCentre 2');
+    fireEvent.click(button('Add 5 people'));
+    await screen.findByText('Asha (Key holder)');
+    expect(screen.getByText('Centre 2 (Centre)')).toBeTruthy();
+    expect(screen.getAllByText('Waiting for them to register')).toHaveLength(5);
+    // The boxes are empty again, ready for the next batch.
+    expect((screen.getByLabelText(/^Key holders/) as HTMLTextAreaElement).value).toBe('');
     const writeText = vi.fn(() => Promise.resolve());
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
     fireEvent.click(button('Copy the link for Asha (Key holder)'));
@@ -226,30 +237,118 @@ describe('step 4, bring people in', () => {
     const link = (writeText.mock.calls[0] as unknown as [string])[0];
     const url = new URL(link);
     expect(url.search).toBe('');
-    const stored = JSON.parse(localStorage.getItem(`paperseal.invites.${examId}`) ?? '[]') as BoardInvite[];
-    expect(stored).toHaveLength(1);
+    const stored = storedInvites();
+    expect(stored).toHaveLength(5);
+    expect(new Set(stored.map((i) => i.inviteSecret)).size).toBe(5);
     const fragment = new URLSearchParams(url.hash.slice('#/join?'.length));
     expect(fragment.get('exam')).toBe(examId);
     expect(fragment.get('role')).toBe('keyholder');
     expect(fragment.get('owner')).toBe('Asha');
-    expect(fragment.get('secret')).toBe(stored[0]?.inviteSecret);
+    expect(fragment.get('secret')).toBe(stored.find((i) => i.owner === 'Asha')?.inviteSecret);
   });
 
-  it('asks for a name for a key holder, refuses a repeat, and needs none for a setter', async () => {
+  it('adds nothing when a line is not acceptable, says which, and refuses a repeated name', async () => {
     const { env } = await seeded('exam');
     renderBoard(env, fakeTee());
     await screen.findByRole('heading', { name: 'Invite people' });
-    addInvite('keyholder', '  ');
-    expect(await screen.findByText('Enter the name to show on the public list.')).toBeTruthy();
-    addInvite('keyholder', 'Asha');
-    await screen.findByText('Waiting for them to register');
-    addInvite('keyholder', 'Asha');
-    expect(await screen.findByText('Asha already has an invite.')).toBeTruthy();
-    addInvite('setter', '');
-    expect(await screen.findByText('Setter 1 (Setter)')).toBeTruthy();
-    const stored = JSON.parse(localStorage.getItem(`paperseal.invites.${examId}`) ?? '[]') as BoardInvite[];
-    expect(stored.find((i) => i.role === 'setter')?.owner).toBeUndefined();
-    expect(new Set(stored.map((i) => i.inviteSecret)).size).toBe(2);
+    fillHolders('Asha\nAsha');
+    fireEvent.click(button('Add 2 people'));
+    expect(await screen.findByText(/Line 2: Asha already has an invite\./)).toBeTruthy();
+    expect(storedInvites()).toHaveLength(0);
+    fillHolders('Asha');
+    fireEvent.click(button('Add 1 person'));
+    await screen.findByText('Asha (Key holder)');
+    // Another box can't reuse the name either.
+    fillCentres('Asha');
+    fireEvent.click(button('Add 1 person'));
+    expect(await screen.findByText(/Line 1: Asha already has an invite\./)).toBeTruthy();
+    expect(storedInvites()).toHaveLength(1);
+  });
+
+  it('adds setters by number, with no name, and keeps them private', async () => {
+    const { env } = await seeded('exam');
+    renderBoard(env, fakeTee());
+    await screen.findByRole('heading', { name: 'Invite people' });
+    expect(button('Add setters').disabled).toBe(true);
+    fillSetters('0');
+    fireEvent.click(screen.getByRole('button', { name: 'Add setters' }));
+    fillSetters('3');
+    fireEvent.click(button('Add 3 setters'));
+    expect(await screen.findByText('Setter 3 (Setter)')).toBeTruthy();
+    const stored = storedInvites();
+    expect(stored.map((i) => i.role)).toEqual(['setter', 'setter', 'setter']);
+    expect(stored.every((i) => i.owner === undefined)).toBe(true);
+    expect(new Set(stored.map((i) => i.inviteSecret)).size).toBe(3);
+  });
+
+  it('copies every waiting link at once as "Name, link" lines', async () => {
+    const { env } = await seeded('exam');
+    stock([...neutrals.slice(0, 2), setter]);
+    renderBoard(env, fakeTee({ registrations: registrationsOf([neutrals[0] as Person]) }));
+    await screen.findByText('Registered');
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    fireEvent.click(button('Copy all'));
+    await screen.findByText('Copied all links');
+    const lines = (writeText.mock.calls[0] as unknown as [string])[0].split('\n');
+    // Asha has registered, so only the two still waiting are listed.
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toMatch(/^Ben, .*#\/join\?exam=/);
+    expect(lines[1]).toMatch(/^Setter 1, .*#\/join\?exam=/);
+    // The per-row buttons stay.
+    expect(button('Copy the link for Ben (Key holder)')).toBeTruthy();
+  });
+
+  it('says plainly that invites live in this browser, and that a backup is private', async () => {
+    const { env } = await seeded('exam');
+    renderBoard(env, fakeTee());
+    await screen.findByRole('heading', { name: 'Invite people' });
+    expect(screen.getByText(/kept in this browser only/)).toBeTruthy();
+    expect(screen.getByText(/The backup is private, because it holds everyone’s links/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Save a backup' })).toBeNull();
+  });
+
+  it('saves a backup file and restores it into an empty browser', async () => {
+    const { env } = await seeded('exam');
+    stock([neutrals[0] as Person, setter]);
+    const blobs: Blob[] = [];
+    let downloaded = '';
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: (blob: Blob) => (blobs.push(blob), 'blob:test'), revokeObjectURL: () => undefined }));
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      downloaded = this.download;
+    });
+    renderBoard(env, fakeTee());
+    await screen.findByText('Asha (Key holder)');
+    fireEvent.click(button('Save a backup'));
+    expect(downloaded).toMatch(/^paperseal-invites-.*\.json$/);
+    const text = await blobs[0]?.text();
+    expect(text).toContain(neutrals[0]?.invite.inviteSecret);
+    click.mockRestore();
+    cleanup();
+
+    localStorage.removeItem(`paperseal.invites.${examId}`);
+    renderBoard(env, fakeTee());
+    await screen.findByRole('heading', { name: 'Invite people' });
+    expect(screen.queryByText('Asha (Key holder)')).toBeNull();
+    const file = new File([text ?? ''], 'backup.json', { type: 'application/json' });
+    fireEvent.change(screen.getByLabelText('Restore from a backup'), { target: { files: [file] } });
+    expect(await screen.findByText('Asha (Key holder)')).toBeTruthy();
+    expect(screen.getByText('Brought back 2 invites.')).toBeTruthy();
+    expect(storedInvites()).toHaveLength(2);
+  });
+
+  it('refuses a backup that is not for this exam or not a backup at all', async () => {
+    const { env } = await seeded('exam');
+    renderBoard(env, fakeTee());
+    await screen.findByRole('heading', { name: 'Invite people' });
+    const restore = async (content: string) => {
+      fireEvent.change(screen.getByLabelText('Restore from a backup'), { target: { files: [new File([content], 'x.json')] } });
+    };
+    await restore('not json');
+    expect(await screen.findByText(/not an invite backup from Paper Seal/)).toBeTruthy();
+    await restore(JSON.stringify({ kind: 'paperseal-invites', examId: `0x${'12'.repeat(32)}`, invites: [] }));
+    expect(await screen.findByText(/for a different exam/)).toBeTruthy();
+    expect(storedInvites()).toHaveLength(0);
   });
 
   it('prints the link when it cannot be copied', async () => {
@@ -266,7 +365,8 @@ describe('step 4, bring people in', () => {
     const { env } = await seeded('exam');
     renderBoard(env, fakeTee());
     await screen.findByRole('heading', { name: 'Invite people' });
-    addInvite('keyholder', 'Asha');
+    fillHolders('Asha');
+    fireEvent.click(button('Add 1 person'));
     await screen.findByText('Waiting for them to register');
     cleanup();
     renderBoard(env, fakeTee());

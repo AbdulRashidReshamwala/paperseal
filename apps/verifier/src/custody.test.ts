@@ -176,7 +176,7 @@ describe('step 1, exam published', () => {
   it('done', () => {
     const s = step(scene(), 'published');
     expect(s.state).toBe('done');
-    expect(s.items).toContainEqual(expect.objectContaining({ label: 'Software image digest', value: world.exam.imageDigest }));
+    expect(s.items).toContainEqual(expect.objectContaining({ label: 'Software image', value: world.exam.imageDigest }));
     expect(s.items).toContainEqual(expect.objectContaining({ label: 'Software version, the commit it was built from', value: world.exam.commitHash }));
     expect(s.round).toBe(null);
   });

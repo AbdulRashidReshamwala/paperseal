@@ -1,7 +1,7 @@
-import { entriesFor, listRolesFor, matchInvites, roles, threshold, type InviteRole, type InviteState } from '@paperseal/protocol';
+import { entriesFor, listRolesFor, matchInvites, roles, threshold, type InviteState } from '@paperseal/protocol';
 import type { RegistrationEntry, TeeClient } from '@paperseal/tee-client';
-import { Button, Check, Field, Hash, Panel, Row, Rows, Stage } from '@paperseal/ui';
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Button, Check, CopyButton, Hash, Panel, Row, Rows, Stage, Stamp } from '@paperseal/ui';
+import { useEffect, useMemo, useState } from 'react';
 
 import { useCurrentExamId } from '../../shared/currentExam';
 import { TEE_STATUS_POLL_MS } from '../../shared/TeeStatus';
@@ -10,8 +10,10 @@ import { usePoll } from './hooks';
 import { withDetails } from './details';
 import { ExamRecord } from './ExamRecord';
 import type { Snapshot } from './examState';
-import { Fold, PostAction } from './Parts';
-import { centreRoles, createInvite, inviteRoleNames, linkFor, reissueInvite, type BoardInvite } from './invites';
+import { AddInvites } from './AddInvites';
+import { InviteBackup } from './InviteBackup';
+import { Fold, PostAction, ReadBackRows } from './Parts';
+import { centreRoles, copyAllText, inviteRoleNames, linkFor, reissueInvite, type BoardInvite } from './invites';
 import { bankNeeded } from './plan';
 import { checkPostTarget, type PostGate } from './postGate';
 import { postApprovedListFlow, type PostOutcome } from './postFlow';
@@ -62,90 +64,6 @@ function usePostGate(tee: TeeClient | null): PostGate {
   return { state: 'checking' };
 }
 
-function CopyLink(props: { who: string; url: string }) {
-  const [copy, setCopy] = useState<'idle' | 'copied' | 'failed'>('idle');
-  const onClick = () => {
-    // navigator.clipboard is missing outside a secure context.
-    const written = (globalThis.navigator as Navigator | undefined)?.clipboard?.writeText(props.url);
-    if (!written) {
-      setCopy('failed');
-      return;
-    }
-    written.then(
-      () => {
-        setCopy('copied');
-      },
-      () => {
-        setCopy('failed');
-      },
-    );
-  };
-  return (
-    <span className="board-link">
-      <Button aria-label={`Copy the link for ${props.who}`} onClick={onClick}>
-        {copy === 'copied' ? 'Copied' : 'Copy link'}
-      </Button>
-      {copy === 'failed' ? (
-        <>
-          <span role="status">The link could not be copied. Select it below and copy it yourself.</span>
-          <span className="ps-mono">{props.url}</span>
-        </>
-      ) : null}
-    </span>
-  );
-}
-
-const inviteRoleOptions: InviteRole[] = ['keyholder', 'centre', 'setter'];
-
-/** Makes one invite: a role and a name, then a link to copy. Setters need no name, and any note stays here. */
-function AddInvite(props: { invites: readonly BoardInvite[]; onAdd: (invite: BoardInvite) => void }) {
-  const [role, setRole] = useState<InviteRole>('keyholder');
-  const [text, setText] = useState('');
-  const [error, setError] = useState<string | undefined>();
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    const made = createInvite(props.invites, role, text);
-    if (!made.ok) {
-      setError(made.reason);
-      return;
-    }
-    setError(undefined);
-    setText('');
-    props.onAdd(made.invite);
-  };
-  return (
-    <form className="board-invite-form" onSubmit={submit}>
-      <label className="ps-field">
-        <span>Role</span>
-        <select
-          className="ps-input board-role"
-          value={role}
-          onChange={(event) => {
-            setRole(event.target.value as InviteRole);
-            setError(undefined);
-          }}
-        >
-          {inviteRoleOptions.map((option) => (
-            <option key={option} value={option}>
-              {inviteRoleNames[option]}
-            </option>
-          ))}
-        </select>
-      </label>
-      <Field
-        label={role === 'setter' ? 'A note for yourself (optional, kept private)' : 'Name to show on the public list'}
-        value={text}
-        error={error}
-        onChange={(value) => {
-          setText(value);
-          setError(undefined);
-        }}
-      />
-      <Button type="submit">Add invite</Button>
-    </form>
-  );
-}
-
 const stateWords: Record<InviteState['kind'], string> = {
   waiting: 'Waiting for them to register',
   matched: 'Registered',
@@ -184,7 +102,11 @@ function InviteRow(props: {
             ))}
           </select>
         ) : null}
-        {state.kind === 'waiting' ? <CopyLink who={who} url={props.link} /> : null}
+        {state.kind === 'waiting' ? (
+          <CopyButton text={props.link} aria-label={`Copy the link for ${who}`}>
+            Copy link
+          </CopyButton>
+        ) : null}
         {state.kind === 'conflict' ? (
           <Button aria-label={`Make a new link for ${who}`} onClick={props.onReissue}>
             Make a new link
@@ -210,7 +132,8 @@ const expected = /^expected \d+ neutral and \d+ centre key holders/;
 
 /** Step 4: invites to send, then the list composed from whoever registered with one. */
 export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPosted: () => void }) {
-  const { environment, tee, addReceipt } = useBoardForm();
+  const { environment, tee, addReceipt, receipts } = useBoardForm();
+  const published = receipts.find((receipt) => receipt.kind === 'publish' && receipt.outcome.matches);
   const examId = useCurrentExamId();
   const reader = useReader();
   const gate = usePostGate(tee);
@@ -242,7 +165,7 @@ export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPoste
       ? 'No exam is open. Go back to the exam board page and open your exam.'
       : entries.length === 0
         ? invites.length === 0
-          ? 'Add an invite for each person, then send them their link.'
+          ? 'Add the people above, then send each person their link.'
           : 'Waiting for people to register. You can close this page and come back.'
         : composed && !composed.ok
           ? expected.test(composed.reason)
@@ -257,6 +180,11 @@ export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPoste
   const base = 'location' in globalThis ? `${location.origin}${location.pathname}` : '';
   const needs = props.snapshot.found?.criteria ? bankNeeded(props.snapshot.found.criteria) : null;
 
+  // Only an invite that is still waiting has a link worth sending.
+  const waiting = examId
+    ? matching.rows.flatMap(({ invite, state }) => (state.kind === 'waiting' ? [{ invite, link: linkFor(base, examId, invite) }] : []))
+    : [];
+
   const changeInvite = (next: BoardInvite) => {
     update(invites.map((invite) => (invite.id === next.id ? next : invite)));
   };
@@ -265,43 +193,66 @@ export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPoste
     <Stage
       eyebrow={props.eyebrow}
       title="Invite people"
-      lede="Add an invite for each person and send them their link. When everyone has registered, post the list."
+      lede="Add the people, copy their links and send each person theirs. When everyone has registered, post the list."
       action={
         <>
+          {published ? (
+            <div className="board-section">
+              <p className="board-stamp">
+                <Stamp press>Published</Stamp>
+              </p>
+              <p>Your exam is saved on the public record, and it matches what you entered.</p>
+              {published.outcome.rows.length > 0 ? (
+                <Fold summary="Details">
+                  <ReadBackRows rows={published.outcome.rows} />
+                </Fold>
+              ) : null}
+            </div>
+          ) : null}
           <Panel title="Invites">
             {examId ? (
-              <AddInvite
+              <AddInvites
                 invites={invites}
-                onAdd={(invite) => {
-                  update([...invites, invite]);
+                settersNeeded={needs?.setters}
+                onAdd={(added) => {
+                  update([...invites, ...added]);
                 }}
               />
             ) : null}
             {invites.length > 0 && examId ? (
-              <Rows>
-                {matching.rows.map(({ invite, state }) => {
-                  const key = state.kind === 'matched' ? state.registration.passkeyPublicKey : undefined;
-                  return (
-                    <InviteRow
-                      key={invite.id}
-                      invite={invite}
-                      state={state}
-                      link={linkFor(base, examId, invite)}
-                      role={key ? picked[key] : undefined}
-                      onRole={(role) => {
-                        if (key) setTouched({ ...touched, [key]: role });
-                      }}
-                      onReissue={() => {
-                        changeInvite(reissueInvite(invite));
-                      }}
-                    />
-                  );
-                })}
-              </Rows>
+              <>
+                {waiting.length > 1 ? (
+                  <p className="board-actions">
+                    <CopyButton text={() => copyAllText(waiting)} copied="Copied all links">
+                      Copy all
+                    </CopyButton>
+                  </p>
+                ) : null}
+                <Rows>
+                  {matching.rows.map(({ invite, state }) => {
+                    const key = state.kind === 'matched' ? state.registration.passkeyPublicKey : undefined;
+                    return (
+                      <InviteRow
+                        key={invite.id}
+                        invite={invite}
+                        state={state}
+                        link={linkFor(base, examId, invite)}
+                        role={key ? picked[key] : undefined}
+                        onRole={(role) => {
+                          if (key) setTouched({ ...touched, [key]: role });
+                        }}
+                        onReissue={() => {
+                          changeInvite(reissueInvite(invite));
+                        }}
+                      />
+                    );
+                  })}
+                </Rows>
+              </>
             ) : null}
+            {examId ? <InviteBackup examId={examId} invites={invites} onRestore={update} /> : null}
             <p className="board-note">
-              Each link works for one person only, so send it to them privately. Your invites are saved in this browser, so
-              use this same browser to see who has registered. It is safe to close this page while you wait.
+              Each link works for one person only, so send it to them privately. It is safe to close this page while you wait.
             </p>
           </Panel>
           <Panel title="On the list">

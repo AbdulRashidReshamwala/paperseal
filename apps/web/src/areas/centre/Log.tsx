@@ -77,7 +77,7 @@ export function LogView({ log, owners, problem, verdict }: LogViewProps) {
       <Rows>
         <Row label="The list of releases is complete">{result(verdict.entriesHash)}</Row>
         <Row label="Signed by Paper Seal">{result(verdict.signature)}</Row>
-        <Row label="Paper Seal is running the published code">
+        <Row label="Paper Seal is the approved version">
           {result(verdict.token.passed)}
           {verdict.token.failures.length > 0 ? ` ${verdict.token.failures.join('; ')}` : ''}
         </Row>

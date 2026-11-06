@@ -85,12 +85,9 @@ describe('configuration', () => {
 });
 
 describe('draftScreen', () => {
-  const ready = { create: true, version: true };
-  it('sends the board back to the first unfinished step', () => {
-    expect(draftScreen('review', { create: false, version: true })).toBe('create');
-    expect(draftScreen('review', { create: true, version: false })).toBe('version');
-    expect(draftScreen('review', ready)).toBe('review');
-    expect(draftScreen('version', ready)).toBe('version');
-    expect(draftScreen('create', ready)).toBe('create');
+  it('sends the board back to the details until they are complete', () => {
+    expect(draftScreen('review', { create: false })).toBe('create');
+    expect(draftScreen('review', { create: true })).toBe('review');
+    expect(draftScreen('create', { create: true })).toBe('create');
   });
 });

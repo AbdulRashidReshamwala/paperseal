@@ -240,17 +240,18 @@ function fillCreate(host: string | null = 'rpc.example.org') {
   if (host !== null) type('Public record address', host);
 }
 
+/** Step 1 done and the review open, before the version has been checked. */
 async function toVersion(env: PublishEnvironment) {
   renderBoard(env);
   fillCreate();
   fireEvent.click(button('Continue'));
-  await screen.findByText('Choose the Paper Seal version');
+  await screen.findByText('Review and publish');
 }
 
+/** The review, once the newest version has been checked. */
 async function toReview(env: PublishEnvironment) {
   await toVersion(env);
-  fireEvent.click(await screen.findByRole('button', { name: /^Use v/ }));
-  await screen.findByText('Review and publish');
+  await screen.findByText(/It has been checked/);
   return button('Publish the exam');
 }
 
@@ -316,17 +317,27 @@ describe('step 1, create the exam', () => {
   });
 });
 
-describe('step 2, the version', () => {
-  it('preselects the newest verified release, so it is one click', async () => {
+describe('the version, in the review', () => {
+  it('chooses the newest verified release by itself, so there is nothing to click', async () => {
     stubGithub({
       releases: [releaseItem('v1.0.0', '2027-01-01T00:00:00Z'), releaseItem('v1.1.0', '2027-02-01T00:00:00Z')],
     });
     const { env } = environment();
-    await toVersion(env);
-    expect(await screen.findByRole('button', { name: 'Use v1.1.0' })).toBeTruthy();
-    expect(screen.getByText(/Version v1\.1\.0 is the newest version/)).toBeTruthy();
-    fireEvent.click(button('Use v1.1.0'));
-    expect(await screen.findByText('Review and publish')).toBeTruthy();
+    const publish = await toReview(env);
+    expect(screen.getByText(/v1\.1\.0, the newest version/)).toBeTruthy();
+    expect(screen.queryByText('Choose the Paper Seal version')).toBeNull();
+    expect(publish.disabled).toBe(false);
+  });
+
+  it('folds the choice of another version into the review', async () => {
+    stubGithub({
+      releases: [releaseItem('v1.0.0', '2027-01-01T00:00:00Z'), releaseItem('v1.1.0', '2027-02-01T00:00:00Z')],
+    });
+    const { env } = environment();
+    await toReview(env);
+    expect(screen.getByText('Use a different version').closest('details')?.open).toBe(false);
+    fireEvent.change(screen.getByLabelText('Version'), { target: { value: 'v1.0.0' } });
+    await screen.findByText(/v1\.0\.0, the version you chose/);
   });
 
   it('skips a newest release whose tag points elsewhere, and says so', async () => {
@@ -335,18 +346,18 @@ describe('step 2, the version', () => {
       tagSha: { 'v1.1.0': 'c'.repeat(40) },
     });
     const { env } = environment();
-    await toVersion(env);
-    expect(await screen.findByRole('button', { name: 'Use v1.0.0' })).toBeTruthy();
+    await toReview(env);
+    expect(screen.getByText(/v1\.0\.0, the newest version/)).toBeTruthy();
     expect(screen.getByText(/Version v1\.1\.0 did not pass its check/)).toBeTruthy();
   });
 
-  it('blocks when no release matches its tag', async () => {
+  it('blocks publishing when no release matches its tag', async () => {
     stubGithub({ tagSha: { 'v1.0.0': 'c'.repeat(40) } });
     const { node, env } = environment();
     await toVersion(env);
     await screen.findByText(/did not pass its check/);
     expect(screen.getByText(/No version passed its check/)).toBeTruthy();
-    expect(button('Use this version').disabled).toBe(true);
+    expect(button('Publish the exam').disabled).toBe(true);
     expect(node.sent).toHaveLength(0);
   });
 
@@ -356,19 +367,18 @@ describe('step 2, the version', () => {
       tagSha: { 'v1.0.0': 'c'.repeat(40) },
     });
     const { env } = environment();
-    await toVersion(env);
-    await screen.findByRole('button', { name: 'Use v1.1.0' });
+    await toReview(env);
     fireEvent.change(screen.getByLabelText('Version'), { target: { value: 'v1.0.0' } });
     await screen.findByText(/Version v1\.0\.0 did not pass its check/);
-    expect(button('Use this version').disabled).toBe(true);
+    expect(button('Publish the exam').disabled).toBe(true);
   });
 
-  it('blocks when the tag cannot be checked', async () => {
+  it('blocks publishing when the tag cannot be checked', async () => {
     stubGithub({ tagStatus: 500 });
     const { env } = environment();
     await toVersion(env);
     await screen.findByText(/versions could not be loaded\. Check your internet/);
-    expect(button('Use this version').disabled).toBe(true);
+    expect(button('Publish the exam').disabled).toBe(true);
   });
 
   it('says plainly when GitHub is limiting, with retry and no manual entry', async () => {
@@ -378,11 +388,12 @@ describe('step 2, the version', () => {
     await screen.findByText(/service is busy/);
     expect(screen.queryByLabelText(/^Commit/)).toBeNull();
     expect(screen.queryByLabelText(/^Image digest/)).toBeNull();
-    expect(button('Use this version').disabled).toBe(true);
+    expect(button('Publish the exam').disabled).toBe(true);
 
     stubGithub();
     fireEvent.click(screen.getByText('Try again'));
-    expect(await screen.findByRole('button', { name: 'Use v1.0.0' })).toBeTruthy();
+    await screen.findByText(/It has been checked/);
+    expect(button('Publish the exam').disabled).toBe(false);
   });
 
   it('shows a loading state, and explains that a version must be tagged when there are none', async () => {
@@ -390,14 +401,15 @@ describe('step 2, the version', () => {
     const { env: pending } = environment();
     await toVersion(pending);
     expect(screen.getByText(/Loading the available versions/)).toBeTruthy();
-    expect(button('Use this version').disabled).toBe(true);
+    expect(button('Publish the exam').disabled).toBe(true);
     cleanup();
+    localStorage.clear();
 
     stubGithub({ releases: [] });
     const { env } = environment();
     await toVersion(env);
     await screen.findByText(/no version to use yet/);
-    expect(button('Use this version').disabled).toBe(true);
+    expect(button('Publish the exam').disabled).toBe(true);
   });
 
   it('does not link a build run that is not an Actions run of the releases repository', async () => {
@@ -411,21 +423,21 @@ describe('step 2, the version', () => {
   });
 });
 
-describe('step 3, review and publish', () => {
-  it('publishes with one action, reads back, stamps it, and moves on to people', async () => {
+describe('step 2, review and publish', () => {
+  it('publishes with one action, reads back, and goes straight to inviting people', async () => {
     const { node, env } = environment();
     const publish = await toReview(env);
     expect(screen.getByText(/nothing here can be changed, not even by the exam board/)).toBeTruthy();
     expect(screen.getByText('Topic: Mechanics')).toBeTruthy();
     fireEvent.click(publish);
 
-    expect(await screen.findByText('The exam is published')).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Invite people' })).toBeTruthy();
+    expect(screen.queryByText('The exam is published')).toBeNull();
     expect(screen.getByText('Published')).toBeTruthy();
     expect(node.sent).toHaveLength(1);
     expect(getCurrentExamId()).toBe(examId);
-
-    fireEvent.click(button('Invite people'));
-    expect(await screen.findByRole('heading', { name: 'Invite people' })).toBeTruthy();
+    // The draft is gone once it has become an exam.
+    expect(localStorage.getItem('paperseal.board.draft')).toBeNull();
   });
 
   it('asks the wallet for an account as part of the same action', async () => {
@@ -440,7 +452,7 @@ describe('step 3, review and publish', () => {
     } as typeof node.provider;
     const publish = await toReview({ ...env, getProvider: () => provider });
     fireEvent.click(publish);
-    await screen.findByText('The exam is published');
+    await screen.findByRole('heading', { name: 'Invite people' });
     expect(shared).toBe(true);
   });
 
@@ -471,6 +483,37 @@ describe('step 3, review and publish', () => {
     fireEvent.click(publish);
     await screen.findAllByText(/Switch to the board’s account in your wallet/);
     expect(node.sent).toHaveLength(0);
+  });
+
+  it('keeps the form through a reload, and not after publishing', async () => {
+    const { env } = environment();
+    await toReview(env);
+    expect(JSON.parse(localStorage.getItem('paperseal.board.draft') ?? 'null')).toMatchObject({ draftStep: 'review', plan: { name } });
+    cleanup();
+    renderBoard(env);
+    expect(await screen.findByText('Review and publish')).toBeTruthy();
+    fireEvent.click(button('Change the details'));
+    expect((field('Exam name') as HTMLInputElement).value).toBe(name);
+  });
+
+  it('starts empty when the saved form is damaged or storage is unavailable', () => {
+    localStorage.setItem('paperseal.board.draft', '{"plan":{"name":3}}');
+    const { env } = environment();
+    renderBoard(env);
+    expect((field('Exam name') as HTMLInputElement).value).toBe('');
+    cleanup();
+    vi.stubGlobal('localStorage', {
+      getItem: () => null,
+      setItem: () => {
+        throw new Error('blocked');
+      },
+      removeItem: () => {
+        throw new Error('blocked');
+      },
+    });
+    renderBoard(env);
+    type('Exam name', name);
+    expect((field('Exam name') as HTMLInputElement).value).toBe(name);
   });
 
   it('goes back to the details without losing them', async () => {

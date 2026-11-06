@@ -38,25 +38,28 @@ function storage(): Storage | null {
   }
 }
 
+/** Keeps the invites that pass `checkInvite` and drops the rest, never half-using one. */
+export function validInvites(examId: Hex, parsed: unknown): BoardInvite[] {
+  if (!Array.isArray(parsed)) return [];
+  return parsed.flatMap((item: unknown) => {
+    const value = item as Partial<BoardInvite> | null;
+    if (!value || typeof value.id !== 'string' || typeof value.label !== 'string') return [];
+    const invite = { examId, role: value.role as InviteRole, inviteSecret: value.inviteSecret as Hex, ...(value.owner === undefined ? {} : { owner: value.owner }) };
+    try {
+      checkInvite(invite);
+    } catch (error) {
+      if (error instanceof InviteError) return [];
+      throw error;
+    }
+    return [{ id: value.id, role: invite.role, label: value.label, inviteSecret: invite.inviteSecret, ...(invite.owner === undefined ? {} : { owner: invite.owner }) }];
+  });
+}
+
 /** Reads this exam's invites. Anything that doesn't pass `checkInvite` is dropped, never half-used. */
 export function loadInvites(examId: Hex): BoardInvite[] {
   try {
     const raw = storage()?.getItem(storageKey(examId));
-    if (!raw) return [];
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.flatMap((item: unknown) => {
-      const value = item as Partial<BoardInvite> | null;
-      if (!value || typeof value.id !== 'string' || typeof value.label !== 'string') return [];
-      const invite = { examId, role: value.role as InviteRole, inviteSecret: value.inviteSecret as Hex, ...(value.owner === undefined ? {} : { owner: value.owner }) };
-      try {
-        checkInvite(invite);
-      } catch (error) {
-        if (error instanceof InviteError) return [];
-        throw error;
-      }
-      return [{ id: value.id, role: invite.role, label: value.label, inviteSecret: invite.inviteSecret, ...(invite.owner === undefined ? {} : { owner: invite.owner }) }];
-    });
+    return raw ? validInvites(examId, JSON.parse(raw) as unknown) : [];
   } catch {
     return [];
   }
@@ -96,6 +99,93 @@ export function createInvite(
   if (problem) return { ok: false, reason: problem };
   if (existing.some((invite) => invite.owner === name)) return { ok: false, reason: `${name} already has an invite.` };
   return { ok: true, invite: { id, role, owner: name, label: name, inviteSecret: newInviteSecret() } };
+}
+
+/** One name per line. Blank lines and spaces around a name are ignored. */
+export function parseNames(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+}
+
+/**
+ * Invites for a whole box of names. Nothing is made unless every name is acceptable, so the box
+ * can be corrected and added again without leaving half of it behind.
+ */
+export function createInvites(
+  existing: readonly BoardInvite[],
+  role: Exclude<InviteRole, 'setter'>,
+  text: string,
+): { ok: true; invites: BoardInvite[] } | { ok: false; reasons: string[] } {
+  const made: BoardInvite[] = [];
+  const reasons: string[] = [];
+  parseNames(text).forEach((name, index) => {
+    const one = createInvite([...existing, ...made], role, name);
+    if (one.ok) made.push(one.invite);
+    else reasons.push(`Line ${String(index + 1)}: ${one.reason}`);
+  });
+  return reasons.length > 0 ? { ok: false, reasons } : { ok: true, invites: made };
+}
+
+export const MAX_SETTER_INVITES = 500;
+
+/** `count` setter invites. A setter needs no name, so each gets a number the board can tell apart. */
+export function createSetters(
+  existing: readonly BoardInvite[],
+  count: number,
+): { ok: true; invites: BoardInvite[] } | { ok: false; reason: string } {
+  if (!Number.isInteger(count) || count < 1 || count > MAX_SETTER_INVITES) {
+    return { ok: false, reason: `Enter a whole number of setters, from 1 to ${String(MAX_SETTER_INVITES)}.` };
+  }
+  const made: BoardInvite[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const one = createInvite([...existing, ...made], 'setter', '');
+    if (one.ok) made.push(one.invite);
+  }
+  return { ok: true, invites: made };
+}
+
+/** "Name, link" for each invite, one per line, ready to paste into a mail merge or a message. */
+export function copyAllText(rows: readonly { invite: BoardInvite; link: string }[]): string {
+  return rows.map(({ invite, link }) => `${invite.label}, ${link}`).join('\n');
+}
+
+const BACKUP_KIND = 'paperseal-invites';
+
+/** The backup file: everything needed to bring this exam's invites back. It holds the secret links. */
+export function backupText(examId: Hex, invites: readonly BoardInvite[]): string {
+  return JSON.stringify({ kind: BACKUP_KIND, version: 1, examId: examId.toLowerCase(), invites }, null, 2);
+}
+
+/** The invites in a backup for this exam, each checked again. Another exam's backup is refused. */
+export function parseBackup(text: string, examId: Hex): { ok: true; invites: BoardInvite[] } | { ok: false; reason: string } {
+  let value: { kind?: unknown; examId?: unknown; invites?: unknown } | null;
+  try {
+    value = JSON.parse(text) as typeof value;
+  } catch {
+    value = null;
+  }
+  if (!value || value.kind !== BACKUP_KIND || typeof value.examId !== 'string') {
+    return { ok: false, reason: 'This file is not an invite backup from Paper Seal.' };
+  }
+  if (value.examId.toLowerCase() !== examId.toLowerCase()) {
+    return { ok: false, reason: 'This backup is for a different exam. Open the exam it belongs to, then restore it there.' };
+  }
+  const invites = validInvites(examId, value.invites);
+  if (invites.length === 0) return { ok: false, reason: 'This backup has no invites in it.' };
+  return { ok: true, invites };
+}
+
+/** Adds the backup's invites to what is here. An invite already here, by id, stays as it is. */
+export function mergeInvites(existing: readonly BoardInvite[], restored: readonly BoardInvite[]): BoardInvite[] {
+  const ids = new Set(existing.map((invite) => invite.id));
+  const owners = new Set(existing.flatMap((invite) => (invite.owner === undefined ? [] : [invite.owner])));
+  const secrets = new Set(existing.map((invite) => invite.inviteSecret));
+  const added = restored.filter(
+    (invite) => !ids.has(invite.id) && !secrets.has(invite.inviteSecret) && (invite.owner === undefined || !owners.has(invite.owner)),
+  );
+  return [...existing, ...added];
 }
 
 /** The same invite with a new secret, so the old link and any key registered with it stop counting. */
