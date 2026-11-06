@@ -156,7 +156,7 @@ const registryTooSlow = 'The public record took too long to answer.';
  * `READ_TIMEOUT_MS`. A node that is limiting requests can hold one open for as long as its
  * Retry-After says, so a try has its own time limit. Only the last failure reaches the page.
  */
-async function readArkiv<T>(read: () => Promise<T>): Promise<T> {
+export async function readArkiv<T>(read: () => Promise<T>): Promise<T> {
   const giveUpAt = Date.now() + READ_TIMEOUT_MS;
   for (let tried = 1; ; tried += 1) {
     try {

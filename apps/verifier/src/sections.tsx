@@ -67,13 +67,15 @@ export function IdentitySection(props: IdentityProps) {
   const name = props.openedName ?? (examName.state === 'ready' ? examName.value.name : null);
   const found = version.state === 'ready' && version.value.state === 'found' ? version.value : null;
   const failed = examName.state === 'ready' ? examName.value.failed : 0;
+  // A read that failed says nothing about whether the exam has a name.
+  const noName = examName.state === 'loading' ? 'Reading' : examName.state === 'ready' && examName.value.unread !== undefined ? 'Could not be read' : 'No name is listed for this exam.';
   const plainCommit = commit.slice(2);
   return (
     <Panel title="Who ran this exam">
       <Rows>
         {board ? <BoardRow board={board} name={props.boardName} /> : null}
         <Row label="Exam name">
-          {name ? <strong>{name}</strong> : <span>No name is listed for this exam.</span>}
+          {name ? <strong>{name}</strong> : <span>{noName}</span>}
           {!name && failed > 0 ? <span className="vf-aside">A listed name did not pass its checks, so it is not shown.</span> : null}
         </Row>
         <Row label="Sealed machine">
