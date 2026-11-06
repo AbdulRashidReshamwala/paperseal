@@ -19,14 +19,14 @@ import {
   uploadBackup,
   type BackupRegistry,
 } from './backup';
-import { realBucket, realEndRound, realExam, realExamId, realKeyPrivTlock, realReleaseLog, realReleaseToken } from './fixtures/real-exam';
+import { realBucket, realCentreKeyPriv, realEndRound, realExam, realExamId, realKeyPrivTlock, realRegistry, realReleaseLog, realReleaseToken } from './fixtures/real-exam';
 import { explorerLinks } from './mirror';
 import { storageObjectUrl, type Fetch } from './storage';
 import { batchQuote, buyStamp, swarmNetworks, swarmStatusLines, syncing, syncLagBlocks, type SwarmSnapshot } from './swarm-node';
 
 // The real demo exam, so the unlock checks run on a token Google signed and a log its TEE signed.
 const examId: Hex = realExamId;
-const registry: Address = '0x6a9f017F374630EcB84e8E3816B1eE9F8Fa2dBE8';
+const registry: Address = realRegistry;
 const storage = 'https://storage.example/bucket';
 const batchId = 'b7'.repeat(32);
 const utf8 = (text: string) => new TextEncoder().encode(text);
@@ -38,13 +38,16 @@ const point = (byte: number) => {
   return key;
 };
 
-/** One setter, 3 neutral key holders and 7 centres that hold keys, as dry-check's sample list. */
+/** One setter, 3 neutral key holders, and the 8 centres of the real exam (7 that hold keys, 1 that does not), as the real log lists them. */
 const listEntries: ApprovedListEntry[] = (() => {
   const setter = point(1);
   const entries: ApprovedListEntry[] = [{ role: 1, passkeyPublicKey: setter, derivedPublicKey: new Uint8Array(), owner: setterOwner(setter) }];
-  for (let i = 0; i < 10; i += 1) {
-    entries.push({ role: i < 3 ? 2 : 3, passkeyPublicKey: point(10 + 2 * i), derivedPublicKey: point(11 + 2 * i), owner: `holder-${String(i)}` });
+  for (let i = 0; i < 3; i += 1) {
+    entries.push({ role: 2, passkeyPublicKey: point(10 + 2 * i), derivedPublicKey: point(11 + 2 * i), owner: `holder-${String(i)}` });
   }
+  Object.keys(realCentreKeyPriv).forEach((key, i) => {
+    entries.push({ role: i < 7 ? 3 : 4, passkeyPublicKey: point(40 + 2 * i), derivedPublicKey: fromHex(key as Hex), owner: `centre-${String(i)}` });
+  });
   return entries;
 })();
 const holders = listEntries.filter((e) => e.role !== 1).map((e) => e.derivedPublicKey);
@@ -114,7 +117,7 @@ const unlockStorage = (): Record<string, Uint8Array> => ({
   [storageNames.releaseLog]: releaseLog(),
   'release-token.jwt': utf8(realReleaseToken),
   [storageNames.keyPriv]: utf8(realKeyPrivTlock),
-  ...Object.fromEntries(centres.map((key, i) => [storageNames.centreKeyPriv(key), new Uint8Array(keyPrivBytes).fill(i + 1)])),
+  ...Object.fromEntries(centres.map((key) => [storageNames.centreKeyPriv(key), fromHex(`0x${realCentreKeyPriv[toHex(key)] ?? ''}`)])),
 });
 
 const without = (files: Record<string, Uint8Array>, name: string) => Object.fromEntries(Object.entries(files).filter(([key]) => key !== name));
@@ -222,7 +225,8 @@ describe('backup phase', () => {
       'key-priv.tlock',
       ...centres.map((key) => storageNames.centreKeyPriv(key)).sort(),
     ]);
-    expect(plan.checks.filter((c) => c.result === 'unhashed').map((c) => c.file)).toEqual(['key-priv.tlock', 'key-priv/*']);
+    // The signed log lists a hash for key-priv.tlock and every centre's key-priv file, so none is left unhashed.
+    expect(plan.checks.filter((c) => c.result === 'unhashed')).toEqual([]);
     expect(s.rows[0]?.files).toBe(paths.length);
   });
 
@@ -370,7 +374,7 @@ describe('backup refusals upload nothing and write nothing', () => {
   it("when key-priv.tlock is sealed to a round other than the exam's endRound", async () => {
     const early = tlockForRound((realEndRound - 1n).toString());
     expect(timelockRound(early)).toBe((realEndRound - 1n).toString());
-    await refuses(setup({ files: unlocked({ [storageNames.keyPriv]: early }) }), /sealed to round 33700842, not the exam's endRound 33700843/);
+    await refuses(setup({ files: unlocked({ [storageNames.keyPriv]: early }) }), new RegExp(`sealed to round ${(realEndRound - 1n).toString()}, not the exam's endRound ${realEndRound.toString()}`));
   });
 
   it('when key-priv.tlock is not a tlock ciphertext', async () => {
