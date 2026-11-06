@@ -80,3 +80,16 @@ describe('the closed check', () => {
     expect(verdict({ receipts: [] })).toBe('none');
   });
 });
+
+describe('a machine on another exam', () => {
+  const base = { configured: true, stage: 'released', statusFailed: false, buildPosted: false, elsewhere: true } as const;
+
+  it('never reads its stage as this exam closing', () => {
+    expect(setterScreen({ ...base, registered: false })).toBe('not-open');
+    expect(setterScreen({ ...base, registered: true })).toBe('waiting');
+  });
+
+  it('still trusts a posted Build', () => {
+    expect(setterScreen({ ...base, registered: true, buildPosted: true })).toBe('closed');
+  });
+});

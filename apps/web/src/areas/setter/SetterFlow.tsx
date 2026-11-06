@@ -2,6 +2,7 @@ import type { Criteria, Hex, Stage as ExamStage } from '@paperseal/protocol';
 import { Button, LoadingSeal, Page, RoleHeader, Stage, useLoaded } from '@paperseal/ui';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
+import { useMachineElsewhere } from '../../shared/machineExam';
 import { credentialIsForInvite, useInvite } from '../../shared/invite';
 import { Register, Trouble } from '../../shared/Register';
 import { Closed } from './Closed';
@@ -142,12 +143,15 @@ export function SetterFlow() {
   const invite = useInvite('setter');
   const registered = credential !== null && !(invite && !credentialIsForInvite(credential, invite));
 
+  const machine = useMachineElsewhere(env.tee, examId);
+
   const screen = setterScreen({
     configured: session.configured,
     stage,
     statusFailed: statusError !== null,
     registered,
     buildPosted: build.state === 'posted',
+    elsewhere: machine.elsewhere,
   });
 
   // The criteria stay on hand through a re-check, so the writing area never leaves the page.
@@ -161,7 +165,7 @@ export function SetterFlow() {
   }, [screen, outcome, checking, runConfirm]);
 
   // The stage picks the screen, so nothing shows until the first read of it is back.
-  const loaded = useLoaded(!session.configured || stage !== null || statusError !== null);
+  const loaded = useLoaded(!session.configured || ((stage !== null || statusError !== null) && machine.settled));
 
   const body = (): ReactNode => {
     switch (screen) {

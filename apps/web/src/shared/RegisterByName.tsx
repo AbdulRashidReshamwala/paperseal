@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { useCurrentExamId } from './currentExam';
 import { loadEnrolments, loadPartyName, savePartyName } from './enrolment';
 import { listEntryForName } from './holder';
+import { useMachineElsewhere } from './machineExam';
 import { directoryName, nameLookup, useDirectory } from './names';
 import {
   browserKeys,
@@ -130,7 +131,8 @@ export function RegisterByName(props: RegisterByNameProps) {
   const lookup = props.lookup === undefined ? nameLookup : props.lookup;
   const reader = props.registry === undefined ? defaultRegistry : props.registry;
   const { read } = useDirectory(lookup);
-  const loaded = useLoaded(!lookup || read !== null);
+  const machine = useMachineElsewhere(tee, examId ?? null);
+  const loaded = useLoaded((!lookup || read !== null) && machine.settled);
 
   const [typed, setTyped] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | undefined>();
@@ -193,6 +195,16 @@ export function RegisterByName(props: RegisterByNameProps) {
   }
 
   if (!loaded) return <LoadingSeal />;
+
+  if (machine.elsewhere) {
+    return (
+      <Stage
+        title="Registration is not open yet"
+        lede="Your exam board is still setting up this exam."
+        next="Come back to this link later, or leave this page open and it moves on by itself."
+      />
+    );
+  }
 
   return (
     <Stage

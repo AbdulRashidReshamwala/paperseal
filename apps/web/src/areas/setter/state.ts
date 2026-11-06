@@ -16,10 +16,13 @@ export function setterScreen(input: {
   registered: boolean;
   /** A posted Build proves the bank closed, even once the TEE has gone away. */
   buildPosted: boolean;
+  /** The sealed machine is on another exam, so its stage says nothing about this one. */
+  elsewhere?: boolean;
 }): SetterScreen {
   const { stage, registered } = input;
   if (!input.configured) return 'not-set-up';
   if (input.buildPosted) return 'closed';
+  if (input.elsewhere) return registered ? 'waiting' : 'not-open';
   if (stage === null) return input.statusFailed ? 'unreachable' : 'opening';
   if (stage === 'publish') return registered ? 'waiting' : 'not-open';
   if (stage === 'onboard') return registered ? 'waiting' : 'register';

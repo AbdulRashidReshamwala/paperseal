@@ -4,6 +4,7 @@ import type { RegistrationEntry, TeeClient } from '@paperseal/tee-client';
 import { Button, Check, Field, Hash, LoadingSeal, Row, Rows, Stamp, useLoaded } from '@paperseal/ui';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 
+import { useMachineElsewhere } from '../../shared/machineExam';
 import { directoryName } from '../../shared/names';
 import { TEE_STATUS_POLL_MS } from '../../shared/TeeStatus';
 import { useBoardForm, useReader } from './BoardForm';
@@ -291,7 +292,9 @@ export function PeopleStep(props: { examId: Hex; snapshot: Snapshot; onPosted: (
   const gate = usePostGate(tee, examId);
   const load = useMemo(() => (tee ? () => tee.registrations() : null), [tee]);
   const { value, problem } = usePoll(load, TEE_STATUS_POLL_MS);
-  const registrations: readonly RegistrationEntry[] = useMemo(() => value?.registrations ?? [], [value]);
+  const machine = useMachineElsewhere(tee, examId);
+  // The machine's registrations are for the exam it runs, so another exam's never count here.
+  const registrations: readonly RegistrationEntry[] = useMemo(() => (machine.elsewhere ? [] : (value?.registrations ?? [])), [value, machine.elsewhere]);
   const { invites, update } = useInvites(examId);
   // The tags are recomputed from the stored secrets on every read, so nothing the TEE says is taken on trust.
   const matching = useMemo(() => matchInvites(invites, registrations), [invites, registrations]);
@@ -333,7 +336,9 @@ export function PeopleStep(props: { examId: Hex; snapshot: Snapshot; onPosted: (
   const conflicts = matching.rows.filter(({ state }) => state.kind === 'conflict').length;
   const blocked = !tee
     ? 'Paper Seal is not connected, so nobody can register yet. Reload this page. If it stays like this, contact whoever runs Paper Seal.'
-    : entries.length === 0
+    : machine.elsewhere
+      ? 'Paper Seal is not running this exam yet. Ask whoever runs it to start it for this exam, then everyone can register.'
+      : entries.length === 0
         ? parties.length === 0 && invites.length === 0
           ? 'Choose who takes part, then share the exam link.'
           : 'Waiting for people to register. You can close this page and come back.'
@@ -348,7 +353,7 @@ export function PeopleStep(props: { examId: Hex; snapshot: Snapshot; onPosted: (
               : null;
 
   // Who has registered and the directory shape the whole page, so it waits for both.
-  const loaded = useLoaded((!tee || value !== null || problem !== null) && (!environment.ensLookup || directory.read !== null));
+  const loaded = useLoaded(machine.settled && (!tee || value !== null || problem !== null) && (!environment.ensLookup || directory.read !== null));
   const base = 'location' in globalThis ? `${location.origin}${location.pathname}` : '';
   const needs = props.snapshot.found?.criteria ? bankNeeded(props.snapshot.found.criteria) : null;
 
@@ -371,6 +376,11 @@ export function PeopleStep(props: { examId: Hex; snapshot: Snapshot; onPosted: (
             </Fold>
           ) : null}
         </div>
+      ) : null}
+      {machine.elsewhere ? (
+        <p className="board-problem" role="alert">
+          <Check status="pending">Paper Seal is not running this exam yet, so nobody can register. Ask whoever runs it to start it for this exam.</Check>
+        </p>
       ) : null}
       <section className="board-draft-card board-people-job">
         <h2>
