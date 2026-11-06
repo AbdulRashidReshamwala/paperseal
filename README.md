@@ -42,13 +42,14 @@ Paper Seal currently covers electronic distribution only. Printed papers, TEE re
 | --- | --- |
 | **Board admin** | Sets the blueprint (topics, questions per topic and setter limits), schedule and `Δ`, onboards setters, key holders and centres, posts the approved list, hosts the web apps, runs the TEE and posts its signed messages on-chain. |
 | **Setter** | Registers a security key, signs in and uploads questions, then gets a "sealed ✓" receipt. |
-| **Centre** | Downloads the encrypted paper, watches the countdown, unlocks with a security key and sees an unlock log. |
-| **Neutral party** | Holds a share and releases it at unlock, without receiving the paper's key. |
+| **Centre** | Enrols a security key once, downloads the encrypted paper, watches the countdown, unlocks with that key and sees an unlock log. |
+| **Neutral party** | Enrols a security key once, holds a share and releases it at unlock, without receiving the paper's key. |
+| **Directory owner** | Controls the parent ENS name and writes which security key belongs to which party's name. |
 | **Public** | Uses the verifier page to see the code hash, attestation, commitments, approved list and live unlock status, then a full proof after the exam. |
 
 ## How It Works
 
-1. **Onboard:** the TEE starts, and setters, key holders and approved centres register through it. The board posts the final list on-chain, where anyone can see it, and the TEE reads it back over TLS and checks it.
+1. **Onboard:** the TEE starts. The board picks key holders and approved centres from a directory of ENS names and invites setters by private link, and each registers through the TEE. The board posts the final list on-chain, where anyone can see it, and the TEE reads it back over TLS and checks it.
 2. **Submit:** setters on the list send questions directly to the TEE, encrypted to its key. The TEE holds the bank in memory, rejects questions in the wrong format and returns a signed receipt.
 3. **Lock:** at the lock round, the TEE locks the bank by itself if it meets the attested selection criteria: no setter above a set percentage of a topic, and a bank for each topic several times larger than its question count.
 4. **Build:** the attested, open-source TEE builder generates a private seed after Lock and uses it to pick a set number of questions per topic at random, so no setter can influence or work out the selection. It assembles the one identical paper, pads it to a fixed size and encrypts the paper and seed with `K`.
@@ -75,10 +76,10 @@ Paper Seal currently covers electronic distribution only. Printed papers, TEE re
 
 Each key holder and approved centre has a root secret in a hardware security key, and the secret can't be exported.
 
-1. **Create:** the web app creates a device-bound passkey on the security key and requests its attestation.
-2. **Derive:** the app signs in with that passkey and uses the WebAuthn PRF extension, with the fixed salt in `spec/constants.json`, to derive a keypair. Every request requires user verification, because a security key can give a different output without it. The private key is never stored.
-3. **Register:** the TEE sends a fresh challenge. The app returns the derived public key, the attestation and a passkey signature over a hash of the derived public key, the holder ID and the challenge.
-4. **Check:** the TEE checks the attestation chain and the passkey signature. Anyone who fails either check doesn't go on the approved list.
+1. **Enrol:** once, the web app creates a device-bound passkey on the security key and requests its attestation. It shows a key card of public values, and the directory owner puts them on the person's ENS name. This identity is permanent and is used for every exam.
+2. **Derive:** for each exam, the app signs in with that passkey and uses the WebAuthn PRF extension to derive a keypair. The PRF input is a hash of the fixed salt in `spec/constants.json` and the exam ID, so each exam has its own keypair, and a leak of one opens no other exam's material. Every request requires user verification, because a security key can give a different output without it. The private key is never stored.
+3. **Register:** the TEE sends a fresh challenge. The passkey signs a hash of the derived public key, the holder ID and the challenge. This takes two touches: one for the derived key, then one to sign, because the derived key is part of what is signed. The app sends the derived public key, the signature and the attestation from enrolment.
+4. **Check:** the TEE checks the passkey signature and, with hardware attestation on, the attestation chain. Anyone who fails doesn't go on the approved list.
 5. **Deliver:** after the Split, the TEE encrypts each key holder's share to their derived public key and publishes it with a hash of the share.
 
 Synced passkeys are not accepted, because they copy the secret to a cloud account. The attestation and the passkey's backup flags are checked to enforce this.
@@ -94,7 +95,7 @@ The board posts one final list per exam on-chain, and the TEE reads it back over
 
 The TEE knows the board through its attested settings: they name `ExamRegistry`, and only that contract's fixed board address can write to it. The TEE and the verifier page check that the code at that address is `ExamRegistry`'s, so a different contract can't stand in for it. The verifier shows the board address that code holds. The board announces the contract address on its official site, which is how everyone else knows it is the real board.
 
-1. **Register:** the board sends each setter, key holder and centre a private invite link with a secret, and each one registers with the TEE as in [Hardware Keys](#hardware-keys). The secret proves who an invite was for, so knowing someone's name isn't enough to take their place. Setters register a passkey only, because nothing is ever encrypted to them, and they need no name.
+1. **Register:** the board picks each key holder and centre by ENS name and shares one public exam link. No secret gates it, and none is needed: a registration joins the list only if its passkey hash equals the name's published record, so knowing someone's name isn't enough to take their place. The board sends each setter a private invite link with a secret instead, because a setter has no public identity. Setters register a passkey only, because nothing is ever encrypted to them, and they need no name. Registration works as in [Hardware Keys](#hardware-keys).
 2. **Post:** the board's address posts the list to `ExamRegistry`, where it can be written only once. Each entry has the owner, role, passkey public key and derived public key. The contract stores a hash of the list and emits the full list, so reading it doesn't depend on storage the board controls.
 3. **Read:** the TEE reads the list at a finalised block from the RPC operator named in its attested settings. Development builds read the latest block to run faster, and the verifier page shows this. The TLS root certificates are part of the attested image, so the board can block this read but can't change it.
 4. **Check:** the TEE rejects the list if any entry wasn't verified at registration. It signs the list hash into the Build, and `ExamRegistry` rejects a Build whose hash differs from the posted one.
@@ -108,11 +109,17 @@ The verifier page fails the name unless it points to a contract running exactly 
 
 ### Party Names
 
-A key holder or a centre is invited by ENS name only, such as `dr-rao.eth`. There are no plain names. The name goes on the public list as typed, and a name that does not exist on the chain cannot be invited. Setters never have a name on the list.
+A key holder or a centre has one permanent identity: an ENS name that publishes their security key, such as `centre-1.paperseal-demo.eth`. There is no wallet, no invite link and no secret, and there are no plain names. The name goes on the public list. Setters never have a name on the list.
 
-A key holder who uses their own ENS name proves it once, by setting one text record on it, `paperseal.passkey`, to the hash of their security key. After they register, the Register screen shows the exact value. The board app reads the record: a match shows "Name confirmed", a record that names another key keeps them off the list, and a missing record shows as waiting, which the board may choose to go ahead without, marked unconfirmed. A centre can use a subname the board issues, which needs no record. The board can change such a name, so it is a readable label and says nothing about independence, and the verifier shows it as a label only.
+1. **Enrol:** the person opens `/enrol`, touches their security key once and sends the resulting key card to the directory owner. Nothing on the card is secret.
+2. **Publish:** the directory owner writes two text records on the person's name, `paperseal.passkey` with the hash of the key and `paperseal.credential` with its credential ID, and lists the name in `paperseal.directory` on the parent. The list is only a menu: each name is checked by its own records.
+3. **Choose:** the board ticks names from the directory, gives each a role, and shares the public exam link once.
+4. **Register:** the person opens the link and touches their key. The record tells the browser which key to ask for, so this works in any browser on this domain.
+5. **Match:** the board app compares each registration's passkey hash with the name's record. A match shows "Name confirmed". A name with no record, or a record for another key, stays off the list.
 
-The verifier page shows, for each listed party with an ENS name, whether the record matches their security key, with the evidence folded. This is a label and a proof of who holds a key, not something the exam depends on. A name that can't be read shows "not confirmed" and never fails a check. The TEE and `ExamRegistry` never read ENS, and the invite link, its secret and the invite match work as before. Names are read on Sepolia through the viewer's own RPC with no gateway, so they prove nothing until a mainnet name is used. Resolution may still run through ENSv1, and nothing here depends on ENSv2.
+The verifier page shows, for each listed party with an ENS name, whether the record matches their key, with the evidence folded. It says plainly who vouches for the name: whoever controls its parent. This is a label and a proof of who holds a key, not something the exam depends on. A name that can't be read shows "not confirmed" and never fails a check. The TEE and `ExamRegistry` never read ENS. Names are read on Sepolia through the viewer's own RPC with no gateway, so they prove nothing until a mainnet name is used. Resolution may still run through ENSv1, and nothing here depends on ENSv2.
+
+If a key is lost, the person enrols a new one and the directory owner replaces both records. A passkey belongs to one domain, so moving the app to another domain means everyone enrols again.
 
 ### Question Submission
 
@@ -204,6 +211,8 @@ The paper stays with approved centres from `T−Δ` until the end round. At that
 ### Board
 
 - The board chooses the key holders. Key ownership is public, so anyone can judge whether the neutral parties are really neutral.
+- The directory owner decides which key belongs to which name, and can swap a record at any time. A swap is public on the chain, and a posted list keeps the key it was posted with. A record says only that the directory owner put it there.
+- In the demo the board owns the directory and issues the neutral parties' records too, so the neutrals aren't independent of the board. A real exam needs each neutral to use a name they own, or a directory the board doesn't control.
 - The exam date is written once to `ExamRegistry` and can't be changed, even by the board.
 - `ExamRegistry` doesn't compare a Build with block time, so the board could post one late. The verifier page flags a Build posted after the unlock time, as a warning that doesn't fail the exam.
 - `ExamRegistry` accepts writes only from the board's address. The board could route setters to a different TEE instance, but the receipt check shows this after the Build, and an unusually low question count would show on-chain.
@@ -226,14 +235,15 @@ The paper stays with approved centres from `T−Δ` until the end round. At that
 - Attestation proves a passkey is on approved hardware, but not that the derived keypair came from it. The board serves the web app, so it could swap in its own derived keys at registration for every holder and centre, because staff can't see what a security key signs. It could then read shares and `K_priv` at unlock with no key holder involved, and the release log would still look normal. The time seal still keeps the paper closed until `T−Δ`.
 - Security keys protect against theft, not dishonest holders, because they can't enforce time. The timelock on `K_pub` is what stops the paper opening early.
 - Attestation usually identifies a batch of security keys, not one key. The on-chain registration ties each key to a holder.
+- The public exam page has no secret, so anyone can register under any name with a key of their own. That never reaches the list, because the key doesn't match the name's record, but the TEE can't refuse it. [Registration Flooding](spec/api.md#registration-flooding) says what limits it.
 
 ### Availability
 
 - The TEE must be available at unlock, so a Google Cloud outage could delay the exam.
 - drand must produce the `T−Δ` round, so a drand outage could delay or block the unlock.
 - Any 3 absent key holders block the unlock, including the 3 neutral parties together.
-- A lost security key can't be recovered, because that holder's share is encrypted to it.
-- Passkeys only work on the web app's domain, so if the site is down at `T−Δ`, nobody can use their security key.
+- A lost security key can't be recovered for an exam already in progress, because that holder's share is encrypted to it. For later exams the directory owner replaces the records.
+- Passkeys only work on the web app's domain, so if the site is down at `T−Δ`, nobody can use their security key, and moving the domain needs everyone to enrol again.
 - The board must run the TEE at unlock, so it can block the exam by refusing.
 - Sepolia or its RPC operator being down could stop the board posting on-chain or the TEE reading the list.
 - If the setter limits aren't met, the bank doesn't lock and the exam can't go ahead.
@@ -259,7 +269,7 @@ The paper stays with approved centres from `T−Δ` until the end round. At that
 | Web apps | React and TypeScript, built with Vite as static files |
 | Browser | Chromium only, for both registration and unlock |
 | Hardware keys | Chrome's virtual authenticator as a mock for the demo, and a security key through WebAuthn PRF in production |
-| Sign-in | Passkeys on security keys for board admins and setters |
+| Sign-in | Passkeys on security keys for board admins and setters, and permanent ones published on an ENS name for key holders and centres |
 | Key split | XOR of `K_pub` and `K_priv`, with Shamir shares of `K_priv` |
 | Crypto | P-256, HPKE and AES-256-GCM, using audited libraries |
 | Paper format | JSON, rendered by the centre app |

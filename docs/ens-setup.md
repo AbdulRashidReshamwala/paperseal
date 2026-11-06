@@ -67,26 +67,55 @@ Open the verifier, type the full name into the exam box, or open `<verifier>/#/n
 | Not confirmed by the board | The parent name's ETH address isn't the board wallet |
 | Can't read the name | The RPC URL under "Check it yourself" is down or isn't Sepolia |
 
-## 4. Names for key holders and centres
+## 4. The directory of key holders and centres
 
-Required for these roles. The board can invite a key holder or a centre under an ENS name by typing it in "Invite people". There are no plain names: everyone invited this way needs an ENS name that exists. Setters never have one.
+Required for these roles. A key holder or a centre has one permanent ENS name that publishes their security key, and the board picks them from a directory. The parent name is `VITE_DIRECTORY_NAME` in the web app, `paperseal-demo.eth` by default. Whoever controls it is the directory owner. The people need no wallet.
 
-- **A key holder uses their own name.** After they register, their Register page shows one value. They add a text record named `paperseal.passkey` to their own name with that value, using the ENS app on Sepolia. The board app then shows "Name confirmed". Until then it shows the key holder as waiting, and the board can choose to go ahead with the name marked unconfirmed.
-- **A centre uses a name the board issues,** such as `north-1.centres.paperseal-mumbai.eth`. It needs no record. The board can change such a name, so the verifier shows it as a label only, and it proves nothing about independence.
+Records for each person:
 
-Both the board app and the verifier read these names on Sepolia through their own RPC, on chain only. The board app uses `VITE_RPC_URL`, and the verifier uses the RPC under "Check it yourself". A name that can't be read shows as not confirmed and never fails the exam.
+| Record | Value |
+| --- | --- |
+| ETH address | Any address, so the name exists. The script uses a burn address |
+| Text `paperseal.passkey` | `passkey` from the key card |
+| Text `paperseal.credential` | `credentialId` from the key card |
 
-### What to create for a real run
+Record on the parent:
 
-A full run has 3 key holders and 8 centres, so the board app needs 11 names that exist on Sepolia before it will add them:
+| Record | Value |
+| --- | --- |
+| Text `paperseal.directory` | A JSON array of names, at most 8,192 bytes, such as `["neutral-1.paperseal-demo.eth"]` |
 
-| Names | Count | What each needs before the invite |
-| --- | --- | --- |
-| `neutral-1.paperseal-demo.eth` to `neutral-3.paperseal-demo.eth` | 3 | An ETH address record, or the `paperseal.passkey` record, so the name exists. The `paperseal.passkey` record can only be set after they register, because it holds their new security key. Until then the board uses "Go ahead without it", or waits. |
-| `centre-1.paperseal-demo.eth` to `centre-8.paperseal-demo.eth` | 8 | An ETH address record, so the name exists. A centre needs no `paperseal.passkey` record. |
+The list is only a menu. Every listed name is checked by its own records.
 
-Subnames under `paperseal-demo.eth` work for both roles, written the way section 2 writes an exam name: records on the parent's resolver, one transaction per record from the board wallet. That is 11 address records, plus up to 3 `paperseal.passkey` records after the key holders register. The ENS v2 behaviour here is the one section 2 relies on and was not re-checked for this change.
+### Add a person
 
-A name the board issues proves nothing about a key holder's independence. The board controls the parent, so it can write, change or take back any record under it, and a record it writes says only that the board put it there. For a centre that is acceptable, because the board approves centres anyway. For a neutral key holder the point is independence from the board, so a real exam needs each neutral to use a name they own and control themselves. Subnames of `paperseal-demo.eth` are fine for the demo only.
+1. They open `/enrol` on the app's domain, touch their security key, and send you the key card. Nothing on it is secret. Check it really came from them, because you are about to say this key is theirs.
+2. Save the card as `card.json` and print the commands. This reads the resolver and sends nothing:
+   ```bash
+   node deploy/ens/records.mjs --name centre-1.paperseal-demo.eth --card card.json
+   ```
+3. Run each printed `cast send` with the wallet that controls the parent. The script passes names as encoded `--data`, because `cast` turns a string ending in `.eth` into an address.
+4. Put every name in a JSON file, print the directory command, and run it:
+   ```bash
+   node deploy/ens/records.mjs --directory names.json
+   ```
 
-What it costs, as best known and not checked against a live quote: on Sepolia only test ETH for gas, plus the one-off registration of `paperseal-demo.eth` itself (about 8 USDC for a year, see section 1) if it is not already registered. On mainnet, each subname record is a transaction at that day's gas price, and each neutral's own `.eth` name is its own yearly fee, which the neutral pays and keeps.
+`--parent`, `--resolver`, `--account`, `--password-file` and `--rpc-url` change the defaults. A name is one transaction per record, so a full run of 3 key holders and 8 centres is 33 transactions and one for the directory.
+
+### Replace a lost key
+
+The person enrols a new key and sends the new card. Run step 2 and step 3 again for their name, which overwrites both records. The swap is public. A list already posted keeps the old key, so this helps from the next exam on.
+
+### Keys and domains
+
+A passkey belongs to one domain. If the app moves to another domain, everyone enrols again and every record is replaced.
+
+### What this proves
+
+The directory owner controls the parent, so they can write, change or take back any record under it, and a record says only that they put it there. For a centre that is acceptable, because the board approves centres anyway. For a neutral key holder the point is independence from the board, so a real exam needs each neutral to use a name they own, or a directory the board doesn't control. In the demo the board owns `paperseal-demo.eth` and issues the neutrals' records too, so the neutrals aren't independent there.
+
+Both the board app and the verifier read these names on Sepolia through their own RPC, on chain only. The board app uses `VITE_RPC_URL`, and the verifier uses the RPC under "Check it yourself". On the board a name with no record stays off the list, and a name that can't be read offers "Try again". On the verifier a name that can't be read shows as not confirmed and never fails the exam.
+
+What it costs, as best known and not checked against a live quote: on Sepolia only test ETH for gas, plus the one-off registration of `paperseal-demo.eth` itself (about 8 USDC for a year, see section 1) if it is not already registered. On mainnet, each record is a transaction at that day's gas price, and each neutral's own `.eth` name is its own yearly fee, which the neutral pays and keeps.
+
+The ENS v2 behaviour here is the one section 2 relies on, and the commands have not been run against Sepolia for this change.
