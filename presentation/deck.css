@@ -25,14 +25,26 @@ h1 em{font-style:normal;color:var(--wax)}
 .lede{font-size:32px;color:var(--ink-soft);max-width:1300px;margin-top:24px}
 .src{font-family:var(--code);font-size:17px;color:var(--ink-soft);line-height:1.5}
 
-/* quote slide */
-.quote{flex-direction:row;align-items:center;gap:96px}
-.quote figure{flex:none;width:520px;height:600px;border:1px solid var(--ink);padding:12px;background:var(--field,#fbf7ee)}
-.quote figure img{width:100%;height:100%;object-fit:cover;display:block}
-.quote blockquote{font-family:var(--serif);font-size:56px;line-height:1.25}
-.quote blockquote p+p{margin-top:28px;color:var(--wax)}
-.quote cite{display:block;margin-top:48px;font-style:normal;font-family:var(--sans);font-size:28px;color:var(--ink-soft);border-top:2px solid var(--ink);padding-top:20px;max-width:600px}
-.quote cite b{display:block;color:var(--ink);font-weight:600}
+/* news headline: the shocker */
+.news{justify-content:center}
+.news .dateline{display:flex;gap:40px;font-family:var(--code);font-size:24px;color:var(--wax);border-bottom:2px solid var(--ink);padding-bottom:16px;margin-bottom:56px}
+.news .dateline span+span{color:var(--ink-soft)}
+.news h1{font-size:152px;line-height:1.04;max-width:1700px;letter-spacing:-.01em}
+.news h1 em{font-style:normal;color:var(--wax)}
+.news .tags{list-style:none;padding:0;display:grid;grid-template-columns:repeat(3,auto);justify-content:start;gap:0;margin-top:64px;font-family:var(--code);font-size:25px}
+.news .tags li{padding:0 40px;border-left:2px solid var(--wax)}
+.news .tags li:first-child{padding-left:20px}
+
+/* quote slide: photo bleeds off the left edge */
+.quote{flex-direction:row;padding:0;align-items:stretch}
+.quote figure{flex:none;width:700px;background:#14151c}
+.quote figure img{width:100%;height:100%;object-fit:cover;object-position:center 20%;display:block}
+.quote .q{flex:1;display:flex;flex-direction:column;justify-content:center;padding:0 128px 0 96px}
+.quote blockquote{font-family:var(--serif);font-weight:700;font-size:78px;line-height:1.12}
+.quote blockquote em{font-style:normal;color:var(--wax)}
+.quote .q2{font-family:var(--serif);font-size:38px;line-height:1.35;margin-top:48px;color:var(--ink-soft);border-left:4px solid var(--wax);padding-left:28px}
+.quote cite{display:block;margin-top:56px;font-style:normal;font-size:28px;color:var(--ink-soft)}
+.quote cite b{display:block;color:var(--ink);font-weight:600;font-size:32px}
 
 /* chain */
 .chain{display:flex;margin-top:72px;border-top:2px solid var(--ink)}
@@ -66,18 +78,6 @@ h1 em{font-style:normal;color:var(--wax)}
 .video-ph{display:grid;place-items:center;border:2px dashed var(--rule-strong,#85796a);background:var(--paper-deep);color:var(--ink-soft);font-family:var(--code);font-size:26px}
 
 #count{position:fixed;right:16px;bottom:10px;font:14px var(--code);color:#aea897}
-/* news headline */
-.news .dateline{display:flex;gap:40px;font-family:var(--code);font-size:20px;color:var(--wax);border-bottom:2px solid var(--ink);padding-bottom:14px;margin-bottom:36px}
-.news .dateline span+span{color:var(--ink-soft)}
-.news h1{font-size:78px;max-width:1660px}
-.news .deck{font-size:31px;color:var(--ink-soft);max-width:1450px;margin-top:28px}
-.news .cols{display:grid;grid-template-columns:repeat(3,1fr);margin-top:44px;border-top:1px solid var(--ink)}
-.news .cols div{padding:22px 32px 0 0}
-.news .cols div+div{padding-left:32px;border-left:1px solid var(--rule)}
-.news .cols h3{font-family:var(--serif);font-size:30px;margin-bottom:6px}
-.news .cols p{font-size:24px;line-height:1.4}
-.news .cols em{font-style:normal;color:var(--wax);font-weight:600}
-.news .sources{margin-top:auto;padding-bottom:36px}
 @page{size:1920px 1080px;margin:0}
 @media print{
   html,body{overflow:visible;background:none;height:auto}
