@@ -16,10 +16,12 @@ export const text = {
   peopleHeading: 'Bring everyone in',
   /** The stamp above the invites once the read-back matched. */
   publishedStamp: 'Published',
+  /** Shows only once the exam's ENS name passes every check. */
+  examNameSet: 'Open by name',
   recordBuildHeading: 'The paper is ready',
   wrongAccount: /not the exam board.s account/i,
   // Shared
-  keyRegisteredHeading: 'Your security key is registered',
+  keyRegisteredHeading: /You.re registered/,
   keyCardHeading: 'Your key card',
   alreadySetUpHeading: 'This security key is already set up',
   linkProblemHeading: /This invitation link doesn.t work/,

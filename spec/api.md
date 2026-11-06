@@ -167,7 +167,7 @@ A reader reads records with the viewer's own RPC, on chain only (`ens.ccipRead` 
 
 ### Registration by name
 
-A party registers per exam from the public exam page, `#/exam?exam=<examId>`, with the same key. The page holds no secret.
+A party registers per exam from the public exam page, `#/exam?exam=<examId>`, with the same key. The page holds no secret. The link may hold the exam's ENS name in place of `examId`, and then opens the exam only if every check in Exam Names passes and the name's registry is the app's own.
 
 1. It reads the name's `ens.records.credential` and `ens.records.passkey` records.
 2. It runs one WebAuthn get with `allowCredentials` set to that credential and the exam's PRF input, and derives the exam's key. If it doesn't already know the passkey public key, it recovers it from this signature with the audited curve library, and accepts only the candidate whose `passkeyRecordValue` equals the record.
@@ -341,6 +341,8 @@ A board may give an exam an ENS name `<name>.<parent>`, where `parent` is the bo
 | `text` `ens.records.storage` | The public storage URL |
 | `text` `ens.records.bucket` | The storage bucket the TEE was started with |
 | `text` `ens.records.arkivWriters` | The Arkiv writers the board publishes, as addresses separated by commas (`arkiv.md`, "Writers") |
+
+The board app writes these right after `createExam`, in one `multicall` from the board's wallet on the resolver of `parent`, and shows the name only once every check below passes. From then on the board's page for the exam, `#/board/exam/<name>`, uses the name in place of `examId`, which keeps working. A name that fails a check opens nothing. An exam needs no name, so a write that is declined or fails leaves the exam as it is, and the board can try again. See `docs/ens-setup.md`.
 
 A reader checks a name with the viewer's own RPC, on-chain only (`ens.ccipRead` is `false`, so no offchain gateway is asked), and fails unless all of these hold:
 

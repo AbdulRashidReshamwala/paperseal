@@ -87,6 +87,9 @@ export function boardTests(lab: () => Lab): void {
         // A correct read-back goes straight to the invites, under a Published stamp.
         await board.seeHeading(text.peopleHeading, 60_000);
         await board.see(text.publishedStamp, 5_000);
+        // The wallet is asked for the exam's name by itself. Once it checks out, the address uses it.
+        await board.see(text.examNameSet, 30_000);
+        await page.waitForURL(`**/#/board/exam/${NAME}.${demoParent}`, { timeout: 30_000 });
         await board.shot('07-published');
       });
       expect(await hashOf(page, 'exam ID').catch(() => '')).toBeDefined();
@@ -117,7 +120,7 @@ export function boardTests(lab: () => Lab): void {
         await page.getByLabel(`Include ${CENTRE}`).check();
         await page.getByRole('button', { name: button.copyExamLink }).click();
         const copied = await page.evaluate(() => navigator.clipboard.readText());
-        expect(copied).toContain(`#/exam?exam=${examId}`);
+        expect(copied).toContain(`#/exam?exam=${NAME}.${demoParent}`);
         await board.shot('10-people-chosen');
       });
       const register = (owner: string, key: Hex) => {

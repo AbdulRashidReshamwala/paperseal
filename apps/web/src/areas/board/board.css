@@ -984,6 +984,15 @@
   margin: 0;
 }
 
+.board-exam-name {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-3);
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 var(--ps-space-4);
+}
+
 /* A published exam is one column: the board has no steps to choose between here. */
 .board-draft.board-exam {
   display: block;

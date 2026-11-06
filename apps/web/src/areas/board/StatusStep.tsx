@@ -1,23 +1,13 @@
-import { examIdFromName, roundTimeSeconds, type Hex } from '@paperseal/protocol';
+import { roundTimeSeconds, type Hex } from '@paperseal/protocol';
 import { Check, Countdown, CopyButton, Row, Rows, Stage, type SealState } from '@paperseal/ui';
 import { Link } from 'react-router';
-
 
 import { useBoardForm } from './BoardForm';
 import { ExamRecord } from './ExamRecord';
 import type { Snapshot } from './examState';
 import { useNow } from './hooks';
 import { sayOf } from './details';
-import { Fold } from './Parts';
-import {
-  ensRecords,
-  examNamePlaceholder,
-  formatTimeOnly,
-  parentPlaceholder,
-  plainWords,
-  verifierNameUrl,
-  verifierUrl,
-} from './plan';
+import { formatTimeOnly, plainWords, verifierUrl } from './plan';
 
 /** Time alone opens the seal, so the state follows the scheduled times. */
 export function sealStateAt(nowMs: number, unlockMs: number, endMs: number): Exclude<SealState, 'broken'> {
@@ -25,61 +15,10 @@ export function sealStateAt(nowMs: number, unlockMs: number, endMs: number): Exc
   return nowMs < endMs ? 'opening' : 'open';
 }
 
-/** A value shown in full, with a button that copies it once it is known. */
-function RecordValue(props: { what: string; known: boolean; value: string }) {
-  return (
-    <span className="board-link">
-      <span className="ps-mono">{props.value}</span>
-      {props.known ? (
-        <CopyButton text={props.value} aria-label={`Copy ${props.what}`}>
-          Copy
-        </CopyButton>
-      ) : null}
-    </span>
-  );
-}
-
-/**
- * The records to set for an optional ENS name, from "Exam Names" in spec/api.md. Nothing here reads
- * ENS: the board sets the name itself, and the verifier checks it. `examName` is null when this
- * session didn't publish the exam, because ExamRegistry stores only the name's hash.
- */
-function EnsName(props: { examName: string | null; registryAddress: Hex | null; verifier: string | null }) {
-  const label = props.examName ?? examNamePlaceholder;
-  return (
-    <Fold summary="Give this exam an ENS name (optional)">
-      <p className="board-note">
-        Anyone can then check this exam by its name on the public page. With the board wallet, set these records for{' '}
-        <span className="ps-mono">{label}.&lt;your primary name&gt;</span> on your name's resolver. With ENS v2 there is
-        nothing to create first. See docs/ens-setup.md.
-      </p>
-      <Rows>
-        <Row label="Subname">
-          <RecordValue what="subname" known={props.examName !== null} value={label} />
-        </Row>
-        {ensRecords(props.registryAddress).map((entry) => (
-          <Row key={entry.record} label={entry.record}>
-            {entry.value ? (
-              <RecordValue what={entry.record} known value={entry.value} />
-            ) : (
-              <Check status="not-checked">{`Not set up yet. Ask whoever installed Paper Seal to set ${entry.setting}.`}</Check>
-            )}
-          </Row>
-        ))}
-        {props.verifier ? (
-          <Row label="Public page by name">
-            <span className="ps-mono">{verifierNameUrl(props.verifier, `${label}.${parentPlaceholder}`)}</span>
-          </Row>
-        ) : null}
-      </Rows>
-    </Fold>
-  );
-}
-
 /** Step 7: the Build is posted. From here the board only watches. */
 export function StatusStep(props: { examId: Hex; snapshot: Snapshot }) {
   const { snapshot } = props;
-  const { receipts, examName, environment } = useBoardForm();
+  const { receipts } = useBoardForm();
   const now = useNow();
   const settings = snapshot.found?.exam.settings;
   const unlockRound = Number(settings?.unlockRound ?? 0);
@@ -90,8 +29,6 @@ export function StatusStep(props: { examId: Hex; snapshot: Snapshot }) {
   const { status, teeProblem } = snapshot;
   const { examId } = props;
   const verifier = verifierUrl(undefined, examId);
-  // The session's name only counts for the exam it hashes to, not one opened from a link.
-  const named = examName && settings && examIdFromName(examName).toLowerCase() === settings.examId.toLowerCase() ? examName : null;
   const justSealed = receipts.some((receipt) => receipt.kind === 'build' && receipt.outcome.matches);
 
   const copy: Record<ReturnType<typeof sealStateAt>, { title: string; lede: string; next: string }> = {
@@ -137,7 +74,6 @@ export function StatusStep(props: { examId: Hex; snapshot: Snapshot }) {
           )}
         </Row>
       </Rows>
-      <EnsName examName={named} registryAddress={environment.registryAddress} verifier={verifierUrl()} />
       <ExamRecord snapshot={snapshot} />
       <p className="board-quiet">
         <Link to="/board/new">Set up another exam</Link>
