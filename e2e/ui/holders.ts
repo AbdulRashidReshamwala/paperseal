@@ -365,8 +365,7 @@ export function holderTests(lab: () => Lab): void {
         const open = await exam(timings.future);
         tee.state.stage = 'publish';
         tee.state.mode = 'ok';
-        await s.page.goto(`${lab().web.url}/#/setter?exam=${open.examId}`);
-        await s.page.reload();
+        await s.page.goto(setterLink(open.examId).url);
         await s.seeHeading(/Nothing to do yet/, 30_000);
         await s.shot('50-not-open');
         tee.state.stage = 'onboard';

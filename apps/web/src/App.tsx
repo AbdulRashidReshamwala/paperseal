@@ -3,29 +3,34 @@ import { lazy, Suspense, useEffect, type ComponentType, type LazyExoticComponent
 import { Link, Route, Routes, useLocation } from 'react-router';
 
 import { RouteFade } from './shared/RouteFade';
+import type { GatedRole } from './shared/RolePage';
 import './shared/home.css';
 
 // Lazy, so each role downloads only its own code. Do not import an area statically.
-const areas: { path: string; label: string; plain: string; Area: LazyExoticComponent<ComponentType> }[] = [
+const areas: { role: GatedRole; path: string; label: string; plain: string; Area: LazyExoticComponent<ComponentType> }[] = [
   {
+    role: 'board',
     path: '/board',
     label: 'Exam board',
     plain: 'Set up the exam and see it through.',
     Area: lazy(() => import('./areas/board/BoardArea')),
   },
   {
+    role: 'setter',
     path: '/setter',
     label: 'Question setter',
     plain: 'Write the questions.',
     Area: lazy(() => import('./areas/setter/SetterArea')),
   },
   {
+    role: 'centre',
     path: '/centre',
     label: 'Exam centre',
     plain: 'Open the sealed paper on exam day.',
     Area: lazy(() => import('./areas/centre/CentreArea')),
   },
   {
+    role: 'keyholder',
     path: '/keyholder',
     label: 'Key holder',
     plain: 'Release your part of the key.',
@@ -33,6 +38,8 @@ const areas: { path: string; label: string; plain: string; Area: LazyExoticCompo
   },
 ];
 
+// Lazy too, because it brings the chain client with it. It decides before an area's code is asked for.
+const RoleGate = lazy(() => import('./shared/RoleGate'));
 const Join = lazy(() => import('./shared/Join'));
 const Enrol = lazy(() => import('./shared/Enrol'));
 const ExamPage = lazy(() => import('./shared/ExamPage'));
@@ -96,8 +103,8 @@ export function App() {
         <Route path="/join" element={<Screen key="join"><Join /></Screen>} />
         <Route path="/enrol" element={<Screen key="enrol"><Enrol /></Screen>} />
         <Route path="/exam" element={<Screen key="exam"><ExamPage /></Screen>} />
-        {areas.map(({ path, Area }) => (
-          <Route key={path} path={`${path}/*`} element={<Screen key={path}><Area /></Screen>} />
+        {areas.map(({ role, path, Area }) => (
+          <Route key={path} path={`${path}/*`} element={<Screen key={path}><RoleGate role={role}><Area /></RoleGate></Screen>} />
         ))}
       </Routes>
     </Suspense>

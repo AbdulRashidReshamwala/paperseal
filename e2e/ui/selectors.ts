@@ -58,6 +58,7 @@ export const field = {
 };
 
 export const button = {
+  connectWallet: 'Connect your wallet',
   continue: 'Continue',
   addTopic: 'Add topic',
   publish: 'Publish the exam',

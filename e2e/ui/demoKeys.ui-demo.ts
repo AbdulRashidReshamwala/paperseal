@@ -124,6 +124,7 @@ describe('demo keys, one tab', () => {
     expect(examNameProblem(name)).toBeNull();
 
     await page.goto(`${web.url}/#/board/blueprint`);
+    await page.getByRole('button', { name: button.connectWallet }).click({ timeout: 60_000 });
     await actor.seeHeading(text.createHeading);
     await page.getByLabel(field.examName).first().fill(name);
     await page.getByLabel(field.examStart).first().fill(localInput(examStart));
