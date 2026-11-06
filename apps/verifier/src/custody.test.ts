@@ -278,15 +278,40 @@ describe('schedule bounds', () => {
 describe('a Build posted after the unlock time', () => {
   const unlockAt = () => roundTimeSeconds(Number(world.exam.settings.unlockRound));
   const posted = (postedAt: number) => scene({ chain: { build: { ...world.build, postedAt: BigInt(postedAt) } as Build } });
+  const sealedAt = (builtRound: bigint, postedAt = 1) =>
+    scene({ chain: { build: { ...world.build, builtRound, postedAt: BigInt(postedAt) } as Build } });
 
-  it('warns, and fails nothing', () => {
+  it('warns that it was sealed in time and posted late, and fails nothing', () => {
     const on = posted(unlockAt());
     expect(on.warnings).toEqual([]);
     const late = posted(unlockAt() + 1);
-    expect(late.warnings).toEqual([expect.stringContaining('recorded after its unlock time')]);
+    expect(late.warnings).toEqual([expect.stringContaining('sealed in time but recorded after its unlock time')]);
     expect(late.failures).toEqual(on.failures);
     expect(step(late, 'sealed').state).toBe(step(on, 'sealed').state);
     expect(step(late, 'sealed').items).toContainEqual(expect.objectContaining({ kind: 'text', tone: 'warn' }));
+  });
+
+  it('shows when it was sealed, with the round', () => {
+    const items = step(scene(), 'sealed').items;
+    expect(items).toContainEqual(expect.objectContaining({ kind: 'fact', label: 'Sealed' }));
+    expect(items).toContainEqual(expect.objectContaining({ label: expect.stringContaining('Paper sealed, round 150') }));
+    expect(items).toContainEqual(expect.objectContaining({ label: 'Sealed after questions closed', status: 'pass' }));
+    expect(scene().warnings).toEqual([]);
+  });
+
+  it('fails a Build sealed before the lock round', () => {
+    const early = sealedAt(world.exam.settings.lockRound - 1n);
+    expect(step(early, 'sealed').state).toBe('failed');
+    expect(early.failures).toEqual([expect.objectContaining({ message: expect.stringContaining('sealed before questions closed') })]);
+    expect(step(sealedAt(world.exam.settings.lockRound), 'sealed').state).toBe('done');
+  });
+
+  it('gives a stronger warning for a Build sealed at or after the unlock round, and not the late one', () => {
+    for (const round of [world.exam.settings.unlockRound, world.exam.settings.unlockRound + 5n]) {
+      const result = sealedAt(round, unlockAt() + 100);
+      expect(result.warnings).toEqual([expect.stringContaining('at or after the unlock time')]);
+      expect(result.failures).toEqual(scene().failures);
+    }
   });
 });
 

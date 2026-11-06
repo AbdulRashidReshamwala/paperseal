@@ -295,6 +295,7 @@ export async function buildWorld(options: WorldOptions = {}) {
     selected,
     bankSize: 30,
     criteriaHash: criteriaHash(criteriaBytes),
+    builtRound: 150n,
   };
   const build = {
     approvedListHash: toHex(buildFields.approvedListHash),
@@ -303,6 +304,7 @@ export async function buildWorld(options: WorldOptions = {}) {
     saltedPaperHash: toHex(buildFields.saltedPaperHash),
     selected,
     bankSize: 30,
+    builtRound: buildFields.builtRound,
     postedAt: 1n,
     criteriaHash: toHex(buildFields.criteriaHash),
     teeSignature: toHex(await teeSign(signing.pair.privateKey, encodeMessage('build', buildFields))),

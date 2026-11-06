@@ -92,6 +92,7 @@ export async function checkBuildSignature(examId: Hex, build: Build): Promise<Bu
       selected: Number(build.selected),
       bankSize: Number(build.bankSize),
       criteriaHash: fromHex(build.criteriaHash),
+      builtRound: build.builtRound,
     });
     const ok = await verifyTeeSignature(fromHex(build.instancePublicKey), fromHex(build.teeSignature), message);
     return ok ? { ok } : { ok, error: 'the Build signature does not verify under its instance key' };

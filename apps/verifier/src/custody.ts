@@ -882,12 +882,44 @@ function manifestItems(result: Sourced<ManifestResult>): { items: Item[]; ok: bo
   };
 }
 
-const lateBuild = 'The paper was recorded after its unlock time. This does not fail the exam, but ask your exam board why it was late.';
+const lateBuild = 'The paper was sealed in time but recorded after its unlock time. This does not fail the exam, but ask your exam board why it was posted late.';
+const sealedAfterUnlock =
+  'The sealed machine says it built the paper at or after the unlock time, when the questions could already be opened. This does not fail the exam here, but ask your exam board to explain it.';
 
-/** Whether the Build reached the public record after the paper's unlock time. Worth a question, not a failure. */
-function isLate(c: Context): boolean {
+/** Where the sealed machine's own round puts the sealing: before questions closed, in time, or too late. */
+function sealing(c: Context): 'early' | 'in-time' | 'late' | null {
   const { build, exam } = c;
-  return build !== null && exam !== null && Number(build.postedAt) > roundTimeSeconds(Number(exam.settings.unlockRound));
+  if (!build || !exam) return null;
+  if (build.builtRound < exam.settings.lockRound) return 'early';
+  return build.builtRound >= exam.settings.unlockRound ? 'late' : 'in-time';
+}
+
+/** The one warning the Build step earns. Worth a question, never a failure. */
+function buildWarning(c: Context): string | null {
+  const { build, exam } = c;
+  if (!build || !exam) return null;
+  if (sealing(c) === 'late') return sealedAfterUnlock;
+  const posted = Number(build.postedAt) > roundTimeSeconds(Number(exam.settings.unlockRound));
+  return posted && sealing(c) === 'in-time' ? lateBuild : null;
+}
+
+function sealedItems(c: Context): Item[] {
+  const { build, exam } = c;
+  if (!build || !exam) return [];
+  const warning = buildWarning(c);
+  return [
+    { kind: 'fact', label: 'Sealed', value: c.when(roundTimeSeconds(Number(build.builtRound))) },
+    { kind: 'fact', label: 'Posted', value: c.when(Number(build.postedAt)) },
+    roundRow('Paper sealed', build.builtRound, c),
+    sealing(c) === 'early'
+      ? fail(
+          'Sealed after questions closed',
+          'The paper was sealed before questions closed, so it could not have used every question the setters sent.',
+          `Sealed at round ${String(build.builtRound)}, questions close at round ${String(exam.settings.lockRound)}`,
+        )
+      : { kind: 'check', label: 'Sealed after questions closed', status: 'pass' },
+    ...(warning ? [{ kind: 'text' as const, tone: 'warn' as const, text: warning }] : []),
+  ];
 }
 
 function sealedStep(c: Context): Draft {
@@ -919,7 +951,7 @@ function sealedStep(c: Context): Draft {
             { kind: 'hash', label: 'Signed by instance key', value: build.instancePublicKey },
           ] satisfies Item[])
         : []),
-      ...(isLate(c) ? [{ kind: 'text' as const, tone: 'warn' as const, text: lateBuild }] : []),
+      ...sealedItems(c),
       signature.item,
       ...manifest.items,
     ],
@@ -1413,7 +1445,7 @@ export function custody(given: View): Custody {
   return {
     steps,
     failures,
-    warnings: [...(given.name && differentRegistry(given.name) ? [otherRegistry] : []), ...(isLate(c) ? [lateBuild] : [])],
+    warnings: [...(given.name && differentRegistry(given.name) ? [otherRegistry] : []), ...(buildWarning(c) ? [buildWarning(c) as string] : [])],
     seal,
     noSeal: build ? 'Not confirmed yet' : 'Not sealed yet',
     headline: words.headline,

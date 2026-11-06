@@ -199,6 +199,8 @@ export interface BuildPost {
   selected: number;
   bankSize: number;
   criteriaHash: Hex;
+  /** The newest verified drand round when the TEE sealed the paper. */
+  builtRound: bigint;
   teeSignature: Hex;
   instancePublicKey: Hex;
 }
@@ -210,18 +212,17 @@ export async function postBuildFlow(
   onStage: (stage: PostStage) => void = () => undefined,
   options: PostOptions = {},
 ): Promise<PostOutcome> {
-  const args = [
-    build.examId,
-    build.approvedListHash,
-    build.paperHash,
-    build.storageManifestHash,
-    build.saltedPaperHash,
-    build.selected,
-    build.bankSize,
-    build.criteriaHash,
-    build.teeSignature,
-    build.instancePublicKey,
-  ] as const;
+  const fields = {
+    approvedListHash: build.approvedListHash,
+    paperHash: build.paperHash,
+    storageManifestHash: build.storageManifestHash,
+    saltedPaperHash: build.saltedPaperHash,
+    selected: build.selected,
+    bankSize: build.bankSize,
+    criteriaHash: build.criteriaHash,
+    builtRound: build.builtRound,
+  };
+  const args = [build.examId, fields, build.teeSignature, build.instancePublicKey] as const;
   const existing = environment.createRegistry ? await environment.createRegistry().getBuild(build.examId) : null;
   if (existing) throw new PublishBlockedError('The sealed paper is already recorded for this exam. It cannot be recorded twice.');
   const sent = await sendFromBoard(
@@ -243,6 +244,7 @@ export async function postBuildFlow(
     row('Selected', String(build.selected), String(stored.selected)),
     row('Bank size', String(build.bankSize), String(stored.bankSize)),
     row('Criteria hash', lower(build.criteriaHash), lower(stored.criteriaHash)),
+    row('Sealed at round', String(build.builtRound), String(stored.builtRound)),
     row('TEE signature', lower(build.teeSignature), lower(stored.teeSignature)),
     row('Instance public key', lower(build.instancePublicKey), lower(stored.instancePublicKey)),
   ];

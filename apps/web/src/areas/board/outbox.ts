@@ -13,6 +13,7 @@ export class OutboxError extends Error {
 
 const bytes32Fields = ['approvedListHash', 'paperHash', 'storageManifestHash', 'saltedPaperHash', 'criteriaHash'] as const;
 const countFields = ['selected', 'bankSize'] as const;
+const roundFields = ['builtRound'] as const;
 
 function bytes32(value: unknown, name: string): Hex {
   if (typeof value !== 'string' || !/^0x[0-9a-f]{64}$/.test(value)) {
@@ -29,6 +30,17 @@ function count(value: unknown, name: string): number {
   return number;
 }
 
+/** A drand round: a decimal string, or a number the TEE sent as one, that fits a uint64. Never zero. */
+function round(value: unknown, name: string): bigint {
+  const text = typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? String(value) : value;
+  if (typeof text !== 'string' || !/^(0|[1-9][0-9]*)$/.test(text)) {
+    throw new OutboxError(`The message field ${name} is not a drand round.`);
+  }
+  const parsed = BigInt(text);
+  if (parsed === 0n || parsed >= 2n ** 64n) throw new OutboxError(`The message field ${name} is not a drand round.`);
+  return parsed;
+}
+
 /**
  * Checks an outbox Build before the board's wallet is asked to post it: the fields are exactly the
  * `build` message's, they name this exam, and the TEE's signature over them verifies under the
@@ -42,7 +54,7 @@ export async function verifyOutboxBuild(
 ): Promise<BuildPost> {
   if (message.kind !== 'build') throw new OutboxError(`Unknown message kind ${String(message.kind)}.`);
   const { fields } = message;
-  const allowed = new Set<string>([...bytes32Fields, ...countFields]);
+  const allowed = new Set<string>([...bytes32Fields, ...countFields, ...roundFields]);
   const names = Object.keys(fields);
   if (names.length !== allowed.size || names.some((name) => !allowed.has(name))) {
     throw new OutboxError('The message does not carry exactly the fields of the build message.');
@@ -56,6 +68,7 @@ export async function verifyOutboxBuild(
     selected: count(fields.selected, 'selected'),
     bankSize: count(fields.bankSize, 'bankSize'),
     criteriaHash: bytes32(fields.criteriaHash, 'criteriaHash'),
+    builtRound: round(fields.builtRound, 'builtRound'),
   };
   if (message.examId !== build.examId || build.examId !== expected.examId.toLowerCase()) {
     throw new OutboxError('The message is for a different exam from the one shown here.');
@@ -74,6 +87,7 @@ export async function verifyOutboxBuild(
         selected: build.selected,
         bankSize: build.bankSize,
         criteriaHash: fromHex(build.criteriaHash),
+        builtRound: build.builtRound,
       }),
     );
   } catch (error) {

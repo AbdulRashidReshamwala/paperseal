@@ -121,6 +121,7 @@ async function signedBuild(): Promise<OutboxMessage> {
     selected: 5,
     bankSize: 40,
     criteriaHash: request().criteria.hash,
+    builtRound: '35732267',
   };
   const message = encodeMessage('build', {
     examId: fromHex(examId),
@@ -131,6 +132,7 @@ async function signedBuild(): Promise<OutboxMessage> {
     selected: fields.selected,
     bankSize: fields.bankSize,
     criteriaHash: fromHex(fields.criteriaHash),
+    builtRound: BigInt(fields.builtRound),
   });
   let signature = new Uint8Array(await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, instance.privateKey, new Uint8Array(message)));
   const order = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n;
