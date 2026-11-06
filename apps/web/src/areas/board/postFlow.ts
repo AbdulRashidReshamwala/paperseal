@@ -32,19 +32,12 @@ export interface PostOutcome {
 
 type FunctionName = 'postApprovedList' | 'postBuild';
 
-/** Checks that must pass before anything is sent, then the dry run, the send and the mining. */
-async function sendFromBoard(
-  environment: PublishEnvironment,
-  call: { functionName: FunctionName; args: readonly unknown[]; send: (registry: ExamRegistry) => Promise<Hex> },
-  onStage: (stage: PostStage) => void,
-): Promise<{ transactionHash: Hex; blockNumber: bigint; reader: ExamRegistry }> {
+/** The checks every send from the board repeats: a wallet, the setup, the network and the board's account. */
+export async function boardWallet(environment: PublishEnvironment, notSetUp: string) {
   const { registryAddress, publicClient, createRegistry } = environment;
-  onStage('checking');
   const provider = environment.getProvider();
   if (!provider) throw new PublishBlockedError('Your wallet was not found. Install a wallet extension in Chrome, then reload this page.');
-  if (!registryAddress || !publicClient || !createRegistry) {
-    throw new PublishBlockedError('Posting is not set up on this page. Ask whoever installed Paper Seal to finish the setup, then reload.');
-  }
+  if (!registryAddress || !publicClient || !createRegistry) throw new PublishBlockedError(notSetUp);
   const account = await currentAccount(provider, await createRegistry().board());
   if (!account) throw new PublishBlockedError('Connect your wallet, then press the button again.');
   // A wallet on the wrong network is asked to switch. If it declines or can't, the instruction below is shown.
@@ -73,6 +66,20 @@ async function sendFromBoard(
       ),
     );
   }
+  return { provider, account, reader, publicClient, registryAddress, createRegistry };
+}
+
+/** Checks that must pass before anything is sent, then the dry run, the send and the mining. */
+async function sendFromBoard(
+  environment: PublishEnvironment,
+  call: { functionName: FunctionName; args: readonly unknown[]; send: (registry: ExamRegistry) => Promise<Hex> },
+  onStage: (stage: PostStage) => void,
+): Promise<{ transactionHash: Hex; blockNumber: bigint; reader: ExamRegistry }> {
+  onStage('checking');
+  const { provider, account, reader, publicClient, registryAddress, createRegistry } = await boardWallet(
+    environment,
+    'Posting is not set up on this page. Ask whoever installed Paper Seal to finish the setup, then reload.',
+  );
 
   onStage('simulating');
   try {

@@ -181,7 +181,7 @@ export function ReviewStep(props: { releases: Releases; onBack: () => void }) {
           Publish the exam
         </PrimaryAction>
       </div>
-      <p className="board-draft-after">Your wallet asks you to confirm once. Then everyone you chose can register, and you invite the setters.</p>
+      <p className="board-draft-after">Your wallet asks you to confirm, then once more to set the exam’s name. Then everyone you chose can register, and you invite the setters.</p>
     </>
   );
 }

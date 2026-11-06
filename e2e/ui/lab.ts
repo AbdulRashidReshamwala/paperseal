@@ -5,6 +5,7 @@ import type { Browser } from 'playwright-core';
 import { startApp, startChain, type Chain } from '../src/chain';
 import { startEnsRpc, type EnsRpc } from '../src/ens';
 import { stopAll } from '../src/procs';
+import { demoParent } from './chainkit';
 import { launchUiChrome } from './kit';
 import { startStubTee, type StubTee } from './stubTee';
 
@@ -56,6 +57,7 @@ export interface Lab {
 export async function startLab(): Promise<Lab> {
   const chain = await startChain();
   const ens = await startEnsRpc(chain.rpcUrl);
+  ens.setPrimary(chain.board, demoParent);
   const tee = await startStubTee();
   const storage = await startStorage();
   const common = { VITE_RPC_URL: ens.rpcUrl, VITE_REGISTRY_ADDRESS: chain.registry, VITE_STORAGE_URL: storage.url };

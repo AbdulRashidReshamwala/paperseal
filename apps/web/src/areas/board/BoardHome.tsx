@@ -1,6 +1,6 @@
 import type { Hex } from '@paperseal/protocol';
 import { Button, Logo, Page, PrimaryAction, RoleHeader } from '@paperseal/ui';
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 
 import { useCurrentExamId } from '../../shared/currentExam';
@@ -8,12 +8,13 @@ import { TEE_STATUS_POLL_MS } from '../../shared/TeeStatus';
 import { useBoardForm, useReader } from './BoardForm';
 import { editedWords, listDrafts, removeDraft } from './draftStore';
 import { readSnapshot, type Snapshot } from './examState';
-import { forgetExam, listKnownExams } from './examsStore';
+import { forgetExam, listKnownExams, type KnownExam } from './examsStore';
 import { useNow } from './hooks';
 import { useListSettled, useRowReads } from './homeReads';
 import { examStatus, homeRows, isAbandoned, type HomeRow } from './homeStatus';
 import { examFinished, machineState, type ChainExam } from './machineVerdict';
 import { MachineRowStatus, useMachineRead, useMachineVerdicts } from './MachineCheck';
+import { readExamName } from './nameFlow';
 import { formatWhen } from './plan';
 
 const examIdOf = (text: string): Hex | null => (/^0x[0-9a-fA-F]{64}$/.test(text.trim()) ? (text.trim().toLowerCase() as Hex) : null);
@@ -146,6 +147,25 @@ function ExamPill(props: { snapshot: Snapshot | null; failed: boolean; now: numb
   return <Pill tone={tone}>{status.label}</Pill>;
 }
 
+/** The exams with a name that passes every check, read once each, so their rows open by name. */
+function useVerifiedExamNames(exams: readonly KnownExam[]) {
+  const { environment, verifiedNames, noteVerifiedName } = useBoardForm();
+  const wanted = exams.flatMap((exam) => (exam.name ? [`${exam.id} ${exam.name}`] : [])).join('\n');
+  useEffect(() => {
+    let live = true;
+    for (const entry of wanted ? wanted.split('\n') : []) {
+      const [id, label] = entry.split(' ') as [Hex, string];
+      void readExamName(environment, label).then((found) => {
+        if (live && found.state === 'set') noteVerifiedName(found.name, id);
+      });
+    }
+    return () => {
+      live = false;
+    };
+  }, [environment, noteVerifiedName, wanted]);
+  return (examId: Hex) => [...verifiedNames].find(([, id]) => id === examId)?.[0] ?? null;
+}
+
 /**
  * `/board`: every exam and draft this browser knows, newest first, under the one way to start a new
  * one. Each published exam is read on its own, a few at a time, and a failed read only affects its
@@ -170,6 +190,7 @@ export function BoardHome() {
     [reader, tee, current],
   );
   const examIds = exams.map((exam) => exam.id);
+  const nameOf = useVerifiedExamNames(exams);
   const reads = useRowReads(examIds, reader ? load : null, TEE_STATUS_POLL_MS);
   const settled = useListSettled(examIds, reads, reader !== null);
   // An exam is hidden only once its read says it never got a Build. Unread or failed rows stay.
@@ -311,7 +332,7 @@ export function BoardHome() {
               <Button
                 aria-label={`Open ${title}`}
                 onClick={() => {
-                  void navigate(`/board/exam/${exam.id}`);
+                  void navigate(`/board/exam/${nameOf(exam.id) ?? exam.id}`);
                 }}
               >
                 Open

@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useMachineElsewhere } from '../../shared/machineExam';
 import { directoryName } from '../../shared/names';
 import { TEE_STATUS_POLL_MS } from '../../shared/TeeStatus';
-import { useBoardForm, useReader } from './BoardForm';
+import { useBoardForm, useReader, useVerifiedName } from './BoardForm';
 import { usePoll } from './hooks';
 import { withDetails } from './details';
 import { ExamRecord } from './ExamRecord';
@@ -66,7 +66,8 @@ function usePostGate(tee: TeeClient | null, examId: Hex): PostGate {
 }
 
 /** The public exam page's link. See "Registration by name" in spec/api.md. */
-export const examPageLink = (base: string, examId: Hex) => `${base.split('#')[0] ?? ''}#/exam?exam=${examId}`;
+/** The public page's link, by the exam's verified name when it has one. */
+export const examPageLink = (base: string, exam: string) => `${base.split('#')[0] ?? ''}#/exam?exam=${exam}`;
 
 function CopyLink(props: { label: string; url: string }) {
   const [copy, setCopy] = useState<'idle' | 'copied' | 'failed'>('idle');
@@ -300,6 +301,7 @@ export function PeopleStep(props: { examId: Hex; snapshot: Snapshot; onPosted: (
   const matching = useMemo(() => matchInvites(invites, registrations), [invites, registrations]);
   const { parties, update: updateParties } = useParties(examId);
   const directory = useDirectoryNames(environment.ensLookup);
+  const verifiedName = useVerifiedName(examId);
   const [search, setSearch] = useState('');
   const chosenNames = useMemo(() => parties.map((party) => party.name), [parties]);
   const { records, retry } = usePartyRecords(environment.ensLookup, chosenNames);
@@ -418,7 +420,7 @@ export function PeopleStep(props: { examId: Hex; snapshot: Snapshot; onPosted: (
         </h2>
         <p className="board-link">
           <span>Send this link to every centre and neutral party so they can register.</span>
-          <CopyLink label="Copy the exam link" url={examPageLink(base, examId)} />
+          <CopyLink label="Copy the exam link" url={examPageLink(base, verifiedName ?? examId)} />
         </p>
         <Fold summary={`Centres and neutral parties, ${String(registeredNames)} of ${String(parties.length)} registered`} open={!peopleChosen}>
           {seen ? (
