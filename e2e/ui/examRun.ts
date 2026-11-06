@@ -389,7 +389,7 @@ describe('real exam through the screens', () => {
               await a.page.getByLabel(field.partyName).fill(p.label, { timeout: 60_000 });
               await a.page.getByRole('button', { name: button.registerByName }).click();
             }
-            await a.see(/security key is registered|You are registered|Nothing to do yet/, 60_000);
+            await a.see(/You.re registered|Nothing to do yet/, 60_000);
           });
           if (p.who === 'setter-1' || p.who === 'centre-1' || p.who === 'neutral-1') await a.shot(`${PREFIX}10-registered`);
         }),

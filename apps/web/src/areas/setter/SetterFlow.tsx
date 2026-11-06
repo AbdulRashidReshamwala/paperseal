@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { useMachineElsewhere } from '../../shared/machineExam';
 import { credentialIsForInvite, useInvite } from '../../shared/invite';
-import { Register, Trouble } from '../../shared/Register';
+import { Register, SetterRegistered, Trouble } from '../../shared/Register';
 import { Closed } from './Closed';
 import { Composer, emptyOptions, type Draft } from './Composer';
 import type { ConfirmOutcome } from './confirm';
@@ -210,14 +210,12 @@ export function SetterFlow() {
         );
       case 'waiting':
         return (
-          <Quiet
-            title="Nothing to do yet"
-            lede={
+          <SetterRegistered
+            next={
               stage === 'onboard'
-                ? 'Your security key is registered. Questions open once your exam board has sent the list of people for this exam.'
-                : 'Your security key is registered. Your exam board has not sent the list of people for this exam yet.'
+                ? 'Questions open once your exam board has sent the list of people for this exam. This page opens for writing by itself.'
+                : 'Your exam board is still setting up this exam. This page opens for writing by itself.'
             }
-            next="This page opens for writing by itself. You can close it and come back to this link later, in this same browser. To use a different security key, ask your exam board for a new invitation link."
           />
         );
       case 'write': {

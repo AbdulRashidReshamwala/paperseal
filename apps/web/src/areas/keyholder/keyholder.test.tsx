@@ -108,7 +108,7 @@ describe('KeyholderView', () => {
 
   it('offers no way to register a second key while waiting for the list', () => {
     view({ chain: chain(facts(roles.neutral, { listPosted: false, entry: null })) });
-    expect(screen.getByRole('heading', { name: 'You are registered. Nothing to do yet.' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'You’re registered' })).toBeTruthy();
     expect(screen.queryByRole('button')).toBeNull();
   });
 
