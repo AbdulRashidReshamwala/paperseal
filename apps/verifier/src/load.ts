@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import { readChecked, withBackup, type BackupSource, type BackupUse, type Judged } from './backup';
 import { checkFreshToken, checkPublishedToken, checkRecordToken, type Build, type FreshVerdict, type PublishedVerdict, type RecordVerdict } from './attest';
-import type { ChainData } from './checks';
+import { sameHex, type ChainData } from './checks';
 import { approvedEntries, checkManifest, holdersOf, type ManifestReport } from './commitments';
 import type { LatestRound } from './live';
 import { runProof, type ProofState } from './proof';
@@ -51,6 +51,8 @@ export type LogResult =
       progress: ReleaseProgress | null;
       /** The log's files against the list and storage. Null until the log's signature and token pass. */
       files: ReleaseFilesReport | null;
+      /** The key that signed the log, which `token` attests when it is verified. */
+      signer: Hex;
     };
 
 /** One polled read of the public record: the chain, and each public file checked against it. */
@@ -190,6 +192,7 @@ async function readLog(
         )
       : null,
     files: isValidLog(verdict, token) ? await checkReleaseFiles(log, list, storage) : null,
+    signer: log.instancePublicKey,
   };
 }
 
@@ -238,12 +241,16 @@ const attempt = async <T>(read: () => Promise<T>): Promise<LiveRead<T>> => {
   }
 };
 
-/** What the optional live TEE says. Until `fresh` is trusted, all of it is hearsay. */
+/**
+ * What the optional live TEE says. It only ever gives progress for an exam still under way, before
+ * anything is recorded. No check depends on it, and until `fresh` is trusted all of it is hearsay.
+ */
 export interface LiveReport {
   fresh: LiveRead<FreshVerdict>;
   status: LiveRead<StatusResponse>;
   progress: ReleaseProgress | null;
-  log: LogVerdict | null;
+  /** The machine says it is serving another exam, so nothing else it says is read or used. */
+  otherExam?: boolean;
 }
 
 export async function loadLive(args: {
@@ -257,20 +264,14 @@ export async function loadLive(args: {
   const chain = args.chain();
   const exam = chain?.exam;
   if (!exam) return neutral('The exam is not on the public record yet.');
-  const [fresh, status, log] = await Promise.all([
-    attempt(() => checkFreshToken({ tee, exam, examId, registry, ...bucketOf(bucket) })),
-    attempt(() => tee.status()),
-    tee.releaseLog().catch(() => null),
-  ]);
+  const status = await attempt(() => tee.status());
+  // An older image names no exam, and is left to the attestation below.
+  if (status.ok && status.value.examId !== undefined && !sameHex(status.value.examId, examId)) {
+    return { fresh: { ok: false, message: 'The live machine is serving another exam.' }, status, progress: null, otherExam: true };
+  }
+  const fresh = await attempt(() => checkFreshToken({ tee, exam, examId, registry, ...bucketOf(bucket) }));
   const list = approvedEntries(chain.entries);
-  const trusted = fresh.ok && fresh.value.trusted ? fresh.value.instancePublicKey : null;
-  return {
-    fresh,
-    status,
-    progress: list && status.ok ? releaseProgress(holdersOf(list), status.value.release.released) : null,
-    // Only a log signed by the key that just passed attestation is checked under that key.
-    log: log ? await checkReleaseLog(log, examId, trusted && log.instancePublicKey === trusted ? trusted : null) : null,
-  };
+  return { fresh, status, progress: list && status.ok ? releaseProgress(holdersOf(list), status.value.release.released) : null };
 }
 
 /** Rabdi makes a block every 2 seconds, so a row's age is its distance from the latest block. */
