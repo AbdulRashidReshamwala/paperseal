@@ -370,7 +370,7 @@ export function PeopleStep(props: { examId: Hex; snapshot: Snapshot; onPosted: (
           <span>1</span> Share the exam link
         </h2>
         <p className="board-link">
-          <span>Send this to every centre and neutral party once. It holds nothing secret.</span>
+          <span>Send this link to every centre and neutral party so they can register.</span>
           <CopyLink label="Copy the exam link" url={examPageLink(base, examId)} />
         </p>
         {seen ? (
