@@ -11,7 +11,7 @@ Formats shared by the TEE, contracts and apps. Change this file first, then ever
 - Hashes are SHA-256 unless a field says otherwise. On-chain identifiers use `keccak256`.
 - TEE signatures are ECDSA over P-256 with SHA-256, encoded as 64-byte `r || s` with low `s`.
 - P-256 public keys, including `instancePublicKey`, are 65-byte uncompressed points starting with `0x04`, and have the ABI type `bytes`.
-- The WebAuthn PRF `first` input is the UTF-8 bytes of `webauthn.prfSalt` from `constants.json`. Changing it changes every derived key, so a registered holder could no longer open their share.
+- The WebAuthn PRF `first` input is the hash of the `prfInput` message, computed from the UTF-8 bytes of `webauthn.prfSalt` in `constants.json` and the `examId`. It is the same in register, release and open, and differs per exam, so one passkey gives each exam its own derived key and a leak of one derived key opens no other exam's material. Changing it changes every derived key, so a registered holder could no longer open their share. The TEE never computes it.
 - Every WebAuthn create and get request sets `userVerification` to `webauthn.userVerification`. An authenticator can give a different PRF output with and without user verification, so this setting can't vary between requests.
 
 ## Exam Settings
@@ -113,28 +113,75 @@ The sum of `questions` times `padding.questionBytes`, plus 1024 bytes for the pa
 
 ## Invites
 
-The board creates one invite per person, so nobody can register under a name they merely know. An invite holds a random 32-byte `inviteSecret`, the `role` and the `owner`, and is sent privately as a link. All of it sits in the URL fragment, so it never reaches a server. Setter invites have no `owner`, because a setter's `owner` is its `setterOwner` hash. For a key holder or a centre the `owner` is an ENS name and nothing else (see "Party Names"). The invite link, the secret and the `inviteTag` match work the same for both.
+Setters are invited, and nobody else is. The board creates one invite per setter. An invite holds a random 32-byte `inviteSecret` and the `role`, always `setter`, and is sent privately as a link. All of it sits in the URL fragment, so it never reaches a server. It has no `owner`, because a setter's `owner` is its `setterOwner` hash.
 
 The registrant's app computes `inviteTag = HMAC-SHA-256(inviteSecret, passkeyPublicKey)`, signs it inside the `registration` message and sends it to the TEE. The TEE stores the tag and returns it from `GET /v1/registrations`. It never sees the secret, so it can't check the tag.
 
-The board's app keeps its invites in the browser and recomputes each tag. A registration joins the list only if its tag matches an invite and its `owner` matches that invite. A tag copied from someone else fails, because it binds a different passkey. If two passkeys match one invite, the board app refuses both until the board reissues that invite. Names of setters stay in the board's browser and are never published.
+The board's app keeps its invites in the browser and recomputes each tag. A registration joins the list only if its tag matches an invite and its `owner` is the `setterOwner` hash of its passkey. A tag copied from someone else fails, because it binds a different passkey. If two passkeys match one invite, the board app refuses both until the board reissues that invite. Names of setters stay in the board's browser and are never published.
+
+Key holders and centres have no invite. They have a permanent identity instead, as in "Party Names". A link with any other role is refused.
 
 ## Party Names
 
-A key holder or a centre is invited by ENS name only, and there is no plain name. The name becomes the party's `owner`, so the TEE, `ExamRegistry`, the approved list and the invite match treat it as an opaque string of at most `limits.ownerBytes` bytes. Setters never have one: their names are never published, and their `owner` stays the `setterOwner` hash.
+A key holder or a centre has one permanent identity: an ENS name that publishes their security key. There is no wallet, no invite link and no secret, and there is no plain name. The name becomes the party's `owner`, so the TEE, `ExamRegistry` and the approved list treat it as an opaque string of at most `limits.ownerBytes` bytes. Setters never have one: their names are never published, and their `owner` stays the `setterOwner` hash.
 
-An `owner` is an ENS name when it has no spaces, has at least two parts around dots, and `normalize(owner)` returns it unchanged. The board app refuses any other `owner` for a key holder or a centre, and for one written like an ENS name that is not normalised it says what to use ("Did you mean ..."), so every reader reaches the same answer. `decodeInviteFragment`, `checkInvite` and the board's list composing refuse it too. The TEE and `ExamRegistry` do not check this, so an older exam or a board that skips the app can still list a plain `owner`. A reader shows such an owner as "Not an ENS name", a warning and never a failure.
+An `owner` is an ENS name when it has no spaces, has at least two parts around dots, and `normalize(owner)` returns it unchanged. The board app refuses any other `owner` for a key holder or a centre, and for one written like an ENS name that is not normalised it says what to use ("Did you mean ..."), so every reader reaches the same answer. The board's list composing refuses it too. The TEE and `ExamRegistry` do not check this, so an older exam or a board that skips the app can still list a plain `owner`. A reader shows such an owner as "Not an ENS name", a warning and never a failure.
 
-There are two kinds of name, and they prove different things:
+### Enrolment
 
-- **A neutral key holder uses their own ENS name.** It proves who holds the key once the holder sets one text record on that name: `ens.records.passkey` (`paperseal.passkey` in `spec/ens.json`), holding `passkeyRecordValue(passkeyPublicKey)`. That value is the `setterOwner` hash of the passkey public key that registered under the invite, as lowercase `0x` hex. It reuses that message instead of adding a domain tag, because `spec/constants.json` is also embedded in the TEE. The key is public, so the value leaks nothing. A reader accepts the record in any hex case and ignores spaces around it.
-- **A centre may use a board-issued subname**, such as `north-1.centres.maths-board.eth`, and needs no record. The board can change such a name under its own parent, so it is a readable label and proves nothing about independence. A centre may also use its own name and set the same record.
+A person enrols once, at `/enrol` on the app's domain. They touch their security key to create a permanent device-bound passkey with PRF support, and the page shows a key card of public values to send to the directory owner:
 
-A reader reads the record with the viewer's own RPC, on chain only (`ens.ccipRead` is `false`), with no fallback RPC, on the chain in `constants.json` (Sepolia in this build). It gives one of these states: confirmed (the record matches the passkey), mismatch (set to something else), missing (not set), refused (the chain would not answer on chain, an offchain lookup included), unreadable (the RPC failed), or invalid (not a normalised ENS name). Resolution goes through whatever the RPC's Universal Resolver does and is not tied to ENSv2.
+| Key card field | Value |
+| --- | --- |
+| `passkey` | `passkeyRecordValue(passkeyPublicKey)`, the `setterOwner` hash of the passkey public key as lowercase `0x` hex |
+| `credentialId` | The WebAuthn credential ID, lowercase `0x` hex |
+| `attestationObject` | The attestation object from the create, lowercase `0x` hex |
 
-This is a label and a proof of who holds a key, never a check the exam depends on. The TEE and `ExamRegistry` never read it. A key holder's name that is missing, wrong or unreadable shows as "not confirmed" in the verifier, and a centre's as a label only, and neither ever fails the exam. On Sepolia anyone can register a look-alike name, so a confirmed name there proves nothing.
+The card is JSON with these three keys and `"kind": "paperseal-key-card"`, `"version": 1`. Nothing on it is secret.
 
-The board app resolves a name typed for a key holder or centre, and a name that does not exist on the chain (it has neither an address record nor a `paperseal.passkey` record) cannot be invited. When the chain cannot be read, the board is told and may try again, and the page keeps trying. A centre's name needs no record, so an existing name with none is accepted. For a key holder, a mismatch keeps them off the list, a missing record shows as waiting and the board may go ahead with it marked unconfirmed, and a match shows as confirmed. The registrant's Register screen shows a key holder with an ENS name the exact record value after they register. The invite is never overwritten once it has matched a registration.
+Enrolling must not silently make a second identity for one key. The page passes every credential ID it knows as `excludeCredentials`: the ones this browser enrolled and every `ens.records.credential` value in the directory, so a key already known refuses with `InvalidStateError` and nothing new is made. A browser that already enrolled shows its card again instead of offering to create. The user handle is random, because a create with a repeated handle would overwrite the earlier passkey on the key.
+
+A passkey belongs to one domain, its relying party ID. Moving the app to another domain needs everyone to enrol again.
+
+### Directory
+
+The directory owner is whoever controls the parent name, `VITE_DIRECTORY_NAME` in the web app, `paperseal-demo.eth` by default. They create subnames with no holder wallet, writing records on the parent's resolver. The text keys are in `spec/ens.json`.
+
+| Name | Record | Holds |
+| --- | --- | --- |
+| Party name | `addr` (ETH) | Any address, so the name exists |
+| Party name | `text` `ens.records.passkey` | The card's `passkey` |
+| Party name | `text` `ens.records.credential` | The card's `credentialId` |
+| Parent | `text` `ens.records.directory` | A JSON array of party names |
+
+The directory is a menu. It is read with one text lookup, is at most `ens.directoryBytes` bytes, and a reader refuses a value that is longer, isn't a JSON array of strings, or holds a name that fails the ENS name rule above. Each listed name is verified by its own records, so a wrong entry in the list gains nothing. `deploy/ens/records.mjs` prints the exact commands from a key card and sends nothing.
+
+The directory owner decides which key belongs to which name, and can swap a record publicly at any time. To replace a lost key, the person enrols a new key and the directory owner replaces both records. An exam's list holds the key as it was when the list was posted.
+
+### The record check
+
+`passkeyRecordValue(passkeyPublicKey)` reuses the `setterOwner` message instead of adding a domain tag. The key is public, so the value leaks nothing. A reader accepts the record in any hex case and ignores spaces around it.
+
+A reader reads records with the viewer's own RPC, on chain only (`ens.ccipRead` is `false`), with no fallback RPC, on the chain in `constants.json` (Sepolia in this build). It gives one of these states: confirmed (the record matches the passkey), mismatch (set to something else), missing (not set), refused (the chain would not answer on chain, an offchain lookup included), unreadable (the RPC failed), or invalid (not a normalised ENS name). Resolution goes through whatever the RPC's Universal Resolver does and is not tied to ENSv2.
+
+### Registration by name
+
+A party registers per exam from the public exam page, `#/exam?exam=<examId>`, with the same key. The page holds no secret.
+
+1. It reads the name's `ens.records.credential` and `ens.records.passkey` records.
+2. It runs one WebAuthn get with `allowCredentials` set to that credential and the exam's PRF input, and derives the exam's key. If it doesn't already know the passkey public key, it recovers it from this signature with the audited curve library, and accepts only the candidate whose `passkeyRecordValue` equals the record.
+3. It asks for a challenge and runs a second get, which signs the `registration` message with `inviteTag` set to 32 zero bytes.
+4. It sends `POST /v1/register` with the `attestationObject` from enrolment, or `0x` in a browser that didn't enrol.
+
+Two touches are needed, because the derived public key is a field of the signed message, so the PRF output has to exist before the signing ceremony starts.
+
+Registering twice is harmless: the TEE answers `already_registered`, and the app accepts that if `GET /v1/registrations` shows this passkey under this name. After the list is posted a new browser needs no ceremony, because the list already holds the key.
+
+### What the board accepts
+
+The board picks names from the directory and may add others by typing. It gives each one a list role. Nobody defaults to a centre without a share: names fill the neutral places, then the centre key-holder places, in the order chosen, and after that the board must choose. A registration joins the list only if its `owner` is the chosen name, it has a derived key and a zero `inviteTag`, and its `passkeyRecordValue` equals the name's `ens.records.passkey` record. A name with no record, or a record for another key, stays off the list, with no way to go ahead without it. A name that can't be read says so and offers to try again, and the board can always remove it.
+
+The verifier reads the same record for each listed party and shows "Name confirmed" when it matches. For a key holder a missing or wrong record shows "Not confirmed". For a centre it shows a label only. Either way it says who vouches for the name: whoever controls its parent. Neither ever fails the exam, and the TEE and `ExamRegistry` never read ENS. On Sepolia anyone can register a look-alike name, so a confirmed name there proves nothing.
 
 ## Approved List
 
@@ -171,6 +218,7 @@ Every client reads `entries` and `criteria` this way. `getExam` returns `created
 | `registration` | Passkey | `bytes derivedPublicKey`, `bytes holderId`, `bytes challenge`, `bytes32 inviteTag` |
 | `instanceKey` | TEE | `bytes32 examId`, `bytes encryptionPublicKey` |
 | `setterOwner` | None, a public hash | `bytes passkeyPublicKey` |
+| `prfInput` | None, a public hash | `bytes prfSalt`, `bytes32 examId` |
 | `criteria` | None, a public hash | `bytes criteria` |
 | `approvedList` | TEE | `bytes32 examId`, `bytes entries` |
 | `questionSubmission` | Passkey | `bytes32 examId`, `bytes challenge`, `bytes32 questionHash` |
@@ -179,7 +227,8 @@ Every client reads `entries` and `criteria` this way. `getExam` returns `created
 | `shareRelease` | Passkey | `bytes32 examId`, `bytes challenge` |
 | `releaseLog` | TEE | `bytes32 examId`, `bytes32 entriesHash`, `bytes32 filesHash` |
 
-- `registration.derivedPublicKey` is empty for setters. `holderId` is the UTF-8 bytes of `owner`.
+- `registration.derivedPublicKey` is empty for setters. `holderId` is the UTF-8 bytes of `owner`. `inviteTag` is 32 zero bytes for a registration by name (see "Party Names"), which keeps the field and its place in the hash. It is the HMAC of an invite for a setter, and the TEE refuses a zero tag without a derived key.
+- `prfInput.prfSalt` is the UTF-8 bytes of `webauthn.prfSalt`. No party signs this message: it is the PRF input, and only apps compute it.
 - `approvedListHash` is the hash of the `approvedList` message. `ExamRegistry` computes the same hash from the posted bytes, and `postBuild` rejects a Build whose hash differs. The TEE signature on `approvedList` isn't posted. Apps fetch it from the TEE and compare the hash with the chain.
 - `questionHash` is the plain SHA-256 of the question ciphertext. It is never a hash of the plaintext, because that would let people test guesses at a question.
 - `paperHash` is the plain SHA-256 of the encrypted paper file.
@@ -228,7 +277,7 @@ The TEE checks the signature, that `clientDataJSON.challenge` is the base64url m
 
 A challenge is 32 random bytes plus an expiry, authenticated with an in-memory key, so issuing one stores nothing. It is single use and expires after 5 minutes. Release challenges are only issued once `unlockRound` is published.
 
-`webauthn.requireHardwareAttestation` is `false` for the demo, so the TEE doesn't check the attestation chain. The value is in the attested image, and the verifier page shows it. When it's `true`, an attestation check that isn't implemented rejects the registration.
+`webauthn.requireHardwareAttestation` is `false` for the demo, so the TEE doesn't look at `attestationObject`. The value is in the attested image, and the verifier page shows it. When it's `true`, the TEE first checks that the object's attested credential is exactly `passkeyPublicKey`, and refuses with `invalid_attestation` otherwise, including when the object is empty. The chain check that follows isn't implemented, so it rejects the registration.
 
 ## Storage
 
@@ -332,7 +381,7 @@ All bodies are JSON. Every route allows any origin, without credentials. Bytes f
 | `POST /v1/release/share` | `{passkeyPublicKey, challenge, sealed}` | `{}` |
 | `GET /v1/release/log` | None | `{examId, entries, entriesHash, files: [{name, sha256}], filesHash, teeSignature, instancePublicKey}` |
 
-`release.released` lists the passkey public keys of holders whose shares were accepted. In an outbox message, `examId` sits at the top level, and `fields` holds the other `build` message fields, with `selected`, `bankSize` and `builtRound` as decimal strings. `stage` is one of `onboard`, `submit`, `lock`, `build`, `distribute`, `unlock`, `released`, `failed`. `register`'s passkey signature covers the `registration` message. `register` refuses an `owner` that is empty, not valid UTF-8 or longer than `limits.ownerBytes`, the same limit readers apply to the approved list, so every registration fits on the list.
+`release.released` lists the passkey public keys of holders whose shares were accepted. In an outbox message, `examId` sits at the top level, and `fields` holds the other `build` message fields, with `selected`, `bankSize` and `builtRound` as decimal strings. `stage` is one of `onboard`, `submit`, `lock`, `build`, `distribute`, `unlock`, `released`, `failed`. `register`'s passkey signature covers the `registration` message, signed in a `webauthn.get` ceremony. That proves the key whether it was created a moment ago, as for a setter, or at enrolment, as for a party. The same flag checks and challenge rules apply to both. A challenge works only on the instance that issued it, so a signature made for one exam can't be replayed on another. `register` refuses a zero `inviteTag` with an empty `derivedPublicKey`, and refuses an `owner` that is empty, not valid UTF-8 or longer than `limits.ownerBytes`, the same limit readers apply to the approved list, so every registration fits on the list.
 
 `GET /v1/release/log` answers `503` with code `delivery_pending` between the threshold and the delivery being prepared, because a log at the threshold must list its files. Once prepared, it answers with the same bytes as `release-log.json`.
 
@@ -369,3 +418,12 @@ The launcher sets these claims under `submods.container`, and readers compare th
 ## TEE API Errors
 
 Errors return a non-2xx status and `{"error": {"code": "<snake_case>", "message": "<text>"}}`.
+
+## Registration Flooding
+
+The TEE can't check who may register. It never could, because it never sees an invite secret, so the public exam page adds no new power: anyone with a software key could already register. What limits a flood:
+
+- Each registration costs a fresh signed challenge and a passkey signature, and a passkey or derived key registers once. The spent-challenge set is capped at 100,000, and past that the TEE answers `busy` until challenges expire.
+- Each request body is at most 1 MiB. The TEE holds no other cap on registrations, so a sustained flood costs it memory until Onboard ends and makes `GET /v1/registrations` slower.
+- A flood can't take anyone's place. A registration under someone's name with another key never joins the list, and it doesn't block their own, because only the passkey and derived key must be unique. The list itself is capped by `limits.entries`.
+- The board app shows only a count of registrations that match nobody, in one line, so a flood can't bury the list.
