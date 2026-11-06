@@ -4,6 +4,7 @@ import { useState, type HTMLInputTypeAttribute, type ReactNode } from 'react';
 
 import { useBoardForm } from './BoardForm';
 import { useBoardWallet, walletStageLabels, type WalletStage } from './hooks';
+import { splitDetails } from './details';
 import { plainWords } from './plan';
 import type { PostOutcome } from './postFlow';
 import { explainError } from './publishFlow';
@@ -11,10 +12,16 @@ import { roleNames } from './registrations';
 
 /** A problem that stops the flow, in words. */
 export function Problem(props: { children: string }) {
+  const { say, detail } = splitDetails(props.children);
   return (
-    <p className="board-problem" role="alert">
-      <Check status="fail">{plainWords(props.children)}</Check>
-    </p>
+    <div className="board-problem" role="alert">
+      <Check status="fail">{plainWords(say)}</Check>
+      {detail ? (
+        <Fold summary="Details">
+          <p className="ps-mono">{detail}</p>
+        </Fold>
+      ) : null}
+    </div>
   );
 }
 
@@ -65,7 +72,7 @@ export function EntryRows(props: { entries: readonly ApprovedListEntry[] }) {
     <Rows>
       {props.entries.map((entry) => (
         <Row key={toHex(entry.passkeyPublicKey)} label={entry.role === roles.setter ? 'Setter' : entry.owner}>
-          {roleNames[entry.role] ?? `Role ${String(entry.role)}`} <Hash value={toHex(entry.passkeyPublicKey)} label="security key" />
+          {roleNames[entry.role] ?? 'Unknown role'} <Hash value={toHex(entry.passkeyPublicKey)} label="security key" />
         </Row>
       ))}
     </Rows>
@@ -102,9 +109,15 @@ export function PostAction(props: {
   }
 
   const running = progress.state === 'running';
+  const blocked = splitDetails(props.blocked ?? '');
   return (
     <>
-      {props.blocked ? <p className="board-blocked">{plainWords(props.blocked)}</p> : null}
+      {blocked.say ? <p className="board-blocked">{plainWords(blocked.say)}</p> : null}
+      {blocked.detail ? (
+        <Fold summary="Details">
+          <p className="ps-mono">{blocked.detail}</p>
+        </Fold>
+      ) : null}
       {problem ? <Problem>{problem}</Problem> : null}
       {progress.state === 'failed' ? <Problem>{progress.message}</Problem> : null}
       <PrimaryAction
@@ -129,7 +142,7 @@ export function ReadBackRows(props: { rows: readonly { label: string; expected: 
             <Check status="pass">Matches</Check>
           ) : (
             <Check status="fail">
-              Expected {row.expected}, read {row.actual}
+              You entered {row.expected}. The public record has {row.actual}.
             </Check>
           )}
         </Row>
@@ -141,10 +154,10 @@ export function ReadBackRows(props: { rows: readonly { label: string; expected: 
 /** The read-backs of what this session posted. */
 export function ReceiptRows() {
   const { receipts } = useBoardForm();
-  const names = { publish: 'Exam', list: 'Approved list', build: 'Sealed paper' };
+  const names = { publish: 'Exam', list: 'List of people', build: 'Sealed paper' };
   return receipts.map((receipt) => (
-    <Row key={receipt.kind} label={`${names[receipt.kind]}, posted in block ${String(receipt.outcome.blockNumber)}`}>
-      <Hash value={receipt.outcome.transactionHash} label="transaction" />
+    <Row key={receipt.kind} label={`${names[receipt.kind]}, saved in block ${String(receipt.outcome.blockNumber)}`}>
+      <Hash value={receipt.outcome.transactionHash} label="receipt code" />
     </Row>
   ));
 }

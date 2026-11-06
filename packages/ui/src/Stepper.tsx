@@ -46,7 +46,7 @@ export function Stepper(props: {
   evidenceLabel?: string;
 }) {
   return (
-    <ol className="ps-stepper" aria-label={props.label ?? 'Chain of custody'}>
+    <ol className="ps-stepper" aria-label={props.label ?? 'Steps for this exam'}>
       {props.steps.map((step) => (
         <li key={step.id} className="ps-step" data-state={step.state} aria-current={step.state === 'current' ? 'step' : undefined}>
           <div className="ps-step-when">{step.when}</div>
@@ -61,7 +61,7 @@ export function Stepper(props: {
             {step.note ? <p className="ps-step-note">{step.note}</p> : null}
             {step.evidence ? (
               <details className="ps-step-evidence">
-                <summary>{props.evidenceLabel ?? 'Show evidence'}</summary>
+                <summary>{props.evidenceLabel ?? 'Show the details'}</summary>
                 <div className="ps-step-proof">{step.evidence}</div>
               </details>
             ) : null}

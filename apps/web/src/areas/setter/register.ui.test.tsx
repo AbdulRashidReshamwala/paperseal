@@ -45,7 +45,7 @@ describe('Register by role', () => {
     const onRegistered = vi.fn();
     render(<Register role="setter" examId={examId} tee={makeTee()} keys={keys} invite={invite('setter')} onRegistered={onRegistered} />);
     expect(screen.queryByRole('textbox')).toBeNull();
-    expect(screen.getByText(/Your name is never published/)).toBeTruthy();
+    expect(screen.getByText(/Your name is not published/)).toBeTruthy();
     expect(screen.getAllByRole('button')).toHaveLength(1);
     fireEvent.click(button());
     await waitFor(() => {
@@ -61,7 +61,7 @@ describe('Register by role', () => {
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(screen.getByText(/Centre One/)).toBeTruthy();
     expect(screen.getAllByRole('button')).toHaveLength(1);
-    expect(screen.getByText(/public approved list/)).toBeTruthy();
+    expect(screen.getByText(/public list for this exam/)).toBeTruthy();
 
     fireEvent.click(button());
     expect(await screen.findByText('Your security key is registered')).toBeTruthy();
@@ -80,7 +80,7 @@ describe('Register by role', () => {
     render(<Register role="setter" examId={examId} tee={tee} keys={makeKeys()} invite={invite('setter')} />);
     fireEvent.click(button());
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toContain('The sealed system refused this');
+    expect(alert.textContent).toContain('Contact your exam board');
     expect(alert.textContent).toContain('registration is closed');
     expect(loadCredential(examId, 'setter')).toBeNull();
     expect(button()).toBeTruthy();

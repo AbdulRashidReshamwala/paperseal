@@ -72,7 +72,7 @@ export function saveInvites(examId: Hex, invites: readonly BoardInvite[]): void 
 
 export const inviteRoleNames: Record<InviteRole, string> = {
   setter: 'Setter',
-  keyholder: 'Neutral party',
+  keyholder: 'Key holder',
   centre: 'Centre',
 };
 
@@ -91,7 +91,7 @@ export function createInvite(
     const label = name === '' ? `Setter ${String(existing.filter((invite) => invite.role === 'setter').length + 1)}` : name;
     return { ok: true, invite: { id, role, label, inviteSecret: newInviteSecret() } };
   }
-  if (name === '') return { ok: false, reason: 'Enter the name to put on the approved list.' };
+  if (name === '') return { ok: false, reason: 'Enter the name to show on the public list.' };
   const problem = ownerProblem(name);
   if (problem) return { ok: false, reason: problem };
   if (existing.some((invite) => invite.owner === name)) return { ok: false, reason: `${name} already has an invite.` };

@@ -123,7 +123,7 @@ describe('CentreView', () => {
 
   it('checks the files by itself: one line, one check, and no download button', () => {
     view({});
-    expect(screen.getByText('Sealed paper downloaded and checked')).toBeTruthy();
+    expect(screen.getByText('The sealed paper is downloaded and checked')).toBeTruthy();
     expect(document.querySelectorAll('.ps-check')).toHaveLength(1);
     expect(screen.queryByRole('button')).toBeNull();
     expect(screen.getByRole('timer')).toBeTruthy();
@@ -138,13 +138,13 @@ describe('CentreView', () => {
 
   it('refuses files that fail, and says who to contact and why', () => {
     view({}, { state: 'refused', detail: 'paper.bin does not match the paper hash in the Build.' });
-    expect(screen.getByRole('heading', { name: 'The sealed paper failed its check' })).toBeTruthy();
-    expect(screen.getByText(/does not match the public record.*Contact your exam board now/)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'The sealed paper did not pass its check' })).toBeTruthy();
+    expect(screen.getByText(/is not the one that was published.*Contact your exam board now/)).toBeTruthy();
   });
 
   it('offers the release in place for a centre with a share', () => {
     view({ chain: asShareholder, reached: true, status: tee(status('unlock')) });
-    expect(screen.getByRole('heading', { name: /can't be released/ })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /can't release your part of the key/ })).toBeTruthy();
     view({ chain: asCentre, reached: true, status: tee(status('unlock')) });
     expect(screen.getByRole('heading', { name: 'Waiting for key holders' })).toBeTruthy();
   });
@@ -195,7 +195,7 @@ describe('CentreView', () => {
     const refusal = refusalFor('check', new PaperHashMismatchError());
     view(atRelease, ready, { ...idleOpen, phase: { name: 'failed', refusal } });
     expect(screen.getByRole('heading', { name: 'This paper failed its check and is not shown' })).toBeTruthy();
-    expect(screen.getByText(/does not match the fingerprint/)).toBeTruthy();
+    expect(screen.getByText(/does not match the published record/)).toBeTruthy();
     expect(screen.getByText(/Contact your exam board now/)).toBeTruthy();
     expect(screen.queryByRole('article')).toBeNull();
     expect(screen.queryByRole('button')).toBeNull();

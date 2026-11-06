@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getCurrentExamId } from '../../shared/currentExam';
 import { fakeChain, type FakeChainOptions } from '../../test/fakeChain';
+import { splitDetails } from './details';
 import { parseLocalTime } from './form';
 import BoardArea from './BoardArea';
 import { explainError, publishExam, PublishBlockedError, type PublishEnvironment, type PublishRequest } from './publishFlow';
@@ -151,20 +152,20 @@ describe('publishExam with a stub wallet', () => {
 
   it('sends nothing from an account that is not the board', async () => {
     const { node, env } = environment({ account: stranger });
-    await expect(publishExam(env, request())).rejects.toThrow(/not the board address/);
+    await expect(publishExam(env, request())).rejects.toThrow(/not the exam board’s account/);
     expect(node.sent).toHaveLength(0);
   });
 
   it('sends nothing on the wrong chain', async () => {
     const { node, env } = environment({ chainId: 1 });
-    await expect(publishExam(env, request())).rejects.toThrow(/Switch it to Sepolia/);
+    await expect(publishExam(env, request())).rejects.toThrow(/wrong network. Switch it to Sepolia/);
     expect(node.sent).toHaveLength(0);
   });
 
   it('sends nothing when no account is connected, or no wallet exists', async () => {
     const { node, env } = environment({ account: null });
     await expect(publishExam(env, request())).rejects.toThrow(/Connect your wallet/);
-    await expect(publishExam({ ...env, getProvider: () => null }, request())).rejects.toThrow(/No browser wallet/);
+    await expect(publishExam({ ...env, getProvider: () => null }, request())).rejects.toThrow(/wallet was not found/);
     expect(node.sent).toHaveLength(0);
   });
 
@@ -179,19 +180,20 @@ describe('publishExam with a stub wallet', () => {
     const { node, env } = environment({ revertWith: { errorName: 'UnlockRoundMismatch', args: [10n, 11n] } });
     const error = await publishExam(env, request()).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(PublishBlockedError);
-    expect((error as Error).message).toBe(
-      'The unlock round must be 10, the first round at or after T − Δ, but 11 was sent.',
-    );
+    expect((error as Error).message).toBe('The release time was not accepted. Go back, check the times, then try again.');
     expect(node.sent).toHaveLength(0);
   });
 
   it('says plainly when the wallet user rejects', async () => {
     const { env } = environment({ rejectSend: true });
-    await expect(publishExam(env, request())).rejects.toThrow('You rejected the request in your wallet. Nothing was sent.');
+    await expect(publishExam(env, request())).rejects.toThrow('You declined in your wallet, so nothing was published.');
   });
 
   it('explains plain errors without hiding them', () => {
-    expect(explainError(new Error('boom'))).toBe('boom');
+    expect(splitDetails(explainError(new Error('boom')))).toEqual({
+      say: expect.stringContaining('Try again'),
+      detail: 'boom',
+    });
   });
 });
 
@@ -222,14 +224,14 @@ function fillCreate(host: string | null = 'rpc.example.org') {
   type('Topic 1 name', 'Mechanics');
   type('Topic 1 questions', '5');
   type('Questions close', picker(times.lock));
-  if (host !== null) type('Public record provider', host);
+  if (host !== null) type('Public record address', host);
 }
 
 async function toVersion(env: PublishEnvironment) {
   renderBoard(env);
   fillCreate();
   fireEvent.click(button('Continue'));
-  await screen.findByText('Choose what the sealed machine runs');
+  await screen.findByText('Choose the Paper Seal version');
 }
 
 async function toReview(env: PublishEnvironment) {
@@ -258,13 +260,13 @@ describe('step 1, create the exam', () => {
     fireEvent.click(screen.getByText('Add topic'));
     type('Topic 2 name', 'Mechanics');
     type('Topic 2 questions', '3');
-    expect(screen.getByText('Topic names must be unique.')).toBeTruthy();
+    expect(screen.getByText('Each topic needs its own name.')).toBeTruthy();
     expect(button('Continue').disabled).toBe(true);
 
     type('Topic 2 name', 'Optics');
     expect(button('Continue').disabled).toBe(false);
     type('Most of a topic one setter can write', '101');
-    expect(screen.getByText('Max setter percent must be from 1 to 100.')).toBeTruthy();
+    expect(screen.getByText('Enter a number from 1 to 100.')).toBeTruthy();
     expect(button('Continue').disabled).toBe(true);
     expect(screen.getByText('Advanced').closest('details')?.open).toBe(true);
   });
@@ -296,8 +298,8 @@ describe('step 1, create the exam', () => {
     fillCreate(null);
     expect(button('Continue').disabled).toBe(true);
     expect(screen.getByText('Advanced').closest('details')?.open).toBe(true);
-    type('Public record provider', 'https://not-a-host/');
-    expect(screen.getByText(/Enter the hostname only/)).toBeTruthy();
+    type('Public record address', 'https://not-a-host/');
+    expect(screen.getByText(/Enter the address only/)).toBeTruthy();
   });
 });
 
@@ -309,7 +311,7 @@ describe('step 2, the version', () => {
     const { env } = environment();
     await toVersion(env);
     expect(await screen.findByRole('button', { name: 'Use v1.1.0' })).toBeTruthy();
-    expect(screen.getByText(/v1\.1\.0 is the newest published version/)).toBeTruthy();
+    expect(screen.getByText(/Version v1\.1\.0 is the newest version/)).toBeTruthy();
     fireEvent.click(button('Use v1.1.0'));
     expect(await screen.findByText('Review and publish')).toBeTruthy();
   });
@@ -322,15 +324,15 @@ describe('step 2, the version', () => {
     const { env } = environment();
     await toVersion(env);
     expect(await screen.findByRole('button', { name: 'Use v1.0.0' })).toBeTruthy();
-    expect(screen.getByText(/Release mismatch: the tag v1\.1\.0 points at commit/)).toBeTruthy();
+    expect(screen.getByText(/Version v1\.1\.0 did not pass its check/)).toBeTruthy();
   });
 
   it('blocks when no release matches its tag', async () => {
     stubGithub({ tagSha: { 'v1.0.0': 'c'.repeat(40) } });
     const { node, env } = environment();
     await toVersion(env);
-    await screen.findByText(/Release mismatch/);
-    expect(screen.getByText(/Publishing is blocked/)).toBeTruthy();
+    await screen.findByText(/did not pass its check/);
+    expect(screen.getByText(/No version passed its check/)).toBeTruthy();
     expect(button('Use this version').disabled).toBe(true);
     expect(node.sent).toHaveLength(0);
   });
@@ -344,7 +346,7 @@ describe('step 2, the version', () => {
     await toVersion(env);
     await screen.findByRole('button', { name: 'Use v1.1.0' });
     fireEvent.change(screen.getByLabelText('Version'), { target: { value: 'v1.0.0' } });
-    await screen.findByText(/Release mismatch: the tag v1\.0\.0/);
+    await screen.findByText(/Version v1\.0\.0 did not pass its check/);
     expect(button('Use this version').disabled).toBe(true);
   });
 
@@ -352,7 +354,7 @@ describe('step 2, the version', () => {
     stubGithub({ tagStatus: 500 });
     const { env } = environment();
     await toVersion(env);
-    await screen.findByText(/GitHub could not be reached/);
+    await screen.findByText(/versions could not be loaded\. Check your internet/);
     expect(button('Use this version').disabled).toBe(true);
   });
 
@@ -360,7 +362,7 @@ describe('step 2, the version', () => {
     stubGithub({ releasesStatus: 403 });
     const { env } = environment();
     await toVersion(env);
-    await screen.findByText(/GitHub is limiting requests/);
+    await screen.findByText(/service is busy/);
     expect(screen.queryByLabelText(/^Commit/)).toBeNull();
     expect(screen.queryByLabelText(/^Image digest/)).toBeNull();
     expect(button('Use this version').disabled).toBe(true);
@@ -374,14 +376,14 @@ describe('step 2, the version', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
     const { env: pending } = environment();
     await toVersion(pending);
-    expect(screen.getByText(/Loading the published versions/)).toBeTruthy();
+    expect(screen.getByText(/Loading the available versions/)).toBeTruthy();
     expect(button('Use this version').disabled).toBe(true);
     cleanup();
 
     stubGithub({ releases: [] });
     const { env } = environment();
     await toVersion(env);
-    await screen.findByText(/A version must be tagged first/);
+    await screen.findByText(/no version to use yet/);
     expect(button('Use this version').disabled).toBe(true);
   });
 
@@ -392,7 +394,7 @@ describe('step 2, the version', () => {
     const { env } = environment();
     await toVersion(env);
     expect((await screen.findByText(foreign)).closest('a')).toBeNull();
-    expect(screen.getByText(/Not a workflow run of/)).toBeTruthy();
+    expect(screen.getByText(/This is not a run of/)).toBeTruthy();
   });
 });
 
@@ -400,7 +402,7 @@ describe('step 3, review and publish', () => {
   it('publishes with one action, reads back, stamps it, and moves on to people', async () => {
     const { node, env } = environment();
     const publish = await toReview(env);
-    expect(screen.getByText(/cannot be changed afterwards, not even by the board/)).toBeTruthy();
+    expect(screen.getByText(/nothing here can be changed, not even by the exam board/)).toBeTruthy();
     expect(screen.getByText('Topic: Mechanics')).toBeTruthy();
     fireEvent.click(publish);
 
@@ -409,8 +411,8 @@ describe('step 3, review and publish', () => {
     expect(node.sent).toHaveLength(1);
     expect(getCurrentExamId()).toBe(examId);
 
-    fireEvent.click(button('Bring people in'));
-    expect(await screen.findByRole('heading', { name: 'Bring people in' })).toBeTruthy();
+    fireEvent.click(button('Invite people'));
+    expect(await screen.findByRole('heading', { name: 'Invite people' })).toBeTruthy();
   });
 
   it('asks the wallet for an account as part of the same action', async () => {
@@ -434,27 +436,27 @@ describe('step 3, review and publish', () => {
     const publish = await toReview(env);
     expect(getCurrentExamId()).toBeNull();
     fireEvent.click(publish);
-    expect(await screen.findByText('Published, but the read-back differs')).toBeTruthy();
+    expect(await screen.findByText('The exam was published, but it does not match')).toBeTruthy();
     expect(screen.queryByText('Published')).toBeNull();
-    expect(screen.getByText(/this exam was not selected/)).toBeTruthy();
+    expect(screen.getByText(/Do not use this exam/)).toBeTruthy();
     expect(getCurrentExamId()).toBeNull();
   });
 
   it('warns about the wrong chain, and the flow still refuses to send', async () => {
     const { node, env } = environment({ chainId: 1 });
     const publish = await toReview(env);
-    await screen.findByText(/Your wallet is on chain 1\. Switch it to Sepolia/);
+    await screen.findByText(/Your wallet is on the wrong network/);
     fireEvent.click(publish);
-    await screen.findByText(/Your wallet is on chain 1\. Switch it to Sepolia \(chain/);
+    await screen.findAllByText(/Your wallet is on the wrong network\. Switch it to Sepolia in your wallet, then try again/);
     expect(node.sent).toHaveLength(0);
   });
 
   it('refuses an account that is not the board', async () => {
     const { node, env } = environment({ account: stranger });
     const publish = await toReview(env);
-    await screen.findByText(/This wallet account is not the board address/);
+    await screen.findByText(/not the exam board’s account/);
     fireEvent.click(publish);
-    await screen.findByText(/is not the board address\. the public record only accepts writes|is not the board address\. The public record/i);
+    await screen.findAllByText(/Switch to the board’s account in your wallet/);
     expect(node.sent).toHaveLength(0);
   });
 

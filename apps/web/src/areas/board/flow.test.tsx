@@ -209,19 +209,19 @@ describe('sealStateAt', () => {
 describe('step 4, bring people in', () => {
   const addInvite = (role: string, text: string) => {
     fireEvent.change(screen.getByLabelText('Role'), { target: { value: role } });
-    fireEvent.change(screen.getByLabelText(/^(Name for the approved list|Your own note)/), { target: { value: text } });
+    fireEvent.change(screen.getByLabelText(/^(Name to show on the public list|A note for yourself)/), { target: { value: text } });
     fireEvent.click(button('Add invite'));
   };
 
   it('makes an invite per person, keeps it in the browser and copies a link with the secret in the fragment', async () => {
     const { env } = await seeded('exam');
     renderBoard(env, fakeTee());
-    await screen.findByRole('heading', { name: 'Bring people in' });
+    await screen.findByRole('heading', { name: 'Invite people' });
     addInvite('keyholder', 'Asha');
     await screen.findByText('Waiting for them to register');
     const writeText = vi.fn(() => Promise.resolve());
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
-    fireEvent.click(button('Copy the link for Asha (Neutral party)'));
+    fireEvent.click(button('Copy the link for Asha (Key holder)'));
     await screen.findByText('Copied');
     const link = (writeText.mock.calls[0] as unknown as [string])[0];
     const url = new URL(link);
@@ -238,9 +238,9 @@ describe('step 4, bring people in', () => {
   it('asks for a name for a key holder, refuses a repeat, and needs none for a setter', async () => {
     const { env } = await seeded('exam');
     renderBoard(env, fakeTee());
-    await screen.findByRole('heading', { name: 'Bring people in' });
+    await screen.findByRole('heading', { name: 'Invite people' });
     addInvite('keyholder', '  ');
-    expect(await screen.findByText('Enter the name to put on the approved list.')).toBeTruthy();
+    expect(await screen.findByText('Enter the name to show on the public list.')).toBeTruthy();
     addInvite('keyholder', 'Asha');
     await screen.findByText('Waiting for them to register');
     addInvite('keyholder', 'Asha');
@@ -256,7 +256,7 @@ describe('step 4, bring people in', () => {
     const { env } = await seeded('exam');
     stock([setter]);
     renderBoard(env, fakeTee());
-    await screen.findByRole('heading', { name: 'Bring people in' });
+    await screen.findByRole('heading', { name: 'Invite people' });
     vi.stubGlobal('navigator', { ...navigator, clipboard: undefined });
     fireEvent.click(button('Copy the link for Setter 1 (Setter)'));
     expect(await screen.findByText(/#\/join\?exam=/)).toBeTruthy();
@@ -265,12 +265,12 @@ describe('step 4, bring people in', () => {
   it('keeps the invites when the board is opened again', async () => {
     const { env } = await seeded('exam');
     renderBoard(env, fakeTee());
-    await screen.findByRole('heading', { name: 'Bring people in' });
+    await screen.findByRole('heading', { name: 'Invite people' });
     addInvite('keyholder', 'Asha');
     await screen.findByText('Waiting for them to register');
     cleanup();
     renderBoard(env, fakeTee());
-    expect(await screen.findByText('Asha (Neutral party)')).toBeTruthy();
+    expect(await screen.findByText('Asha (Key holder)')).toBeTruthy();
   });
 
   it('counts against what is needed, and holds the list until it is complete', async () => {
@@ -281,7 +281,7 @@ describe('step 4, bring people in', () => {
     expect(await screen.findByText('3 of 3')).toBeTruthy();
     expect(screen.getByText('6 of 7')).toBeTruthy();
     expect(screen.getByText(/1, at least 5 needed/)).toBeTruthy();
-    await screen.findByText(/needs exactly 3 neutral parties and 7 centres with keys/);
+    await screen.findByText(/needs exactly 3 key holders and 7 centres holding part of the key/);
     expect(button('Post the list').disabled).toBe(true);
     expect(node.sent).toHaveLength(sent);
   });
@@ -293,7 +293,7 @@ describe('step 4, bring people in', () => {
     renderBoard(env, fakeTee({ registrations: registrationsOf(everyone) }));
     // A centre's key place is the only choice, and it is already made. Key holders and setters have none.
     const role = await screen.findByLabelText<HTMLSelectElement>('Role for Centre 1');
-    expect(within(role).getByRole<HTMLOptionElement>('option', { name: 'Centre with a key' }).selected).toBe(true);
+    expect(within(role).getByRole<HTMLOptionElement>('option', { name: 'Centre holding part of the key' }).selected).toBe(true);
     expect(screen.queryByLabelText('Role for Asha')).toBeNull();
     expect(screen.queryByLabelText('Role for Setter 1')).toBeNull();
     expect(screen.getAllByText('Registered')).toHaveLength(11);
@@ -334,7 +334,7 @@ describe('step 4, bring people in', () => {
     stock(everyone);
     const guessed: RegistrationEntry = { ...holder(30, 'Asha').registration, inviteTag: `0x${'77'.repeat(32)}` };
     renderBoard(env, fakeTee({ registrations: [...registrationsOf(everyone.slice(1)), guessed] }));
-    await screen.findByText('Registered without one of your invites. Not on the list.');
+    await screen.findByText('This person registered without one of your invites, so they are not on the list.');
     expect(screen.getAllByText('Waiting for them to register')).toHaveLength(1);
     expect(screen.getByText('2 of 3')).toBeTruthy();
   });
@@ -347,7 +347,7 @@ describe('step 4, bring people in', () => {
     const renamed: RegistrationEntry = { ...(rest[0] as Person).registration, owner: 'Someone Else' };
     renderBoard(env, fakeTee({ registrations: [copied, renamed, ...registrationsOf(centres), setter.registration] }));
     await waitFor(() => {
-      expect(screen.getAllByText('Registered without one of your invites. Not on the list.')).toHaveLength(2);
+      expect(screen.getAllByText('This person registered without one of your invites, so they are not on the list.')).toHaveLength(2);
     });
     expect(screen.getByText('0 of 3')).toBeTruthy();
   });
@@ -361,21 +361,21 @@ describe('step 4, bring people in', () => {
       inviteTag: tagFor((neutrals[0] as Person).invite.inviteSecret, key(40 + 10)),
     };
     renderBoard(env, fakeTee({ registrations: [...registrationsOf(everyone), twin] }));
-    await screen.findByText('Two security keys used this invite. Neither is on the list.');
+    await screen.findByText('Two security keys used this invite, so neither is on the list.');
     expect(screen.getByText('2 of 3')).toBeTruthy();
     expect(button('Post the list').disabled).toBe(true);
     expect(node.sent).toHaveLength(sent);
     const before = (JSON.parse(localStorage.getItem(`paperseal.invites.${examId}`) ?? '[]') as BoardInvite[]).find((i) => i.id === 'invite-100');
-    fireEvent.click(button('Reissue the invite for Asha (Neutral party)'));
+    fireEvent.click(button('Make a new link for Asha (Key holder)'));
     await waitFor(() => {
-      expect(screen.queryByText('Two security keys used this invite. Neither is on the list.')).toBeNull();
+      expect(screen.queryByText('Two security keys used this invite, so neither is on the list.')).toBeNull();
     });
     const after = (JSON.parse(localStorage.getItem(`paperseal.invites.${examId}`) ?? '[]') as BoardInvite[]).find((i) => i.id === 'invite-100');
     expect(after?.inviteSecret).not.toBe(before?.inviteSecret);
     expect(screen.getAllByText('Waiting for them to register')).toHaveLength(1);
     // Both old keys now match nothing, so neither is listed, and a new link can be copied.
-    expect(screen.getAllByText('Registered without one of your invites. Not on the list.')).toHaveLength(2);
-    expect(button('Copy the link for Asha (Neutral party)')).toBeTruthy();
+    expect(screen.getAllByText('This person registered without one of your invites, so they are not on the list.')).toHaveLength(2);
+    expect(button('Copy the link for Asha (Key holder)')).toBeTruthy();
   });
 
   it('blocks posting while the sealed machine is not at this stage, and says why', async () => {
@@ -383,7 +383,7 @@ describe('step 4, bring people in', () => {
     const sent = node.sent.length;
     stock(everyone);
     renderBoard(env, fakeTee({ registrations: registrationsOf(everyone), status: { stage: 'submit' } }));
-    await screen.findByText(/at the submit stage, not onboard/);
+    await screen.findByText(/Stage: submit\./);
     expect(button('Post the list').disabled).toBe(true);
     expect(node.sent).toHaveLength(sent);
   });
@@ -393,7 +393,7 @@ describe('step 4, bring people in', () => {
     const { env } = await seeded('exam');
     stock(everyone);
     renderBoard(env, fakeTee({ registrations: registrationsOf(everyone) }));
-    await screen.findByText(/could not be checked: network down/);
+    await screen.findByText(/network down/);
     expect(button('Post the list').disabled).toBe(true);
   });
 
@@ -408,7 +408,7 @@ describe('step 4, bring people in', () => {
     });
     verifyTee.mockRejectedValue(new TypeError('gone'));
     fireEvent.click(button('Post the list'));
-    await screen.findByText(/could not be checked: gone/);
+    await screen.findByText(/gone/);
     expect(node.sent).toHaveLength(sent);
   });
 
@@ -433,19 +433,19 @@ describe('step 5, wait', () => {
   it('says the list is going final while the machine is still at onboard', async () => {
     const { env } = await seeded('list');
     renderBoard(env, fakeTee());
-    expect(await screen.findByText(/reads it once it is final/)).toBeTruthy();
+    expect(await screen.findByText(/Setters can start sending questions in about 20 minutes/)).toBeTruthy();
   });
 
   it('says the machine is building once questions close', async () => {
     const { env } = await seeded('list', {}, { lock: -60, start: 3600, end: 7200 });
     renderBoard(env, fakeTee({ status: { stage: 'build', questionCount: 20 } }));
-    expect(await screen.findByText('The sealed machine is building the paper')).toBeTruthy();
+    expect(await screen.findByText('The paper is being built')).toBeTruthy();
   });
 
   it('reports a failed machine, and an unreachable one as not checked', async () => {
     const { env } = await seeded('list');
     renderBoard(env, fakeTee({ status: { stage: 'failed' } }));
-    expect(await screen.findByText('The sealed machine stopped')).toBeTruthy();
+    expect(await screen.findByText('The paper could not be built')).toBeTruthy();
     cleanup();
     const tee = fakeTee();
     vi.mocked(tee.status).mockRejectedValue(new Error('refused'));
@@ -459,9 +459,9 @@ describe('step 6, post the Build', () => {
   it('verifies the outbox, posts with one action, and shows the seal', async () => {
     const { node, env } = await seeded('list');
     renderBoard(env, fakeTee({ outbox: [await signedBuild()], status: { stage: 'build' } }));
-    await screen.findByText('Record the sealed paper');
-    await screen.findByText(/5 questions, chosen from a bank of 40/);
-    fireEvent.click(button('Post to the public record'));
+    await screen.findByText('The paper is ready');
+    await screen.findByText(/5 questions, chosen from the 40 sent in/);
+    fireEvent.click(button('Post the paper’s record'));
     await screen.findByRole('img', { name: 'Sealed' });
     expect(node.builds.get(examId)).toBeDefined();
   });
@@ -471,7 +471,7 @@ describe('step 6, post the Build', () => {
     const { env } = await seeded('list');
     renderBoard(env, fakeTee({ outbox: [await signedBuild()] }));
     await screen.findByText(/signed by a key other than the attested instance key/);
-    expect(button('Post to the public record').disabled).toBe(true);
+    expect(button('Post the paper’s record').disabled).toBe(true);
   });
 
   it('blocks everything when the machine fails its proof', async () => {
@@ -479,8 +479,8 @@ describe('step 6, post the Build', () => {
     const message = await signedBuild();
     verifyTee.mockRejectedValue(new Error('bad token'));
     renderBoard(env, fakeTee({ outbox: [message] }));
-    await screen.findByText(/proof is not trusted, so nothing it signed can be posted\. bad token/);
-    expect(button('Post to the public record').disabled).toBe(true);
+    await screen.findByText(/Paper Seal could not be confirmed for this exam/);
+    expect(button('Post the paper’s record').disabled).toBe(true);
   });
 });
 
@@ -491,17 +491,17 @@ describe('step 7, exam status', () => {
     await screen.findByRole('img', { name: 'Sealed' });
     expect(screen.getByRole('heading', { level: 1 }).textContent).toMatch(/^Sealed\. Nothing to do until/);
     expect(screen.getByRole('timer')).toBeTruthy();
-    expect(screen.getByText('2 of the 8 needed')).toBeTruthy();
+    expect(screen.getByText('2 of 8 needed')).toBeTruthy();
   });
 
   it('links the public verifier when its address is set, and says so when not', async () => {
     const { env } = await seeded('build');
     renderBoard(env, fakeTee());
-    await screen.findByText(/Set VITE_VERIFIER_URL to link it/);
+    await screen.findByText(/link is not set up yet/);
     cleanup();
     vi.stubEnv('VITE_VERIFIER_URL', 'https://verify.example.org/');
     renderBoard(env, fakeTee());
-    expect((await screen.findByText('Open the public verifier')).closest('a')?.getAttribute('href')).toBe('https://verify.example.org/');
+    expect((await screen.findByText('Open the public page')).closest('a')?.getAttribute('href')).toBe('https://verify.example.org/');
   });
 
   it('opens once the end time has passed', async () => {
@@ -531,7 +531,7 @@ describe('deep links', () => {
   it.each(['', '/onboarding', '/list', '/outbox'])('/board%s shows what the exam needs now', async (path) => {
     const { env } = await seeded('list');
     renderBoard(env, fakeTee(), `/board${path}`);
-    expect(await screen.findByText(/reads it once it is final/)).toBeTruthy();
+    expect(await screen.findByText(/Setters can start sending questions in about 20 minutes/)).toBeTruthy();
   });
 
   it('treats an exam pointer the chain has never heard of as no exam', async () => {
@@ -545,7 +545,7 @@ describe('when the public record cannot be read', () => {
   it('says the page is not connected rather than guessing a step', () => {
     setCurrentExamId(examId);
     renderBoard({ ...environment().env, createRegistry: null }, null);
-    expect(screen.getByText('This page cannot read the public record')).toBeTruthy();
+    expect(screen.getByText('This page is not ready to use yet')).toBeTruthy();
   });
 
   it('says so when the read fails', async () => {
@@ -553,7 +553,7 @@ describe('when the public record cannot be read', () => {
     const { env } = environment();
     const failing = { ...env, createRegistry: () => ({ getExam: () => Promise.reject(new Error('rpc down')) }) as never };
     renderBoard(failing, null);
-    expect(await screen.findByText('The public record cannot be read right now')).toBeTruthy();
+    expect(await screen.findByText('Your exam cannot be loaded right now')).toBeTruthy();
   });
 });
 

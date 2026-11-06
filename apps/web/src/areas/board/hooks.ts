@@ -92,7 +92,7 @@ export function useBoardWallet() {
   const refresh = useCallback(async () => {
     const provider = environment.getProvider();
     if (!provider) {
-      setWallet({ account: null, chainId: null, board: null, error: 'No browser wallet was found in this browser.' });
+      setWallet({ account: null, chainId: null, board: null, error: 'Your wallet was not found. Install a wallet extension in Chrome, then reload this page.' });
       return;
     }
     try {
@@ -112,7 +112,7 @@ export function useBoardWallet() {
   /** Asks the wallet to share an account if it hasn't, which is part of the one action on screen. */
   const ensureAccount = useCallback(async () => {
     const provider = environment.getProvider();
-    if (!provider) throw new PublishBlockedError('No browser wallet was found. Install one in this Chromium browser and reload.');
+    if (!provider) throw new PublishBlockedError('Your wallet was not found. Install a wallet extension in Chrome, then reload this page.');
     const account = (await currentAccount(provider)) ?? (await requestAccount(provider));
     await refresh();
     return account;
@@ -120,9 +120,9 @@ export function useBoardWallet() {
 
   let problem = wallet.error;
   if (!problem && wallet.chainId !== null && wallet.chainId !== chain.chainId) {
-    problem = `Your wallet is on chain ${String(wallet.chainId)}. Switch it to Sepolia.`;
+    problem = 'Your wallet is on the wrong network. Switch it to Sepolia in your wallet.';
   } else if (!problem && wallet.account && wallet.board && wallet.account.toLowerCase() !== wallet.board.toLowerCase()) {
-    problem = 'This wallet account is not the board address. Switch accounts in your wallet.';
+    problem = 'This wallet account is not the exam board’s account. Switch accounts in your wallet.';
   }
   return { wallet, problem, ensureAccount };
 }
@@ -132,8 +132,8 @@ export type WalletStage = 'checking' | 'simulating' | 'wallet' | 'mining' | 'rea
 /** The primary button's words while a flow runs. */
 export const walletStageLabels: Record<WalletStage, string> = {
   checking: 'Checking your wallet',
-  simulating: 'Checking with the public record',
+  simulating: 'Checking your request',
   wallet: 'Confirm in your wallet',
-  mining: 'Waiting for the public record',
-  reading: 'Reading it back',
+  mining: 'Saving to the public record',
+  reading: 'Checking it saved correctly',
 };

@@ -22,12 +22,12 @@ export const releaseSteps = ['attest', 'listHash', 'fetch', 'challenge', 'releas
 export type ReleaseStep = (typeof releaseSteps)[number];
 
 export const releaseStepLabels: Record<ReleaseStep, string> = {
-  attest: 'Check the TEE attestation',
-  listHash: 'Match the signed list to the chain',
-  fetch: 'Download and check your encrypted share',
-  challenge: 'Get a fresh challenge',
-  release: 'Touch your security key once to sign and open your share',
-  submit: 'Send the share to the TEE',
+  attest: 'Check that this is the real Paper Seal',
+  listHash: 'Check the list of people against the public record',
+  fetch: 'Download your part of the key',
+  challenge: 'Get ready for your security key',
+  release: 'Touch your security key once',
+  submit: 'Send your part of the key',
 };
 
 export class ReleaseAbortedError extends Error {

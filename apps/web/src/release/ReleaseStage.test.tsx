@@ -16,7 +16,7 @@ const stepsThen = (steps: ReleaseStep[], end: () => Promise<void>) => async (ctx
   await end();
 };
 const press = () => {
-  fireEvent.click(screen.getByRole('button', { name: 'Release my share' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Release my part of the key' }));
 };
 
 beforeEach(() => {
@@ -29,10 +29,10 @@ afterEach(() => {
 });
 
 describe('ReleaseStage', () => {
-  it('offers one action, "Release my share", and no way to skip it', () => {
+  it('offers one action, "Release my part of the key", and no way to skip it', () => {
     render(<ReleaseStage context={context} onReleased={vi.fn()} next="Next." />);
     expect(screen.getAllByRole('button')).toHaveLength(1);
-    expect(screen.getByRole('button', { name: 'Release my share' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Release my part of the key' })).toBeTruthy();
   });
 
   it('asks for the key only when the flow reaches the key', async () => {
@@ -50,12 +50,12 @@ describe('ReleaseStage', () => {
     render(<ReleaseStage context={context} onReleased={vi.fn()} next="Next." />);
     press();
     await waitFor(() => {
-      expect(screen.getByText('Checking before your key is used', { selector: 'span:not(.ps-sr)' })).toBeTruthy();
+      expect(screen.getByText('Checking before your security key is used', { selector: 'span:not(.ps-sr)' })).toBeTruthy();
     });
-    expect(screen.queryByText('Touch your security key now')).toBeNull();
+    expect(screen.queryByText('Touch your security key')).toBeNull();
     finish();
     await waitFor(() => {
-      expect(screen.getByText('Touch your security key now')).toBeTruthy();
+      expect(screen.getByText('Touch your security key')).toBeTruthy();
     });
     finish();
   });
@@ -94,19 +94,19 @@ describe('ReleaseStage', () => {
     render(<ReleaseStage context={context} onReleased={onReleased} next="Next." />);
     press();
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Your share was not released' })).toBeTruthy();
+      expect(screen.getByRole('heading', { name: 'Your part of the key was not sent' })).toBeTruthy();
     });
-    expect(screen.getByText(/could not prove it is running the published code.*contact your exam board/i)).toBeTruthy();
+    expect(screen.getByText(/could not confirm that this page is talking to the real Paper Seal.*contact your exam board/i)).toBeTruthy();
     expect(screen.getByText('token claim eat_nonce').closest('details')).toBeTruthy();
     expect(onReleased).not.toHaveBeenCalled();
   });
 
-  it('says plainly when the sealed machine has not opened release yet', async () => {
+  it('says plainly when Paper Seal has not opened release yet', async () => {
     run.mockImplementation(stepsThen(['challenge'], () => Promise.reject(new ReleaseAbortedError('challenge', RELEASE_NOT_OPEN_MESSAGE))));
     render(<ReleaseStage context={context} onReleased={vi.fn()} next="Next." />);
     press();
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Release has not opened yet' })).toBeTruthy();
+      expect(screen.getByRole('heading', { name: 'Release is not open yet' })).toBeTruthy();
     });
   });
 
@@ -120,12 +120,12 @@ describe('ReleaseStage', () => {
 describe('ReleaseCount', () => {
   it('shows the live count', () => {
     render(<ReleaseCount status={status('unlock', Array.from({ length: 6 }, () => '0x01'))} />);
-    expect(screen.getByRole('status').textContent).toBe('6 of 8 released');
+    expect(screen.getByRole('status').textContent).toBe('6 of 8 parts of the key released');
   });
 
   it('does not guess a count it could not read', () => {
     render(<ReleaseCount status={null} />);
     expect(screen.queryByText(/of 8/)).toBeNull();
-    expect(screen.getByText(/can't be read/)).toBeTruthy();
+    expect(screen.getByText(/can't see how many/)).toBeTruthy();
   });
 });

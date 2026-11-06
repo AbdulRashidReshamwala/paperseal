@@ -24,7 +24,7 @@ describe('ChromiumGate', () => {
   it('blocks other browsers', () => {
     const html = renderToString(<ChromiumGate nav={firefox}>inside</ChromiumGate>);
     expect(html).not.toContain('inside');
-    expect(html).toContain('Chromium required');
+    expect(html).toContain('Open this page in Chrome');
   });
 });
 
@@ -35,7 +35,7 @@ describe('Connected', () => {
         {() => 'value'}
       </Connected>,
     );
-    expect(html).toContain('TEE: not connected');
+    expect(html).toContain('TEE: not set up yet');
     expect(html).toContain('Set VITE_TEE_URL.');
   });
 });

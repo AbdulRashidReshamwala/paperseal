@@ -298,20 +298,20 @@ describe('Countdown', () => {
   const at = Date.UTC(2026, 10, 6, 9, 59);
   const render = (nowMs: number) =>
     renderToString(
-      <Countdown at={at} round={33700743} label="Paper unlocks" reached="The time seal is open" now={() => nowMs} locale="en-GB" timeZone="UTC" />,
+      <Countdown at={at} round={33700743} label="Paper unlocks" reached="Open now" now={() => nowMs} locale="en-GB" timeZone="UTC" />,
     );
 
-  it('shows the time left, the clock time and the round', () => {
+  it('shows the time left and the clock time, not the round', () => {
     const html = render(at - 3723_000);
     expect(html).toContain('1:02:03');
     expect(html).toContain('09:59');
-    expect(html).toContain('33,700,743');
+    expect(html).not.toContain('33,700,743');
     expect(html).toContain('role="timer"');
   });
 
   it('says so once the moment has passed', () => {
     const html = render(at + 1000);
-    expect(html).toContain('The time seal is open');
+    expect(html).toContain('Open now');
     expect(html).toContain('data-reached="true"');
   });
 

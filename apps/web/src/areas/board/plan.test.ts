@@ -58,10 +58,9 @@ describe('bankNeeded', () => {
 
 describe('plainWords', () => {
   it('rewrites the words the design rules out of primary screens', () => {
-    expect(plainWords('The lock time has already passed. Choose a time in the future.')).toBe('Questions would close in the past. Choose a later time.');
-    expect(plainWords('ExamRegistry only accepts writes from the TEE')).toBe('the public record only accepts writes from the sealed machine');
+    expect(plainWords('ExamRegistry only accepts writes from the TEE')).toBe('the public record only accepts writes from Paper Seal');
     expect(plainWords('Not published on ExamRegistry.')).toBe('Not published on the public record.');
-    expect(plainWords('Topic names must be unique.')).toBe('Topic names must be unique.');
+    expect(plainWords('Each topic needs its own name.')).toBe('Each topic needs its own name.');
   });
 });
 

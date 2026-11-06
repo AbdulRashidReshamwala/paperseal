@@ -15,7 +15,7 @@ It must not look like a dashboard or a crypto app. That rules out purple gradien
 1. **One primary action per screen.** If a screen seems to need two, it is two screens, or one of them is not primary.
 2. **The fewest clicks.** Do what can be done without asking. Skip any step the system can work out, and never ask someone to confirm something they cannot judge.
 3. **State decides the screen, not tabs.** Read the exam's state and show the one screen it calls for. Nobody chooses where to go, and there is no navigation to learn.
-4. **Plain words.** No crypto jargon on primary surfaces. See [Copy rules](#copy-rules).
+4. **Plain words.** No crypto jargon on primary surfaces. See [Writing](#writing).
 5. **Hashes only where they are evidence.** A hash appears inside folded evidence on the verifier, or on a receipt someone may need to quote. It never appears on a primary surface.
 6. **Always say what happens next.** Every screen, including a screen where the person only waits, ends with one sentence on what comes next.
 7. **Never fake it.** A check that has not run shows `Not checked`. An unfinished flow shows that it is unfinished. A screen must never imply more certainty than the code has.
@@ -32,7 +32,7 @@ import { Page, PrimaryAction, RoleHeader, Stage } from '@paperseal/ui';
     title="Publish the approved list"
     lede="Twelve people have registered their security keys. Publishing makes the list final."
     action={<PrimaryAction onClick={publish} status={status} busyLabel="Publishing">Publish the list</PrimaryAction>}
-    next="The sealed machine checks the list, then setters can send questions."
+    next="Setters can then send questions, usually about 20 minutes later."
   />
 </Page>;
 ```
@@ -210,7 +210,7 @@ The chain of custody, and the centrepiece of the verifier. Pass `steps`, each wi
 
 It reads as a ledger: `when` on the left, then the rail, then the label. On phones `when` folds above the label. It is a vertical list at every width because evidence opens downwards, and that wouldn't work on a horizontal track.
 
-`when` is a timestamp or a round, such as `Round 33,700,743`. `evidence` is a folded native `<details>`, so it needs no script and works from a keyboard. Put `Hash` and `Check` inside it. Set `aria-current` by giving one step the `current` state.
+`when` is a real clock time, such as `Sat 7 Nov, 21:30`, never a round number. `evidence` is a folded native `<details>`, so it needs no script and works from a keyboard. Put `Hash` and `Check` inside it. Set `aria-current` by giving one step the `current` state.
 
 ### `Seal`
 
@@ -219,7 +219,7 @@ The signature. `state` is `sealed`, `opening` or `open`. It closes, cracks and b
 | Exam state | Seal |
 | --- | --- |
 | Questions sealed, paper built, waiting for unlock | `sealed` |
-| Time seal open, key holders releasing | `opening` |
+| Paper unlocked, key holders releasing | `opening` |
 | Paper decrypted at a centre, or opened to the public | `open` |
 
 Only show a seal's state that the code has established. `Seal` is not evidence, and never show `sealed` as a stand-in for a check that hasn't run.
@@ -238,7 +238,7 @@ A shortened mono value. Clicking or tapping copies the whole value and prints it
 
 ### `Countdown`
 
-`at` is the moment in milliseconds, `round` is the drand round due then, `label` says what the moment is and `reached` replaces the clock afterwards. It shows the time left, the clock time and `Public clock round 33,700,743`.
+`at` is the moment in milliseconds, `label` says what the moment is and `reached` replaces the clock afterwards. It shows the time left and the clock time with its zone. `round` is still required by the type but is not shown.
 
 It only displays. The round is the real clock, so convert with `roundTimeSeconds(round) * 1000` from `@paperseal/protocol`, and decide the flow from the round.
 
@@ -251,35 +251,45 @@ It only displays. The round is the real clock, so convert with `roundTimeSeconds
 - **`Button`** is the secondary control, in ink. A screen may have several, or none.
 - **`Badge`** remains for short tags. For a check's result, use `Check`.
 
-## Copy rules
+## Writing
 
-Write as a careful exam officer would. Use short sentences and active verbs. Instructions start with the verb: "Publish the list", "Unlock the paper".
+Write as a careful exam officer would, to teachers and centre staff who are not technical. The product owner's rule: make the copy simple, guide the person to the next step, and do not tell them what happens inside.
+
+**Every screen answers "what do I do now?"** Lead with that, not with the reason. If there is nothing to do, say when to come back and whether it is safe to close the page. A screen where the person only waits still says what comes next, in one sentence.
+
+- Use short sentences and everyday words, one idea each. Keep the voice calm. Use sentence case, and no exclamation marks, marketing or em dashes. "Sealed" is the one brand word and needs no celebration.
+- Instructions start with the verb: "Publish the exam", "Open the paper". A button names the action in plain words, never "Submit" or "OK".
+- `Stage` titles are never system nouns. "Open the paper", not "Unlock". "Nothing to do until 09:59", not "Status".
+- Every error says what to do next, and never shows a raw technical message outside a folded details area. On the board, `withDetails` keeps the plain sentence first and folds the original message under "Details".
+- Say nothing about what happens inside. Leave out TEE, attestation, hash, round, delta, Build, HPKE, Shamir, drand, RPC, instance key, list finality, timelock, PRF and read-back. Say what the person sees or does instead, and show real clock times, with weekday, date and zone, never round numbers.
+- Keep roles by name: "exam board", "setter", "key holder" and "centre". Say what the person must do, and do not assume they know the system.
+- Say "security key" every time. The demo's virtual key is explained only by `KeyTouch`'s one-line hint. Say "wallet" only where the board must confirm in it.
+- Stay truthful. Do not say anything is checked or done unless the code does it. Permanent actions say so plainly, such as a name that cannot be changed once published. Keep warnings that protect someone, such as that closing a window or using another browser matters.
+- Be precise about guarantees. Say "No one person can open the paper", not "impossible to leak". The README's Trust Assumptions set the limits.
+- Explanations that help the curious go in the folded "details" areas. Hashes, rounds and evidence live there, and may use technical terms, but should still be readable. On the verifier, the main view is plain words and real times, and the evidence stays folded.
 
 | Don't write | Write |
 | --- | --- |
 | Passkey, authenticator, WebAuthn, credential | Security key |
-| TEE, enclave, attestation | Sealed machine; proof it's running the published code |
-| `K`, `K_priv`, Shamir share | Key, part of the key |
-| Timelock, drand | Time seal; public clock |
-| `T−Δ` | Unlock time |
+| TEE, enclave, attestation | Paper Seal; a check that it runs the published code, in details only |
+| `K`, `K_priv`, Shamir share | The key, a part of the key |
+| Timelock, drand, round | The time the paper unlocks, as a clock time |
+| `T−Δ`, delta | Release time |
 | Hash, commitment | Fingerprint, or leave it out |
-| On-chain, transaction | Published; public record |
-| Decrypt | Open, unlock |
+| On-chain, transaction, RPC | The public record; receipt code |
+| Neutral party | Key holder |
+| Centre with a key / without a key | Centre holding part of the key / centre that gets the key when the paper unlocks |
+| Approved list | The list of people for this exam |
+| Reissue invite | Make a new link |
+| Decrypt | Open |
 | Threshold, 8-of-10 | "8 of the 10 key holders" |
 | Bank | Question bank |
 
-- Technical names are allowed in folded evidence, where an expert expects them, and on the verifier's Connection screen. Even there, lead with a plain label.
-- Button labels name the outcome: "Publish the list", not "Submit" or "OK".
-- `Stage` titles are never system nouns. "Unlock the paper", not "Unlock". "Nothing to do until 09:59", not "Status".
-- Errors say what happened and what to do. "This key is not on the approved list. Contact your exam board." Never show a raw error on a primary surface.
-- Waiting screens say what they're waiting for and when it ends.
-- Say "security key" every time. The demo's virtual key is explained only by `KeyTouch`'s one-line hint.
-- Use sentence case. Avoid exclamation marks. "Sealed" needs no celebration.
-- Be precise about guarantees. Say "No one person can open the paper", not "impossible to leak". The README's Trust Assumptions set the limits.
+Technical names are allowed in folded evidence, where an expert expects them, and in the hints of the verifier's "Check it yourself" settings. Even there, lead with a plain label.
 
 ## Per-role flows
 
-Each flow is a list of states. Each state is one `Stage`, and only the first unfinished one shows. The screen comes from the exam's state and this browser's stored credential, so a reload returns to the same place. The old paths still work as deep links, and land on the screen the state calls for. Detail such as hashes and rounds sits in a folded exam record.
+Each flow is a list of states. Each state is one `Stage`, and only the first unfinished one shows. The screen comes from the exam's state and this browser's stored credential, so a reload returns to the same place. The old paths still work as deep links, and land on the screen the state calls for. Detail such as fingerprints and rounds sits in a folded exam record.
 
 ### Board admin
 
@@ -288,19 +298,19 @@ Each flow is a list of states. Each state is one `Stage`, and only the first unf
 Seven steps, each with its number in the `Stage` eyebrow. The wallet is not a step: the action that needs it asks for it.
 
 1. **Create the exam:** one form for the name, time, length, topics and release time. Rounds and hashes are worked out, and setter limits, the closing time and the public record provider are folded under Advanced.
-2. **Choose what the sealed machine runs:** the newest version whose tag checks out is already selected, so this is one click. Other versions are folded.
-3. **Review and publish:** one summary and one action, "Publish the exam". A `Stamp` receipt follows, with the read-back folded.
-4. **Bring people in:** one invite per person. The board picks a role, types the name for the approved list (a setter needs none, only an optional private note) and presses "Add invite", and a "Copy link" button appears on that row. The `Rows` then show each invite in one of four states, each with a word and a `Check` shape, never colour alone: waiting ("Waiting for them to register", with Copy link), registered ("Registered"), two keys on one invite ("Two security keys used this invite. Neither is on the list.", with "Reissue invite"), and a registration that fits no invite ("Not invited", with the key's `Hash`). The list composes itself from the registered ones. The only choice left is a centre's place, a select of "Centre with a key" or "Centre without a key". Counts sit under "On the list". Primary action: post the approved list. Adding an invite is a plain `Button`, so the screen still has one red thing to press.
-5. **Questions are coming in:** a wait screen with a `Countdown` to lock.
-6. **Record the sealed paper:** the Build from the outbox, with one action to post it. Nothing else competes with it.
-7. **Status:** `seal` follows the unlock and end rounds, with `stampSeal` once the Build is posted, and the count of key holders released. It links the public verifier when `VITE_VERIFIER_URL` is set.
+2. **Choose the Paper Seal version:** the newest version whose tag checks out is already selected, so this is one click. Other versions are folded.
+3. **Review and publish:** one summary and one action, "Publish the exam". A `Stamp` receipt follows, with the details folded.
+4. **Invite people:** one invite per person. The board picks a role, types the name for the public list (a setter needs none, only an optional private note) and presses "Add invite", and a "Copy link" button appears on that row. The `Rows` then show each invite in one of four states, each with a word and a `Check` shape, never colour alone: waiting ("Waiting for them to register", with Copy link), registered ("Registered"), two keys on one invite ("Two security keys used this invite, so neither is on the list.", with "Make a new link"), and a registration that fits no invite ("Not invited", with the key's `Hash`). The list composes itself from the registered ones. The only choice left is a centre's place, a select of "Centre holding part of the key" or "Centre getting the key at unlock". Counts sit under "On the list". Primary action: post the approved list. Adding an invite is a plain `Button`, so the screen still has one red thing to press.
+5. **Questions are coming in:** a wait screen with a `Countdown` to the closing time. It says the board must come back after that time to post the paper's record, and that it is safe to close the page until then.
+6. **The paper is ready:** one action, "Post the paper's record". Nothing else competes with it.
+7. **Status:** `seal` follows the unlock and end rounds, with `stampSeal` once the paper's record is posted, and the count of key holders released. It links the public verifier when `VITE_VERIFIER_URL` is set.
 
 ### Setter
 
 `RoleHeader role="Setter"`. Phone-friendly, and quick to repeat.
 
 1. **Register:** opens from the invite link. The role is in the link, so nothing is typed, and the only control is `KeyTouch` to register the security key. Next: wait for the board's list. Without a valid link it shows a plain explanation and no form.
-2. **Waiting for the board:** a wait screen. The page opens for writing by itself.
+2. **Nothing to do yet:** a wait screen whose wording follows whether the board has posted the list. The page opens for writing by itself.
 3. **Check the machine:** runs by itself, with nothing to press. If it fails, sealing stops and the writing stays on the page.
 4. **Add a question:** the form, with a `PrimaryAction` to seal it. Each question needs one touch, and receipts build up on the same page. A choice of Written or Multiple choice sits above the writing area, with Written already picked, so a written question costs no extra click. Multiple choice shows two lettered option fields, with Add an option up to the limit in `spec/constants.json` and Remove once there are more than the minimum. A blank or repeated option is called out beside its field in plain words, and sealing stays shut until it is fixed. There is no field for the correct answer: one short line says the answer key isn’t sent, because the paper becomes public. Options are trimmed and sent in the order shown.
 5. **Closed:** a wait screen. After the Build, the check that the same machine built the paper appears as one `Check`.
@@ -330,7 +340,7 @@ Seven steps, each with its number in the `Stage` eyebrow. The wallet is not a st
 `RoleHeader role="Public record" exam={exam.name}`. There is no primary action and no sign-in, so the page is a single `Stepper`, with a sentence at the top saying where the exam has got to.
 
 1. Lead with a plain-language verdict, for example "This exam is on track. Nothing has failed so far."
-2. Show one `Stepper` for the whole chain: code published, machine proof, approved list, paper sealed and published, time seal, key holders released, unlock, full proof.
+2. Show one `Stepper` for the whole chain: exam published, Paper Seal runs the published code, people approved, questions closed, paper built and sealed, key holders released, paper unlocks for centres, paper opens to everyone.
 3. Put the existing evidence (`Attestation`, `Commitments`, `Proof`) inside each step's `evidence`, with `Check` and `Hash`.
 4. A check not yet run is `Not checked`. A step that doesn't apply is `not-applicable`. If demo mode is on, because `requireHardwareAttestation` is false, say so visibly as a `note` in plain words: this is a demonstration and the security keys are simulated.
-5. The Connection settings stay as a quiet link at the foot of the page.
+5. The connection settings stay at the foot of the page, under "Check it yourself".
