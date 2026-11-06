@@ -26,7 +26,7 @@ import { addParticipant, call, startLab, type Lab, type Participant } from './br
 import { composeFromInvites, issueInvites, openLink } from './invites';
 import { gaps } from './config';
 import { checkLogFiles, checkLogHolders, checkSetterOwners, openPaper, verifySignedLog, waitForRound } from './proof';
-import { releaseOrder, roster, type Kind } from './roster';
+import { ownerNameOf, releaseOrder, roster, type Kind } from './roster';
 import { liveCriteria, liveQuestion, questionsPerSetterPerTopic } from './schedule';
 import {
   Reporter,
@@ -222,7 +222,7 @@ async function setup(ctx: Ctx) {
       ctx.people.push(await addParticipant(started, spec));
     }
     // A setter has no name on the list: its owner is made from its passkey when it registers.
-    for (const p of ctx.people) if (p.kind !== 'setter') p.owner ??= p.name;
+    for (const p of ctx.people) if (p.kind !== 'setter') p.owner ??= ownerNameOf(p) as string;
     rep.record(
       'setup',
       'one isolated browser context and one virtual authenticator per participant',
@@ -291,7 +291,7 @@ async function register(ctx: Ctx): Promise<{ listHash: Hex; entries: Hex }> {
         p.owner = owner;
         p.passkeyPublicKey = request.passkeyPublicKey;
         if (p.kind === 'setter' && owner !== setterOwner(fromHex(request.passkeyPublicKey))) throw new Error(`${p.name}: the owner is not the setterOwner hash of its passkey`);
-        if (p.kind !== 'setter' && owner !== p.name) throw new Error(`${p.name}: registered under ${owner}, not the name in the invite`);
+        if (p.kind !== 'setter' && owner !== ownerNameOf(p)) throw new Error(`${p.name}: registered under ${owner}, not the name in the invite`);
         const expectedTag = toHex(computeInviteTag(fromHex(opened.inviteSecret), fromHex(request.passkeyPublicKey)));
         if (request.inviteTag !== expectedTag) throw new Error(`${p.name}: the request tag is not HMAC-SHA-256(inviteSecret, passkeyPublicKey)`);
         if (JSON.stringify(request).includes(opened.inviteSecret.slice(2))) throw new Error(`${p.name}: the invite secret is in the request`);
@@ -307,7 +307,7 @@ async function register(ctx: Ctx): Promise<{ listHash: Hex; entries: Hex }> {
         name: p.name,
         kind: p.kind,
         role: p.role,
-        owner: p.owner ?? p.name,
+        owner: p.owner ?? ownerNameOf(p) ?? p.name,
         passkeyPublicKey: (p.passkeyPublicKey ?? '0x') as Hex,
         derivedPublicKey: (p.derivedPublicKey ?? '0x') as Hex,
       }));
