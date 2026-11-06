@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Paper Seal app config.json",
+  "description": "Read by apps/web and apps/verifier beside index.html. See spec/deploy.md, \"App config.json\". Every field is optional, and unknown fields are ignored.",
+  "type": "object",
+  "properties": {
+    "teeUrl": { "type": "string", "pattern": "^https?://[^\\s]+$" },
+    "rpcUrl": { "type": "string", "pattern": "^https?://[^\\s]+$" },
+    "registry": { "type": "string", "pattern": "^0x[0-9a-fA-F]{40}$" },
+    "chainId": { "type": "integer", "minimum": 1 },
+    "chainName": { "type": "string" },
+    "storageUrl": { "type": "string", "pattern": "^https?://[^\\s]+$" },
+    "storageBucket": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$" },
+    "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+    "examId": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "arkivWriters": { "type": "string" },
+    "swarmApiUrl": { "type": "string", "pattern": "^https?://[^\\s]+$" },
+    "releaseTag": { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$" }
+  }
+}

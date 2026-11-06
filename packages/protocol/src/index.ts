@@ -6,3 +6,4 @@ export * from './ens';
 export * from './formats';
 export * from './invite';
 export * from './types';
+export * from './web-config';
