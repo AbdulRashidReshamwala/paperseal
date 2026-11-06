@@ -21,9 +21,9 @@ import {
   checkRegistryCode,
   examRegistryBoard,
   examRegistryRuntime,
-  checkPartyNameExists,
   isExamRegistryCode,
-  lookupPartyName,
+  readDirectory,
+  readPartyRecords,
   resolveExamName,
   type EnsLookup,
 } from './index';
@@ -506,31 +506,53 @@ describe('checkPasskeyName', () => {
   });
 });
 
-describe('lookupPartyName', () => {
-  it('finds a name with an address, and reports an unset one, a refused read and an RPC failure', async () => {
-    const holder: Address = '0x00000000000000000000000000000000000000dd';
-    const at = (address: () => Promise<Address | null>) => lookup({ address });
-    expect(await lookupPartyName('dr-rao.eth', { lookup: at(() => Promise.resolve(holder)) })).toEqual({ state: 'found', name: 'dr-rao.eth', address: holder });
-    expect(await lookupPartyName('dr-rao.eth', { lookup: at(() => Promise.resolve(null)) })).toMatchObject({ state: 'unset' });
-    expect(await lookupPartyName('dr-rao.eth', { lookup: at(() => Promise.reject(needsGateway())) })).toMatchObject({ state: 'refused' });
-    expect(
-      await lookupPartyName('dr-rao.eth', { lookup: at(() => Promise.reject(new HttpRequestError({ url: 'https://rpc.example.org', status: 503 }))) }),
-    ).toMatchObject({ state: 'unreadable' });
-    expect(await lookupPartyName('Dr Rao', { lookup: at(() => Promise.resolve(holder)) })).toMatchObject({ state: 'invalid' });
+describe('readPartyRecords', () => {
+  const texts = (values: Record<string, string | null>): { lookup: EnsLookup } => ({
+    lookup: { text: (_name: string, key: string) => Promise.resolve(values[key] ?? null) } as unknown as EnsLookup,
+  });
+  const failing = (error: unknown): { lookup: EnsLookup } => ({ lookup: { text: () => Promise.reject(error as Error) } as unknown as EnsLookup });
+  const passkey = `0x${'ab'.repeat(32)}`;
+
+  it('finds both records, and tidies them', async () => {
+    expect(await readPartyRecords('dr-rao.eth', texts({ [ens.records.passkey]: ` ${passkey.toUpperCase().replace('0X', '0x')} `, [ens.records.credential]: '0xAB' }))).toEqual({
+      state: 'found',
+      name: 'dr-rao.eth',
+      passkey,
+      credentialId: '0xab',
+    });
+  });
+
+  it('needs both records', async () => {
+    expect(await readPartyRecords('dr-rao.eth', texts({ [ens.records.passkey]: passkey }))).toMatchObject({ state: 'missing' });
+    expect(await readPartyRecords('dr-rao.eth', texts({ [ens.records.credential]: '0xab' }))).toMatchObject({ state: 'missing' });
+    expect(await readPartyRecords('dr-rao.eth', texts({ [ens.records.passkey]: passkey, [ens.records.credential]: 'nope' }))).toMatchObject({ state: 'refused' });
+  });
+
+  it('says when it could not read, and never throws', async () => {
+    expect(await readPartyRecords('dr-rao.eth', failing(new HttpRequestError({ url: 'https://rpc.example.org', status: 503 })))).toMatchObject({ state: 'unreadable' });
+    expect(await readPartyRecords('Dr Rao', texts({}))).toMatchObject({ state: 'invalid' });
   });
 });
 
-describe('checkPartyNameExists', () => {
-  const holder: Address = '0x00000000000000000000000000000000000000dd';
-  const down = () => new HttpRequestError({ url: 'https://rpc.example.org', status: 503 });
-  it('counts an address record or a passkey record, and says when there is neither', async () => {
-    const at = (o: Partial<EnsLookup>) => ({ lookup: lookup({ text: () => Promise.resolve(null), address: () => Promise.resolve(null), ...o }) });
-    expect(await checkPartyNameExists('dr-rao.eth', at({ address: () => Promise.resolve(holder) }))).toEqual({ state: 'exists', name: 'dr-rao.eth' });
-    expect(await checkPartyNameExists('dr-rao.eth', at({ text: () => Promise.resolve(' 0xabc ') }))).toMatchObject({ state: 'exists' });
-    expect(await checkPartyNameExists('dr-rao.eth', at({}))).toMatchObject({ state: 'missing' });
-    expect(await checkPartyNameExists('dr-rao.eth', at({ address: () => Promise.reject(down()) }))).toMatchObject({ state: 'unreadable' });
-    expect(await checkPartyNameExists('dr-rao.eth', at({ address: () => Promise.reject(needsGateway()) }))).toMatchObject({ state: 'refused' });
-    expect(await checkPartyNameExists('dr-rao.eth', at({ text: () => Promise.reject(down()) }))).toMatchObject({ state: 'unreadable' });
-    expect(await checkPartyNameExists('Dr Rao', at({}))).toMatchObject({ state: 'invalid' });
+describe('readDirectory', () => {
+  const holding = (value: string | null): { lookup: EnsLookup } => ({ lookup: { text: () => Promise.resolve(value) } as unknown as EnsLookup });
+
+  it('reads the names with one text lookup', async () => {
+    const text = vi.fn(() => Promise.resolve('["a.paperseal-demo.eth"]'));
+    expect(await readDirectory('paperseal-demo.eth', { lookup: { text } as unknown as EnsLookup })).toEqual({
+      state: 'found',
+      name: 'paperseal-demo.eth',
+      names: ['a.paperseal-demo.eth'],
+    });
+    expect(text).toHaveBeenCalledTimes(1);
+    expect(text).toHaveBeenCalledWith('paperseal-demo.eth', ens.records.directory);
+  });
+
+  it('tells an empty directory from a broken one, and an outage from both', async () => {
+    expect(await readDirectory('paperseal-demo.eth', holding(null))).toMatchObject({ state: 'none' });
+    expect(await readDirectory('paperseal-demo.eth', holding('not a list'))).toMatchObject({ state: 'malformed' });
+    expect(
+      await readDirectory('paperseal-demo.eth', { lookup: { text: () => Promise.reject(new HttpRequestError({ url: 'https://rpc.example.org', status: 503 })) } as unknown as EnsLookup }),
+    ).toMatchObject({ state: 'unreadable' });
   });
 });

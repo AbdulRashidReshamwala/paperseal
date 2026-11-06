@@ -1,3 +1,5 @@
+import { p256 } from '@noble/curves/nist';
+
 import { arrayBuffer } from './buf';
 
 /** Half the P-256 group order: a canonical low-s signature has s at or below this. */
@@ -29,4 +31,20 @@ export async function verifyTeeSignature(
     arrayBuffer(signature),
     arrayBuffer(message),
   );
+}
+
+/**
+ * The P-256 public keys that could have made a DER signature over a 32-byte hash, as 65-byte points.
+ * Recovery has more than one answer, so the caller must pick the one it can identify some other way.
+ * A passkey's public key comes from a create, so a browser that only ever sees a get recovers it here.
+ */
+export function recoverP256PublicKeys(signature: Uint8Array, hash: Uint8Array): Uint8Array[] {
+  const parsed = p256.Signature.fromDER(signature);
+  return [0, 1].flatMap((bit) => {
+    try {
+      return [parsed.addRecoveryBit(bit).recoverPublicKey(hash).toRawBytes(false)];
+    } catch {
+      return [];
+    }
+  });
 }
