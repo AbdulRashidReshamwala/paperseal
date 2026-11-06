@@ -6,16 +6,19 @@
 
 /* The loudest thing on the page. Not wax: a seal is good news, and this is not. */
 .vf-alarm {
-  padding-block: var(--ps-space-3);
+  padding: var(--ps-space-4) var(--ps-space-5);
   margin-bottom: var(--ps-space-5);
   color: var(--ps-fail);
-  border-block: 3px double var(--ps-fail);
+  background: var(--ps-field);
+  border: 1px solid var(--ps-fail);
+  border-radius: 8px;
 }
 
 .vf-alarm h2 {
   margin: 0 0 var(--ps-space-2);
-  font-size: var(--ps-text-title);
-  line-height: 1.2;
+  font-size: var(--ps-text-section);
+  font-weight: 400;
+  line-height: 1.3;
 }
 
 .vf-alarm ul {
@@ -30,12 +33,15 @@
 .vf-warnings {
   display: grid;
   gap: var(--ps-space-2);
-  padding: var(--ps-space-3) 0;
+  padding: var(--ps-space-3) var(--ps-space-5);
   margin: 0 0 var(--ps-space-5);
+  font-size: var(--ps-text-small);
   font-weight: 600;
   color: var(--ps-pending);
   list-style: none;
-  border-block: 1px solid var(--ps-pending);
+  background: var(--ps-field);
+  border: 1px solid var(--ps-pending);
+  border-radius: 8px;
 }
 
 .vf-demo {

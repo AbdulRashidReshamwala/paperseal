@@ -33,7 +33,7 @@
   --ps-serif: 'Libre Caslon Text', 'Iowan Old Style', Georgia, serif;
   --ps-sans: 'Public Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --ps-code: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-  --ps-text-display: clamp(2rem, 1.5rem + 2.4vw, 2.875rem);
+  --ps-text-display: 2rem;
   --ps-text-title: 1.75rem;
   --ps-text-section: 1.25rem;
   --ps-text-body: 1rem;
@@ -66,7 +66,7 @@
   --ps-ok: var(--ps-pass);
   --ps-warn: var(--ps-pending);
   --ps-bad: var(--ps-fail);
-  --ps-radius: 2px;
+  --ps-radius: 6px;
   --ps-font: var(--ps-sans);
   --ps-mono: var(--ps-code);
 }
@@ -162,9 +162,9 @@ a:hover {
 /* Layout */
 
 .ps-shell {
-  max-width: 880px;
+  max-width: 760px;
   min-height: 100dvh;
-  padding: var(--ps-space-5) var(--ps-space-4) var(--ps-space-8);
+  padding: var(--ps-space-5) var(--ps-space-6) var(--ps-space-8);
   margin: 0 auto;
 }
 
@@ -174,10 +174,10 @@ a:hover {
   display: flex;
   flex-wrap: wrap;
   gap: var(--ps-space-1) var(--ps-space-5);
-  align-items: baseline;
-  padding-bottom: var(--ps-space-3);
-  margin-bottom: var(--ps-space-6);
-  border-bottom: 3px double var(--ps-ink);
+  align-items: center;
+  padding-bottom: var(--ps-space-4);
+  margin-bottom: 40px;
+  border-bottom: 1px solid var(--ps-rule);
 }
 
 .ps-brand,
@@ -260,8 +260,7 @@ a:hover {
 .ps-stage {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: var(--ps-space-5);
-  padding-block: var(--ps-space-4);
+  gap: var(--ps-space-4);
 }
 
 .ps-stage-seal {
@@ -271,13 +270,15 @@ a:hover {
 .ps-stage-title {
   margin: 0;
   font-size: var(--ps-text-display);
-  line-height: 1.12;
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
   text-wrap: balance;
 }
 
 .ps-stage-lede {
-  max-width: 34em;
-  margin-top: var(--ps-space-3);
+  margin-top: var(--ps-space-1);
+  font-size: 0.9375rem;
   color: var(--ps-ink-soft);
 }
 
@@ -286,23 +287,25 @@ a:hover {
 }
 
 .ps-stage-action {
-  margin-top: var(--ps-space-6);
+  padding: var(--ps-space-5);
+  margin-top: var(--ps-space-5);
+  background: var(--ps-field);
+  border: 1px solid var(--ps-rule);
+  border-radius: 8px;
 }
 
 .ps-stage-next {
   display: grid;
-  gap: var(--ps-space-1);
-  max-width: 34em;
-  padding-top: var(--ps-space-3);
-  margin: var(--ps-space-6) 0 0;
-  border-top: 1px solid var(--ps-rule);
+  gap: 2px;
+  margin: var(--ps-space-4) 0 0;
+  font-size: var(--ps-text-small);
+  color: var(--ps-ink-soft);
 }
 
 .ps-stage-next-label {
-  font-size: var(--ps-text-small);
+  font-size: 0.8125rem;
   font-weight: 600;
-  letter-spacing: 0.07em;
-  color: var(--ps-ink-soft);
+  color: var(--ps-ink);
 }
 
 .ps-stage-detail {
@@ -334,14 +337,13 @@ a:hover {
   align-items: center;
   justify-content: center;
   width: 100%;
-  min-height: 52px;
-  padding: var(--ps-space-3) var(--ps-space-6);
-  font: 600 1.0625rem / 1.3 var(--ps-sans);
+  min-height: 40px;
+  padding: var(--ps-space-2) var(--ps-space-4);
+  font: 600 var(--ps-text-small) / 1.3 var(--ps-sans);
   color: var(--ps-on-wax);
   cursor: pointer;
   background: var(--ps-wax);
   border: 0;
-  border-bottom: 3px solid var(--ps-wax-deep);
   border-radius: var(--ps-radius);
   transition:
     background-color var(--ps-time-quick),
@@ -351,7 +353,6 @@ a:hover {
 @media (min-width: 480px) {
   .ps-primary {
     width: auto;
-    min-width: 240px;
   }
 }
 
@@ -360,8 +361,7 @@ a:hover {
 }
 
 .ps-primary:active {
-  translate: 0 2px;
-  border-bottom-width: 1px;
+  translate: 0 1px;
 }
 
 .ps-primary[data-status='busy'],
@@ -885,19 +885,28 @@ a:hover {
 }
 
 .ps-panel {
-  padding-block: var(--ps-space-3) var(--ps-space-4);
+  display: grid;
+  gap: var(--ps-space-3);
+  padding: var(--ps-space-5);
   margin-bottom: var(--ps-space-4);
-  border-top: 1px solid var(--ps-ink);
+  background: var(--ps-field);
+  border: 1px solid var(--ps-rule);
+  border-radius: 8px;
 }
 
 .ps-panel .ps-panel {
+  padding: var(--ps-space-4) 0 0;
   margin-bottom: 0;
-  border-top-color: var(--ps-rule);
+  background: none;
+  border: 0;
+  border-top: 1px solid var(--ps-rule);
+  border-radius: 0;
 }
 
 .ps-panel h2 {
-  margin: 0 0 var(--ps-space-2);
+  margin: 0;
   font-size: var(--ps-text-section);
+  font-weight: 400;
   line-height: 1.3;
 }
 
@@ -979,17 +988,16 @@ a:hover {
 .ps-button {
   min-height: 40px;
   padding: var(--ps-space-2) var(--ps-space-4);
-  font: 500 var(--ps-text-body) / 1.3 var(--ps-sans);
+  font: 500 var(--ps-text-small) / 1.3 var(--ps-sans);
   color: var(--ps-ink);
   cursor: pointer;
   background: transparent;
-  border: 1px solid var(--ps-ink);
+  border: 1px solid var(--ps-rule-strong);
   border-radius: var(--ps-radius);
 }
 
 .ps-button:hover {
-  color: var(--ps-paper);
-  background: var(--ps-ink);
+  background: var(--ps-paper-deep);
 }
 
 .ps-button:disabled {
@@ -1008,18 +1016,17 @@ a:hover {
 .ps-input {
   width: 100%;
   min-height: 44px;
-  padding: var(--ps-space-2);
+  padding: var(--ps-space-2) var(--ps-space-3);
   font: var(--ps-text-body) / 1.4 var(--ps-sans);
   color: var(--ps-ink);
   background: var(--ps-field);
-  border: 0;
-  border-bottom: 1px solid var(--ps-ink);
-  border-radius: 0;
-  box-shadow: inset 0 0 0 1px var(--ps-rule-strong);
+  border: 1px solid var(--ps-rule-strong);
+  border-radius: var(--ps-radius);
 }
 
 .ps-input[aria-invalid='true'] {
-  box-shadow: inset 0 0 0 2px var(--ps-fail);
+  border-color: var(--ps-fail);
+  box-shadow: inset 0 0 0 1px var(--ps-fail);
 }
 
 .ps-field-hint {
@@ -1113,4 +1120,18 @@ a:hover {
   .ps-loading-ring {
     animation: ps-loading-appear 1ms var(--ps-loading-wait) both !important;
   }
+}
+
+/* Inside a panel there is already a surface, so fields sit on paper and nested panels stay flat. */
+.ps-stage-action .ps-input,
+.ps-panel .ps-input {
+  background: var(--ps-paper);
+}
+
+.ps-stage-action .ps-panel {
+  padding: 0;
+  margin-bottom: var(--ps-space-4);
+  background: none;
+  border: 0;
+  border-radius: 0;
 }
