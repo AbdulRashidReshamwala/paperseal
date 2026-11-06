@@ -1,5 +1,5 @@
 import { chain, roles } from '@paperseal/protocol';
-import { Button, Hash, PrimaryAction, Row, Rows, Stage } from '@paperseal/ui';
+import { Button, Hash, PrimaryAction, Row, Rows } from '@paperseal/ui';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -81,14 +81,10 @@ export function ReviewStep(props: { releases: Releases; onBack: () => void }) {
   const needs = criteria ? bankNeeded(criteria) : null;
   const running = progress.state === 'running';
   return (
-    <Stage
-      title="Preview and submit"
-      lede={
-        <strong>Once you publish, nothing here can be changed, not even by the exam board.</strong>
-      }
-      action={
-        <>
-          <div className="board-section">
+    <>
+      <h1 className="board-draft-title">Preview and submit</h1>
+      <p className="board-draft-lede">Once you publish, nothing here can be changed, not even by the exam board.</p>
+      <div className="board-draft-card board-preview">
             <Rows>
               <Row label="Exam">{plan.name}</Row>
               {schedule.examStart !== null ? <Row label="Starts">{formatWhen(schedule.examStart)}</Row> : null}
@@ -110,69 +106,68 @@ export function ReviewStep(props: { releases: Releases; onBack: () => void }) {
               <Row label="Neutral parties">{partyNames(plan.parties, [roles.neutral])}</Row>
               <Row label="Paper Seal version">{versionSummary(props.releases, publish.version)}</Row>
             </Rows>
-          </div>
-          <VersionProblems releases={props.releases} />
-          <WalletProblem wallet={boardWallet} />
-          {progress.state === 'failed' ? <Problem>{progress.message}</Problem> : null}
-          <PrimaryAction
-            disabled={!request}
-            status={running ? 'busy' : 'idle'}
-            busyLabel={progress.state === 'running' ? walletStageLabels[progress.stage] : ''}
-            onClick={() => void confirm()}
-          >
-            Publish the exam
-          </PrimaryAction>
-        </>
-      }
-      next="Your wallet asks you to confirm once. Then everyone you chose can register, and you invite the setters."
-    >
-      <VersionPicker
-        releases={props.releases}
-        chosen={publish.version}
-        onChoose={(version) => {
-          setPublish({ ...publish, version });
-        }}
-      />
-      {request ? (
-        <Fold summary="Exam record">
-          <Rows>
-            <Row label="Network">Sepolia, chain {chain.chainId}</Row>
-            <Row label="Public record contract">
-              {environment.registryAddress ? <Hash value={environment.registryAddress} label="contract" /> : 'Not set.'}
-            </Row>
-            <Row label="Sent from">{wallet.account ? <Hash value={wallet.account} label="wallet account" /> : 'Your wallet, once connected.'}</Row>
-            <Row label="Exam ID">
-              <Hash value={request.examId} label="exam ID" />
-            </Row>
-            <Row label="Version">{request.fields.version}</Row>
-            <VersionEvidence releases={props.releases} />
-            <Row label="Commit">
-              <Hash value={request.fields.commitHash} label="commit" />
-            </Row>
-            <Row label="Software image">
-              <Hash value={request.fields.imageDigest} label="software image" />
-            </Row>
-            <Row label="Public record address">
-              <span className="ps-mono">{request.fields.rpcHost}</span>
-            </Row>
-            <Row label="Exam start">
-              {formatClock(request.schedule.examStart)} ({request.schedule.examStart})
-            </Row>
-            <Row label="Released before the start">{request.schedule.delta} seconds</Row>
-            <Row label="Lock round">{request.schedule.lockRound}</Row>
-            <Row label="Unlock round">{request.schedule.unlockRound}</Row>
-            <Row label="End round">{request.schedule.endRound}</Row>
-            <Row label="Topics">
-              <Hash value={request.criteria.hash} label="criteria hash" />
-            </Row>
-          </Rows>
-        </Fold>
-      ) : null}
-      <p className="board-quiet">
+      </div>
+      <div className="board-preview-more">
+        <VersionPicker
+          releases={props.releases}
+          chosen={publish.version}
+          onChoose={(version) => {
+            setPublish({ ...publish, version });
+          }}
+        />
+        {request ? (
+          <Fold summary="Exam record">
+            <Rows>
+              <Row label="Network">Sepolia, chain {chain.chainId}</Row>
+              <Row label="Public record contract">
+                {environment.registryAddress ? <Hash value={environment.registryAddress} label="contract" /> : 'Not set.'}
+              </Row>
+              <Row label="Sent from">{wallet.account ? <Hash value={wallet.account} label="wallet account" /> : 'Your wallet, once connected.'}</Row>
+              <Row label="Exam ID">
+                <Hash value={request.examId} label="exam ID" />
+              </Row>
+              <Row label="Version">{request.fields.version}</Row>
+              <VersionEvidence releases={props.releases} />
+              <Row label="Commit">
+                <Hash value={request.fields.commitHash} label="commit" />
+              </Row>
+              <Row label="Software image">
+                <Hash value={request.fields.imageDigest} label="software image" />
+              </Row>
+              <Row label="Public record address">
+                <span className="ps-mono">{request.fields.rpcHost}</span>
+              </Row>
+              <Row label="Exam start">
+                {formatClock(request.schedule.examStart)} ({request.schedule.examStart})
+              </Row>
+              <Row label="Released before the start">{request.schedule.delta} seconds</Row>
+              <Row label="Lock round">{request.schedule.lockRound}</Row>
+              <Row label="Unlock round">{request.schedule.unlockRound}</Row>
+              <Row label="End round">{request.schedule.endRound}</Row>
+              <Row label="Topics">
+                <Hash value={request.criteria.hash} label="criteria hash" />
+              </Row>
+            </Rows>
+          </Fold>
+        ) : null}
+      </div>
+      <VersionProblems releases={props.releases} />
+      <WalletProblem wallet={boardWallet} />
+      {progress.state === 'failed' ? <Problem>{progress.message}</Problem> : null}
+      <div className="board-draft-foot">
         <Button disabled={running} onClick={props.onBack}>
           Back
         </Button>
-      </p>
-    </Stage>
+        <PrimaryAction
+          disabled={!request}
+          status={running ? 'busy' : 'idle'}
+          busyLabel={progress.state === 'running' ? walletStageLabels[progress.stage] : ''}
+          onClick={() => void confirm()}
+        >
+          Publish the exam
+        </PrimaryAction>
+      </div>
+      <p className="board-draft-after">Your wallet asks you to confirm once. Then everyone you chose can register, and you invite the setters.</p>
+    </>
   );
 }

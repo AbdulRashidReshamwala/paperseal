@@ -82,9 +82,10 @@ export function PartyStep(props: { kind: 'centres' | 'neutrals'; rail: DraftRail
       </p>
       {all.length > SEARCH_FROM ? <Field label="Search the names" value={search} onChange={setSearch} /> : null}
       {unread ? (
-        <p className="board-note">
-          The list of names cannot be read right now. Add a name below, or <Button onClick={directory.retry}>Try again</Button>
-        </p>
+        <div className="board-party-unread">
+          <p>The list of names cannot be read right now. You can add a name below.</p>
+          <Button onClick={directory.retry}>Try again</Button>
+        </div>
       ) : null}
       {shown.length > 0 ? (
         <ul className="board-party-list">

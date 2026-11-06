@@ -86,7 +86,7 @@ export function DetailsStep(props: { rail: DraftRail; onContinue: () => void }) 
           }}
         />
         <label className="ps-field">
-          <span>Release to centres, minutes before the exam</span>
+          <span>Release to centres, in minutes</span>
           <input
             className="ps-input"
             inputMode="numeric"
@@ -99,6 +99,7 @@ export function DetailsStep(props: { rail: DraftRail; onContinue: () => void }) 
           {schedule.errors.deltaMinutes && plan.releaseMinutes.trim() !== '' ? (
             <span className="ps-field-error">{plainWords(schedule.errors.deltaMinutes)}</span>
           ) : null}
+          <span className="ps-field-hint">How long before the exam starts.</span>
         </label>
       </div>
       {lockAt !== null ? (

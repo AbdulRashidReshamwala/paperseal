@@ -836,3 +836,60 @@
   font-weight: 500;
   color: var(--ps-ink);
 }
+
+/* Buttons beside a field match its height and sit level with it. */
+.board-draft-card .board-topic,
+.board-draft-card .board-invite-form {
+  align-items: end;
+}
+
+.board-draft-card .board-topic .ps-button,
+.board-draft-card .board-invite-form .ps-button {
+  min-height: 44px;
+  margin: 0;
+}
+
+.board-draft-card .board-note {
+  margin: 0;
+}
+
+.board-party-unread {
+  display: flex;
+  gap: var(--ps-space-4);
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--ps-text-small);
+  color: var(--ps-ink-soft);
+}
+
+.board-party-unread p {
+  margin: 0;
+}
+
+/* The preview's own parts: the summary and the folded record. */
+.board-draft-card.board-preview {
+  display: block;
+  padding-block: var(--ps-space-2);
+}
+
+.board-preview-more {
+  display: grid;
+  gap: var(--ps-space-3);
+  margin-top: var(--ps-space-4);
+}
+
+.board-preview-more .board-fold {
+  margin: 0;
+}
+
+.board-draft-main .board-problem,
+.board-draft-main .ps-check {
+  margin-top: var(--ps-space-4);
+}
+
+.board-draft-after {
+  margin: var(--ps-space-3) 0 0;
+  font-size: 0.8125rem;
+  color: var(--ps-ink-soft);
+  text-align: right;
+}
