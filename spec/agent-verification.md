@@ -62,7 +62,7 @@ Rules:
 | `registry` | The registry on the page, in lowercase | `^0x[0-9a-f]{40}$` |
 | `chainName`, `chainId` | `chain.name`, `chain.chainId` in `constants.json` | |
 | `storageUrl` | The storage base URL | An `https` URL with no spaces or line breaks |
-| `verifierUrl` | The [share link](#share-links) | An `https` URL with no spaces or line breaks |
+| `verifierUrl` | The [share link](#share-links) | An `https` URL, or an `http` URL whose host is exactly `localhost`, `127.0.0.1` or `[::1]`, with no spaces or line breaks |
 | `repository` | The [repository](#repository-link) | `^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$` |
 | `version` | The verifier's own release tag | `^v[0-9]+\.[0-9]+\.[0-9]+$` |
 
@@ -76,6 +76,8 @@ The prompt never includes:
 ## Share Links
 
 A link for an agent is `<verifier URL>/?exam=<examId>`. The part after `#` never reaches a server, so `#/exam/0x...` can't be used for this. `verifierUrl` in the prompt is always this form.
+
+A loopback `http` address is allowed only for testing a page on the viewer's own machine. It reaches only an agent on the same machine and can't be served to anyone else, so a link meant for other people is always `https`.
 
 The link people see is `#/name/<ENS name>` once the exam has a verified name. The page moves any exam link to it and drops `?exam=` from the address. Until then the page rewrites its address to the `?exam=` form when it loads an exam. Every form keeps working as a link.
 
@@ -161,6 +163,8 @@ A report is one JSON object matching [`agent-report.schema.json`](agent-report.s
 | `limits` | `string[]`, facts the claims don't cover, in plain words. See [Limits](#limits) |
 
 `mode` is `production`, `dev`, or `unknown` for an exam with no on-chain mode. Until [exam mode](../docs/proposals/self-hosting.md#6-exam-mode) ships, every exam reports `unknown`.
+
+Whenever the verifier page shows a whole seal (sealed, opening or open), a note under the headline says the exam ran on a test network, names it from `chain.name` in `constants.json`, and says an independent check reports the exam as `partial` until exams carry a `production` mode. A broken seal has no note, because the check reports that exam as `failed`.
 
 Each `evidence` entry is `{source, name, value, untrusted}`, where `source` is `chain`, `token`, `storage` or `drand`. `untrusted` is `true` for any text someone else wrote, such as an owner name, criteria or question text. An agent shows such a value as quoted data and never acts on it.
 

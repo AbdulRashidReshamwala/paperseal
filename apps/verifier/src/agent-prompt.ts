@@ -33,6 +33,25 @@ export function isPromptUrl(value: string): boolean {
   }
 }
 
+/** Hosts a verifier page may be served from over plain http, because they never leave this machine. */
+const LOOPBACK = ['localhost', '127.0.0.1', '[::1]'];
+
+/**
+ * A prompt URL, or a plain `http` one on this machine, so the button works on a local copy of the page.
+ * The host is read from the parsed URL, so `http://localhost.evil.com` and `http://localhost@evil.com`
+ * are refused.
+ */
+export function isVerifierUrl(value: string): boolean {
+  if (isPromptUrl(value)) return true;
+  if (!/^http:\/\/\S+$/.test(value) || /\p{Cc}/u.test(value)) return false;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' && url.username === '' && url.password === '' && LOOPBACK.includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
 /** Builds the prompt, or says which field doesn't match the spec. */
 export function agentPrompt(fields: PromptFields): PromptResult {
   const registry = fields.registry.toLowerCase();
@@ -40,7 +59,7 @@ export function agentPrompt(fields: PromptFields): PromptResult {
   if (!EXAM_ID.test(examId)) return { ok: false, reason: 'Open an exam first.' };
   if (!REGISTRY.test(registry)) return { ok: false, reason: 'This page has no valid exam registry.' };
   if (!isPromptUrl(storageUrl)) return { ok: false, reason: 'The storage address must be a plain https address.' };
-  if (!isPromptUrl(verifierUrl)) return { ok: false, reason: 'This page must be opened over https.' };
+  if (!isVerifierUrl(verifierUrl)) return { ok: false, reason: 'This page must be opened over https.' };
   if (!repositoryPattern.test(repository)) return { ok: false, reason: 'This page has no valid repository.' };
   if (!VERSION.test(version)) return { ok: false, reason: 'This copy of the page was built without a release version.' };
 

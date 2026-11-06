@@ -177,6 +177,16 @@
   color: var(--ps-ink-soft);
 }
 
+/* Under the headline while the seal shows: a test exam is not a full verification. Ink, never wax or fail. */
+.vf-test-network {
+  max-width: 68ch;
+  padding-inline-start: var(--ps-space-3);
+  margin: var(--ps-space-3) 0 0;
+  font-size: var(--ps-text-small);
+  color: var(--ps-ink-soft);
+  border-inline-start: 2px solid var(--ps-rule-strong);
+}
+
 /* A quiet way on, under a form. */
 .vf-more {
   margin: var(--ps-space-3) 0 0;

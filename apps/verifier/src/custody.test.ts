@@ -19,7 +19,7 @@ import {
 } from '@paperseal/verify';
 import { boardAddress, buildWorld, examId, random, registryAddress, registryMatches, storageBucket, type World } from '@paperseal/verify/fixtures';
 
-import { clockTime, custody, inWords, repository, utcTime, type Custody, type CustodyStep, type Item, type NameView, type StepId, type View } from './custody';
+import { clockTime, custody, inWords, repository, testNetworkNote, utcTime, type Custody, type CustodyStep, type Item, type NameView, type StepId, type View } from './custody';
 import type { ArkivReport, LiveReport, ProofRun, Records } from './load';
 
 // The rounds of a fixture exam, with its times in the past or future as each test needs.
@@ -170,6 +170,7 @@ describe('the whole chain', () => {
     expect(result.seal).toBe('open');
     expect(result.paper?.questions).toHaveLength(1);
     expect(result.verdict).toBe('Every step has been checked. Nothing failed.');
+    expect(result.testNetwork).toBe('Test exam on Sepolia. An independent check reports it as partial, not verified, until exams carry a production mode.');
   });
 
   it('never has more than one current step', () => {
@@ -202,6 +203,29 @@ describe('the whole chain', () => {
     expect(result.failures).toEqual([]);
     expect(checks(step(result, 'sealed')).find((c) => c.label === 'Storage manifest')).toMatchObject({ status: 'not-checked' });
     expect(result.verdict).toMatch(/could not be read/);
+  });
+});
+
+describe('the test network note', () => {
+  it('names the network from the spec and says partial, not verified', () => {
+    expect(chainSpec.name).toBe('sepolia');
+    expect(testNetworkNote('open')).toBe('Test exam on Sepolia. An independent check reports it as partial, not verified, until exams carry a production mode.');
+  });
+
+  it('shows with every whole seal', () => {
+    expect(scene().seal).toBe('sealed');
+    expect(scene().testNetwork).toBe(testNetworkNote('sealed'));
+    const opening = scene({ round: UNLOCK, records: { log: { kind: 'neutral', message: 'no log' } } });
+    expect(opening.seal).toBe('opening');
+    expect(opening.testNetwork).toBe(testNetworkNote('opening'));
+    expect(testNetworkNote('sealed')).not.toBeNull();
+  });
+
+  it('is absent with no seal, and with a broken one, which an independent check reports as failed', () => {
+    const none = scene(beforeBuild);
+    expect(none.seal).toBe(null);
+    expect(none.testNetwork).toBeNull();
+    expect(testNetworkNote('broken')).toBeNull();
   });
 });
 
