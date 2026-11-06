@@ -31,6 +31,8 @@ const areas: { path: string; label: string; plain: string; Area: LazyExoticCompo
 ];
 
 const Join = lazy(() => import('./shared/Join'));
+const Enrol = lazy(() => import('./shared/Enrol'));
+const ExamPage = lazy(() => import('./shared/ExamPage'));
 
 function Home() {
   return (
@@ -46,6 +48,7 @@ function Home() {
                 {plain}
               </Row>
             ))}
+            <Row label={<Link to="/enrol">Set up your security key</Link>}>You do this once, if you are a key holder or an exam centre.</Row>
           </Rows>
         }
         next="Your page shows you the one thing to do next."
@@ -77,6 +80,8 @@ export function App() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/join" element={<Join />} />
+        <Route path="/enrol" element={<Enrol />} />
+        <Route path="/exam" element={<ExamPage />} />
         {areas.map(({ path, Area }) => (
           <Route key={path} path={`${path}/*`} element={<Area />} />
         ))}

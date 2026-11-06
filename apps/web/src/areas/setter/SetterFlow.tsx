@@ -194,7 +194,6 @@ export function SetterFlow() {
         if (!examId || !env.tee) return null;
         return (
           <Register
-            role="setter"
             examId={examId}
             tee={env.tee}
             keys={env.keys()}

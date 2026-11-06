@@ -36,7 +36,6 @@ export function progress(overrides: Partial<HolderProgress> = {}): HolderProgres
     missing: [],
     examId: `0x${'11'.repeat(32)}`,
     credential,
-    registering: false,
     chain: { value: facts(), error: null, settled: true },
     status: { value: status('distribute'), error: null, settled: true },
     reached: false,

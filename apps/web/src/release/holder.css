@@ -35,3 +35,14 @@
   margin: var(--ps-space-2) 0 0;
   overflow-wrap: anywhere;
 }
+
+.enrol-card pre {
+  max-height: 16rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.enrol-card .ps-mono {
+  word-break: break-all;
+}

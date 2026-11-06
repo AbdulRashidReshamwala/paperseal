@@ -1,12 +1,11 @@
-import { ownerEnsName, toHex, roundTimeSeconds } from '@paperseal/protocol';
-import { Countdown, Page, Panel, RoleHeader, Stage, Stamp } from '@paperseal/ui';
+import { toHex, roundTimeSeconds } from '@paperseal/protocol';
+import { Countdown, Page, RoleHeader, Stage, Stamp } from '@paperseal/ui';
 import { useMemo, useState } from 'react';
 
 import type { ReleaseContext } from '../../release/flow';
 import { Gate } from '../../release/Gate';
 import { useHolderProgress, type HolderProgress, type ProgressActions } from '../../release/progress';
 import { ReleaseCount, ReleaseStage, releaseContext } from '../../release/ReleaseStage';
-import { NameRecord } from '../../shared/Register';
 import { keyholderStage } from './stage';
 
 const AFTER_RELEASE = 'Nothing more to do. The paper reaches exam centres once enough key holders have released.';
@@ -32,7 +31,7 @@ export function KeyholderView(props: {
           <Stage
             title={progress.chain.value?.buildPosted ? 'Nothing to do yet. Your part of the key is safe.' : 'Nothing to do yet.'}
             {...(progress.chain.value?.buildPosted ? {} : { lede: 'The paper is not sealed yet, so there is nothing to release yet.' })}
-            next="When the paper unlocks, this page asks you to release your part of the key with one touch of your security key. You can close this page until then. Open it again in this same browser, and keep your security key with you."
+            next="When the paper unlocks, this page asks you to release your part of the key with one touch of your security key. You can close this page until then, and keep your security key with you."
           >
             {round !== null ? <Countdown at={roundTimeSeconds(round) * 1000} round={round} label="Release opens in" /> : null}
           </Stage>
@@ -96,20 +95,7 @@ export function KeyholderView(props: {
     }
   }
 
-  // A key holder invited under their own ENS name can confirm it with one record. It stays on the page
-  // after registering, and nothing about the exam waits on it.
-  const credential = progress.credential;
-  const named = credential && stage !== 'register' && ownerEnsName(credential.owner) ? credential : null;
-  return (
-    <Page header={<RoleHeader role="Key holder" />}>
-      {body()}
-      {named ? (
-        <Panel title="Confirm your name">
-          <NameRecord owner={named.owner} passkeyPublicKey={named.passkeyPublicKey} />
-        </Panel>
-      ) : null}
-    </Page>
-  );
+  return <Page header={<RoleHeader role="Key holder" />}>{body()}</Page>;
 }
 
 export default function KeyholderArea() {

@@ -5,7 +5,6 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { storageUrl } from '../shared/config';
 import { useCurrentExamId } from '../shared/currentExam';
-import { useInvite, credentialIsForInvite } from '../shared/invite';
 import { listEntryFor, useHolderCredential, type HolderRole } from '../shared/holder';
 import type { StoredCredential } from '../shared/Register';
 import { registry } from '../shared/registry';
@@ -38,8 +37,6 @@ export interface HolderProgress {
   missing: readonly string[];
   examId: Hex | null;
   credential: StoredCredential | null;
-  /** True while a new invitation link is open that this browser's stored key was not registered under. */
-  registering: boolean;
   chain: Pick<Polled<ChainFacts>, 'value' | 'error' | 'settled'>;
   status: Pick<Polled<StatusResponse>, 'value' | 'error' | 'settled'>;
   /** The public clock has reached the unlock round, by this computer's time. The sealed machine has the last word. */
@@ -66,7 +63,7 @@ export const centreRoles: readonly number[] = [roles.centre, roles.centreKeyHold
 export function holderGate(progress: HolderProgress, allowedRoles: readonly number[]): GateStage | null {
   const { chain } = progress;
   if (progress.missing.length > 0) return 'setup';
-  if (!progress.credential || progress.registering) {
+  if (!progress.credential) {
     if (progress.ended) return 'ended';
     // Registration is offered only once the exam is known not to be over, so it never flashes up and goes.
     if (chain.settled === false && !chain.value && !chain.error) return 'loading';
@@ -134,9 +131,7 @@ export function useHolderProgress(role: HolderRole): { progress: HolderProgress;
   const examId = useCurrentExamId();
   const stored = useHolderCredential(role);
   const [fresh, setFresh] = useState<StoredCredential | null>(null);
-  const invite = useInvite(role);
   const credential = fresh ?? stored;
-  const registering = Boolean(credential && invite && !credentialIsForInvite(credential, invite));
   const passkey = credential?.passkeyPublicKey ?? null;
 
   const loadChain = useMemo(() => {
@@ -165,5 +160,5 @@ export function useHolderProgress(role: HolderRole): { progress: HolderProgress;
     [refreshChain, refreshStatus],
   );
 
-  return { progress: { missing, examId, credential, registering, chain, status, reached, ended }, actions };
+  return { progress: { missing, examId, credential, chain, status, reached, ended }, actions };
 }

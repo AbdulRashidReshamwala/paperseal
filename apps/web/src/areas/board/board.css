@@ -209,3 +209,10 @@
   gap: var(--ps-space-2);
   align-items: center;
 }
+
+.board-tick {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  overflow-wrap: anywhere;
+}
