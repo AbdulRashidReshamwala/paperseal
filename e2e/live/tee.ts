@@ -43,7 +43,10 @@ export function connectTee(): TeeClient {
   return createTeeClient({ baseUrl: deployed.teeUrl });
 }
 
-/** Reads on a TEE GET are retried on transient errors (including a Cloudflare 52x while the VM boots). */
+/**
+ * Reads on a TEE GET are retried on transient errors (including a Cloudflare 52x while the VM boots).
+ * `isTransient` counts any 5xx, so that covers the log's 503 `delivery_pending` after the threshold.
+ */
 export const teeRead = <T>(run: () => Promise<T>): Promise<T> => retryTransient(run);
 
 export async function chainSettings(env: Pick<Env, 'io' | 'examId'>): Promise<{ settings: ExamSettings; imageDigest: Hex; criteria: Criteria }> {

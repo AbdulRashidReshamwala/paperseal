@@ -25,7 +25,7 @@ import { buildArgs, verifyOutboxBuild, type BuildPost } from './build';
 import { addParticipant, call, startLab, type Lab, type Participant } from './browser';
 import { composeFromInvites, issueInvites, openLink } from './invites';
 import { gaps } from './config';
-import { checkLogHolders, checkSetterOwners, openPaper, verifySignedLog, waitForRound } from './proof';
+import { checkLogFiles, checkLogHolders, checkSetterOwners, openPaper, verifySignedLog, waitForRound } from './proof';
 import { releaseOrder, roster, type Kind } from './roster';
 import { liveCriteria, liveQuestion, questionsPerSetterPerTopic } from './schedule';
 import {
@@ -683,6 +683,7 @@ async function assertNothingPublished(ctx: Ctx, released: readonly Participant[]
   const log = await teeRead(() => ctx.tee.releaseLog());
   await verifySignedLog(log, ctx.exam.examId);
   if (log.entries.length !== 7) throw new Error(`GET /v1/release/log lists ${String(log.entries.length)} entries after 7 shares`);
+  if (log.files.length !== 0) throw new Error(`GET /v1/release/log lists ${String(log.files.length)} files before the threshold`);
   const logged = log.entries.map((e) => e.passkeyPublicKey);
   if (JSON.stringify(logged) !== JSON.stringify(released.map((p) => p.passkeyPublicKey))) throw new Error('GET /v1/release/log does not list the 7 who released, in order');
 }
@@ -816,15 +817,13 @@ async function proofStep(ctx: Ctx, build: BuildPost, centrePaperHash: Hex): Prom
       }
     });
 
-    await rep.check('h-proof', 'release-log.json and release-token.jwt verify, and the log names the 8 holders who released', async () => {
+    await rep.check('h-proof', 'release-log.json and release-token.jwt verify, the log names the 8 holders who released, and it lists exactly key-priv.tlock and each centre\'s key-priv file with their stored hashes', async () => {
       const stored = JSON.parse(new TextDecoder().decode(await ctx.fetchFile(storageNames.releaseLog))) as Awaited<ReturnType<TeeClient['releaseLog']>>;
       const live = await teeRead(() => tee.releaseLog());
       await verifySignedLog(stored, exam.examId);
-      // The TEE signs afresh on each GET and ECDSA is randomised, so two signatures differ. Each one
-      // verifies, and everything else must be identical.
-      await verifySignedLog(live, exam.examId);
-      const body = (log: typeof stored) => JSON.stringify([log.examId, log.entries, log.entriesHash, log.instancePublicKey]);
-      if (body(stored) !== body(live)) throw new Error('release-log.json differs from GET /v1/release/log');
+      // Once the delivery is prepared the TEE serves the log it published and does not sign again,
+      // so the whole body must be identical, signature included.
+      if (JSON.stringify(stored) !== JSON.stringify(live)) throw new Error('release-log.json differs from GET /v1/release/log');
       const token = new TextDecoder().decode(await ctx.fetchFile('release-token.jwt'));
       const failures = await checkPublishedToken(env, token, stored.instancePublicKey);
       if (failures.length > 0) throw new Error(`release-token.jwt: ${failures.join('; ')}`);
@@ -834,7 +833,8 @@ async function proofStep(ctx: Ctx, build: BuildPost, centrePaperHash: Hex): Prom
       const listEntries = await ctx.io.read(() => ctx.io.registry.getApprovedListEntries(exam.examId));
       if (!listEntries) throw new Error('the approved list is not readable from the chain');
       checkLogHolders(stored, listEntries, (await fetchManifest(ctx.fetchFile, build, exam.examId)).manifest, exam.schedule.unlockRound);
-      return `${String(stored.entries.length)} entries, signature, entriesHash, token and share hashes verified, signer ${short(stored.instancePublicKey)}`;
+      const files = await checkLogFiles(stored, listEntries, ctx.fetchFile);
+      return `${String(stored.entries.length)} entries, ${String(files)} files, signature, entriesHash, filesHash, token, share hashes and stored file hashes verified, signer ${short(stored.instancePublicKey)}`;
     });
 
     // No names are published. The list shows only the hash of each setter's passkey, and anyone recomputes it.
