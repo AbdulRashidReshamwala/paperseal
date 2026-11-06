@@ -13,7 +13,7 @@ export interface Stage {
   page: Page;
   board: Actor;
   world: World;
-  /** A label nobody has used, from the video's `prefix` and the time. */
+  /** A label nobody has used: the video's `prefix` and the time as HHMM. */
   label: string;
   /** Moves to the control, lets the viewer see it, and clicks it. */
   click: (target: Locator) => Promise<void>;
@@ -25,6 +25,11 @@ export interface Stage {
   top: () => Promise<void>;
   /** Waits, so the viewer can read the screen. */
   hold: (ms: number) => Promise<void>;
+  /**
+   * Ends the finished video on the frame where `selector` first holds `text`, with this caption. Later
+   * steps still run, off camera, so they can check things and fail the run.
+   */
+  endWhen: (selector: string, text: string, caption: string) => Promise<void>;
   /** Lines for the report, such as an exam ID. */
   notes: Record<string, string>;
 }
@@ -44,7 +49,7 @@ export interface Video {
   title: string;
   /** The start of the unique label. */
   prefix: string;
-  /** The app's route to open. What is on screen at the end of `ready` is the video's first frame. */
+  /** The app's route to open. `ready` runs off camera, and what it leaves on screen is the video's first frame. */
   open: string;
   ready: (stage: Stage) => Promise<void>;
   /** Throwing in a step fails the run, so a step that reads the outcome from where it really is is an assertion. */

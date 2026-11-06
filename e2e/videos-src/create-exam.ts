@@ -23,7 +23,7 @@ async function readExam(s: Stage) {
 }
 
 /** Ticks the names in the list on the page, trying again if the list could not be read. */
-async function tick(s: Stage, names: readonly string[]) {
+async function tick(s: Stage, names: readonly string[], pace = 100) {
   const first = s.page.getByLabel(`Include ${names[0] ?? ''}`);
   await retry('reading the list of names', async () => {
     if (await first.isVisible()) return;
@@ -34,7 +34,7 @@ async function tick(s: Stage, names: readonly string[]) {
   for (const name of names) {
     const box = s.page.getByLabel(`Include ${name}`);
     await box.hover();
-    await s.hold(100);
+    await s.hold(pace);
     await box.check();
   }
 }
@@ -74,6 +74,8 @@ async function publish(s: Stage) {
 
 /** Waits for the name to show as set. It asks the wallet by itself, and a failed attempt offers a button. */
 async function waitForName(s: Stage) {
+  await s.endWhen('.board-exam-name', s.label, 'Published. The exam name is set');
+  await s.top();
   const deadline = Date.now() + 240_000;
   const set = namePage(s).filter({ hasText: s.label });
   while (Date.now() < deadline) {
@@ -109,14 +111,14 @@ async function confirmOnChain(s: Stage) {
 
 export default defineVideo({
   title: 'Create an exam',
-  prefix: 'video-create',
+  prefix: 'class-12-physics',
   open: '/#/board',
-  ready: (s) => s.page.getByRole('heading', { name: 'Connect the exam board’s wallet' }).waitFor({ timeout: 60_000 }),
+  ready: async (s) => {
+    await s.page.getByRole('button', { name: button.connectWallet }).click({ timeout: 60_000 });
+    await s.page.getByRole('heading', { name: 'Your exams' }).waitFor({ timeout: 60_000 });
+    await s.hold(500);
+  },
   steps: [
-    step('The exam board connects its wallet', async (s) => {
-      await s.click(s.page.getByRole('button', { name: button.connectWallet }));
-      await s.page.getByRole('heading', { name: 'Your exams' }).waitFor({ timeout: 60_000 });
-    }),
     step('This is the board’s home page. Start a new exam', async (s) => {
       await s.click(s.page.getByRole('button', { name: 'Create an exam' }));
       await s.board.seeHeading(text.createHeading);
@@ -124,15 +126,16 @@ export default defineVideo({
     step('Give the exam a name', async (s) => {
       await s.type(s.page.getByLabel(field.examName).first(), s.label);
     }),
-    step('The date and times are filled in. They can be changed', async (s) => {
+    step('Fill in the exam details', async (s) => {
       await s.show(s.page.getByLabel(field.examStart).first());
       await s.hold(700);
       await s.click(s.page.getByRole('button', { name: button.continue, exact: true }));
       await s.board.seeHeading('Add the topics');
     }, { hold: 250 }),
     step('Add what the paper covers', async (s) => {
+      await s.hold(1500);
       await s.click(s.page.getByRole('button', { name: 'Add 2 topics with 2 questions' }));
-      await s.hold(800);
+      await s.hold(3200);
       await s.click(s.page.getByRole('button', { name: button.continue, exact: true }));
       await s.board.seeHeading('Choose the centres');
     }, { hold: 250 }),
@@ -143,8 +146,9 @@ export default defineVideo({
       await s.board.seeHeading('Choose the neutral parties');
     }, { hold: 250 }),
     step('Choose the neutral key holders', async (s) => {
-      await tick(s, neutrals);
-      await s.hold(500);
+      await s.hold(1500);
+      await tick(s, neutrals, 900);
+      await s.hold(2500);
       await s.click(s.page.getByRole('button', { name: button.continue, exact: true }));
       await s.board.seeHeading(text.reviewHeading, 60_000);
     }, { hold: 250 }),
@@ -157,12 +161,7 @@ export default defineVideo({
     }, { hold: 100 }),
     wait('Publish the exam. Waiting for Sepolia to confirm it', publish, { hold: 300, spends: true }),
     wait('Now the exam gets its public name. Waiting for Sepolia', waitForName, { hold: 300, spends: true }),
-    step('The exam is published and its name is set. The machine check comes next', (s) => s.top(), { hold: 2500 }),
+    // Off camera. The video ends when the name shows, and this fails the run if the record disagrees.
     wait('Reading the exam back from Sepolia', confirmOnChain, { hold: 0, spends: true }),
-    step((s) => `Confirmed on Sepolia: ${s.label} is published, and named ${s.notes.name ?? ''}`, async (s) => {
-      await s.click(s.page.getByRole('link', { name: 'All your exams and drafts' }));
-      await s.page.getByRole('list', { name: 'Your exams and drafts' }).getByText(s.label).waitFor({ timeout: 60_000 });
-      await s.top();
-    }, { hold: 4500 }),
   ],
 });

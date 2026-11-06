@@ -3,13 +3,15 @@ import { basename, dirname, resolve } from 'node:path';
 
 import type { Locator } from 'playwright-core';
 
+import { examIdFromName } from '@paperseal/protocol';
+
 import { linkInstalledFfmpeg } from '../../ffmpegLink';
 import { freePort, httpOk, recentLog, spawnManaged, stop, stopAll, waitFor } from '../../src/procs';
 import { repoRoot } from '../../src/chain';
 import { launchUiChrome, openActor, proxyGithubIfLimited, type Actor } from '../../ui/kit';
 import { cut, keptRanges, probe } from './cut';
 import type { Stage, Video } from './script';
-import { liveWorld, mockWorld, type World } from './world';
+import { liveWorld, mockWorld, retry, type World } from './world';
 
 /*
  * Runs one video file: starts the app on a spare port, opens one real Chrome window, plays the steps,
@@ -43,10 +45,27 @@ const pointerScript = `(() => {
   addEventListener('mousemove', (e) => { dot().style.transform = 'translate(' + e.clientX + 'px,' + e.clientY + 'px)'; }, true);
 })();`;
 
+/** The caption as a pill at the bottom centre. It overrides the caption bar of src/recorder.ts for every video. */
+const captionPillScript = `(() => {
+  const style = document.createElement('style');
+  style.textContent = '#__ps_caption{left:50%!important;right:auto!important;bottom:20px!important;transform:translateX(-50%);width:max-content;max-width:960px;box-sizing:border-box;padding:10px 26px!important;border:0!important;border-radius:999px;text-align:center;font:600 18px/1.3 system-ui,sans-serif!important;background:rgba(15,23,42,.92)!important;box-shadow:0 6px 20px rgba(15,23,42,.28)}';
+  document.documentElement.appendChild(style);
+})();`;
+
 const stamp = (d = new Date()) => {
   const two = (n: number) => String(n).padStart(2, '0');
-  return `${two(d.getMonth() + 1)}${two(d.getDate())}-${two(d.getHours())}${two(d.getMinutes())}${two(d.getSeconds())}`;
+  return `${two(d.getHours())}${two(d.getMinutes())}`;
 };
+
+/** The prefix and the time, with a number added if an exam already has that name. */
+async function freeLabel(prefix: string, world: World): Promise<string> {
+  const base = `${prefix}-${stamp()}`;
+  for (let n = 1; n < 100; n += 1) {
+    const label = n === 1 ? base : `${base}-${String(n)}`;
+    if (!(await retry('checking the exam name is free', () => world.registry.getExam(examIdFromName(label))))) return label;
+  }
+  throw new Error(`no free name after ${base}`);
+}
 
 const listVideos = () =>
   readdirSync(SOURCES)
@@ -82,6 +101,19 @@ function stageFor(board: Actor, world: World, label: string, notes: Record<strin
     label,
     notes,
     show,
+    endWhen: (selector, text, caption) =>
+      page.evaluate(
+        ([where, what, say]) => {
+          const shown = window as unknown as { __caption?: (a: string, b: string) => void; __psEndAt?: number };
+          new MutationObserver((_, observer) => {
+            if (!document.querySelector(where as string)?.textContent?.includes(what as string)) return;
+            observer.disconnect();
+            shown.__caption?.(say as string, '');
+            shown.__psEndAt = Date.now();
+          }).observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+        },
+        [selector, text, caption],
+      ),
     top: async () => {
       await page.evaluate(() => {
         scrollTo({ top: 0, behavior: 'smooth' });
@@ -108,7 +140,7 @@ function stageFor(board: Actor, world: World, label: string, notes: Record<strin
 }
 
 async function play(name: string, video: Video, world: World, dry: boolean): Promise<void> {
-  const label = `${video.prefix}-${stamp()}`;
+  const label = await freeLabel(video.prefix, world);
   const notes: Record<string, string> = { label };
   const web = await startWeb(world);
   const browser = await launchUiChrome();
@@ -125,6 +157,7 @@ async function play(name: string, video: Video, world: World, dry: boolean): Pro
     mkdirSync(rawDir, { recursive: true });
     const board = await openActor(browser, 'board', null, { role: 'board', videoDir: rawDir, wallet: world.walletScript, bindings: world.bindings });
     await board.person.context.addInitScript(pointerScript);
+    await board.person.context.addInitScript(captionPillScript);
     await proxyGithubIfLimited(board.person.context);
     const { page } = board;
     const stage = stageFor(board, world, label, notes);
@@ -148,6 +181,7 @@ async function play(name: string, video: Video, world: World, dry: boolean): Pro
         if (one.wait) waits.push([started, Date.now()]);
         await page.waitForTimeout(one.hold);
       }
+      const endAt = await page.evaluate(() => (window as unknown as { __psEndAt?: number }).__psEndAt ?? null);
       const recording = page.video();
       const closedAt = Date.now();
       await board.person.context.close();
@@ -160,7 +194,10 @@ async function play(name: string, video: Video, world: World, dry: boolean): Pro
       const at = (ms: number) => (ms - board.videoStartedAt) / 1000 + shift;
       const out = resolve(VIDEOS, `${name}${world.kind === 'mock' ? '.mock' : ''}${dry ? '.dry' : ''}.mp4`);
       mkdirSync(dirname(out), { recursive: true });
-      cut(raw, out, keptRanges(at(firstFrame), media.seconds, waits.map(([a, b]) => [at(a), at(b)])));
+      // A small margin past the end mark, so the frame that shows it is the last one kept.
+      const lastFrame = endAt === null ? media.seconds : Math.min(media.seconds, at(endAt) + 0.1);
+      const onCamera = waits.map(([a, b]) => [at(a), Math.min(at(b), lastFrame)] as const).filter(([a]) => a < lastFrame);
+      cut(raw, out, keptRanges(at(firstFrame), lastFrame, onCamera));
       rmSync(rawDir, { recursive: true, force: true });
       const final = probe(out);
       if (final.width !== 1280 || final.height !== 800) throw new Error(`the video is ${String(final.width)}x${String(final.height)}, not 1280x800`);
