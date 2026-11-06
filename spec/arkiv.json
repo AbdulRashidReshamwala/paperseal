@@ -1,0 +1,14 @@
+{
+  "network": {
+    "name": "rabdi",
+    "chainId": 7794095,
+    "rpcUrl": "https://rpc.rabdi.db-chain.testnet.arkiv.network",
+    "explorer": "https://rabdi.explorer.arkiv.network"
+  },
+  "schemas": {
+    "releaseLog": "paperseal.v1.release-log",
+    "releaseToken": "paperseal.v1.release-token"
+  },
+  "lifetimeDays": 180,
+  "staleAfterSeconds": 120
+}
