@@ -12,6 +12,7 @@ import {
   type Criteria,
   type ExamSettings,
   type Hex,
+  type Question,
 } from '@paperseal/protocol';
 
 import { gaps, rpcHost, deployed, type LiveGaps } from './config';
@@ -38,6 +39,21 @@ import type { Schedule } from './state';
  */
 export function questionText(topic: string, numberInTopic: number): string {
   return `${topic} question ${String(numberInTopic)}: explain a result and show the working.`;
+}
+
+/**
+ * One question of the live paper. Every third question in a topic is multiple choice, so a run covers
+ * both kinds: the third has four options and the sixth has two, which are the longer and shorter
+ * lists the form allows. Options are distinct and name no one. No answer key is part of a question.
+ */
+export function liveQuestion(topic: string, numberInTopic: number): Question {
+  const text = questionText(topic, numberInTopic);
+  if (numberInTopic % 3 !== 0) return { topic, text };
+  const options =
+    numberInTopic % 2 === 1
+      ? ['The result follows directly', 'The result needs a further assumption', 'The result is false', 'The question is ill-posed']
+      : ['True', 'False'];
+  return { topic, text, options };
 }
 
 export const liveCriteria: Criteria = {

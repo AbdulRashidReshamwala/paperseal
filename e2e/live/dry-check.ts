@@ -17,9 +17,12 @@ import {
   setterOwner,
   startupArgs,
   threshold,
+  encodePaper,
+  parsePaper,
   toHex,
   type ApprovedListEntry,
   type Hex,
+  type Question,
   type TaggedRegistration,
 } from '@paperseal/protocol';
 import { decodeFunctionData, getAbiItem, toFunctionSelector, type AbiFunction } from 'viem';
@@ -29,7 +32,7 @@ import { deployed, gapsFor, rpcHost } from './config';
 import { composeFromInvites, issueInvites, openLink, type IssuedInvite } from './invites';
 import { parseReleaseBody } from './github';
 import { releaseOrder, roster } from './roster';
-import { computeSchedule, liveCriteria, plan, questionsPerSetterPerTopic, questionText, runTeeArgs } from './schedule';
+import { computeSchedule, liveCriteria, plan, liveQuestion, questionsPerSetterPerTopic, questionText, runTeeArgs } from './schedule';
 
 /* `dry-check`: everything that can be checked with no network, no chain, no TEE and no key. */
 
@@ -207,6 +210,33 @@ export async function dryCheck(): Promise<void> {
     const after = matchInvites(reissued, [...registered, twin]);
     expect(after.rows[neutral]?.state.kind === 'waiting' && after.unmatched.length === 2, 'a reissued invite still matches an old key');
     return 'each is unmatched or refused, and a reissued invite matches neither old key';
+  });
+
+  await check('the live questions include multiple choice, and every one passes the paper format', () => {
+    const questions: Question[] = [];
+    for (const topic of liveCriteria.topics) {
+      for (let n = 1; n <= 2 * questionsPerSetterPerTopic; n += 1) questions.push(liveQuestion(topic.name, n));
+    }
+    const choice = questions.filter((q) => q.options !== undefined);
+    expect(choice.length >= 2 && choice.length < questions.length, 'the live questions are not a mix of multiple choice and written');
+    expect(
+      liveCriteria.topics.every((t) => questions.some((q) => q.topic === t.name && q.options !== undefined)),
+      'a topic has no multiple choice question',
+    );
+    expect(new Set(choice.map((q) => q.options?.length)).size > 1, 'every multiple choice question has the same number of options');
+    expect(questions.every((q) => q.options === undefined || !('answer' in q)), 'a question carries an answer key');
+    // The same strict path the proof uses: encode, then parse, with the bytes unchanged.
+    const examId = `0x${'ab'.repeat(32)}` as const;
+    const bytes = encodePaper({ examId, questions });
+    const parsed = parsePaper(bytes);
+    expect(parsed.questions.length === questions.length, 'parsePaper changed the question count');
+    expect(toHex(encodePaper(parsed)) === toHex(bytes), 'the paper does not round-trip to the same bytes');
+    expect(parsed.questions.every((q, i) => q.options === undefined || q.options.join('|') === questions[i]?.options?.join('|')), 'option order changed');
+    expect(
+      questions.every((q) => !/setter/i.test(JSON.stringify(q)) && !roster.some((r) => JSON.stringify(q).includes(r.name))),
+      'a question or option names a setter',
+    );
+    return `${String(choice.length)} of ${String(questions.length)} are multiple choice, with ${[...new Set(choice.map((q) => q.options?.length))].join(' and ')} options`;
   });
 
   await check('question text names no setter, and no two questions read the same', () => {

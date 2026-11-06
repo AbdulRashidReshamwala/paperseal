@@ -5,6 +5,7 @@ import {
   entriesHash,
   equalBytes,
   fromHex,
+  encodePaper,
   parsePaper,
   releaseEntryFromWire,
   roles,
@@ -191,6 +192,16 @@ export async function proof(): Promise<void> {
       return `salted paper hash ${build.saltedPaperHash}, paper sha256 ${toHex(await sha256(opened.paperBytes))}`;
     });
 
+    await check('multiple choice: every question is written or has 2 to 6 distinct options, in the canonical bytes', () => {
+      if (!opened) throw new Error('no paper was opened');
+      // parsePaper has already refused bad options. This also requires the published bytes to be the
+      // canonical encoding, so a written question carries no options key and key order is fixed.
+      const again = encodePaper(parsePaper(opened.paperBytes));
+      if (toHex(again) !== toHex(opened.paperBytes)) throw new Error('the published paper is not in the canonical encoding');
+      const choice = opened.paper.questions.filter((q) => q.options !== undefined);
+      return `${String(choice.length)} multiple choice, ${String(opened.paper.questions.length - choice.length)} written`;
+    });
+
     await check('selected: the paper has as many questions as the Build says, and as the criteria ask', () => {
       if (!opened) throw new Error('no paper was opened');
       const count = opened.paper.questions.length;
@@ -232,6 +243,9 @@ export async function proof(): Promise<void> {
     console.log(`\nThe paper, ${String(opened.paper.questions.length)} questions:\n`);
     opened.paper.questions.forEach((question, index) => {
       console.log(`${String(index + 1)}. [${question.topic}] ${question.text}`);
+      question.options?.forEach((option, at) => {
+        console.log(`     ${String.fromCharCode(65 + at)}. ${option}`);
+      });
     });
     console.log(`\nThe paper as published:\n${text(opened.paperBytes)}`);
   };

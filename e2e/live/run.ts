@@ -27,7 +27,7 @@ import { composeFromInvites, issueInvites, openLink } from './invites';
 import { gaps } from './config';
 import { checkLogHolders, checkSetterOwners, openPaper, verifySignedLog, waitForRound } from './proof';
 import { releaseOrder, roster, type Kind } from './roster';
-import { liveCriteria, questionsPerSetterPerTopic, questionText } from './schedule';
+import { liveCriteria, liveQuestion, questionsPerSetterPerTopic } from './schedule';
 import {
   Reporter,
   RunStopped,
@@ -444,8 +444,8 @@ async function setters(ctx: Ctx, listHash: Hex): Promise<{ setter: string; quest
       const c = confirmed;
       for (const topic of liveCriteria.topics) {
         for (let n = 1; n <= questionsPerSetterPerTopic; n += 1) {
-          const question: Question = { topic: topic.name, text: questionText(topic.name, setterIndex * questionsPerSetterPerTopic + n) };
-          await rep.check('c-setters', `${p.name}: sealQuestion, sign, submit, verify receipt (${topic.name} ${String(n)})`, async () => {
+          const question: Question = liveQuestion(topic.name, setterIndex * questionsPerSetterPerTopic + n);
+          await rep.check('c-setters', `${p.name}: sealQuestion, sign, submit, verify receipt (${topic.name} ${String(n)}${question.options ? `, multiple choice with ${String(question.options.length)} options` : ''})`, async () => {
             const status = await teeRead(() => tee.status());
             if (status.stage !== 'submit') throw new Error(`the TEE is at the ${status.stage} stage, not submit`);
             const examBytes = fromHex(exam.examId);
@@ -756,7 +756,7 @@ async function unlockStep(ctx: Ctx, build: BuildPost, downloads: Map<string, Dow
         try {
           const { paperBytes, paper } = await openPaper({ examId: exam.examId, saltedPaperHash: build.saltedPaperHash, criteria: liveCriteria, keyPubTlock: dl.keyPubTlock, kPriv: kPrivBytes, paperFile: dl.paper });
           hashes.set(p.name, toHex(await sha256(paperBytes)));
-          return `${String(paper.questions.length)} questions, paper sha256 ${short(hashes.get(p.name) as string)}`;
+          return `${String(paper.questions.length)} questions, ${String(paper.questions.filter((q) => q.options).length)} multiple choice, paper sha256 ${short(hashes.get(p.name) as string)}`;
         } finally {
           kPrivBytes.fill(0);
         }
