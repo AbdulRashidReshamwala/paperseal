@@ -212,9 +212,9 @@ export function useBoardForm(): BoardForm {
 }
 
 /** The exam's verified ENS name in this session, if it has one. */
-export function useVerifiedName(examId: Hex): string | null {
+export function useVerifiedName(examId: Hex | null): string | null {
   const { verifiedNames } = useBoardForm();
-  for (const [name, id] of verifiedNames) if (id === examId.toLowerCase()) return name;
+  for (const [name, id] of verifiedNames) if (id === examId?.toLowerCase()) return name;
   return null;
 }
 

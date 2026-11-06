@@ -120,6 +120,8 @@ The registrant's app computes `inviteTag = HMAC-SHA-256(inviteSecret, passkeyPub
 
 The board's app keeps its invites in the browser and recomputes each tag. A registration joins the list only if its tag matches an invite and its `owner` is the `setterOwner` hash of its passkey. A tag copied from someone else fails, because it binds a different passkey. If two passkeys match one invite, the board app refuses both until the board reissues that invite. Names of setters stay in the board's browser and are never published.
 
+An invite link may also carry `name`, the exam's ENS name. It is only a hint for showing the exam's name, must pass the Exam Names checks like any other name, and takes no part in the invite: a link without it, or with a damaged one, works the same.
+
 Key holders and centres have no invite. They have a permanent identity instead, as in "Party Names". A link with any other role is refused.
 
 ## Party Names
@@ -342,7 +344,7 @@ A board may give an exam an ENS name `<name>.<parent>`, where `parent` is the bo
 | `text` `ens.records.bucket` | The storage bucket the TEE was started with |
 | `text` `ens.records.arkivWriters` | The Arkiv writers the board publishes, as addresses separated by commas (`arkiv.md`, "Writers") |
 
-The board app writes these right after `createExam`, in one `multicall` from the board's wallet on the resolver of `parent`, and shows the name only once every check below passes. From then on the board's page for the exam, `#/board/exam/<name>`, uses the name in place of `examId`, which keeps working. A name that fails a check opens nothing. An exam needs no name, so a write that is declined or fails leaves the exam as it is, and the board can try again. See `docs/ens-setup.md`.
+The board app writes these right after `createExam`, in one `multicall` from the board's wallet on the resolver of `parent`, and shows the name only once every check below passes. From then on the board's page for the exam, `#/board/exam/<name>`, uses the name in place of `examId`, which keeps working. The role pages do the same at `#/setter/<name>`, `#/keyholder/<name>` and `#/centre/<name>`, and the old forms keep working and move there once the name verifies. A name that fails a check opens nothing. An exam needs no name, so a write that is declined or fails leaves the exam as it is, and the board can try again. See `docs/ens-setup.md`.
 
 A reader checks a name with the viewer's own RPC, on-chain only (`ens.ccipRead` is `false`, so no offchain gateway is asked), and fails unless all of these hold:
 

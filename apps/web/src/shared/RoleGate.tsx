@@ -9,6 +9,7 @@ import { BoardGate } from './BoardGate';
 import { useCurrentExamId } from './currentExam';
 import { demoGate } from './demoKeys';
 import { loadEnrolments } from './enrolment';
+import { examNameInPath } from './examName';
 import { holderCredential, listEntryFor, type HolderRole } from './holder';
 import { useInvite } from './invite';
 import { loadCredential } from './Register';
@@ -104,12 +105,14 @@ function useListedRole(examId: Hex | null, passkey: Hex | null, reader: Pick<Exa
 export function HolderGate(props: { role: HolderRole; children: ReactNode; reader?: Pick<ExamRegistry, 'getApprovedListEntries'> | null }) {
   const { role } = props;
   const examId = useCurrentExamId();
-  const named = new URLSearchParams(useLocation().search).get('exam');
+  const { search, pathname } = useLocation();
+  const named = new URLSearchParams(search).get('exam');
   const credential = holderCredential(role, examId);
   const listed = useListedRole(examId, credential?.passkeyPublicKey ?? null, props.reader === undefined ? registry : props.reader);
   const access = holderAccess({
     role,
-    linked: named !== null && /^0x[0-9a-f]{64}$/.test(named),
+    // NamedExam lets a page with a name in its address through only once that name has passed.
+    linked: (named !== null && /^0x[0-9a-f]{64}$/.test(named)) || examNameInPath(pathname) !== null,
     enrolled: loadEnrolments().length > 0,
     holderKey: credential !== null,
     setterKey: examId !== null && loadCredential(examId, 'setter') !== null,
