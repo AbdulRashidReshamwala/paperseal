@@ -52,6 +52,7 @@
 
 .board-problem {
   max-width: 34em;
+  overflow-wrap: anywhere;
   margin: 0 0 var(--ps-space-3);
 }
 
@@ -135,15 +136,30 @@
   }
 }
 
-.board-copy {
+.board-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--ps-space-1) var(--ps-space-2);
+  gap: var(--ps-space-2) var(--ps-space-3);
   align-items: center;
-  min-width: 0;
+  margin: 0 0 var(--ps-space-3);
 }
 
-.board-copy .ps-mono {
-  overflow-wrap: anywhere;
-  font-size: var(--ps-text-small);
+.board-file {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.board-file input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.board-file:focus-within {
+  outline: 2px solid var(--ps-ink);
+  outline-offset: 2px;
 }

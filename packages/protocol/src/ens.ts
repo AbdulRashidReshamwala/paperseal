@@ -14,9 +14,6 @@ export const ens = ensSpec;
 
 const example = 'jee-main-2026';
 
-/** ENSIP-15 errors quote characters between bidi marks; drop those so the message reads plainly. */
-const plainReason = (message: string): string => message.replace(/[‎‏]/g, '').trim();
-
 /** Null for a valid exam name, else a short sentence saying what is wrong with it. */
 export function examNameProblem(name: string): string | null {
   if (name.length === 0) return 'The exam name is empty.';
@@ -24,15 +21,10 @@ export function examNameProblem(name: string): string | null {
   let normalised: string;
   try {
     normalised = normalize(name);
-  } catch (error) {
-    const reason = error instanceof Error ? plainReason(error.message) : '';
-    const hint = `Use lowercase letters, digits and hyphens, like ${example}.`;
-    return reason.length > 0 && reason.length <= 80 ? `${hint} (${reason})` : hint;
+  } catch {
+    return `Use lowercase letters, digits and hyphens, like ${example}.`;
   }
-  if (normalised !== name) {
-    return `The exam name must already be in normalised form. Did you mean ${normalised}?`;
-  }
-  return null;
+  return normalised === name ? null : `Use lowercase letters, digits and hyphens. Did you mean ${normalised}?`;
 }
 
 /** `<label>.<parent>` split at the first dot. Null if there is no dot or either part is empty. */

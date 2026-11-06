@@ -151,7 +151,7 @@ describe('the whole chain', () => {
     const round = UNLOCK - 280;
     const inMinutes = scene({ round, records: { log: { kind: 'neutral', message: 'no log' } } });
     const at = clockTime(roundTimeSeconds(UNLOCK), roundTimeSeconds(round), 'UTC');
-    expect(inMinutes.headline).toBe(`Paper sealed. Opens to centres at ${at}, in 14 minutes.`);
+    expect(inMinutes.headline).toBe(`The paper is sealed. It unlocks for centres at ${at}, in 14 minutes.`);
     expect(inMinutes.next.length).toBeGreaterThan(0);
   });
 
@@ -160,7 +160,7 @@ describe('the whole chain', () => {
     if (!report || report.report.kind !== 'parsed') throw new Error('no manifest');
     const result = scene({ records: { manifest: { ...report, report: { ...report.report, hashCheck: 'fail' } } } });
     expect(step(result, 'sealed').state).toBe('failed');
-    expect(result.failures).toEqual([{ step: 5, label: 'Paper built and sealed', message: 'The list of published files is not the one the Build committed to.' }]);
+    expect(result.failures).toEqual([{ step: 5, label: 'Paper built and sealed', message: 'The published files are not the ones recorded for this paper.' }]);
     expect(result.next).toMatch(/Contact your exam board/);
     expect(result.verdict).toMatch(/One check failed/);
   });
@@ -174,12 +174,30 @@ describe('the whole chain', () => {
   });
 });
 
+describe('a Build with no files to check it against', () => {
+  it('does not call the questions locked, and does not say everything is fine', () => {
+    const result = scene({
+      records: {
+        token: { kind: 'unavailable', message: 'Storage returned 404' },
+        manifest: { kind: 'unavailable', message: 'Storage returned 404' },
+      },
+    });
+    expect(step(result, 'locked').state).not.toBe('done');
+    expect(step(result, 'locked').state).not.toBe('failed');
+    expect(step(result, 'locked').note).toMatch(/not confirmed/);
+    expect(step(result, 'sealed').state).not.toBe('done');
+    expect(result.failures).toEqual([]);
+    expect(result.verdict).toMatch(/not confirmed/);
+    expect(result.verdict).not.toMatch(/on track/);
+  });
+});
+
 describe('step 1, exam published', () => {
   it('done', () => {
     const s = step(scene(), 'published');
     expect(s.state).toBe('done');
-    expect(s.items).toContainEqual(expect.objectContaining({ label: 'TEE image digest', value: world.exam.imageDigest }));
-    expect(s.items).toContainEqual(expect.objectContaining({ label: 'TEE version, the commit it was built from', value: world.exam.commitHash }));
+    expect(s.items).toContainEqual(expect.objectContaining({ label: 'Software image', value: world.exam.imageDigest }));
+    expect(s.items).toContainEqual(expect.objectContaining({ label: 'Software version, the commit it was built from', value: world.exam.commitHash }));
     expect(s.round).toBe(null);
   });
 
@@ -218,8 +236,8 @@ describe('step 2, the sealed machine', () => {
     claims[0] = { claim: 'image_digest', ok: false, actual: 'sha256:aa', expected: 'sha256:bb' } as (typeof claims)[0];
     const result = scene({ records: { token: { ...token, verdict: { ...token.verdict, verified: false, claims } } } });
     expect(step(result, 'attested').state).toBe('failed');
-    expect(result.failures[0]?.message).toContain('image_digest');
-    expect(result.failures[0]?.message).toContain('sha256:bb');
+    expect(result.failures[0]?.message).toMatch(/does not match what was published/);
+    expect(step(result, 'attested').items).toContainEqual(expect.objectContaining({ label: { code: 'image_digest' }, status: 'fail', detail: expect.stringContaining('sha256:bb') }));
   });
 
   it('failed when the live machine fails its check, and neutral when it cannot be reached', () => {
@@ -244,14 +262,14 @@ describe('step 3, people approved', () => {
   it('done, with setters shown only by their hash', () => {
     const s = step(scene(), 'people');
     expect(s.state).toBe('done');
-    expect(s.note).toBe('12 people approved: 1 setter, 3 neutral parties and 8 centres.');
+    expect(s.note).toBe('12 people approved: 1 setter, 3 key holders and 8 centres.');
     expect(s.items.filter((item) => item.kind === 'hash' && item.label === 'Setter')).toHaveLength(1);
   });
 
   it('current when no list is posted', () => {
     const result = scene({ chain: { list: null, entries: null, build: null }, records: notReadyFiles });
     expect(step(result, 'people').state).toBe('current');
-    expect(result.headline).toBe('Setting up. The approved list is not published yet.');
+    expect(result.headline).toBe('Setting up. The list of approved people is not published yet.');
   });
 
   it('neutral when the list is posted but cannot be read', () => {
@@ -273,7 +291,7 @@ describe('step 3, people approved', () => {
   it("failed when the Build's list is not the published list", () => {
     const result = scene({ chain: { build: { ...world.build, approvedListHash: `0x${'00'.repeat(32)}` } as Build } });
     expect(step(result, 'people').state).toBe('failed');
-    expect(result.failures[0]?.message).toMatch(/different approved list/);
+    expect(result.failures[0]?.message).toMatch(/different list of approved people/);
   });
 });
 
@@ -289,13 +307,13 @@ describe('step 4, questions locked', () => {
     const result = scene(beforeBuild);
     expect(step(result, 'locked').state).toBe('current');
     expect(step(result, 'locked').note).toMatch(/Setters can send questions until/);
-    expect(result.headline).toMatch(/^Questions are coming in. They lock at/);
+    expect(result.headline).toMatch(/^Questions are coming in. They close at/);
   });
 
   it('never claims the lock happened until the Build shows it', () => {
     const result = scene({ ...beforeBuild, round: LOCK });
     expect(step(result, 'locked').state).toBe('current');
-    expect(step(result, 'locked').note).toMatch(/Lock time has passed/);
+    expect(step(result, 'locked').note).toMatch(/Questions have closed/);
   });
 
   it('failed when the criteria do not match the exam', () => {
@@ -331,8 +349,8 @@ describe('step 5, paper built and sealed', () => {
     const result = scene({ records: { manifest: { kind: 'neutral', message: 'no manifest' } } });
     expect(step(result, 'sealed').state).toBe('current');
     expect(result.seal).toBe(null);
-    expect(result.noSeal).toBe('Not confirmed');
-    expect(result.headline).toBe('Paper published. Its checks are not finished.');
+    expect(result.noSeal).toBe('Not confirmed yet');
+    expect(result.headline).toBe('The paper is published. Its checks are not finished.');
   });
 
   it('does not check the Build signature without the token', () => {
@@ -350,7 +368,7 @@ describe('step 5, paper built and sealed', () => {
     expect(step(result, 'sealed').state).toBe('failed');
     expect(step(result, 'attested').state).toBe('failed');
     expect(result.seal).toBe(null);
-    expect(result.headline).toBe('Paper published, but it failed its checks.');
+    expect(result.headline).toBe('The paper is published, but it failed its checks.');
   });
 
   it('shows no seal and does not say sealed when an earlier step failed', () => {
@@ -360,8 +378,8 @@ describe('step 5, paper built and sealed', () => {
     const result = scene({ records: { token: { ...token, verdict: { ...token.verdict, verified: false, signature } } } });
     expect(step(result, 'attested').state).toBe('failed');
     expect(result.seal).toBe(null);
-    expect(result.noSeal).toBe('Not confirmed');
-    expect(result.headline).toBe('Paper published, but it failed its checks.');
+    expect(result.noSeal).toBe('Not confirmed yet');
+    expect(result.headline).toBe('The paper is published, but it failed its checks.');
   });
 
   it('failed when a file is addressed to someone not on the list', () => {
@@ -392,14 +410,14 @@ describe('step 6, unlock', () => {
     const result = scene({ round: UNLOCK, records: { log: { kind: 'neutral', message: 'no log' } } });
     expect(step(result, 'unlock').state).toBe('current');
     expect(result.seal).toBe('opening');
-    expect(result.headline).toMatch(/^Opening to centres/);
+    expect(result.headline).toMatch(/^Unlocking for centres/);
   });
 
   it('done with a verified log and enough holders', () => {
     const result = scene({ round: UNLOCK + 1 });
     expect(step(result, 'unlock').state).toBe('done');
     expect(step(result, 'unlock').note).toBe('8 of the 8 needed key holders have released.');
-    expect(result.headline).toMatch(/^Key holders have released. The paper opens to everyone at/);
+    expect(result.headline).toMatch(/^Key holders have released their parts. The paper opens to everyone at/);
   });
 
   it('is not done, and says not verified, when the release token is not there', () => {
@@ -419,7 +437,8 @@ describe('step 6, unlock', () => {
     const token = { ...log.token, verified: false, claims: [{ claim: 'eat_nonce', ok: false, actual: 'a', expected: 'b' } as never] };
     const result = scene({ round: UNLOCK + 1, records: { log: { ...log, token } } });
     expect(step(result, 'unlock').state).toBe('failed');
-    expect(result.failures[0]?.message).toContain('eat_nonce');
+    expect(result.failures[0]?.message).toMatch(/does not pass/);
+    expect(step(result, 'unlock').items).toContainEqual(expect.objectContaining({ status: 'fail', detail: expect.stringContaining('eat_nonce') }));
   });
 
   it('failed on a malformed log', () => {
@@ -442,11 +461,11 @@ describe('step 6, unlock', () => {
     const progress = releaseProgress(holdersOf(list ?? []), keys);
     const said = { ...liveReport(false), fresh: { ok: false as const, message: 'down' }, progress };
     const s = step(scene({ round: UNLOCK, records: { log: { kind: 'neutral', message: 'no log' } }, live: said }), 'unlock');
-    expect(s.items).toContainEqual({ kind: 'heading', text: 'Live from the sealed machine, optional' });
-    expect(s.items).toContainEqual(expect.objectContaining({ label: 'Holders released', value: '3 of 8 needed (not verified)' }));
+    expect(s.items).toContainEqual({ kind: 'heading', text: 'Live from the machine, optional' });
+    expect(s.items).toContainEqual(expect.objectContaining({ label: 'Key holders released', value: '3 of 8 needed (not verified)' }));
     expect(s.note).toMatch(/may have released/);
     const known = step(scene({ round: UNLOCK, records: { log: { kind: 'neutral', message: 'no log' } }, live: { ...liveReport(true), progress } }), 'unlock');
-    expect(known.note).toBe('Time seal open. 3 of the 8 needed key holders have released.');
+    expect(known.note).toBe('Unlocked. 3 of the 8 needed key holders have released.');
   });
 
   it('not applicable when no paper was sealed', () => {
@@ -494,7 +513,7 @@ describe('step 7, exam ends and paper opens', () => {
     expect(step(result, 'open').state).toBe('failed');
     expect(result.paper).toBe(null);
     expect(result.withheld).toBe(true);
-    expect(result.failures[0]?.message).toMatch(/not the paper the Build committed to/);
+    expect(result.failures[0]?.message).toMatch(/not the paper recorded for this exam/);
   });
 
   it('is not done when a check could not run, and never counts it as a pass', () => {
@@ -507,7 +526,7 @@ describe('step 7, exam ends and paper opens', () => {
     const proof: ProofRun = { ok: true, result: { state: 'failed', step: 'decrypt', message: 'bad key' } };
     const result = scene({ round: END, proof });
     expect(step(result, 'open').state).toBe('failed');
-    expect(result.headline).toBe('The paper did not open.');
+    expect(result.headline).toBe('The paper could not be opened.');
   });
 
   it('neutral when the proof could not read a file', () => {
@@ -519,14 +538,14 @@ describe('step 7, exam ends and paper opens', () => {
   it('not applicable when no copy of the key exists', () => {
     const result = scene({ round: END, records: { log: { kind: 'neutral', message: 'no log' } }, proof: { ok: true, result: { state: 'sealed' } } });
     expect(step(result, 'open').state).toBe('not-applicable');
-    expect(result.headline).toBe('The paper stays sealed. The unlock never happened.');
+    expect(result.headline).toBe('The paper stays sealed. It was never unlocked.');
     expect(result.seal).toBe('sealed');
   });
 
   it('not applicable when no paper was sealed', () => {
     const result = scene({ ...beforeBuild, round: END });
     expect(step(result, 'open').state).toBe('not-applicable');
-    expect(result.headline).toBe('The exam ended with no paper published.');
+    expect(result.headline).toBe('The exam ended and no paper was published.');
   });
 
   it("uses the public clock's round, not the device clock, once the round is known", () => {
@@ -568,7 +587,7 @@ describe('step 1 on a name route, the name', () => {
     ]);
     const tags = step(result, 'name').items.filter((item) => item.kind === 'tag');
     expect(tags.map((item) => item.kind === 'tag' && [item.label, item.tag])).toEqual([
-      ['TEE URL', 'From Connection'],
+      ['TEE URL', 'From your settings'],
       ['Storage URL', 'From the name'],
       ['Storage bucket', 'Built into this page'],
     ]);
@@ -577,14 +596,14 @@ describe('step 1 on a name route, the name', () => {
 
   it.each([
     ['name', 'Not a valid name'],
-    ['registry', 'No registry'],
-    ['primaryName', 'Primary name differs'],
-    ['forward', 'Not verified both ways'],
+    ['registry', 'No exam record'],
+    ['primaryName', 'Not the board’s name'],
+    ['forward', 'Not confirmed by the board'],
   ] as [ExamNameCheck, string][])('a failed %s check fails it, holds every later step and shows no seal', (check, title) => {
     const value: ExamNameResult = { ok: false, failed: check, reason: 'Because.', partial: { name } };
     const result = named({ state: 'ready', value, readAt: 0 }, { round: END, proof: opened() });
     expect(step(result, 'name').state).toBe('failed');
-    expect(result.failures).toEqual([{ step: 1, label: 'Name', message: `${title}. Because.` }]);
+    expect(result.failures).toEqual([{ step: 1, label: 'Name', message: expect.stringMatching(new RegExp(`^${title}\\. `)) as string }]);
     expect(states(result).slice(1)).toEqual(Array(7).fill('waiting'));
     expect(result.steps.slice(1).flatMap(checks).filter((c) => c.status === 'pass')).toEqual([]);
     expect(result.headline).toBe('This name does not lead to a verified exam.');
@@ -592,8 +611,19 @@ describe('step 1 on a name route, the name', () => {
     expect(result.seal).toBe(null);
   });
 
+  it('counts its own step in the references that name a later one', () => {
+    const live = liveReport(false);
+    const text = (result: Custody) =>
+      result.steps.flatMap((s) => s.items).flatMap((item) => (item.kind === 'text' ? [item.text] : []));
+    const plain = custody(sceneView({ live }));
+    const namedView = named({ state: 'ready', value: passed, readAt: 0 }, { live });
+    expect(text(plain).filter((line) => line.includes('See step 2'))).not.toEqual([]);
+    expect(text(namedView).filter((line) => line.includes('See step 3'))).not.toEqual([]);
+    expect(text(namedView).filter((line) => line.includes('See step 2'))).toEqual([]);
+  });
+
   it.each([
-    ['not connected', { state: 'off' }, 'Not connected to the public record.'],
+    ['not connected', { state: 'off' }, 'This page cannot read the public record yet.'],
     ['reading', { state: 'loading' }, 'Checking the exam name.'],
     ["can't read ENS", { state: 'error', message: 'RPC down' }, 'The exam name could not be read.'],
   ] as const)('%s is neutral, with no Pass and no seal', (_, polled, headline) => {
@@ -621,7 +651,7 @@ describe('before there is an exam to show', () => {
   it.each([
     ['no exam', base, 'Choose an exam to check.'],
     ['a bad link', { ...base, invalidLink: true }, 'This link does not name an exam.'],
-    ['no connection', { ...base, examId }, 'Not connected to the public record.'],
+    ['no connection', { ...base, examId }, 'This page cannot read the public record yet.'],
     ['a first read', { ...base, examId, sources: { ...base.sources, chain: true }, records: { state: 'loading' } }, 'Reading the public record.'],
     ['a failed read', { ...base, examId, sources: { ...base.sources, chain: true }, records: { state: 'error', message: 'down' } }, 'The public record could not be read.'],
   ] as [string, View, string][])('%s says so, with no Pass', (_, view, headline) => {

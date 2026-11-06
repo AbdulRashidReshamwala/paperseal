@@ -154,3 +154,50 @@
     gap: 2pt;
   }
 }
+
+/* Hand out the paper: a ruled list of rooms, one copies field each. */
+.handout-demo {
+  padding: var(--ps-space-2) var(--ps-space-3);
+  margin: 0;
+  font-size: var(--ps-text-small);
+  font-weight: 600;
+  color: var(--ps-pending);
+  border: 1px dashed var(--ps-rule-strong);
+}
+
+.handout-rooms {
+  width: min(100%, 36rem);
+  text-align: left;
+}
+
+.handout-room {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-3) var(--ps-space-4);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.handout-copies {
+  display: flex;
+  gap: var(--ps-space-2);
+  align-items: center;
+  font-size: var(--ps-text-small);
+}
+
+.handout-copies .ps-input {
+  width: 5.5rem;
+}
+
+.handout-total {
+  margin: 0;
+  font-size: var(--ps-text-small);
+  color: var(--ps-ink-soft);
+}
+
+.handout-more {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-3);
+  justify-content: center;
+}

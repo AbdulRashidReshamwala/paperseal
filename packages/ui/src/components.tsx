@@ -1,9 +1,18 @@
-import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import {
+  useEffect,
+  useState,
+  type ButtonHTMLAttributes,
+  type ReactNode,
+} from "react";
 
-import { isChromium, type BrandedNavigator } from './browser';
-import { Logo, Wordmark } from './Logo';
+import { isChromium, type BrandedNavigator } from "./browser";
+import { Logo, Wordmark } from "./Logo";
 
-export function AppShell(props: { name: string; nav: ReactNode; children: ReactNode }) {
+export function AppShell(props: {
+  name: string;
+  nav: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <div className="ps-shell">
       <header className="ps-header">
@@ -20,7 +29,11 @@ export function AppShell(props: { name: string; nav: ReactNode; children: ReactN
   );
 }
 
-export function Screen(props: { title: string; lede: string; children: ReactNode }) {
+export function Screen(props: {
+  title: string;
+  lede: string;
+  children: ReactNode;
+}) {
   return (
     <section className="ps-screen">
       <h1>{props.title}</h1>
@@ -47,7 +60,7 @@ export function EmptyState(props: { title: string; children: ReactNode }) {
   );
 }
 
-export type Tone = 'ok' | 'warn' | 'bad' | 'neutral';
+export type Tone = "ok" | "warn" | "bad" | "neutral";
 
 export function Badge(props: { tone: Tone; children: ReactNode }) {
   return (
@@ -59,6 +72,64 @@ export function Badge(props: { tone: Tone; children: ReactNode }) {
 
 export function Button(props: ButtonHTMLAttributes<HTMLButtonElement>) {
   return <button type="button" className="ps-button" {...props} />;
+}
+
+/**
+ * Copies `text` (a function is read at the press, so a link always has its fragment) and says so.
+ * When the browser won't allow it, the text is shown to select by hand.
+ */
+export function CopyButton(props: {
+  text: string | (() => string);
+  children: ReactNode;
+  copied?: string;
+  "aria-label"?: string;
+}) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const [shown, setShown] = useState("");
+  const onClick = () => {
+    const text = typeof props.text === "function" ? props.text() : props.text;
+    setShown(text);
+    // navigator.clipboard is missing outside a secure context.
+    const nav = globalThis.navigator as Navigator | undefined;
+    let written: Promise<void> | undefined;
+    try {
+      written = nav?.clipboard?.writeText(text);
+    } catch {
+      written = undefined;
+    }
+    if (!written) {
+      setState("failed");
+      return;
+    }
+    written.then(
+      () => {
+        setState("copied");
+      },
+      () => {
+        setState("failed");
+      },
+    );
+  };
+  return (
+    <span className="ps-copy">
+      <Button
+        {...(props["aria-label"] ? { "aria-label": props["aria-label"] } : {})}
+        onClick={onClick}
+      >
+        {state === "copied" ? (props.copied ?? "Copied") : props.children}
+      </Button>
+      {state === "failed" ? (
+        <>
+          <span role="status">
+            It could not be copied. Select the text below and copy it yourself.
+          </span>
+          <span className="ps-mono" style={{ whiteSpace: "pre-wrap" }}>
+            {shown}
+          </span>
+        </>
+      ) : null}
+    </span>
+  );
 }
 
 export function Field(props: {
@@ -81,7 +152,9 @@ export function Field(props: {
           props.onChange(event.target.value);
         }}
       />
-      {props.error ? <span className="ps-field-error">{props.error}</span> : null}
+      {props.error ? (
+        <span className="ps-field-error">{props.error}</span>
+      ) : null}
       {props.hint ? <span className="ps-field-hint">{props.hint}</span> : null}
     </label>
   );
@@ -92,9 +165,13 @@ export function Rows(props: { children: ReactNode }) {
 }
 
 /** `muted` greys the row out, for content that has not been verified and should not read as fact. */
-export function Row(props: { label: ReactNode; children: ReactNode; muted?: boolean }) {
+export function Row(props: {
+  label: ReactNode;
+  children: ReactNode;
+  muted?: boolean;
+}) {
   return (
-    <li data-muted={props.muted ? 'true' : undefined}>
+    <li data-muted={props.muted ? "true" : undefined}>
       <span>{props.label}</span>
       <span>{props.children}</span>
     </li>
@@ -106,8 +183,8 @@ export function Mono(props: { children: ReactNode }) {
 }
 
 type Loaded<T> =
-  | { source: () => Promise<T>; state: 'ready'; value: T }
-  | { source: () => Promise<T>; state: 'error'; message: string };
+  | { source: () => Promise<T>; state: "ready"; value: T }
+  | { source: () => Promise<T>; state: "error"; message: string };
 
 /**
  * Loads from a real source, or shows that the source is not set up. `load` is
@@ -135,15 +212,17 @@ export function Connected<T>(props: {
       load()
         .then(
           (value) => {
-            if (live) setLoaded({ source: load, state: 'ready', value });
+            if (live) setLoaded({ source: load, state: "ready", value });
           },
           (error: unknown) => {
-            const message = error instanceof Error ? error.message : String(error);
-            if (live) setLoaded({ source: load, state: 'error', message });
+            const message =
+              error instanceof Error ? error.message : String(error);
+            if (live) setLoaded({ source: load, state: "error", message });
           },
         )
         .finally(() => {
-          if (live && pollMs !== undefined && pollMs > 0) timer = setTimeout(read, pollMs);
+          if (live && pollMs !== undefined && pollMs > 0)
+            timer = setTimeout(read, pollMs);
         });
     };
     read();
@@ -153,26 +232,66 @@ export function Connected<T>(props: {
     };
   }, [load, pollMs]);
 
-  if (!load) return <EmptyState title={`${props.title}: not connected`}>{props.notConnected}</EmptyState>;
-  if (loaded?.source !== load) return <EmptyState title={props.title}>Loading.</EmptyState>;
-  if (loaded.state === 'error') {
-    return <EmptyState title={`${props.title}: unavailable`}>{loaded.message}</EmptyState>;
+  if (!load)
+    return (
+      <EmptyState title={`${props.title}: not set up yet`}>
+        {props.notConnected}
+      </EmptyState>
+    );
+  if (loaded?.source !== load)
+    return <EmptyState title={props.title}>One moment.</EmptyState>;
+  if (loaded.state === "error") {
+    return (
+      <EmptyState title={`${props.title}: not available right now`}>
+        <p>
+          This page keeps trying. If it stays like this, contact your exam
+          board.
+        </p>
+        <details>
+          <summary>Details</summary>
+          {loaded.message}
+        </details>
+      </EmptyState>
+    );
   }
   return <Panel title={props.title}>{props.children(loaded.value)}</Panel>;
 }
 
 /** Blocks everything outside Chromium, which both registration and unlock need. */
-export function ChromiumGate(props: { children: ReactNode; nav?: BrandedNavigator }) {
-  const nav = props.nav ?? (globalThis.navigator as BrandedNavigator | undefined);
+export function ChromiumGate(props: {
+  children: ReactNode;
+  nav?: BrandedNavigator;
+  /** The address to copy. Defaults to this page's, with its fragment. */
+  href?: string;
+}) {
+  const nav =
+    props.nav ?? (globalThis.navigator as BrandedNavigator | undefined);
   if (isChromium(nav)) return <>{props.children}</>;
   return (
     <div className="ps-shell">
       <header className="ps-role">
         <Wordmark />
       </header>
-      <Screen title="Chromium required" lede="Paper Seal needs a Chromium browser.">
+      <Screen
+        title="Open this page in Chrome"
+        lede="Paper Seal does not work in this browser."
+      >
         <Panel>
-          <p>Open this page in Chrome, Edge or another Chromium browser to use your security key.</p>
+          <p>
+            Open this page in Chrome or Edge on a computer. Then use your
+            security key.
+          </p>
+          <p>
+            <CopyButton
+              text={() =>
+                props.href ??
+                (globalThis.location as Location | undefined)?.href ??
+                ""
+              }
+            >
+              Copy link
+            </CopyButton>
+          </p>
         </Panel>
       </Screen>
     </div>

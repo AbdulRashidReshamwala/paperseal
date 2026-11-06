@@ -34,7 +34,7 @@ export function CreateStep(props: { eyebrow: string; onContinue: () => void }) {
     <Stage
       eyebrow={props.eyebrow}
       title="Create the exam"
-      lede="Say when the exam is and what the paper covers. We work out the rest."
+      lede="Enter when the exam is and what the paper covers. We work out the rest."
       action={
         <form
           className="board-form"
@@ -46,7 +46,7 @@ export function CreateStep(props: { eyebrow: string; onContinue: () => void }) {
           <Panel title="The exam">
             <Input
               label="Exam name"
-              hint="Lowercase letters, digits and hyphens, like jee-main-2026. It becomes the exam's ENS name. Published names are final, and each exam needs its own."
+              hint="Use lowercase letters, digits and hyphens, like jee-main-2026. The name cannot be changed once the exam is published. Each exam needs its own name."
               error={whenTyped(plan.name, blueprint.nameError)}
               value={plan.name}
               onChange={(name) => {
@@ -84,7 +84,7 @@ export function CreateStep(props: { eyebrow: string; onContinue: () => void }) {
                     set({ releaseMinutes: event.target.value });
                   }}
                 />
-                minutes before
+                minutes before the exam starts
               </span>
               {schedule.errors.deltaMinutes && plan.releaseMinutes.trim() !== '' ? (
                 <span className="ps-field-error">{plainWords(schedule.errors.deltaMinutes)}</span>
@@ -134,7 +134,7 @@ export function CreateStep(props: { eyebrow: string; onContinue: () => void }) {
           {lockAt !== null ? (
             <p className="board-note" role="status">
               Questions close {formatWhen(lockAt)}.
-              {isTight(lockAt, nowSeconds) ? ' That leaves under 30 minutes to register everyone, which is too short for most exams.' : ''}
+              {isTight(lockAt, nowSeconds) ? ' That leaves under 30 minutes to bring everyone in, which is too short for most exams.' : ''}
               {needs ? ` You will need at least ${String(needs.questions)} questions from at least ${String(needs.setters)} setters.` : ''}
             </p>
           ) : null}
@@ -148,7 +148,7 @@ export function CreateStep(props: { eyebrow: string; onContinue: () => void }) {
             <Fold summary="Advanced" open={advancedNeeded || !folded}>
               <Input
                 label="Most of a topic one setter can write, in percent"
-                hint="From 1 to 100."
+                hint="A percentage, from 1 to 100."
                 numeric
                 error={whenTyped(plan.maxSetterPercent, blueprint.percentError)}
                 value={plan.maxSetterPercent}
@@ -157,8 +157,8 @@ export function CreateStep(props: { eyebrow: string; onContinue: () => void }) {
                 }}
               />
               <Input
-                label="Question bank size, as a multiple of the questions used"
-                hint="Each topic's bank must be this many times its question count, at least 2."
+                label="How many questions to collect, compared with the questions used"
+                hint="For each topic, setters send this many times the questions the paper uses. Enter 2 or more."
                 numeric
                 error={whenTyped(plan.minBankMultiple, blueprint.multipleError)}
                 value={plan.minBankMultiple}
@@ -169,7 +169,7 @@ export function CreateStep(props: { eyebrow: string; onContinue: () => void }) {
               <Input
                 label="Questions close"
                 type="datetime-local"
-                hint="Leave empty to use the time above."
+                hint="Leave this empty and we choose a time for you."
                 error={whenTyped(plan.lockTime, schedule.errors.lockTime)}
                 value={plan.lockTime}
                 onChange={(lockTime) => {
@@ -177,8 +177,8 @@ export function CreateStep(props: { eyebrow: string; onContinue: () => void }) {
                 }}
               />
               <Input
-                label="Public record provider"
-                hint="The host name the sealed machine reads the public record from, such as sepolia.example.org."
+                label="Public record address"
+                hint="The internet address Paper Seal uses to read the public record, such as sepolia.example.org. Leave it as it is unless you were given another."
                 error={whenTyped(publish.rpcHost, hostError)}
                 value={publish.rpcHost}
                 onChange={(rpcHost) => {
@@ -195,7 +195,7 @@ export function CreateStep(props: { eyebrow: string; onContinue: () => void }) {
           </div>
         </form>
       }
-      next="You choose the version of the sealed machine, then review everything before it is published."
+      next="Next you choose the Paper Seal version. Then you review everything before anything is published."
     />
   );
 }

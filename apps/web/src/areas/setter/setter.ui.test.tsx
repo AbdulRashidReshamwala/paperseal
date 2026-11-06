@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 import { fromHex, padding, parseQuestion, setterOwner, unpadQuestion } from '@paperseal/protocol';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { clearHeldInvites, holdInvite } from '../../shared/invite';
 import { saveCredential } from '../../shared/Register';
-import { CONFIRMATION_TTL_MS } from './confirm';
+import { CONFIRMATION_REFRESH_MS, CONFIRMATION_TTL_MS } from './confirm';
 import { loadReceipts, saveReceipt } from './receipts';
 import SetterArea from './SetterArea';
 import { saveTopic } from './state';
@@ -61,7 +61,7 @@ describe('a first visit', () => {
     const world = await makeWorld();
     mount(world);
     expect(await screen.findByRole('heading', { name: 'Register your security key' })).toBeTruthy();
-    expect(screen.getByText(/Your name is never published/)).toBeTruthy();
+    expect(screen.getByText(/Your name is not published/)).toBeTruthy();
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(screen.getAllByRole('button')).toHaveLength(1);
 
@@ -84,7 +84,7 @@ describe('a first visit', () => {
     world.stage.current = 'onboard';
     mount(world);
     fireEvent.click(await screen.findByRole('button', { name: 'Register your security key' }));
-    expect(await screen.findByText('Waiting for your exam board')).toBeTruthy();
+    expect(await screen.findByText(/Your exam board has sent the list of people/)).toBeTruthy();
     // There is no list to check yet, so a check here could only raise a false alarm.
     expect(world.verifyToken).not.toHaveBeenCalled();
 
@@ -108,7 +108,7 @@ describe('a first visit', () => {
     const world = await makeWorld();
     world.stage.current = 'onboard';
     mount(world);
-    expect(await screen.findByText('Waiting for your exam board')).toBeTruthy();
+    expect(await screen.findByText(/Your exam board has sent the list of people/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Use a different security key' })).toBeNull();
     cleanup();
     holdInvite({ examId, role: 'setter', inviteSecret: `0x${'5a'.repeat(32)}` });
@@ -134,7 +134,7 @@ describe('the automatic check', () => {
     let finish: (value: unknown) => void = () => undefined;
     world.verifyToken.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
     mount(world);
-    expect(await screen.findByRole('heading', { name: /Checking this is the genuine sealed system/ })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: /Getting ready for your questions/ })).toBeTruthy();
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(sealButton()).toBeNull();
     finish({ trusted: true, signature: { ok: true }, instanceKey: { ok: true }, claims: [] });
@@ -144,8 +144,8 @@ describe('the automatic check', () => {
   it('blocks sealing, loudly and with the reason, when attestation fails', async () => {
     const world = await makeWorld({ realAttestation: true });
     mount(world);
-    expect(await screen.findByRole('heading', { name: /can’t confirm this is the genuine sealed system/ })).toBeTruthy();
-    expect(screen.getByRole('alert').textContent).toContain('Sealing has stopped');
+    expect(await screen.findByRole('heading', { name: /can’t take your questions yet/ })).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toContain('Nothing new has been sent');
     expect(screen.getByText(/Claim iss: expected/)).toBeTruthy();
     expect(sealButton()).toBeNull();
     expect(screen.queryByRole('textbox')).toBeNull();
@@ -252,7 +252,7 @@ describe('sealing', () => {
     mount(world);
     await ready();
     expect(await screen.findByText('1 question sealed so far')).toBeTruthy();
-    expect(await screen.findByText('This receipt doesn’t check out')).toBeTruthy();
+    expect(await screen.findByText(/This receipt could not be confirmed/)).toBeTruthy();
   });
 
   it('states the size limit and refuses a question over it', async () => {
@@ -399,7 +399,7 @@ describe('a question that may or may not have arrived', () => {
     fireEvent.click(sealButton() as HTMLButtonElement);
 
     const again = await screen.findByRole('button', { name: 'Send this question again' });
-    expect(screen.getByText(/can’t be stored twice/)).toBeTruthy();
+    expect(screen.getByText(/will not be stored twice/)).toBeTruthy();
     expect(area.readOnly).toBe(true);
     expect(area.value).toBe('What is momentum?');
     expect(screen.getAllByRole('radio').every((chip) => (chip as HTMLInputElement).matches(':disabled'))).toBe(true);
@@ -422,7 +422,7 @@ describe('a question that may or may not have arrived', () => {
     await ready();
     const area = await write('What is momentum?');
     fireEvent.click(sealButton() as HTMLButtonElement);
-    expect(await screen.findByText(/reply didn’t check out/)).toBeTruthy();
+    expect(await screen.findByText(/could not confirm that this question was received/)).toBeTruthy();
     expect(area.value).toBe('What is momentum?');
     expect(screen.queryByText('Sealed')).toBeNull();
     expect(loadReceipts(examId)).toEqual([]);
@@ -452,6 +452,37 @@ describe('an expired or lost confirmation', () => {
     expect(await writingArea()).toBe(area);
   });
 
+  it('checks again at about four minutes while the writer is still writing, with no pause and no second press', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const world = await makeWorld();
+      mount(world);
+      await ready();
+      const area = await write('Still writing this one');
+      const before = world.verifyToken.mock.calls.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(CONFIRMATION_REFRESH_MS + 1000);
+      });
+      await vi.waitFor(() => {
+        expect(world.verifyToken.mock.calls.length).toBeGreaterThan(before);
+      });
+      // Past the old five minutes, sealing is still open and the words are still there.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(CONFIRMATION_TTL_MS - CONFIRMATION_REFRESH_MS);
+      });
+      expect(await writingArea()).toBe(area);
+      expect(area.value).toBe('Still writing this one');
+      expect(sealButton()).not.toBeNull();
+      fireEvent.click(sealButton() as HTMLButtonElement);
+      await vi.waitFor(() => {
+        expect(loadReceipts(examId)).toHaveLength(1);
+      });
+      expect(world.teeQuestion).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('shuts sealing and keeps the draft when the sealed system shows different keys', async () => {
     const world = await makeWorld();
     mount(world);
@@ -467,7 +498,7 @@ describe('an expired or lost confirmation', () => {
     (world.tee as { attestation: unknown }).attestation = other.tee.attestation;
     fireEvent.click(sealButton() as HTMLButtonElement);
 
-    expect(await screen.findByRole('heading', { name: /can’t confirm this is the genuine sealed system/ })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: /can’t take your questions yet/ })).toBeTruthy();
     expect(sealButton()).toBeNull();
     expect(area.value).toBe('Keep these words');
     // Earlier questions really were sealed, so the warning must not say otherwise.
@@ -514,7 +545,7 @@ describe('after Lock', () => {
     world.build.current = { instancePublicKey: `0x04${'bb'.repeat(64)}` };
     mount(world);
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toContain('You may have been routed to a different sealed system');
+    expect(alert.textContent).toContain('do not match the paper that was built');
     expect(alert.textContent).toContain('Tell your exam board now');
     expect(screen.queryByRole('heading', { name: 'Your questions are sealed' })).toBeNull();
     expect(screen.queryByRole('img', { name: 'Sealed' })).toBeNull();

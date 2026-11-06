@@ -4,6 +4,7 @@ import { Check, Countdown, Stage } from '@paperseal/ui';
 import { ExamRecord } from './ExamRecord';
 import type { Snapshot } from './examState';
 import { useNow } from './hooks';
+import { sayOf } from './details';
 import { bankNeeded, formatTimeOnly, plainWords } from './plan';
 
 function Questions(props: { snapshot: Snapshot }) {
@@ -11,7 +12,7 @@ function Questions(props: { snapshot: Snapshot }) {
   if (!status) {
     return (
       <p>
-        <Check status="not-checked">{teeProblem ? plainWords(teeProblem) : 'The sealed machine has not answered yet.'}</Check>
+        <Check status="not-checked">{teeProblem ? plainWords(sayOf(teeProblem)) : 'Paper Seal has not answered yet.'}</Check>
       </p>
     );
   }
@@ -25,7 +26,7 @@ function Questions(props: { snapshot: Snapshot }) {
   );
 }
 
-/** Step 5: there is nothing to do here. The sealed machine runs Lock and Build by itself. */
+/** Step 5: there is nothing to do here until the paper is built. */
 export function WaitStep(props: { eyebrow: string; snapshot: Snapshot }) {
   const { snapshot } = props;
   const now = useNow();
@@ -39,9 +40,9 @@ export function WaitStep(props: { eyebrow: string; snapshot: Snapshot }) {
     return (
       <Stage
         eyebrow={props.eyebrow}
-        title="The sealed machine stopped"
-        lede="It reported a failure. If the questions did not meet the setter limits, the paper cannot be built and the exam cannot go ahead."
-        next="Ask whoever runs the sealed machine to check its log. Nothing more can happen here until it recovers."
+        title="The paper could not be built"
+        lede="This can happen when setters did not send enough questions. The exam cannot go ahead until it is fixed."
+        next="Contact whoever runs Paper Seal and tell them what you see here. You can close this page."
       >
         <Questions snapshot={snapshot} />
         <ExamRecord snapshot={snapshot} />
@@ -51,15 +52,19 @@ export function WaitStep(props: { eyebrow: string; snapshot: Snapshot }) {
   return (
     <Stage
       eyebrow={props.eyebrow}
-      title={closed ? 'The sealed machine is building the paper' : `Nothing to do until ${formatTimeOnly(lockSeconds)}`}
+      title={closed ? 'The paper is being built' : `Nothing to do until ${formatTimeOnly(lockSeconds)}`}
       lede={
         closed
-          ? 'Questions have closed. The sealed machine locks the question bank and builds the paper by itself.'
+          ? 'Questions have closed. Paper Seal is building the paper. You do not need to do anything.'
           : stage === 'onboard'
-            ? 'The list is posted. The sealed machine reads it once it is final, which can take about 20 minutes, and setters can then send questions.'
-            : 'Setters are sending questions. The sealed machine locks them in and builds the paper by itself.'
+            ? 'Your list of people is posted. Setters can start sending questions in about 20 minutes.'
+            : 'Setters are sending questions. You do not need to do anything now.'
       }
-      next={closed ? 'You post the finished paper’s record here, as soon as it is ready.' : 'When questions close, the sealed machine builds the paper. You post its record here.'}
+      next={
+        closed
+          ? 'This page changes by itself when the paper is ready. You must then post its record here, and no one else can do it for you. If you close this page, come back later.'
+          : `Come back after ${formatTimeOnly(lockSeconds)}. You must then post the paper’s record here, and no one else can do it for you. It is safe to close this page until then.`
+      }
     >
       <Questions snapshot={snapshot} />
       <Countdown at={lockSeconds * 1000} round={lockRound} label="Questions close" reached="Closed" />

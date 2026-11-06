@@ -65,15 +65,15 @@ const verdict = (ok: boolean): CheckResult => (ok ? 'pass' : 'fail');
 
 export async function runProof(input: ProofInput): Promise<ProofState> {
   const { storage, examId, exam, build, criteria, client } = input;
-  if (!examId || !exam) return { state: 'not-ready', reason: 'The exam is not published on the chain yet.' };
+  if (!examId || !exam) return { state: 'not-ready', reason: 'The exam is not on the public record yet.' };
 
   const endRound = Number(exam.settings.endRound);
   const reached =
     input.currentRound !== null ? input.currentRound >= endRound : input.now >= roundTimeSeconds(endRound);
   if (!reached) return { state: 'waiting', endRound, opensAt: roundTimeSeconds(endRound) };
 
-  if (!storage) return { state: 'not-ready', reason: 'Set the storage URL under Connection.' };
-  if (!build) return { state: 'not-ready', reason: 'There is no Build on the chain to compare the paper with.' };
+  if (!storage) return { state: 'not-ready', reason: 'Add where the public files are kept under "Check it yourself".' };
+  if (!build) return { state: 'not-ready', reason: 'No paper is recorded to compare with.' };
 
   const keyPrivFile = await storage.get(storageNames.keyPriv);
   if (!keyPrivFile) return { state: 'sealed' };
@@ -83,7 +83,7 @@ export async function runProof(input: ProofInput): Promise<ProofState> {
   ]);
   if (!keyPubFile || !paperFile) {
     const missing = [!keyPubFile && storageNames.keyPub, !paperFile && storageNames.paper].filter(Boolean);
-    return { state: 'failed', step: 'files', message: `Storage has no ${missing.join(' or ')}.` };
+    return { state: 'failed', step: 'files', message: `The public files have no ${missing.join(' or ')}.` };
   }
 
   let key: Uint8Array;

@@ -147,14 +147,14 @@ export interface View {
   timeZone?: string;
 }
 
-const needsStorage = 'Needs the storage address, which you can add under "Check against your own RPC".';
-const needsTee = 'Needs a TEE URL, which you can add under "Check against your own RPC". Every chain check works without it.';
+const needsStorage = 'Add where the public files are kept under "Check it yourself" at the foot of the page.';
+const needsTee = 'Add the live machine address under "Check it yourself" at the foot of the page. Every other check works without it.';
 
 const roleNames: Record<number, string> = {
   1: 'Setter',
-  2: 'Neutral party',
-  3: 'Centre, key holder',
-  4: 'Approved centre',
+  2: 'Key holder',
+  3: 'Centre holding part of the key',
+  4: 'Centre that gets the key when the paper unlocks',
 };
 
 const plural = (n: number, word: string) => `${String(n)} ${word}${n === 1 ? '' : 's'}`;
@@ -228,14 +228,14 @@ function sourceGap(label: string, source: Neutral | { kind: 'off' } | { kind: 'u
 /** A record that is on-chain but whose bytes can't be used. Never shown as "not posted". */
 function problemRow(label: string, problem: ChainProblem): Item {
   return problem.kind === 'mismatch'
-    ? fail(label, `${label}: the bytes on the public record do not match its fingerprint. ${problem.message}`, problem.message)
+    ? fail(label, `${label} on the public record does not match its fingerprint.`, problem.message)
     : notChecked(label, `Could not be read: ${problem.message}`);
 }
 
 function claimRow(check: ClaimCheck): Item {
   if (check.ok) return { kind: 'check', label: { code: check.claim }, status: 'pass', detail: short(check.actual) };
   const detail = `${short(check.actual)}, expected ${short(check.expected)}${check.note ? ` (${check.note})` : ''}`;
-  return fail({ code: check.claim }, `The proof's ${check.claim} claim does not match: ${detail}.`, detail);
+  return fail({ code: check.claim }, 'The proof that Paper Seal runs the published code does not match what was published.', detail);
 }
 
 interface Draft {
@@ -272,6 +272,9 @@ interface Context {
   when: (seconds: number) => string;
 }
 
+/** A step's number as shown: a name route puts the Name step first, so the others move down one. */
+const stepNumber = (c: Context, withoutName: number) => withoutName + (c.view.name ? 1 : 0);
+
 const roundOf = (seconds: number | null) => (seconds === null ? null : roundAtSeconds(seconds) || null);
 
 function roundRow(label: string, round: bigint, c: Context): Item {
@@ -287,15 +290,15 @@ function settingsItems(exam: Exam, examId: Hex | null): Item[] {
   const s = exam.settings;
   return [
     ...(examId ? [{ kind: 'hash' as const, label: 'Exam ID', value: examId }] : []),
-    { kind: 'fact', label: 'T, exam start', value: utcTime(Number(s.examStart)) },
-    { kind: 'fact', label: 'Δ', value: `${String(s.delta)} s` },
+    { kind: 'fact', label: 'Exam start', value: utcTime(Number(s.examStart)) },
+    { kind: 'fact', label: 'Paper released to centres this long before the exam', value: `${String(s.delta)} s` },
     { kind: 'fact', label: `Lock round ${String(s.lockRound)}`, value: utcTime(roundTimeSeconds(Number(s.lockRound))) },
     { kind: 'fact', label: `Unlock round ${String(s.unlockRound)}`, value: utcTime(roundTimeSeconds(Number(s.unlockRound))) },
     { kind: 'fact', label: `End round ${String(s.endRound)}`, value: utcTime(roundTimeSeconds(Number(s.endRound))) },
     { kind: 'hash', label: 'Criteria hash', value: s.criteriaHash },
-    { kind: 'fact', label: 'RPC host the sealed machine reads', value: s.rpcHost },
-    { kind: 'hash', label: 'TEE version, the commit it was built from', value: exam.commitHash },
-    { kind: 'hash', label: 'TEE image digest', value: exam.imageDigest },
+    { kind: 'fact', label: 'Public record address Paper Seal uses', value: s.rpcHost },
+    { kind: 'hash', label: 'Software version, the commit it was built from', value: exam.commitHash },
+    { kind: 'hash', label: 'Software image', value: exam.imageDigest },
     { kind: 'link', href: `https://github.com/${REPOSITORY}/commit/${exam.commitHash.slice(2)}`, text: 'Read this version of the code' },
   ];
 }
@@ -303,13 +306,22 @@ function settingsItems(exam: Exam, examId: Hex | null): Item[] {
 /** The short titles of docs/ens-setup.md, one per check a name can fail. */
 const nameTitles: Record<ExamNameCheck, string> = {
   name: 'Not a valid name',
-  registry: 'No registry',
-  primaryName: 'Primary name differs',
-  forward: 'Not verified both ways',
-  unreadable: "Can't read ENS",
+  registry: 'No exam record',
+  primaryName: 'Not the board’s name',
+  forward: 'Not confirmed by the board',
+  unreadable: "Can't read the name",
 };
 
-const sepoliaName = 'On Sepolia anyone can register a look-alike name, so this is a demo. Real proof needs a mainnet name.';
+/** What each failure means to someone who is not technical. The exact reason stays in the evidence. */
+const nameFailures: Record<ExamNameCheck, string> = {
+  name: 'Check how the name is spelled.',
+  registry: 'This name does not lead to an exam on the public record.',
+  primaryName: 'This name does not belong to the exam board behind that record.',
+  forward: 'The exam board behind that record does not confirm this name.',
+  unreadable: 'The name could not be read.',
+};
+
+const sepoliaName = 'On Sepolia, a test network, anyone can register a similar name, so this check is only a demo.';
 
 /** Where one locator came from: the name's record, or the viewer's own value where it sets none. */
 function located(label: string, record: string | null, used: string, fallback: string): Item {
@@ -344,12 +356,12 @@ function nameStep(named: NameView): Draft {
     return {
       ...base,
       aside: sepoliaName,
-      note: 'Needs a Sepolia RPC URL to check this name.',
-      items: [notChecked('Name', 'Needs a Sepolia RPC URL, which you can add under "Check against your own RPC".')],
+      note: 'Add where to read the public record under "Check it yourself" to check this name.',
+      items: [notChecked('Name', 'Needs a Sepolia RPC URL, which you can add under "Check it yourself".')],
     };
   }
   if (result.state === 'loading') {
-    return { ...base, aside: sepoliaName, note: `Checking ${named.name} on ENS.`, items: [notChecked('Name', 'Reading')] };
+    return { ...base, aside: sepoliaName, note: `Checking ${named.name}.`, items: [notChecked('Name', 'Reading')] };
   }
   if (result.state === 'error') return unreadable(`Could not be read: ${result.message}`);
   const read = result.value;
@@ -359,7 +371,7 @@ function nameStep(named: NameView): Draft {
     return {
       ...base,
       note: title,
-      items: [{ kind: 'fact', label: 'Name', value: named.name }, fail(title, `${title}. ${read.reason}`, read.reason), ...partialRows(read.partial)],
+      items: [{ kind: 'fact', label: 'Name', value: named.name }, fail(title, `${title}. ${nameFailures[read.failed]}`, read.reason), ...partialRows(read.partial)],
     };
   }
   const value = read.value;
@@ -368,7 +380,7 @@ function nameStep(named: NameView): Draft {
     ...base,
     complete: true,
     aside: sepoliaName,
-    note: `${value.name} names this exam, and its board's primary name is verified both ways.`,
+    note: `${value.name} belongs to the exam board behind this record.`,
     items: [
       { kind: 'check', label: 'Exam name, a valid ENS label', status: 'pass', detail: value.label },
       { kind: 'hash', label: 'Exam ID, the labelhash of the exam name', value: value.examId },
@@ -377,12 +389,12 @@ function nameStep(named: NameView): Draft {
       { kind: 'check', label: "Board's primary name", status: 'pass', detail: value.parent },
       { kind: 'check', label: `${value.parent} points back to the board, so verified both ways`, status: 'pass' },
       { kind: 'heading', text: 'Where to look' },
-      located('TEE URL', value.teeUrl, used.teeUrl, 'From Connection'),
-      located('Storage URL', value.storageUrl, used.storageUrl, 'From Connection'),
+      located('TEE URL', value.teeUrl, used.teeUrl, 'From your settings'),
+      located('Storage URL', value.storageUrl, used.storageUrl, 'From your settings'),
       located('Storage bucket', value.bucket, used.bucket, 'Built into this page'),
       {
         kind: 'text',
-        text: "These records only say where to look. A wrong value makes the later checks fail, it can't make them pass. Where the name sets none, this page uses your own Connection settings.",
+        text: 'These records only say where to look. A wrong value makes the later checks fail, it can’t make them pass. Where the name sets none, this page uses your settings under "Check it yourself".',
       },
     ],
   };
@@ -417,7 +429,8 @@ function publishedStep(c: Context): Draft {
   };
 }
 
-function publishedTokenItems(token: Records['token'] | null): Item[] {
+function publishedTokenItems(c: Context): Item[] {
+  const token = c.records?.token ?? null;
   if (!token) return [notChecked('Published proof', 'Not read yet')];
   if (token.kind !== 'ready') return [sourceGap('Published proof', token)];
   const { verdict: result, build } = token;
@@ -429,13 +442,13 @@ function publishedTokenItems(token: Records['token'] | null): Item[] {
       status: result.verified ? 'pass' : 'fail',
       ...(result.verified
         ? {}
-        : { quiet: recordFailed, failure: 'The Build is not signed by the key in the machine proof. See step 5.' }),
+        : { quiet: recordFailed, failure: `The paper is not signed by the same machine that proved it runs the published code. See step ${String(stepNumber(c, 5))}.` }),
     },
     result.signature.ok
       ? { kind: 'check', label: "Token signature, up to Google's root", status: 'pass' }
       : fail(
           "Token signature, up to Google's root",
-          `The machine proof's signature does not lead to Google: ${result.signature.error.message}`,
+          'The proof that Paper Seal runs the published code could not be traced back to Google.',
           result.signature.error.message,
         ),
     ...result.claims.map(claimRow),
@@ -444,10 +457,10 @@ function publishedTokenItems(token: Records['token'] | null): Item[] {
 }
 
 function liveTokenItems(c: Context): Item[] {
-  const heading: Item = { kind: 'heading', text: 'Live from the sealed machine, optional' };
+  const heading: Item = { kind: 'heading', text: 'Live from the machine, optional' };
   if (!c.view.sources.tee) return [heading, { kind: 'text', text: needsTee }];
   const { live } = c.view;
-  const unpublished = 'The exam is not published on the chain yet.';
+  const unpublished = 'The exam is not on the public record yet.';
   if (live.state === 'error') return [heading, notChecked('Fresh token', `Could not be read: ${live.message}`)];
   if (live.state !== 'ready') return [heading, notChecked('Fresh token', c.exam ? 'Not read yet' : unpublished)];
   if ('kind' in live.value) return [heading, notChecked('Fresh token', live.value.message)];
@@ -461,19 +474,19 @@ function liveTokenItems(c: Context): Item[] {
       label: 'Trusted: token signature, every claim and the instance key signature',
       status: result.trusted ? 'pass' : 'fail',
       quiet: true,
-      failure: 'The live sealed machine did not pass its check.',
+      failure: 'The live check of the machine that builds the paper did not pass.',
     },
     result.signature.ok
       ? { kind: 'check', label: "Token signature, up to Google's root", status: 'pass' }
       : fail(
           "Token signature, up to Google's root",
-          `The live machine's proof does not lead to Google: ${result.signature.error.message}`,
+          'The live proof that Paper Seal runs the published code could not be traced back to Google.',
           result.signature.error.message,
         ),
     ...result.claims.map(claimRow),
     result.instanceKey.ok
       ? { kind: 'check', label: 'Instance key signs the encryption key', status: 'pass' }
-      : fail('Instance key signs the encryption key', `The live machine's keys do not match: ${result.instanceKey.error}`, result.instanceKey.error),
+      : fail('Instance key signs the encryption key', 'The live machine’s keys do not match each other.', result.instanceKey.error),
     { kind: 'hash', label: 'Instance key', value: result.instancePublicKey },
   ];
 }
@@ -495,7 +508,7 @@ function rebuildItems(exam: Exam): Item[] {
 }
 
 const demoWarning =
-  'Demo mode. The sealed machine does not check where security keys come from, so a simulated key could be registered as a key holder, setter or centre.';
+  'Demo mode. Paper Seal does not check where security keys come from, so a simulated key could be registered as a key holder, setter or centre.';
 
 function attestedStep(c: Context): Draft {
   const { exam, build, live } = c;
@@ -512,7 +525,7 @@ function attestedStep(c: Context): Draft {
     {
       kind: 'text',
       ...(requireHardwareAttestation
-        ? { text: 'The sealed machine checks that every registered security key comes from approved hardware.' }
+        ? { text: 'Every registered security key is checked to come from approved hardware.' }
         : { text: demoWarning, tone: 'warn' as const }),
     },
     { kind: 'text', text: "This is the value in spec/constants.json when this verifier was built. The sealed machine's own value is part of its attested image." },
@@ -520,16 +533,16 @@ function attestedStep(c: Context): Draft {
   const complete = published?.verdict.verified === true || (build === null && freshPassed);
   const demo = requireHardwareAttestation ? '' : ' This is a demonstration: its security keys are simulated.';
   const note = published?.verdict.verified
-    ? `Google's signed proof says the sealed machine runs the published code.${demo}`
+    ? `A proof signed by Google says Paper Seal runs the published code.${demo}`
     : complete
-      ? `Checked live just now. The permanent proof is published with the paper.${demo}`
+      ? `Checked just now. The lasting proof is published with the paper.${demo}`
       : build
-        ? `The permanent proof has not been checked yet.${demo}`
-        : `The proof is published with the paper.${demo}`;
+        ? `The lasting proof has not been checked yet.${demo}`
+        : `The proof is published together with the paper.${demo}`;
   const at = published?.issuedAt ?? null;
   return {
     id: 'attested',
-    label: 'Sealed machine running the published code',
+    label: 'Paper Seal runs the published code',
     complete,
     blocks: build !== null,
     at,
@@ -537,7 +550,7 @@ function attestedStep(c: Context): Draft {
     note,
     items: [
       { kind: 'heading', text: 'Published proof' },
-      ...publishedTokenItems(token),
+      ...publishedTokenItems(c),
       ...liveTokenItems(c),
       { kind: 'heading', text: 'Security key hardware' },
       ...hardware,
@@ -552,7 +565,7 @@ function listSummary(entries: readonly ApprovedListEntry[]): string {
   const neutrals = count((role) => role === roles.neutral);
   const centres = count((role) => role !== roles.setter && role !== roles.neutral);
   const people = entries.length === 1 ? '1 person' : `${String(entries.length)} people`;
-  const parties = neutrals === 1 ? '1 neutral party' : `${String(neutrals)} neutral parties`;
+  const parties = neutrals === 1 ? '1 key holder' : `${String(neutrals)} key holders`;
   return `${people} approved: ${plural(setters, 'setter')}, ${parties} and ${plural(centres, 'centre')}.`;
 }
 
@@ -569,7 +582,7 @@ function entryRows(bytes: Uint8Array): { items: Item[]; entries: ApprovedListEnt
     };
   } catch (error) {
     const message = (error as Error).message;
-    return { entries: null, items: [fail('List decode', `The approved list on the public record can't be read: ${message}`, message)] };
+    return { entries: null, items: [fail('List decode', 'The approved list on the public record can’t be read.', message)] };
   }
 }
 
@@ -582,7 +595,7 @@ function peopleStep(c: Context): Draft {
     return {
       ...base,
       complete: false,
-      note: 'The list is on the public record, but it could not be used.',
+      note: 'The list is on the public record, but this page could not use it.',
       items: [problemRow('Approved list', problem)],
     };
   }
@@ -590,7 +603,7 @@ function peopleStep(c: Context): Draft {
     return {
       ...base,
       complete: false,
-      note: 'The exam board has not published the approved list.',
+      note: 'The exam board has not yet published the list of approved people.',
       items: [notChecked('Approved list', 'Not posted')],
     };
   }
@@ -601,15 +614,15 @@ function peopleStep(c: Context): Draft {
   return {
     ...base,
     complete: hashOk && rows.entries !== null,
-    note: rows.entries ? listSummary(rows.entries) : 'The list could not be read.',
+    note: rows.entries ? listSummary(rows.entries) : 'The list could not be read. Contact your exam board.',
     items: [
       verdict('List hash matches the chain', hashOk, {
-        failure: 'The approved list does not match the fingerprint on the public record.',
+        failure: 'The list of approved people does not match its fingerprint on the public record.',
         hash: computed,
       }),
       build
         ? verdict("Build's approved list hash", sameHex(build.approvedListHash, computed), {
-            failure: 'The paper was built against a different approved list from the one published.',
+            failure: 'The paper was built for a different list of approved people from the one published.',
             hash: build.approvedListHash,
           })
         : notChecked("Build's approved list hash", 'No Build yet'),
@@ -627,14 +640,14 @@ function criteriaItems(c: Context): { items: Item[]; ok: boolean } {
   const bytes = fromHex(chain.criteria);
   const hashOk = checks?.criteria === 'pass';
   const hashRow = verdict('Criteria hash matches the exam', hashOk, {
-    failure: 'The selection criteria do not match the fingerprint on the public record.',
+    failure: 'The rules for choosing questions do not match their fingerprint on the public record.',
   });
   let decoded;
   try {
     decoded = decodeCriteria(bytes);
   } catch (error) {
     const message = (error as Error).message;
-    return { ok: false, items: [hashRow, fail('Criteria decode', `The selection criteria can't be read: ${message}`, message)] };
+    return { ok: false, items: [hashRow, fail('Criteria decode', 'The rules for choosing questions can’t be read.', message)] };
   }
   return {
     ok: hashOk,
@@ -652,7 +665,7 @@ function machineFailed(c: Context): Item[] {
   const { live } = c;
   const reported = live?.fresh.ok === true && live.fresh.value.trusted && live.status.ok && live.status.value.stage === 'failed';
   return reported
-    ? [fail('Sealed machine status, live', 'The sealed machine, which passed its live check, reports that this exam has failed and cannot go ahead.')]
+    ? [fail('Sealed machine status, live', 'The machine that builds the paper, which passed its live check, reports that this exam has failed and cannot go ahead.')]
     : [];
 }
 
@@ -660,17 +673,22 @@ function lockedStep(c: Context): Draft {
   const { exam, build } = c;
   const lockAt = exam ? roundTimeSeconds(Number(exam.settings.lockRound)) : null;
   const { items, ok } = criteriaItems(c);
+  // The counts are the Build's own claim. Until the Build is shown to come from the sealed machine
+  // they are only a claim, so this step is not done on the Build alone.
+  const confirmed = build !== null && buildSignatureItem(c.records?.token ?? null).ok;
   const note = build
-    ? `${plural(Number(build.selected), 'question')} chosen from a question bank of ${String(build.bankSize)}.`
+    ? confirmed
+      ? `${plural(Number(build.selected), 'question')} chosen from a question bank of ${String(build.bankSize)}.`
+      : 'A paper is recorded, but its files can’t be checked yet, so the number of questions chosen is not confirmed.'
     : !exam || lockAt === null
-      ? 'Waiting for the exam to be published.'
+      ? 'Waiting for the exam board to publish the exam.'
       : c.lockReached
-        ? 'Lock time has passed. The size of the question bank is published with the paper.'
+        ? 'Questions have closed. The paper is published next.'
         : `Setters can send questions until ${c.when(lockAt)}.`;
   return {
     id: 'locked',
-    label: 'Questions locked',
-    complete: ok && build !== null,
+    label: 'Questions closed',
+    complete: ok && confirmed,
     at: lockAt,
     round: exam ? Number(exam.settings.lockRound) : null,
     note,
@@ -679,7 +697,7 @@ function lockedStep(c: Context): Draft {
       build
         ? { kind: 'fact', label: 'Selected from question bank', value: `${String(build.selected)} of ${String(build.bankSize)}` }
         : notChecked('Selected from question bank', 'No Build yet'),
-      ...(exam ? [roundRow('Lock', exam.settings.lockRound, c)] : []),
+      ...(exam ? [roundRow('Questions close', exam.settings.lockRound, c)] : []),
       ...(build ? [] : machineFailed(c)),
     ],
   };
@@ -691,22 +709,22 @@ function buildSignatureItem(token: Records['token'] | null): { item: Item; ok: b
   const { build } = token.verdict;
   return build.ok
     ? { item: { kind: 'check', label, status: 'pass' }, ok: true }
-    : { item: fail(label, `The Build's signature does not check out: ${build.error ?? 'it does not verify'}.`, build.error), ok: false };
+    : { item: fail(label, 'The signature on the paper does not check out.', build.error), ok: false };
 }
 
 function manifestItems(result: Sourced<ManifestResult>): { items: Item[]; ok: boolean } {
   if (result.kind !== 'ready') return { items: [sourceGap('Storage manifest', result)], ok: false };
   const { report, owners } = result;
   const hashRow = verdict("Manifest hash matches the Build's storageManifestHash", report.hashCheck, {
-    failure: 'The list of published files is not the one the Build committed to.',
+    failure: 'The published files are not the ones recorded for this paper.',
     absent: 'No Build yet',
     hash: report.hash,
   });
   if (report.kind === 'malformed') {
-    return { ok: false, items: [hashRow, fail('Manifest format', `The list of published files can't be read: ${report.error}`, report.error)] };
+    return { ok: false, items: [hashRow, fail('Manifest format', 'The list of published files can’t be read.', report.error)] };
   }
   const coverage = verdict('Lists every file, with one share per key holder on the approved list', report.coverage.check, {
-    failure: `The published files are incomplete: ${report.coverage.error ?? 'they do not match the approved list'}.`,
+    failure: 'Some published files are missing or do not match the approved list.',
     absent: 'No approved list yet',
   });
   const files = report.files.map((file): Item => {
@@ -729,7 +747,7 @@ function manifestItems(result: Sourced<ManifestResult>): { items: Item[]; ok: bo
       report.files.every((file) => file.recipientOnList !== 'fail'),
     items: [
       hashRow,
-      verdict('Manifest is for this exam', report.examIdCheck, { failure: 'The list of published files is for a different exam.' }),
+      verdict('Manifest is for this exam', report.examIdCheck, { failure: 'The published files are for a different exam.' }),
       coverage,
       ...files,
     ],
@@ -749,10 +767,10 @@ function sealedStep(c: Context): Draft {
     at,
     round: roundOf(at),
     note: !build
-      ? 'The sealed machine builds the paper after the questions lock. No person sees it.'
+      ? 'Paper Seal builds the paper after questions close. No person sees it.'
       : complete
-        ? 'One sealed paper, built by the sealed machine and signed by it. Its files match the public record.'
-        : "The paper's record is published. Its files and signature have not all been checked yet.",
+        ? 'The paper is built and sealed. Its files match the public record.'
+        : 'The paper is recorded. Its files and signature are not all checked yet.',
     items: [
       build
         ? { kind: 'check', label: 'Build', status: 'pass', detail: 'Exists' }
@@ -774,19 +792,19 @@ function sealedStep(c: Context): Draft {
 /** Until `trusted`, every badge is neutral: a count from an unverified source is hearsay, not evidence. */
 function progressItems(progress: ReleaseProgress, trusted: boolean): Item[] {
   return [
-    { kind: 'fact', label: 'Holders released', value: `${String(progress.count)} of ${String(progress.required)} needed${trusted ? '' : ' (not verified)'}` },
+    { kind: 'fact', label: 'Key holders released', value: `${String(progress.count)} of ${String(progress.required)} needed${trusted ? '' : ' (not verified)'}` },
     ...progress.rows.map(
       (row): Item => ({
         kind: 'tag',
         label: `${row.owner}, ${roleNames[row.role] ?? 'key holder'}`,
         tone: row.released && trusted ? 'ok' : 'neutral',
-        tag: row.released ? 'Released' : 'Not released',
+        tag: row.released ? 'Released' : 'Not released yet',
       }),
     ),
     ...progress.unknown.map(
       (key): Item =>
         trusted
-          ? { ...fail('Released by a key that is not an approved key holder', 'A key that is not on the approved list released a part of the key.'), hash: key }
+          ? { ...fail('Released by a key that is not an approved key holder', 'A security key that is not on the approved list released a part of the key.'), hash: key }
           : { kind: 'tag', label: 'Released by a key that is not an approved key holder', tone: 'neutral', tag: 'Unverified', hash: key },
     ),
   ];
@@ -794,10 +812,10 @@ function progressItems(progress: ReleaseProgress, trusted: boolean): Item[] {
 
 function logItems(result: LogVerdict, signatureLabel: string, signatureAbsent: string): Item[] {
   return [
-    verdict('Log is for this exam', result.examId, { failure: 'The release log is for a different exam.' }),
-    verdict('entriesHash matches the entries', result.entriesHash, { failure: 'The release log has been changed: its entries do not match its hash.' }),
+    verdict('Log is for this exam', result.examId, { failure: 'The record of releases is for a different exam.' }),
+    verdict('entriesHash matches the entries', result.entriesHash, { failure: 'The record of releases has been changed after it was signed.' }),
     verdict(signatureLabel, result.signature, {
-      failure: 'The release log is not signed by the key it should be signed by.',
+      failure: 'The record of releases is not signed by the right key.',
       absent: signatureAbsent,
     }),
     ...(result.error ? [fail('Log error', `The release log could not be checked: ${result.error}`, result.error)] : []),
@@ -828,7 +846,7 @@ function publishedLogItems(log: Records['log'] | null): { items: Item[]; verifie
     items: [
       ...(trusted
         ? []
-        : [{ kind: 'text' as const, tone: 'warn' as const, text: 'Unverified. Until that token passes, nothing says which TEE signed this log, so its release list is not evidence.' }]),
+        : [{ kind: 'text' as const, tone: 'warn' as const, text: 'Not verified. Until this proof passes, nothing says who signed this log, so its list of releases is not evidence.' }]),
       ...logItems(log.verdict, 'Signed by the key the log names', 'Not checked'),
       ...(progress ? progressItems(progress, trusted) : []),
       token
@@ -836,7 +854,7 @@ function publishedLogItems(log: Records['log'] | null): { items: Item[]; verifie
           ? { kind: 'check', label: 'release-token.jwt attests the key that signed the log', status: 'pass' }
           : fail(
               'release-token.jwt attests the key that signed the log',
-              `The proof behind the release log does not pass: ${tokenProblem}`,
+              'The proof behind the release log does not pass.',
               tokenProblem,
             )
         : notChecked('release-token.jwt attests the key that signed the log', 'Not in storage yet or the exam is not published'),
@@ -845,7 +863,7 @@ function publishedLogItems(log: Records['log'] | null): { items: Item[]; verifie
 }
 
 function liveReleaseItems(c: Context): Item[] {
-  const heading: Item = { kind: 'heading', text: 'Live from the sealed machine, optional' };
+  const heading: Item = { kind: 'heading', text: 'Live from the machine, optional' };
   if (!c.view.sources.tee) return [heading, { kind: 'text', text: needsTee }];
   const { live } = c;
   if (!live) {
@@ -863,7 +881,7 @@ function liveReleaseItems(c: Context): Item[] {
           : [
               {
                 kind: 'fact' as const,
-                label: 'Holders released',
+                label: 'Key holders released',
                 value: `${String(stage.release.released.length)} of ${String(stage.release.required)} needed${trusted ? '' : ' (not verified)'}`,
               },
             ]),
@@ -871,8 +889,8 @@ function liveReleaseItems(c: Context): Item[] {
   return [
     heading,
     ...(trusted
-      ? [{ kind: 'check' as const, label: 'TEE attestation passes, so its answers can be trusted', status: 'pass' as const }]
-      : [{ kind: 'text' as const, tone: 'warn' as const, text: 'Unverified. The TEE has not passed attestation, so what it reports here is not evidence. See step 2.' }]),
+      ? [{ kind: 'check' as const, label: 'The machine passed its check, so its answers can be trusted', status: 'pass' as const }]
+      : [{ kind: 'text' as const, tone: 'warn' as const, text: `Not verified. The machine has not passed its check, so what it reports here is not evidence. See step ${String(stepNumber(c, 2))}.` }]),
     ...stateItems,
     ...(live.log
       ? logItems(live.log, "Signed by the live TEE's attested key", 'Not checked, the log is not signed by the attested key')
@@ -901,31 +919,31 @@ function unlockStep(c: Context, sealedOff: boolean): Draft {
           at: (unlockAt ?? 0) * 1000,
           round: Number(exam.settings.unlockRound),
           label: 'Paper unlocks',
-          reached: c.unlockReached ? 'Time seal open' : 'Due, waiting for the public clock',
+          reached: c.unlockReached ? 'Unlocked' : 'Due, waiting for the public clock',
         },
         c.view.latest.round !== null
           ? { kind: 'fact', label: 'Latest public clock round', value: c.view.latest.round.toLocaleString('en-GB') }
           : notChecked('Latest public clock round', c.view.latest.error ? 'Public clock not reached' : 'Loading'),
-        roundRow('Lock', exam.settings.lockRound, c),
-        roundRow('Unlock, T minus Δ', exam.settings.unlockRound, c),
-        roundRow('End, paper opens', exam.settings.endRound, c),
+        roundRow('Questions close', exam.settings.lockRound, c),
+        roundRow('Paper unlocks for centres', exam.settings.unlockRound, c),
+        roundRow('Paper opens to everyone', exam.settings.endRound, c),
       ]
     : [];
   const noPaper = c.endReached && build === null;
   const note = logs.complete
     ? releaseLine(c, logs.verified, logs.said)
     : noPaper
-      ? 'No paper was sealed, so there is nothing to unlock.'
+      ? 'No paper was made, so there is nothing to unlock.'
       : sealedOff
-        ? 'The unlock did not happen.'
+        ? 'The paper was never unlocked.'
         : !exam || unlockAt === null
-          ? 'Waiting for the exam to be published.'
+          ? 'Waiting for the exam board to publish the exam.'
           : c.unlockReached
-            ? `Time seal open. ${releaseLine(c, logs.verified, logs.said)}`
+            ? `Unlocked. ${releaseLine(c, logs.verified, logs.said)}`
             : `Opens to centres at ${c.when(unlockAt)}. Nothing can open it sooner.`;
   return {
     id: 'unlock',
-    label: 'Unlock',
+    label: 'Paper unlocks for centres',
     complete: logs.complete,
     notApplicable: noPaper || sealedOff,
     at: unlockAt,
@@ -942,11 +960,11 @@ function unlockStep(c: Context, sealedOff: boolean): Draft {
 }
 
 const proofLabels: Record<keyof ProofChecks, { label: string; failure: string }> = {
-  paperFile: { label: 'paper.bin is the file the Build hashed (paperHash)', failure: 'The published paper file is not the one the Build committed to.' },
-  saltedHash: { label: 'Seed and paper give the Build’s saltedPaperHash', failure: 'The opened paper is not the paper the Build committed to.' },
+  paperFile: { label: 'paper.bin is the file the Build hashed (paperHash)', failure: 'The published paper file is not the one recorded for this exam.' },
+  saltedHash: { label: 'Seed and paper give the Build’s saltedPaperHash', failure: 'The opened paper is not the paper recorded for this exam.' },
   examId: { label: 'Paper is for this exam', failure: 'The opened paper is for a different exam.' },
-  selectedCount: { label: 'Question count equals the Build’s selected', failure: 'The paper has a different number of questions from the Build.' },
-  criteriaCount: { label: 'Build’s selected equals the published criteria’s total', failure: 'The Build chose a different number of questions from the published criteria.' },
+  selectedCount: { label: 'Question count equals the Build’s selected', failure: 'The paper has a different number of questions from the one recorded.' },
+  criteriaCount: { label: 'Build’s selected equals the published criteria’s total', failure: 'The recorded paper has a different number of questions from the published rules.' },
   topics: { label: 'Each topic has the question count the criteria ask for', failure: 'A topic in the paper does not have the number of questions the criteria ask for.' },
   criteriaHash: { label: 'Published criteria match the exam’s criteriaHash', failure: 'The published criteria do not match the fingerprint on the public record.' },
 };
@@ -958,22 +976,22 @@ function proofItems(proof: Extract<ProofRun, { ok: true }>['result']): { items: 
     case 'not-ready':
       return { items: [notChecked('Proof', proof.reason)], complete: false, note: proof.reason };
     case 'waiting':
-      return { items: [notChecked('Proof', 'The end round has not arrived.')], complete: false, note: 'The end round has not arrived.' };
+      return { items: [notChecked('Proof', 'The exam has not ended yet.')], complete: false, note: 'The exam has not ended yet.' };
     case 'sealed':
       return {
         complete: false,
-        note: 'No copy exists, and the paper stays sealed.',
+        note: 'The paper cannot be opened.',
         items: [
-          notChecked('Proof', 'No copy exists, and the paper stays sealed'),
+          notChecked('Proof', 'The paper cannot be opened'),
           {
             kind: 'text',
-            text: `The end round has passed, and storage holds no ${storageNames.keyPriv}. If the unlock never happened, the timelocked copy of K_priv was never published, so nobody can open the paper. If you expected an unlock, check the storage address under "Check against your own RPC".`,
+            text: `The exam has ended, but the public files hold no ${storageNames.keyPriv}. If the paper was never unlocked, the time-locked key was never published, so nobody can open the paper. If you expected it to open, check where the public files are kept under "Check it yourself".`,
           },
         ],
       };
     case 'failed': {
-      const label = proof.step === 'files' ? 'Files' : proof.step === 'timelock' ? 'Timelock' : 'Paper decryption';
-      return { complete: false, note: 'The paper did not open.', items: [fail(label, `The paper did not open: ${proof.message}`, proof.message)] };
+      const label = proof.step === 'files' ? 'Files' : proof.step === 'timelock' ? 'Time lock' : 'Opening the paper';
+      return { complete: false, note: 'The paper could not be opened.', items: [fail(label, 'The paper could not be opened.', proof.message)] };
     }
     case 'opened': {
       const results = proofNames.map((name) =>
@@ -983,15 +1001,15 @@ function proofItems(proof: Extract<ProofRun, { ok: true }>['result']): { items: 
       const complete = passed === proofNames.length && proof.paper !== null && !proof.parseError;
       return {
         complete,
-        note: complete ? `The paper is open to everyone. All ${String(passed)} checks passed.` : `The paper opened. ${String(passed)} of ${String(proofNames.length)} checks passed.`,
+        note: complete ? `The paper is open to everyone. All ${String(passed)} checks passed.` : `The paper is open. ${String(passed)} of ${String(proofNames.length)} checks passed.`,
         items: [
           ...results,
-          ...(proof.parseError ? [fail('Paper format', `The opened paper can't be read: ${proof.parseError}`, proof.parseError)] : []),
+          ...(proof.parseError ? [fail('Paper format', 'The opened paper can’t be read.', proof.parseError)] : []),
           {
             kind: 'text',
-            text: 'Selection is attested by the TEE, not independently proven, because the question bank stays hidden. The salted hash shows this is the paper the Build committed to, not what a centre showed students.',
+            text: 'Which questions were chosen is vouched for by Paper Seal, not independently proven, because the question bank stays hidden. These checks show this is the paper that was recorded, not what a centre showed students.',
           },
-          ...(proof.paper ? [] : [notChecked('Paper withheld', 'The paper opened, but it is not shown because it does not match the Build.')]),
+          ...(proof.paper ? [] : [notChecked('Paper withheld', 'The paper is open, but it is not shown because it does not match the recorded paper.')]),
         ],
       };
     }
@@ -1002,9 +1020,9 @@ function openStep(c: Context): Draft {
   const { exam, build } = c;
   const endRound = exam ? Number(exam.settings.endRound) : null;
   const endAt = endRound === null ? null : roundTimeSeconds(endRound);
-  const base = { id: 'open' as const, label: 'Exam ends and paper opens', at: endAt, round: endRound };
+  const base = { id: 'open' as const, label: 'Paper opens to everyone', at: endAt, round: endRound };
   if (!exam || endRound === null || endAt === null) {
-    return { ...base, complete: false, note: 'Waiting for the exam to be published.', items: [notChecked('Proof', 'The exam is not published on the chain yet.')] };
+    return { ...base, complete: false, note: 'Waiting for the exam board to publish the exam.', items: [notChecked('Proof', 'The exam is not on the public record yet.')] };
   }
   if (!c.endReached) {
     return {
@@ -1015,19 +1033,19 @@ function openStep(c: Context): Draft {
         notChecked('Proof', 'Not open yet'),
         {
           kind: 'text',
-          text: `The paper opens when the public clock publishes round ${String(endRound)}, at ${utcTime(endAt)}. Nothing here can open it sooner.`,
+          text: `The paper opens when the public clock reaches round ${String(endRound)}, at ${utcTime(endAt)}. Nothing here can open it sooner.`,
         },
       ],
     };
   }
   if (build === null) {
-    return { ...base, complete: false, notApplicable: true, note: 'No paper was sealed, so there is nothing to open.', items: [notChecked('Proof', 'There is no Build on the chain to compare the paper with.')] };
+    return { ...base, complete: false, notApplicable: true, note: 'No paper was made, so there is nothing to open.', items: [notChecked('Proof', 'No paper is recorded to compare with.')] };
   }
   const { proof } = c.view;
-  if (!c.view.sources.storage) return { ...base, complete: false, note: 'Needs the storage address to open the paper.', items: [notChecked('Proof', needsStorage)] };
+  if (!c.view.sources.storage) return { ...base, complete: false, note: 'This page needs to know where the public files are kept.', items: [notChecked('Proof', needsStorage)] };
   if (!proof) return { ...base, complete: false, note: 'Opening the paper.', items: [notChecked('Proof', 'Opening the paper.')] };
   if (!proof.ok) {
-    return { ...base, complete: false, note: 'The paper could not be opened just now. This page will try again.', items: [notChecked('Proof', `Could not be read: ${proof.message}`)] };
+    return { ...base, complete: false, note: 'The paper could not be opened just now. This page tries again by itself.', items: [notChecked('Proof', `Could not be read: ${proof.message}`)] };
   }
   const result = proofItems(proof.result);
   return { ...base, complete: result.complete, notApplicable: proof.result.state === 'sealed', note: result.note, items: result.items };
@@ -1094,20 +1112,20 @@ interface Words {
 
 /** Where things stand when no exam can be shown. Null once there is one. */
 function noExamWords(view: View): Words | null {
-  const again = 'This page keeps trying by itself. You can also read the record through your own connection below.';
+  const again = 'This page tries again by itself. You can also choose another source under "Check it yourself" below.';
   if (view.name) {
     const { result } = view.name;
-    if (result.state === 'off') return { headline: 'Not connected to the public record.', next: 'Add a Sepolia RPC URL below to check this name. Nothing has been checked yet.' };
-    if (result.state === 'loading') return { headline: 'Checking the exam name.', next: 'The checks run in this browser and take a few seconds.' };
+    if (result.state === 'off') return { headline: 'This page cannot read the public record yet.', next: 'Add where to read it under "Check it yourself" below. Nothing has been checked yet.' };
+    if (result.state === 'loading') return { headline: 'Checking the exam name.', next: 'This takes a few seconds. Keep this page open.' };
     if (result.state === 'error' || (!result.value.ok && result.value.failed === 'unreadable')) {
       return { headline: 'The exam name could not be read.', next: again };
     }
-    if (!result.value.ok) return { headline: 'This name does not lead to a verified exam.', next: 'Check the name with your exam board. Nothing after the name has been checked.' };
+    if (!result.value.ok) return { headline: 'This name does not lead to a verified exam.', next: 'Ask your exam board for the right name. Nothing after the name has been checked.' };
   }
-  if (view.invalidLink) return { headline: 'This link does not name an exam.', next: 'Check the link with your exam board, or enter the exam ID below.' };
+  if (view.invalidLink) return { headline: 'This link does not name an exam.', next: 'Ask your exam board for the right link, or enter the exam ID below.' };
   if (!view.examId) return { headline: 'Choose an exam to check.', next: 'Enter the exam ID below, or open the link your exam board shared.' };
-  if (!view.sources.chain) return { headline: 'Not connected to the public record.', next: 'Add a Sepolia RPC URL and the ExamRegistry address below. Nothing has been checked yet.' };
-  if (view.records.state === 'loading') return { headline: 'Reading the public record.', next: 'The checks run in this browser and take a few seconds.' };
+  if (!view.sources.chain) return { headline: 'This page cannot read the public record yet.', next: 'Add where to read it under "Check it yourself" below. Nothing has been checked yet.' };
+  if (view.records.state === 'loading') return { headline: 'Reading the public record.', next: 'This takes a few seconds. Keep this page open.' };
   if (view.records.state === 'error') return { headline: 'The public record could not be read.', next: again };
   return null;
 }
@@ -1122,44 +1140,46 @@ function examWords(c: Context, steps: readonly CustodyStep[], seal: SealState | 
   const state = (id: StepId) => steps.find((step) => step.id === id)?.state;
   if (proofState === 'opened') {
     return state('open') === 'done'
-      ? { headline: 'Paper open. Anyone can read it and check it.', next: 'Nothing more happens. Anyone can repeat these checks at any time.' }
-      : { headline: 'The paper opened, but it did not pass every check.', next: 'Contact your exam board and quote the failed checks.' };
+      ? { headline: 'The paper is open. Anyone can read it and check it.', next: 'Nothing more is needed. Anyone can repeat these checks at any time.' }
+      : { headline: 'The paper is open, but it did not pass every check.', next: 'Contact your exam board and tell them which checks failed.' };
   }
   if (c.endReached) {
-    if (!build) return { headline: 'The exam ended with no paper published.', next: 'Nothing more happens. Contact your exam board if you expected a paper.' };
-    if (proofState === 'sealed') return { headline: 'The paper stays sealed. The unlock never happened.', next: 'Nobody can open this paper now. Contact your exam board if you expected an unlock.' };
-    if (proofState === 'failed') return { headline: 'The paper did not open.', next: 'Contact your exam board and quote the failed check.' };
-    return { headline: 'Exam over. Opening the paper.', next: 'The public clock has opened the paper. This page is checking it now.' };
+    if (!build) return { headline: 'The exam ended and no paper was published.', next: 'Nothing more is needed. Contact your exam board if you expected a paper.' };
+    if (proofState === 'sealed') return { headline: 'The paper stays sealed. It was never unlocked.', next: 'Nobody can open this paper now. Contact your exam board if you expected it to open.' };
+    if (proofState === 'failed') return { headline: 'The paper could not be opened.', next: 'Contact your exam board and tell them which check failed.' };
+    return { headline: 'The exam is over. The paper is opening.', next: 'The public clock has opened the paper. This page is checking it now.' };
   }
-  if (!chain?.list) return { headline: 'Setting up. The approved list is not published yet.', next: `The exam board publishes the list of approved people next. ${auto}` };
+  if (!chain?.list) return { headline: 'Setting up. The list of approved people is not published yet.', next: `The exam board publishes the list next. ${auto}` };
   if (!build) {
     return c.lockReached
-      ? { headline: 'Lock time has passed. The paper is not published yet.', next: `The sealed machine builds the paper next, and no person sees it. ${auto}` }
-      : { headline: `Questions are coming in. They lock at ${c.when(lockAt)}.`, next: 'After that the sealed machine builds the paper, and no person sees it.' };
+      ? { headline: 'Questions have closed. The paper is not published yet.', next: `Paper Seal builds the paper next. No person sees it. ${auto}` }
+      : { headline: `Questions are coming in. They close at ${c.when(lockAt)}.`, next: 'After that Paper Seal builds the paper. No person sees it.' };
   }
   if (BEFORE_SEAL.some((id) => state(id) === 'failed')) {
-    return { headline: 'Paper published, but it failed its checks.', next: 'Contact your exam board and quote the failed check.' };
+    return { headline: 'The paper is published, but it failed its checks.', next: 'Contact your exam board and tell them which check failed.' };
   }
-  if (seal === null) return { headline: 'Paper published. Its checks are not finished.', next: `The checks finish once the published files can be read. ${auto}` };
+  if (seal === null) return { headline: 'The paper is published. Its checks are not finished.', next: `The checks finish once the published files can be read. ${auto}` };
   if (!c.unlockReached) {
-    return { headline: `Paper sealed. Opens to centres at ${c.when(unlockAt)}.`, next: 'At that time the time seal opens, and key holders release their parts of the key.' };
+    return { headline: `The paper is sealed. It unlocks for centres at ${c.when(unlockAt)}.`, next: 'At that time key holders release their parts of the key.' };
   }
   if (state('unlock') === 'done') {
-    return { headline: `Key holders have released. The paper opens to everyone at ${c.when(endAt)}.`, next: 'After the exam the public clock opens the paper, and this page checks it.' };
+    return { headline: `Key holders have released their parts. The paper opens to everyone at ${c.when(endAt)}.`, next: 'After the exam the public clock opens the paper, and this page checks it.' };
   }
   const last = steps.find((step) => step.id === 'unlock');
-  return { headline: `Opening to centres. ${last?.note.replace('Time seal open. ', '') ?? ''}`.trim(), next: 'Once enough key holders have released, centres can open the paper.' };
+  return { headline: `Unlocking for centres. ${last?.note.replace('Unlocked. ', '') ?? ''}`.trim(), next: 'Once enough key holders have released, centres can open the paper.' };
 }
 
 function verdictLine(c: Context, steps: readonly CustodyStep[], failures: readonly Failure[]): string {
   if (failures.length > 0) {
-    return failures.length === 1 ? 'One check failed. Do not rely on this exam until it is explained.' : `${String(failures.length)} checks failed. Do not rely on this exam until they are explained.`;
+    return failures.length === 1 ? 'One check failed. Do not rely on this exam until your exam board explains it.' : `${String(failures.length)} checks failed. Do not rely on this exam until your exam board explains them.`;
   }
   if (!c.exam) return 'Nothing has been checked yet.';
   const done = steps.filter((step) => step.state === 'done').length;
   if (done === steps.length) return 'Every step has been checked. Nothing failed.';
-  const gaps = [c.records?.token, c.records?.manifest, c.records?.log].some((source) => source?.kind === 'unavailable');
-  if (gaps) return 'Nothing has failed so far, but some public files could not be read.';
+  const gaps = [c.records?.token, c.records?.manifest, c.records?.log].some(
+    (source) => source !== undefined && source !== null && source.kind !== 'ready' && source.kind !== 'malformed',
+  );
+  if (gaps) return 'Nothing has failed so far, but some public files could not be read yet, so those steps are not confirmed.';
   return `This exam is on track. Nothing has failed so far. ${String(done)} of ${String(steps.length)} steps are confirmed.`;
 }
 
@@ -1212,10 +1232,10 @@ export function custody(given: View): Custody {
     steps,
     failures,
     seal,
-    noSeal: build ? 'Not confirmed' : 'Not sealed yet',
+    noSeal: build ? 'Not confirmed yet' : 'Not sealed yet',
     headline: words.headline,
     verdict: verdictLine(c, steps, failures),
-    next: failures.length > 0 ? 'Contact your exam board and quote the failed check. This page keeps checking by itself.' : words.next,
+    next: failures.length > 0 ? 'Contact your exam board and tell them which check failed. This page keeps checking by itself.' : words.next,
     paper,
     withheld: proof?.state === 'opened' && proof.paper === null,
   };

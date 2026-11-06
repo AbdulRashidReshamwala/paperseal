@@ -51,7 +51,7 @@ describe('exam names', () => {
   it('explains the problem in plain words', () => {
     expect(examNameProblem('')).toBe('The exam name is empty.');
     expect(examNameProblem('jee.main')).toMatch(/dot/);
-    expect(examNameProblem('JEE-Main-2026')).toMatch(/normalised form.*jee-main-2026\?$/);
+    expect(examNameProblem('JEE-Main-2026')).toMatch(/^Use lowercase letters.*Did you mean jee-main-2026\?$/);
     const space = examNameProblem('Maths 2026') ?? '';
     expect(space).toMatch(/^Use lowercase letters, digits and hyphens, like jee-main-2026\./);
     expect(space).not.toMatch(/[‎‏]/);

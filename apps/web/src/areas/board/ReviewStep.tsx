@@ -1,6 +1,7 @@
 import { chain } from '@paperseal/protocol';
 import { Button, Hash, PrimaryAction, Row, Rows, Stage } from '@paperseal/ui';
 import { useState } from 'react';
+import { useNavigate } from 'react-router';
 
 import { setCurrentExamId } from '../../shared/currentExam';
 import { useBoardForm, useEvaluated } from './BoardForm';
@@ -10,12 +11,17 @@ import { Fold, Problem } from './Parts';
 import { bankNeeded, formatWhen } from './plan';
 import { explainError, publishExam, type PublishRequest } from './publishFlow';
 import type { Releases } from './releases';
+import { versionSummary, VersionEvidence, VersionPicker, VersionProblems } from './VersionChoice';
 
 type Progress = { state: 'idle' } | { state: 'running'; stage: WalletStage } | { state: 'failed'; message: string };
 
-/** Step 3: one summary, and one action that connects the wallet if it must and asks it to confirm. */
+/**
+ * Step 2: one summary, with the Paper Seal version already chosen, and one action that connects the
+ * wallet if it must and asks it to confirm. A version that can't be used is explained here and blocks it.
+ */
 export function ReviewStep(props: { eyebrow: string; releases: Releases; onBack: () => void }) {
-  const { plan, publish, environment, addReceipt } = useBoardForm();
+  const { plan, publish, setPublish, environment, addReceipt, resetDraft } = useBoardForm();
+  const navigate = useNavigate();
   const { blueprint, schedule, scheduleInput } = useEvaluated();
   const { wallet, problem, ensureAccount } = useBoardWallet();
   const [progress, setProgress] = useState<Progress>({ state: 'idle' });
@@ -35,7 +41,7 @@ export function ReviewStep(props: { eyebrow: string; releases: Releases; onBack:
     if (!request) return;
     // The lock time may have passed while this page was open.
     if (!evaluateSchedule(scheduleInput).settings) {
-      setProgress({ state: 'failed', message: 'The schedule is no longer valid. Go back and choose new times.' });
+      setProgress({ state: 'failed', message: 'These times are no longer possible. Go back and choose new times.' });
       return;
     }
     setProgress({ state: 'running', stage: 'checking' });
@@ -48,6 +54,11 @@ export function ReviewStep(props: { eyebrow: string; releases: Releases; onBack:
       if (outcome.matches) setCurrentExamId(request.examId);
       addReceipt({ kind: 'publish', outcome, version: request.fields.version, name: plan.name });
       setProgress({ state: 'idle' });
+      // A correct read-back goes straight on to the invites. Only a mismatch stops on a receipt.
+      if (outcome.matches) {
+        resetDraft();
+        void navigate('/board');
+      }
     } catch (error) {
       setProgress({ state: 'failed', message: explainError(error) });
     }
@@ -61,7 +72,7 @@ export function ReviewStep(props: { eyebrow: string; releases: Releases; onBack:
       eyebrow={props.eyebrow}
       title="Review and publish"
       lede={
-        <strong>Everything here is written once and cannot be changed afterwards, not even by the board.</strong>
+        <strong>Once you publish, nothing here can be changed, not even by the exam board.</strong>
       }
       action={
         <>
@@ -80,12 +91,13 @@ export function ReviewStep(props: { eyebrow: string; releases: Releases; onBack:
               ))}
               {criteria && needs ? (
                 <Row label="Question bank">
-                  At least {needs.questions} questions, with no setter above {criteria.maxSetterPercent}% of a topic
+                  At least {needs.questions} questions in total, and no setter writes more than {criteria.maxSetterPercent}% of a topic
                 </Row>
               ) : null}
-              {fields ? <Row label="Sealed machine version">{fields.version}</Row> : null}
+              <Row label="Paper Seal version">{versionSummary(props.releases, publish.version)}</Row>
             </Rows>
           </div>
+          <VersionProblems releases={props.releases} />
           {problem ? <Problem>{problem}</Problem> : null}
           {progress.state === 'failed' ? <Problem>{progress.message}</Problem> : null}
           <PrimaryAction
@@ -98,8 +110,15 @@ export function ReviewStep(props: { eyebrow: string; releases: Releases; onBack:
           </PrimaryAction>
         </>
       }
-      next="Your wallet asks you to confirm once. Then you bring people in."
+      next="Your wallet asks you to confirm once. Then you invite the people who take part."
     >
+      <VersionPicker
+        releases={props.releases}
+        chosen={publish.version}
+        onChoose={(version) => {
+          setPublish({ ...publish, version });
+        }}
+      />
       {request ? (
         <Fold summary="Exam record">
           <Rows>
@@ -111,24 +130,25 @@ export function ReviewStep(props: { eyebrow: string; releases: Releases; onBack:
             <Row label="Exam ID">
               <Hash value={request.examId} label="exam ID" />
             </Row>
-            <Row label="Version">{request.fields.version} (a label: only the commit and image digest are stored)</Row>
+            <Row label="Version">{request.fields.version}</Row>
+            <VersionEvidence releases={props.releases} />
             <Row label="Commit">
               <Hash value={request.fields.commitHash} label="commit" />
             </Row>
-            <Row label="Image digest">
-              <Hash value={request.fields.imageDigest} label="image digest" />
+            <Row label="Software image">
+              <Hash value={request.fields.imageDigest} label="software image" />
             </Row>
-            <Row label="Public record provider">
+            <Row label="Public record address">
               <span className="ps-mono">{request.fields.rpcHost}</span>
             </Row>
             <Row label="Exam start">
               {formatClock(request.schedule.examStart)} ({request.schedule.examStart})
             </Row>
-            <Row label="Delta, T−Δ">{request.schedule.delta} seconds</Row>
+            <Row label="Released before the start">{request.schedule.delta} seconds</Row>
             <Row label="Lock round">{request.schedule.lockRound}</Row>
             <Row label="Unlock round">{request.schedule.unlockRound}</Row>
             <Row label="End round">{request.schedule.endRound}</Row>
-            <Row label="Criteria hash">
+            <Row label="Topics">
               <Hash value={request.criteria.hash} label="criteria hash" />
             </Row>
           </Rows>

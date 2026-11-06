@@ -36,6 +36,21 @@ export async function walletChainId(provider: EIP1193Provider): Promise<number> 
   return Number(BigInt(await provider.request({ method: 'eth_chainId' })));
 }
 
+/**
+ * Asks the wallet to move to Sepolia, which shows the wallet's own prompt. Returns whether the wallet
+ * is on Sepolia afterwards. A wallet that declines, or can't switch, leaves the caller to show the
+ * plain instruction.
+ */
+export async function switchToSepolia(provider: EIP1193Provider): Promise<boolean> {
+  try {
+    if ((await walletChainId(provider)) === chain.chainId) return true;
+    await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: `0x${chain.chainId.toString(16)}` }] });
+    return (await walletChainId(provider)) === chain.chainId;
+  } catch {
+    return false;
+  }
+}
+
 /** A wallet client that sends through the wallet with `account`, on Sepolia. */
 export function walletClientFor(provider: EIP1193Provider, account: Address): WalletClient {
   return createWalletClient({ account, chain: sepolia, transport: custom(provider) });
