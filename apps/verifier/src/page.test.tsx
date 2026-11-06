@@ -442,7 +442,7 @@ describe('step 6, unlock', () => {
   describe('with the live TEE', () => {
     async function openLive(trusted: boolean) {
       freshTrusted = trusted;
-      const world = await buildWorld();
+      const world = await buildWorld({ endRound: 2000 });
       arrange(world);
       const holders = decodeApprovedList(fromHex(world.entriesHex)).filter((e) => e.role === 2 || e.role === 3);
       const released = holders.slice(0, 8).map((e) => toHex(e.passkeyPublicKey));
@@ -466,17 +466,17 @@ describe('step 6, unlock', () => {
 
     it('is neutral, with the warning above the rows, when the fresh attestation is not trusted', async () => {
       const step = await openLive(false);
-      const warning = await within(step).findByText(/has not passed its check/);
+      const warning = await within(step).findByText(/has not shown it is running this exam/);
       expect(within(step).getByText('unlock (not verified)')).toBeTruthy();
       const rows = within(step).getByText('unlock (not verified)').closest('ul');
       expect(warning.compareDocumentPosition(rows ?? warning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
-    it('shows progress as evidence when the fresh attestation is trusted', async () => {
+    it('shows progress so far when the fresh attestation is trusted, and says only the record counts', async () => {
       const step = await openLive(true);
-      await within(step).findByText('The machine passed its check, so its answers can be trusted');
+      await within(step).findByText(/only the record counts/);
       expect(within(step).getByText('unlock')).toBeTruthy();
-      expect(within(step).queryByText(/has not passed its check/)).toBeNull();
+      expect(within(step).queryByText(/has not shown it is running this exam/)).toBeNull();
     });
   });
 });

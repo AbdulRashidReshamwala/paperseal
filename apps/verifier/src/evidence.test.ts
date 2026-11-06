@@ -1,5 +1,5 @@
 import { encodeMessage, fromHex, storageNames, toHex, type Hex } from '@paperseal/protocol';
-import { TeeApiError, type TeeClient } from '@paperseal/tee-client';
+import type { TeeClient } from '@paperseal/tee-client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { checkBuildSignature, checkFreshToken, checkPublishedToken, checkRecordToken } from './attest';
@@ -330,17 +330,33 @@ describe('release log', () => {
     expect(parse({ ...w.releaseLog, files: [{ sha256: filesHash }] })).toThrow('malformed file');
   });
 
-  it('counts a live answer of delivery_pending as no log yet, not as a failure', async () => {
+  it('asks a machine serving another exam nothing more, and uses none of what it says', async () => {
     const w = await getWorld();
+    const attestation = vi.fn(() => Promise.reject(new Error('never asked')));
     const tee = {
-      status: () => Promise.resolve({ stage: 'unlock', questionCount: 0, release: { released: [], required: 8 } }),
-      releaseLog: () => Promise.reject(new TeeApiError(503, 'delivery_pending', 'not ready')),
-      attestation: () => Promise.reject(new Error('down')),
+      status: () => Promise.resolve({ stage: 'unlock', examId: `0x${'22'.repeat(32)}`, questionCount: 0, release: { released: [`0x04${'aa'.repeat(64)}`], required: 8 } }),
+      attestation,
     } as unknown as TeeClient;
     const chain = { exam: w.exam, entries: w.entriesHex } as ChainData;
     const report = await loadLive({ tee, chain: () => chain, examId, registry: registryAddress });
     if ('kind' in report) throw new Error('expected a report');
-    expect(report.log).toBeNull();
+    expect(report.otherExam).toBe(true);
+    expect(report.progress).toBeNull();
+    expect(attestation).not.toHaveBeenCalled();
+  });
+
+  it('still checks a machine that names this exam, or names none', async () => {
+    const w = await getWorld();
+    for (const named of [{ examId }, {}]) {
+      const attestation = vi.fn(() => Promise.reject(new Error('down')));
+      const tee = { status: () => Promise.resolve({ stage: 'unlock', questionCount: 0, release: { released: [], required: 8 }, ...named }), attestation } as unknown as TeeClient;
+      const chain = { exam: w.exam, entries: w.entriesHex } as ChainData;
+      const report = await loadLive({ tee, chain: () => chain, examId, registry: registryAddress });
+      if ('kind' in report) throw new Error('expected a report');
+      expect(report.otherExam).toBeUndefined();
+      expect(report.fresh.ok).toBe(false);
+      expect(attestation).toHaveBeenCalled();
+    }
   });
 });
 
