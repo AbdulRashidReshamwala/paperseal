@@ -34,7 +34,7 @@ LIVE_REGISTRY=<REGISTRY> node e2e/live/cli.mjs registry-check
 
 ### Verify the source on Etherscan
 
-Needs `ETHERSCAN_API_KEY` and `REGISTRY_ADDRESS` in `contracts/.env` (gitignored). Check out the commit that was deployed first; the compiler settings come from `foundry.toml` (solc 0.8.30, optimizer 200 runs, `prague`, no via-ir), and the constructor argument is `BOARD_ADDRESS`.
+Needs `ETHERSCAN_API_KEY` and `REGISTRY_ADDRESS` in `contracts/.env` (gitignored). Check out the commit that was deployed first; the compiler settings come from `foundry.toml` (solc 0.8.34, optimizer 200 runs, `prague`, no via-ir), and the constructor argument is `BOARD_ADDRESS`.
 
 ```sh
 contracts/script/verify.sh              # uses REGISTRY_ADDRESS

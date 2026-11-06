@@ -20,5 +20,5 @@ ARGS="$(cast abi-encode 'constructor(address)' "$BOARD_ADDRESS")"
 # --guess-constructor-args is not used; the board address is known.
 forge verify-contract "$ADDRESS" src/ExamRegistry.sol:ExamRegistry \
   --chain "$CHAIN_ID" --verifier etherscan \
-  --compiler-version 0.8.30 --num-of-optimizations 200 --evm-version prague \
+  --compiler-version 0.8.34 --num-of-optimizations 200 --evm-version prague \
   --constructor-args "$ARGS" --watch 2>&1 | sed "s/${ETHERSCAN_API_KEY}/<redacted>/g"

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.30;
+pragma solidity 0.8.34;
 
 import {Test, Vm} from "forge-std/Test.sol";
 import {ExamRegistry} from "../src/ExamRegistry.sol";
@@ -37,7 +37,7 @@ contract ExamRegistryTest is Test {
     bytes32 internal constant MANIFEST_HASH = keccak256("manifest");
     bytes32 internal constant SALTED_HASH = keccak256("salted");
     bytes32 internal constant OTHER = keccak256("other");
-    uint256 internal constant CONTRACT_ENTRIES_CAP = 327680;
+    uint256 internal constant CONTRACT_ENTRIES_CAP = 130000;
     /// @dev geth's `txMaxSize`, the largest transaction its mempool accepts.
     uint256 internal constant MEMPOOL_TX_BYTES = 131072;
     uint32 internal constant QUESTIONS = 200;
@@ -193,14 +193,13 @@ contract ExamRegistryTest is Test {
         assertEq(vm.parseJsonUint(json, ".drand.genesisTime"), GENESIS);
     }
 
-    /// @dev `limits.criteriaBytes` is the contract's own cap. `limits.entriesBytes` is lower on purpose: the
-    ///      contract's 327680-byte cap is an upper bound, and the spec sets what fits in one transaction
-    ///      through geth's mempool. No reader accepts a list between the two.
+    /// @dev Both byte limits in the spec are the contract's own caps. `limits.entriesBytes` is what one
+    ///      transaction can carry through geth's mempool.
     function test_Limits_MatchSpec() public {
         string memory json = _constants();
         uint256 entriesBytes = vm.parseJsonUint(json, ".limits.entriesBytes");
         uint256 criteriaBytes = vm.parseJsonUint(json, ".limits.criteriaBytes");
-        assertLe(entriesBytes, CONTRACT_ENTRIES_CAP);
+        assertEq(entriesBytes, CONTRACT_ENTRIES_CAP);
         assertEq(criteriaBytes, 16384);
 
         // The selector and three words of calldata, padding, and room for the transaction's own fields.

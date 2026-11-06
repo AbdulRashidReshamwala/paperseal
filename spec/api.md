@@ -275,7 +275,7 @@ After decoding, readers also apply `limits.entries`, `limits.topics`, `limits.ow
 
 `limits.entriesBytes` and `limits.entries` are set by what one transaction can carry. geth's mempool refuses a transaction over 131,072 bytes, and most public nodes run it, so a longer list would never reach a block. An entry with an owner at `limits.ownerBytes` takes 576 bytes, so 225 entries take 129,664 bytes with the array's head, and `limits.entriesBytes` is 130,000. Calldata adds at most 131 bytes to that, which leaves about 900 bytes for the transaction's own fields and signature. The board app refuses a list over either limit before it asks the wallet to sign.
 
-`ExamRegistry`'s own cap on `entries` is 327,680 bytes. That cap is an upper bound, and `limits.entriesBytes` is the working limit. Readers reject a list between the two.
+`ExamRegistry` enforces the same `limits.entriesBytes` as its own cap on `entries`, so the contract and the readers accept the same lists.
 
 ## Exam Names
 

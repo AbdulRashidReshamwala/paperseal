@@ -56,7 +56,7 @@ Arkiv also doesn't replace `ExamRegistry`, and the TEE never reads from it.
 
 | Limit | Value | What it means here |
 | --- | --- | --- |
-| Bytes per create or patch | 128 KiB | `paper.bin` is padded to 1 MiB, so it can't go in one entity. The approved list can reach 327,680 bytes, so it needs one row per person |
+| Bytes per create or patch | 128 KiB | `paper.bin` is padded to 1 MiB, so it can't go in one entity. The approved list can reach 130,000 bytes, so it needs one row per person |
 | Lifetime | About 182.5 days, then it must be extended | Rows created with `permissionlessExtension` can be extended by anyone, so the public could keep the evidence alive |
 | Network | Testnet only, Rabdi | Fine for a mirror, not for primary storage |
 | Durability | No guarantee found | Same as above |

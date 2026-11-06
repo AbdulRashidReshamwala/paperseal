@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.30;
+pragma solidity 0.8.34;
 
 /// @title ExamRegistry
 /// @notice Write-once public record of each exam. Only the board address can write.
@@ -105,7 +105,7 @@ contract ExamRegistry {
     string private constant CRITERIA_TAG = "paperseal/v1/criteria";
     string private constant APPROVED_LIST_TAG = "paperseal/v1/approved-list";
     /// @dev Matches `limits.entriesBytes` in spec/constants.json.
-    uint256 private constant ENTRIES_BYTES = 327680;
+    uint256 private constant ENTRIES_BYTES = 130000;
     /// @dev Matches `limits.criteriaBytes` in spec/constants.json.
     uint256 private constant CRITERIA_BYTES = 16384;
     /// @dev Uncompressed P-256 key: 0x04, x, y.
