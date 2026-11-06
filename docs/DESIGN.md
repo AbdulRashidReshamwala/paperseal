@@ -315,7 +315,7 @@ Six steps, each with its number in the `Stage` eyebrow. The wallet is not a step
 
 ### Exam page
 
-`/exam?exam=<id>`, the public link. It asks for the name, filled in when this browser knows it, with the directory as suggestions, then `KeyTouch`. It says the key is touched twice. Once the list is posted it links to the role's page.
+`/exam?exam=<id or exam name>`, the public link. It asks for the name, filled in when this browser knows it, with the directory as suggestions, then `KeyTouch`. It says the key is touched twice. Once the list is posted it links to the role's page.
 
 ### Setter
 

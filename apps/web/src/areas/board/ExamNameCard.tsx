@@ -1,4 +1,4 @@
-import { examIdFromName, type Hex } from '@paperseal/protocol';
+import { examIdFromName, splitExamEnsName, type Hex } from '@paperseal/protocol';
 import { Button, Check, CopyButton, PrimaryAction } from '@paperseal/ui';
 import { useCallback, useEffect, useState } from 'react';
 
@@ -11,11 +11,11 @@ import { verifierNameUrl, verifierUrl } from './plan';
 
 type View = ExamName | { state: 'checking' } | { state: 'running'; stage: WalletStage };
 
-/** The exam's name, kept by this browser. ExamRegistry stores only its hash, so another browser can't know it. */
-function useExamLabel(examId: Hex): string | null {
+/** The exam's name: from the route, or as this browser kept it. ExamRegistry stores only its hash. */
+function useExamLabel(examId: Hex, routeName: string | null): string | null {
   const { examName } = useBoardForm();
-  const known = examName ?? listKnownExams().find((exam) => exam.id === examId.toLowerCase())?.name ?? null;
-  return known && examIdFromName(known).toLowerCase() === examId.toLowerCase() ? known : null;
+  const kept = [routeName ? splitExamEnsName(routeName)?.label : null, examName, listKnownExams().find((exam) => exam.id === examId.toLowerCase())?.name];
+  return kept.find((label) => label && examIdFromName(label).toLowerCase() === examId.toLowerCase()) ?? null;
 }
 
 /**
@@ -23,12 +23,12 @@ function useExamLabel(examId: Hex): string | null {
  * itself. Reopened, it only reads: a name that is set shows, and one that isn't offers one button. The
  * exam carries on whatever happens here.
  */
-export function ExamNameCard(props: { examId: Hex }) {
-  const label = useExamLabel(props.examId);
-  return label ? <NameOf examId={props.examId} label={label} /> : null;
+export function ExamNameCard(props: { examId: Hex; routeName?: string | null; onVerified?: (name: string) => void }) {
+  const label = useExamLabel(props.examId, props.routeName ?? null);
+  return label ? <NameOf examId={props.examId} label={label} {...(props.onVerified ? { onVerified: props.onVerified } : {})} /> : null;
 }
 
-function NameOf(props: { examId: Hex; label: string }) {
+function NameOf(props: { examId: Hex; label: string; onVerified?: (name: string) => void }) {
   const { environment, claimNamePrompt } = useBoardForm();
   const { ensureAccount } = useBoardWallet();
   const { label } = props;
@@ -63,6 +63,12 @@ function NameOf(props: { examId: Hex; label: string }) {
       setView((current) => (current.state === 'checking' ? found : current));
     });
   }, [claimNamePrompt, environment, label, props.examId, send]);
+
+  const { onVerified } = props;
+  const verified = view.state === 'set' ? view.name : null;
+  useEffect(() => {
+    if (verified) onVerified?.(verified);
+  }, [onVerified, verified]);
 
   if (view.state === 'off' || view.state === 'checking') return null;
 

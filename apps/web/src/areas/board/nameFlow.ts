@@ -74,6 +74,28 @@ export async function readExamName(environment: PublishEnvironment, label: strin
   }
 }
 
+/** What opening an exam by name found. `retry`: the RPC couldn't answer, so nothing was decided. */
+export type ExamNameRoute = { ok: true; examId: Hex } | { ok: false; retry: boolean; message: string };
+
+/**
+ * Whether a name in a link opens an exam on this app's registry. Every check in `resolveExamName` must
+ * pass, so a name that fails opens nothing, and the exam is the name's own labelhash.
+ */
+export async function openExamName(environment: PublishEnvironment, name: string): Promise<ExamNameRoute> {
+  const { ensLookup: lookup, registryAddress } = environment;
+  if (!lookup || !registryAddress) return { ok: false, retry: false, message: 'This page cannot check exam names yet. Ask whoever installed Paper Seal to finish the setup.' };
+  const resolved = await resolveExamName(name, { lookup });
+  if (!resolved.ok) {
+    return resolved.failed === 'unreadable'
+      ? { ok: false, retry: true, message: withDetails('This exam name cannot be checked right now. Check your internet connection, then press Try again.', resolved.reason) }
+      : { ok: false, retry: false, message: withDetails('This exam name did not pass its checks, so no exam was opened.', resolved.reason) };
+  }
+  if (resolved.value.registry.toLowerCase() !== registryAddress.toLowerCase()) {
+    return { ok: false, retry: false, message: withDetails('This exam name belongs to a different public record, so no exam was opened.', `${name} names ${resolved.value.registry}.`) };
+  }
+  return { ok: true, examId: resolved.value.examId };
+}
+
 /** Reads until every check passes, because an RPC node can lag the node that mined the block. */
 async function readUntilSet(environment: PublishEnvironment, name: string, registry: Hex, options: NameOptions): Promise<ExamName> {
   const attempts = options.readBackAttempts ?? 6;

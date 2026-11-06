@@ -39,6 +39,9 @@ interface BoardForm {
   examName: string | null;
   /** True once for an exam this session just published, so its name is asked for in the wallet by itself, once. */
   claimNamePrompt: (examId: Hex) => boolean;
+  /** ENS names that passed every check this session, with their exam. The route opens these with no second read. */
+  verifiedNames: ReadonlyMap<string, Hex>;
+  noteVerifiedName: (name: string, examId: Hex) => void;
   receipts: readonly Receipt[];
   /** A receipt the board has to see before the flow moves on. */
   held: Receipt | null;
@@ -157,6 +160,10 @@ export function BoardFormProvider(props: {
     latest.current = blank;
     setForm(blank);
   }, []);
+  const [verifiedNames, setVerifiedNames] = useState<ReadonlyMap<string, Hex>>(new Map());
+  const noteVerifiedName = useCallback((name: string, examId: Hex) => {
+    setVerifiedNames((previous) => (previous.get(name) === examId ? previous : new Map(previous).set(name, examId)));
+  }, []);
   const namePrompts = useRef(new Set<string>());
   const claimNamePrompt = useCallback((examId: Hex) => namePrompts.current.delete(examId.toLowerCase()), []);
   const addReceipt = useCallback((receipt: Receipt) => {
@@ -184,6 +191,8 @@ export function BoardFormProvider(props: {
       resetDraft,
       examName,
       claimNamePrompt,
+      verifiedNames,
+      noteVerifiedName,
       receipts,
       held,
       addReceipt,
@@ -191,7 +200,7 @@ export function BoardFormProvider(props: {
       environment,
       tee,
     }),
-    [plan, setPlan, publish, setPublish, draftStep, setDraftStep, draftId, form.missing, resetDraft, examName, claimNamePrompt, receipts, held, addReceipt, dismissHeld, environment, tee],
+    [plan, setPlan, publish, setPublish, draftStep, setDraftStep, draftId, form.missing, resetDraft, examName, claimNamePrompt, verifiedNames, noteVerifiedName, receipts, held, addReceipt, dismissHeld, environment, tee],
   );
   return <BoardFormContext.Provider value={value}>{props.children}</BoardFormContext.Provider>;
 }
@@ -200,6 +209,13 @@ export function useBoardForm(): BoardForm {
   const form = useContext(BoardFormContext);
   if (!form) throw new Error('useBoardForm needs BoardFormProvider');
   return form;
+}
+
+/** The exam's verified ENS name in this session, if it has one. */
+export function useVerifiedName(examId: Hex): string | null {
+  const { verifiedNames } = useBoardForm();
+  for (const [name, id] of verifiedNames) if (id === examId.toLowerCase()) return name;
+  return null;
 }
 
 /** The plan, evaluated again each time it changes. */
