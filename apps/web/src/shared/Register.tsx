@@ -140,7 +140,6 @@ const noLink = {
 
 const lede = 'You are registering as a question setter. Your name is not published.';
 const nextStep = 'Then your exam board finishes the list of people for this exam. After that you can write your questions here.';
-const newKey = 'To use a different security key, ask your exam board for a new invitation link.';
 
 /** The setter's registered screen. `next` says what the page is waiting for, and never that the list is sent unless it is. */
 export function SetterRegistered(props: { next?: string }) {
@@ -148,7 +147,6 @@ export function SetterRegistered(props: { next?: string }) {
     <Registered
       message="Your security key is set for this exam."
       next={props.next ?? 'Your exam board is finishing the list of people for this exam. Then this page opens for writing by itself.'}
-      note={`You can close this page and come back to this link later, in this same browser. ${newKey}`}
     />
   );
 }
