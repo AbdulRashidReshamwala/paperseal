@@ -64,7 +64,7 @@ import { timelockEncrypt } from './tlock';
  * drand timelock (sealed to the real quicknet rounds, opened by the browser with real beacons) and the
  * clock, which is the real drand clock with short rounds chosen by the exam's times.
  *
- * Replaced: the attestation (a throwaway root made by pki.ts), the Shamir split (a share is a random
+ * Replaced: the random choice of questions (it always puts a multiple choice question on the paper when the bank has one), the attestation (a throwaway root made by pki.ts), the Shamir split (a share is a random
  * value, and eight valid shares release the key), the WebAuthn signature checks at registration, on
  * questions and on release (the page still makes the signatures, this machine does not check them),
  * and the registration checks against the invite. Sepolia is a local anvil.
@@ -265,7 +265,12 @@ export async function startMockTee(options: MockTeeOptions): Promise<MockTee> {
         const j = randomBytes(4).readUInt32BE() % (i + 1);
         [items[i], items[j]] = [items[j] as (typeof items)[number], items[i] as (typeof items)[number]];
       }
-      selected.push(...items.slice(0, topic.questions).map((item) => item.question));
+      const chosen = items.slice(0, topic.questions);
+      // MOCK ONLY: the real machine picks at random. This one makes sure a topic that has a multiple choice question
+      // in its bank shows one on the paper, so a recording of the paper always has lettered options to show.
+      const spare = items.slice(topic.questions).find((item) => item.question.options);
+      if (spare && !chosen.some((item) => item.question.options)) chosen[chosen.length - 1] = spare;
+      selected.push(...chosen.map((item) => item.question));
     }
     const seed = new Uint8Array(randomBytes(32));
     const paperBytes = encodePaper({ examId, questions: selected });

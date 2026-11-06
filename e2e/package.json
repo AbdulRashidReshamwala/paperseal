@@ -10,7 +10,8 @@
     "demo": "node demo/cli.mjs main",
     "demo:check": "node demo/cli.mjs check",
     "ui": "vitest run --config vitest.ui.config.ts",
-    "ui:live": "UI_LIVE=1 vitest run --config vitest.ui.config.ts"
+    "ui:live": "UI_LIVE=1 vitest run --config vitest.ui.config.ts",
+    "ui:mock": "node scripts/ui-mock.mjs"
   },
   "dependencies": {
     "@paperseal/crypto": "workspace:*",

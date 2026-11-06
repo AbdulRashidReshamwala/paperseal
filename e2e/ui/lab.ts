@@ -20,7 +20,7 @@ export interface Storage {
   stop: () => Promise<void>;
 }
 
-async function startStorage(): Promise<Storage> {
+export async function startStorage(): Promise<Storage> {
   const files = new Map<string, Uint8Array>();
   const server: Server = createServer((req, res) => {
     const key = decodeURIComponent((req.url ?? '').split('?')[0] ?? '').replace(/^\//, '');

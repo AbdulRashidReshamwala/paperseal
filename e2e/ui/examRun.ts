@@ -7,12 +7,16 @@ import { decodeInviteFragment, examNameProblem, firstRoundAtOrAfter, roundTimeSe
 import { keccak256, toBytes } from 'viem';
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { startApp } from '../src/chain';
+import { startApp, startChain, type Chain } from '../src/chain';
 import { stopAll } from '../src/procs';
 import { castSend } from '../live/cast';
 import { deployed, rpcHost } from '../live/config';
 import { liveCriteria, liveQuestion, questionsPerSetterPerTopic } from '../live/schedule';
+import { startMockTee, type MockTee } from '../mock/mockTee';
+import { makeMockPki, type MockPki } from '../mock/pki';
+import { testWalletScript } from '../src/wallet';
 import { castWalletScript } from './castWallet';
+import { startStorage } from './lab';
 import { Actor, launchUiChrome, openActor, proxyGithubIfLimited, report, UI_DIR, writeReport } from './kit';
 import { button, centre as centreText, composer, field, fold, hashOf, radio, stepStates, text, unfold } from './selectors';
 
@@ -32,24 +36,40 @@ import { button, centre as centreText, composer, field, fold, hashOf, radio, ste
  * from the chain, which is the same flow as `e2e/live/cli.mjs publish` printing them.
  *
  * Run with: UI_LIVE=1 pnpm --filter @paperseal/e2e ui:live   (LIVE_STORAGE_BUCKET is the default bucket).
+ *
+ * THE MOCK RUN is the same script with UI_MOCK=1 (`pnpm --filter @paperseal/e2e ui:mock`), for iterating
+ * on screens and recordings in minutes. It is NOT a real run and every screen says "Mock data". See
+ * `mockWorld` below for what is real and what is replaced. It never touches the VM, Sepolia or the bucket.
  */
 
+// The repository is public, but unauthenticated calls to api.github.com are limited to 60 an hour per address and the
+// suites spend that quickly. So in this test run the browser's GitHub calls are answered by the GitHub CLI's own login
+// with GitHub's real data (kit.ts, proxyGithubIfLimited). The token is never read, printed or given to the browser.
+process.env.UI_GH_PROXY ??= '1';
+
+const MODE: 'live' | 'mock' = process.env.UI_MOCK === '1' ? 'mock' : 'live';
+const PREFIX = `${MODE}-`;
+
 const RESUME = process.env.UI_LIVE_RESUME ?? '';
-const RELEASE = process.env.UI_LIVE_RELEASE ?? 'v0.5.0';
+// v0.6.0 signs the unlock files (filesHash) into the release log, which the apps now require, and limits an owner to 128 bytes.
+const RELEASE = process.env.UI_LIVE_RELEASE ?? 'v0.6.0';
+const RELEASE_DIGEST = process.env.UI_LIVE_DIGEST ?? (RELEASE === 'v0.6.0' ? '0x66dec9144ea2e05b72354c3fbc4d4929b508a378310b28200b00829660e1f0da' : '');
 const BOARD_ADDRESS = process.env.UI_LIVE_BOARD ?? '0xC3808daC38cA53a709F981Fb663814DbaaAB7420';
-const MINUTES_TO_LOCK = Number(process.env.UI_LIVE_LOCK_MINUTES ?? 10);
-const UNLOCK_AFTER_LOCK = 4; // minutes: Build, post it, centre downloads
-const DELTA = 1; // minutes
-const DURATION = 4; // minutes of exam: the shares and every centre open within this
+// Minutes from the start to the close of questions, from the close to the unlock (the Build, its post, the centre downloads),
+// the release time, and the length of the exam (the shares and every centre open within it). The mock run has no VM to boot.
+const MINUTES_TO_LOCK = Number(process.env.UI_LIVE_LOCK_MINUTES ?? (MODE === 'mock' ? 4 : 10));
+const UNLOCK_AFTER_LOCK = MODE === 'mock' ? 1 : 4;
+const DELTA = 1;
+const DURATION = MODE === 'mock' ? 2 : 4;
 
 // Videos: each window of the people worth watching is recorded, then cut by e2e/scripts/cut-videos.mjs.
 const RECORD = process.env.UI_RECORD !== '0';
 const RECORDED = new Set(['board', 'setter-1', 'neutral-1', 'centre-1', 'centre-8', 'verifier']);
-const VIDEO_RAW = resolve(UI_DIR, 'video-raw');
+const VIDEO_RAW = resolve(UI_DIR, `${MODE}-video-raw`);
 const videoDirFor = (who: string) => (RECORD && RECORDED.has(who) ? resolve(VIDEO_RAW, who) : undefined);
 
 const repo = resolve(import.meta.dirname, '../..');
-const logFile = resolve(UI_DIR, 'live-run.log');
+const logFile = resolve(UI_DIR, `${MODE}-run.log`);
 const results: { step: string; ok: boolean; detail: string; at: string }[] = [];
 const notDrivenInUi: string[] = [];
 const bugs: string[] = [];
@@ -103,32 +123,32 @@ async function finishVideos(): Promise<void> {
     plan.push({ who, file: video ? await video.path().catch(() => null) : null, startedAt: actor.videoStartedAt, marks: actor.marks });
   }
   mkdirSync(UI_DIR, { recursive: true });
-  writeFileSync(resolve(UI_DIR, 'video-plan.json'), `${JSON.stringify(plan, null, 2)}\n`);
+  writeFileSync(resolve(UI_DIR, `${MODE}-video-plan.json`), `${JSON.stringify(plan, null, 2)}\n`);
 }
 
 describe('real exam through the screens', () => {
   afterAll(async () => {
     await finishVideos();
-    writeReport('live', { results, notDrivenInUi, bugs });
-    writeFileSync(resolve(UI_DIR, 'live-results.json'), `${JSON.stringify({ results, notDrivenInUi, bugs }, null, 2)}\n`);
+    for (const stop of stoppers.splice(0)) await Promise.resolve(stop()).catch(() => undefined);
+    writeReport(MODE, { results, notDrivenInUi, bugs });
+    writeFileSync(resolve(UI_DIR, `${MODE}-results.json`), `${JSON.stringify({ results, notDrivenInUi, bugs }, null, 2)}\n`);
     await stopAll();
   });
 
   it('board, 2 setters, 3 neutral key holders and 8 centres, one real exam', async () => {
     mkdirSync(UI_DIR, { recursive: true });
-    const registry = createExamRegistry({ address: deployed.registry, rpcUrl: deployed.rpcUrl });
-    const boardOnChain = await registry.board();
-    expect(boardOnChain.toLowerCase()).toBe(BOARD_ADDRESS.toLowerCase());
+    const world = MODE === 'mock' ? await mockWorld() : liveWorld();
+    stoppers.push(world.stop);
+    const registry = world.registry;
+    if (MODE === 'live') {
+      const boardOnChain = await registry.board();
+      expect(boardOnChain.toLowerCase()).toBe(BOARD_ADDRESS.toLowerCase());
+    }
 
-    const env = {
-      VITE_RPC_URL: deployed.rpcUrl,
-      VITE_REGISTRY_ADDRESS: deployed.registry,
-      VITE_TEE_URL: deployed.teeUrl,
-      VITE_STORAGE_URL: deployed.storageUrl,
-      VITE_TEE_STORAGE_BUCKET: deployed.storageBucket,
-    };
-    const verifierApp = await startApp('apps/verifier', { ...env }, { host: 'localhost' });
-    const web = await startApp('apps/web', { ...env, VITE_VERIFIER_URL: verifierApp.url }, { host: 'localhost' });
+    const env = world.env;
+    const mockMode = MODE === 'mock' ? { mode: 'mock' } : {};
+    const verifierApp = await startApp('apps/verifier', { ...env }, { host: 'localhost', ...mockMode });
+    const web = await startApp('apps/web', { ...env, VITE_VERIFIER_URL: verifierApp.url }, { host: 'localhost', ...mockMode });
     if (RECORD) rmSync(VIDEO_RAW, { recursive: true, force: true });
     const browser = await launchUiChrome();
     for (const base of [web.url, verifierApp.url]) {
@@ -145,7 +165,7 @@ describe('real exam through the screens', () => {
     const examStart = lockAt + (UNLOCK_AFTER_LOCK + DELTA) * 60;
     const endAt = examStart + DURATION * 60;
     // The board's form accepts lowercase letters, digits and hyphens only.
-    const name = `paperseal-ui-live-${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'z').toLowerCase()}`;
+    const name = `paperseal-ui-${MODE}-${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'z').toLowerCase()}`;
     const nameProblem = examNameProblem(name);
     if (nameProblem) throw new Error(`the exam name is not accepted by the app's own rule: ${nameProblem}`);
     log(`exam "${name}": lock ${localInput(lockAt)}, T ${localInput(examStart)}, delta ${String(DELTA)} min, end ${localInput(endAt)}`);
@@ -153,8 +173,8 @@ describe('real exam through the screens', () => {
     const board = await openActor(browser, 'board', null, {
       role: 'board',
       ...(videoDirFor('board') ? { videoDir: videoDirFor('board') as string } : {}),
-      wallet: castWalletScript(deployed.rpcUrl, BOARD_ADDRESS),
-      bindings: { __castSend: (data: Hex, to: Hex) => castSend(data, to) },
+      wallet: world.walletScript,
+      ...(world.bindings ? { bindings: world.bindings } : {}),
     });
     const bp = board.page;
     const githubProxied = await proxyGithubIfLimited(board.person.context);
@@ -181,8 +201,8 @@ describe('real exam through the screens', () => {
       await board.type(bp.getByLabel(field.maxPercent).first(), String(liveCriteria.maxSetterPercent));
       await board.type(bp.getByLabel(field.bankMultiple).first(), String(liveCriteria.minBankMultiple));
       await board.type(bp.getByLabel(field.questionsClose).first(), localInput(lockAt));
-      await board.type(bp.getByLabel(field.rpcHost).first(), rpcHost);
-      await board.shot('live-01-create');
+      await board.type(bp.getByLabel(field.rpcHost).first(), world.rpcHost);
+      await board.shot(`${PREFIX}01-create`);
       await board.beat(2500);
       await bp.getByRole('button', { name: button.continue }).click();
       await board.seeHeading(text.reviewHeading, 60_000);
@@ -190,33 +210,37 @@ describe('real exam through the screens', () => {
       // The version is a row in the review. The newest checked one is already chosen.
       const other = bp.locator('summary', { hasText: fold.differentVersion });
       await other.waitFor({ timeout: 60_000 }).catch(async () => {
-        await board.shot('live-02-version-stuck');
+        await board.shot(`${PREFIX}02-version-stuck`);
         throw new Error(`version list did not load. Page: ${(await board.text()).slice(0, 500)}`);
       });
       await other.click();
       await bp.locator('details', { has: other }).locator('select').selectOption({ label: RELEASE });
       await bp.getByText(new RegExp(`^${RELEASE.replace(/\./g, '\\.')}, the version you chose`)).first().waitFor({ timeout: 90_000 });
-      await board.shot('live-03-review');
+      await board.shot(`${PREFIX}03-review`);
       await board.beat(3000);
       await bp.getByRole('button', { name: button.publish }).click();
       await board.seeHeading(text.peopleHeading, 180_000).catch(async () => {
-        await board.shot('live-04-publish-stuck');
+        await board.shot(`${PREFIX}04-publish-stuck`);
         throw new Error(`publish did not finish. Page: ${(await board.text()).slice(0, 600)}`);
       });
       await board.see(text.publishedStamp, 10_000);
       await board.say('Exam board: published, now invite people');
-      await board.shot('live-04-published');
+      await board.shot(`${PREFIX}04-published`);
       await board.beat(2500);
       board.mark('published');
     })));
     // Nothing after this can work without a published exam, so this is the one place the run stops.
-    if (!publishedOk) throw new Error('the exam was not published through the UI, so there is nothing more to run. See live-results.json.');
+    if (!publishedOk) throw new Error('the exam was not published through the UI, so there is nothing more to run. See the results file.');
 
     // ---------------------------------------------------------------- start the TEE from what the chain holds
     // The exam ID is the hash of the name, the same rule the app uses, so it needs no reading from the page.
     const examId = keccak256(toBytes(RESUME || name)) as Hex;
     const exam = await registry.getExam(examId);
     if (!exam) throw new Error('the exam is not on the chain');
+    // The VM is started on the digest the chain holds, so it must be the release this run means to test.
+    if (RELEASE_DIGEST && exam.imageDigest.toLowerCase() !== RELEASE_DIGEST.toLowerCase()) {
+      throw new Error(`the exam holds image digest ${exam.imageDigest}, not ${RELEASE_DIGEST} of ${RELEASE}. Not starting the VM on it.`);
+    }
     const settings = {
       examId,
       examStart: Number(exam.settings.examStart),
@@ -226,7 +250,7 @@ describe('real exam through the screens', () => {
       endRound: exam.settings.endRound.toString(),
       criteriaHash: exam.settings.criteriaHash,
       rpcHost: exam.settings.rpcHost,
-      registry: deployed.registry,
+      registry: world.registryAddress,
       chainId: 11155111,
     };
     const lockUnix = roundTimeSeconds(Number(exam.settings.lockRound));
@@ -236,7 +260,7 @@ describe('real exam through the screens', () => {
     expect(firstRoundAtOrAfter(lockUnix)).toBe(Number(exam.settings.lockRound));
     const args = [...startupArgs(settings), `--image-digest=sha256:${exam.imageDigest.slice(2)}`];
     const teeLog = resolve(UI_DIR, 'live-tee-deploy.log');
-    const deploy = RESUME ? null : spawn(resolve(repo, 'deploy/gcp/run-tee.sh'), ['--reset', ...args], {
+    const deploy = RESUME || MODE === 'mock' ? null : spawn(resolve(repo, 'deploy/gcp/run-tee.sh'), ['--reset', ...args], {
       env: { ...process.env, PROJECT_ID: 'paperseal-demo', REGION: 'asia-south2', ZONE: 'asia-south2-a', BUCKET: deployed.storageBucket },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -250,6 +274,8 @@ describe('real exam through the screens', () => {
         log(`run-tee.sh finished with code ${String(code)}`);
       });
     }
+    // The mock machine starts by being pointed at the exam the board just published. It needs no VM.
+    if (world.startTee) await world.startTee(examId);
     if (RESUME) {
       await bp.goto(`${web.url}/#/board?exam=${examId}`);
       await bp.reload();
@@ -272,7 +298,7 @@ describe('real exam through the screens', () => {
           await bp.getByRole('button', { name: new RegExp(`^Copy the link for ${person.label} \\(`) }).click();
           links[person.who] = await bp.evaluate(() => navigator.clipboard.readText());
         }
-        await board.shot('live-05-invites-waiting');
+        await board.shot(`${PREFIX}05-invites-waiting`);
         if (Object.keys(links).length !== 13) throw new Error(`only ${String(Object.keys(links).length)} links copied`);
         return '13 links';
       }),
@@ -283,9 +309,9 @@ describe('real exam through the screens', () => {
       const deadline = Date.now() + 8 * 60_000;
       let seenDown = false;
       while (Date.now() < deadline) {
-        const status = await fetch(`${deployed.teeUrl}/v1/status`).then((r) => (r.ok ? (r.json() as Promise<{ stage: string }>) : null), () => null);
+        const status = await fetch(`${world.teeUrl}/v1/status`).then((r) => (r.ok ? (r.json() as Promise<{ stage: string }>) : null), () => null);
         if (!status) seenDown = true;
-        if (status && ['onboard', 'publish'].includes(status.stage) && (seenDown || Date.now() > deadline - 7 * 60_000)) return `stage ${status.stage}`;
+        if (status && ['onboard', 'publish'].includes(status.stage) && (MODE === 'mock' || seenDown || Date.now() > deadline - 7 * 60_000)) return `stage ${status.stage}`;
         await sleep(3000);
       }
       throw new Error('the TEE did not come back');
@@ -315,7 +341,7 @@ describe('real exam through the screens', () => {
             await a.page.getByRole('button', { name: button.register }).click({ timeout: 60_000 });
             await a.see(/security key is registered|You are registered|Nothing to do yet/, 60_000);
           });
-          if (p.who === 'setter-1' || p.who === 'centre-1' || p.who === 'neutral-1') await a.shot('live-10-registered');
+          if (p.who === 'setter-1' || p.who === 'centre-1' || p.who === 'neutral-1') await a.shot(`${PREFIX}10-registered`);
         }),
       ),
     );
@@ -326,14 +352,14 @@ describe('real exam through the screens', () => {
         await bp.reload();
         await board.seeHeading(text.peopleHeading, 60_000);
         await board.see('Registered', 60_000);
-        await board.shot('live-11-people-registered');
+        await board.shot(`${PREFIX}11-people-registered`);
         // Seven centres hold part of the key and the eighth gets the key at unlock. The screen's default is not relied on.
         for (let n = 1; n <= 8; n++) {
           const pick = bp.getByLabel(`Role for Centre ${String(n)}`);
           await pick.waitFor({ timeout: 60_000 });
           await pick.selectOption({ label: n === 8 ? 'Centre getting the key at unlock' : 'Centre holding part of the key' });
         }
-        await board.shot('live-11b-people-places');
+        await board.shot(`${PREFIX}11b-people-places`);
         board.mark('post-list-start');
         await board.say('Exam board: post the list of people');
         await board.beat(2500);
@@ -341,13 +367,13 @@ describe('real exam through the screens', () => {
         await post.click({ timeout: 120_000 });
         // After the post the board has nothing to do until the questions close.
         await board.seeHeading(/Nothing to do until|The paper is being built/, 240_000);
-        await board.shot('live-12-list-posted');
+        await board.shot(`${PREFIX}12-list-posted`);
         await board.beat(2500);
         board.mark('list-posted');
       });
     });
     if (!listPosted) {
-      bugs.push('The board could not post the list through the UI: see live-results.json.');
+      bugs.push('The board could not post the list through the UI: see the results file.');
     }
 
     // ---------------------------------------------------------------- setters write and seal
@@ -370,7 +396,7 @@ describe('real exam through the screens', () => {
               a.paced = true;
               await a.say('Setter: a multiple choice question needs its options, each different');
               await page.getByRole('radio', { name: radio.multipleChoice }).check();
-              await a.shot('live-20-composer-choice');
+              await a.shot(`${PREFIX}20-composer-choice`);
               await a.beat();
               await a.type(page.getByLabel(composer.question), 'A draft with a repeated option');
               await a.type(page.getByRole('textbox', { name: field.option('A'), exact: true }), 'Same');
@@ -379,18 +405,18 @@ describe('real exam through the screens', () => {
               await page.locator(composer.optionError).first().waitFor({ timeout: 10_000 });
               const sealDisabled = await page.getByRole('button', { name: button.seal }).isDisabled();
               if (!sealDisabled) throw new Error('Seal stays open with a repeated option');
-              await a.shot('live-21-composer-repeated-option');
+              await a.shot(`${PREFIX}21-composer-repeated-option`);
               await a.beat(2500);
               await a.type(page.getByRole('textbox', { name: field.option('B'), exact: true }), '');
               await page.getByRole('textbox', { name: field.option('A'), exact: true }).focus();
-              await a.shot('live-22-composer-blank-option');
+              await a.shot(`${PREFIX}22-composer-blank-option`);
               a.paced = false;
               for (const letter of ['C', 'D', 'E', 'F']) {
                 await page.getByRole('button', { name: button.addOption, exact: true }).click();
                 await a.type(page.getByRole('textbox', { name: field.option(letter), exact: true }), `Option ${letter}`);
               }
               if (await page.getByRole('button', { name: button.addOption, exact: true }).count()) throw new Error('more than six options are offered');
-              await a.shot('live-23-composer-six-options');
+              await a.shot(`${PREFIX}23-composer-six-options`);
               await page.getByRole('button', { name: button.removeOption('F'), exact: true }).click();
               await page.getByRole('radio', { name: radio.written }).check();
               await a.type(page.getByLabel(composer.question), '');
@@ -419,17 +445,17 @@ describe('real exam through the screens', () => {
                 await page.getByRole('button', { name: button.seal }).click();
                 sealed += 1;
                 await page.getByText(composer.sealedSoFar(sealed)).first().waitFor({ timeout: 90_000 });
-                if (sealed === 1) await a.shot('live-24-first-receipt');
+                if (sealed === 1) await a.shot(`${PREFIX}24-first-receipt`);
                 if (a.paced) await a.beat(3500);
                 if (index === 0 && topic === liveCriteria.topics[0] && k === 3) a.mark('sealed-choice');
               }
             }
             a.paced = false;
-            await a.shot('live-25-all-sealed');
+            await a.shot(`${PREFIX}25-all-sealed`);
             a.mark('all-sealed');
           });
         } catch (error) {
-          await a.shot(`live-2x-${who}-failed`).catch(() => undefined);
+          await a.shot(`${PREFIX}2x-${who}-failed`).catch(() => undefined);
           throw new Error(`${String(sealed)} sealed before it stopped: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`);
         }
         return `${String(sealed)} sealed`;
@@ -441,15 +467,15 @@ describe('real exam through the screens', () => {
     await step('board posts the paper’s record (UI, wallet signature via cast)', async () => {
       await board.flow('post the Build', async () => {
         await board.seeHeading(/Nothing to do until|The paper is being built/, 60_000).catch(() => undefined);
-        await board.shot('live-30-wait');
+        await board.shot(`${PREFIX}30-wait`);
         await board.seeHeading(text.recordBuildHeading, Math.max(60_000, (lockUnix + 300 - Date.now() / 1000) * 1000));
         board.mark('paper-ready');
         await board.say('Exam board: the paper is ready, post its record');
-        await board.shot('live-31-record-build');
+        await board.shot(`${PREFIX}31-record-build`);
         await board.beat(3000);
         await bp.getByRole('button', { name: button.postBuild }).click();
         await board.seeHeading(/Sealed\. Nothing to do until|Key holders are releasing/, 240_000);
-        await board.shot('live-32-status');
+        await board.shot(`${PREFIX}32-status`);
         await board.say('Exam board: sealed, nothing more to do until unlock');
         await board.beat(3000);
         board.mark('build-posted');
@@ -465,7 +491,7 @@ describe('real exam through the screens', () => {
         await verifier.page.locator('li[data-state]').first().waitFor({ timeout: 60_000 });
         await sleep(20_000);
         const states = await stepStates(verifier.page);
-        await verifier.shot('live-40-verifier-before-unlock');
+        await verifier.shot(`${PREFIX}40-verifier-before-unlock`);
         notes.push(`verifier before unlock: ${states.map((s) => `${s.label}=${s.state}`).join(' | ')}`);
       });
     });
@@ -483,7 +509,7 @@ describe('real exam through the screens', () => {
           await a.page.waitForLoadState('networkidle').catch(() => undefined);
           a.mark('waiting');
           await a.say(who.startsWith('neutral') ? 'Key holder: waiting for the unlock time' : 'Centre: waiting for the unlock time');
-          if (who === 'centre-8') await a.shot('live-49-centre-waiting');
+          if (who === 'centre-8') await a.shot(`${PREFIX}49-centre-waiting`);
           onTheirPage.add(who);
         }),
       ),
@@ -501,17 +527,20 @@ describe('real exam through the screens', () => {
             // One after another, so the count on the waiting pages visibly goes up.
             await sleep(order * 2500);
             const releaseBtn = a.page.getByRole('button', { name: button.release });
-            await releaseBtn.waitFor({ timeout: 120_000 });
+            // Eight of the ten parts open the paper, so the last two holders may find nothing left to release.
+            const notNeeded = a.page.getByText(/was not needed/).or(a.page.getByRole('button', { name: centreText.openPaper }));
+            await releaseBtn.or(notNeeded).first().waitFor({ timeout: 120_000 });
+            if (!(await releaseBtn.isVisible())) return 'not needed: enough parts had already been released';
             a.mark('release-visible');
             await a.say(who.startsWith('neutral') ? 'Key holder: release your part of the key' : 'Centre holding part of the key: release it');
             if (who === 'neutral-1' || who === 'centre-1') {
-              await a.shot('live-50-release');
+              await a.shot(`${PREFIX}50-release`);
               await a.beat(3000);
             }
             await releaseBtn.click();
             a.mark('release-sent');
             await a.see(/Done\. You can close this tab|parts of the key released|Waiting for key holders|Open the paper/, 120_000);
-            if (who === 'neutral-1') await a.shot('live-51-keyholder-done');
+            if (who === 'neutral-1') await a.shot(`${PREFIX}51-keyholder-done`);
           });
         }),
       ),
@@ -544,7 +573,7 @@ describe('real exam through the screens', () => {
           await a.flow('open the paper', async () => {
             if (who === 'centre-8') {
               await a.seeHeading(/Waiting for key holders|Open the paper/, 120_000);
-              await a.shot('live-52-centre-without-share-waiting');
+              await a.shot(`${PREFIX}52-centre-without-share-waiting`);
               a.mark('holders-waiting');
               await a.say('Centre: waiting while key holders release their parts. The count goes up');
               await a.page.getByText(/^(8|9|10) of 8 parts of the key released$/).waitFor({ timeout: 120_000 }).catch(() => undefined);
@@ -560,7 +589,7 @@ describe('real exam through the screens', () => {
             a.mark('paper-open');
             await a.say('Centre: the paper is open, with lettered options');
             if (who === 'centre-1' || who === 'centre-8') {
-              await a.shot(`live-53-paper-open-${who}`);
+              await a.shot(`${PREFIX}53-paper-open-${who}`);
               const options = await a.page.locator('ol[type="A"] li').count();
               record(`${who}: the paper shows lettered options`, options > 0, `${String(options)} option lines`);
               await a.page.locator('ol[type="A"]').first().scrollIntoViewIfNeeded().catch(() => undefined);
@@ -588,13 +617,13 @@ describe('real exam through the screens', () => {
             await a.seeHeading(centreText.handOutHeading, 15_000);
             await a.say('Centre: hand out the paper. This is a demo, nothing is sent to any room');
             await a.see(centreText.demoLabel, 5_000);
-            await a.shot(`live-54-handout-${who}`);
+            await a.shot(`${PREFIX}54-handout-${who}`);
             await a.beat(3000);
             await a.type(a.page.getByLabel(centreText.copiesFor('Room 1')), '35');
             await a.beat(1000);
             await a.page.getByRole('button', { name: centreText.sendToRooms }).click();
             await a.page.getByText(centreText.sentInDemo).nth(2).waitFor({ timeout: 30_000 });
-            await a.shot(`live-55-handed-out-${who}`);
+            await a.shot(`${PREFIX}55-handed-out-${who}`);
             const body = await a.text();
             if (/delivered|received|arrived/i.test(body)) throw new Error('the hand out page claims a real delivery');
             await a.beat(4000);
@@ -615,7 +644,7 @@ describe('real exam through the screens', () => {
         await verifier.page.locator('li[data-state]').first().waitFor({ timeout: 60_000 });
         await sleep(40_000);
         const states = await stepStates(verifier.page);
-        await verifier.shot('live-60-verifier-finished');
+        await verifier.shot(`${PREFIX}60-verifier-finished`);
         notes.push(`verifier finished: ${states.map((s) => `${s.label}=${s.state}`).join(' | ')}`);
         if (states.some((s) => s.state === 'failed')) throw new Error(`a step failed: ${states.map((s) => `${s.label}=${s.state}`).join(', ')}`);
         verifier.mark('verifier-shown');
@@ -626,7 +655,7 @@ describe('real exam through the screens', () => {
       if (!a) throw new Error('no window');
       await a.page.reload();
       await a.seeHeading(/Your questions are sealed/, 60_000);
-      await a.shot('live-61-setter-closed');
+      await a.shot(`${PREFIX}61-setter-closed`);
       await a.see(/Your receipts match the paper that was built/, 60_000);
     });
     // Late registration offer: a finished exam offers none.
@@ -637,19 +666,26 @@ describe('real exam through the screens', () => {
       await late.page.goto(links['centre-8']?.replace(/^https?:\/\/[^#]+/, `${web.url}/`) ?? '');
       await late.seeHeading(text.endedHeading, 60_000);
       if (await late.page.getByRole('button', { name: button.register }).count()) throw new Error('registration offered after the end');
-      await late.shot('live-62-ended');
+      await late.shot(`${PREFIX}62-ended`);
     });
 
     notDrivenInUi.push(
-      'The board wallet signatures (createExam, postApprovedList, postBuild) are produced by `cast send` with the Foundry keystore, behind the injected wallet. The buttons were clicked in the UI.',
-      'The TEE VM start (run-tee.sh --reset) is run by this driver, not by a screen.',
+      ...(MODE === 'mock'
+        ? [
+            'MOCK RUN. The sealed machine is a TypeScript mock (e2e/mock), not the Go TEE, and its attestation is signed by a throwaway root. Sepolia is a local anvil. The drand clock and beacons, the GitHub release list and the apps are real.',
+            'The board wallet is the anvil test wallet, not a Foundry keystore.',
+          ]
+        : [
+            'The board wallet signatures (createExam, postApprovedList, postBuild) are produced by `cast send` with the Foundry keystore, behind the injected wallet. The buttons were clicked in the UI.',
+            'The TEE VM start (run-tee.sh --reset) is run by this driver, not by a screen.',
+          ]),
     );
     await finishVideos();
     await browser.close();
     await verifierApp.stop();
     await web.stop();
     const failed = results.filter((r) => !r.ok);
-    writeFileSync(resolve(UI_DIR, 'live-notes.txt'), notes.join('\n'));
+    writeFileSync(resolve(UI_DIR, `${MODE}-notes.txt`), notes.join('\n'));
     expect(failed.map((f) => `${f.step}: ${f.detail}`)).toEqual([]);
   });
 });
@@ -657,3 +693,77 @@ describe('real exam through the screens', () => {
 const notes: string[] = [];
 void hashOf;
 void logFile;
+
+const stoppers: (() => Promise<void> | void)[] = [];
+
+interface World {
+  env: Record<string, string>;
+  registry: ReturnType<typeof createExamRegistry>;
+  registryAddress: Hex;
+  teeUrl: string;
+  rpcHost: string;
+  walletScript: string;
+  bindings?: Record<string, (...args: never[]) => unknown>;
+  /** Mock only: points the mock machine at the published exam. */
+  startTee?: (examId: Hex) => Promise<void>;
+  stop: () => Promise<void>;
+}
+
+/** The deployed system: the real TEE VM, Sepolia, the real bucket. */
+function liveWorld(): World {
+  return {
+    env: {
+      VITE_RPC_URL: deployed.rpcUrl,
+      VITE_REGISTRY_ADDRESS: deployed.registry,
+      VITE_TEE_URL: deployed.teeUrl,
+      VITE_STORAGE_URL: deployed.storageUrl,
+      VITE_TEE_STORAGE_BUCKET: deployed.storageBucket,
+    },
+    registry: createExamRegistry({ address: deployed.registry, rpcUrl: deployed.rpcUrl }),
+    registryAddress: deployed.registry,
+    teeUrl: deployed.teeUrl,
+    rpcHost,
+    walletScript: castWalletScript(deployed.rpcUrl, BOARD_ADDRESS),
+    bindings: { __castSend: (data: Hex, to: Hex) => castSend(data, to) },
+    stop: async () => undefined,
+  };
+}
+
+/**
+ * The mock system, for fast recordings. REAL: the apps (run in their own `mock` mode, which only adds the
+ * "Mock data" label and a test attestation root), the real ExamRegistry on a local anvil, Chrome with
+ * virtual security keys and real PRF-derived keys, HPKE, AES-GCM, ECDSA and every message and file of
+ * spec/api.md, the drand clock and beacons, and the GitHub release list. REPLACED: the Go TEE by e2e/mock,
+ * its attestation by a throwaway root, Shamir by random shares, the machine's WebAuthn signature checks,
+ * Sepolia by anvil, the board's Foundry wallet by anvil's test wallet, and the bucket by a local server.
+ */
+async function mockWorld(): Promise<World> {
+  const chain: Chain = await startChain();
+  const pki: MockPki = makeMockPki();
+  const storage = await startStorage();
+  const registry = createExamRegistry({ address: chain.registry, rpcUrl: chain.rpcUrl });
+  const bucket = 'mock-bucket';
+  const tee: MockTee = await startMockTee({ pki, registry, storage: storage.files, bucket, log });
+  return {
+    env: {
+      VITE_RPC_URL: chain.rpcUrl,
+      VITE_REGISTRY_ADDRESS: chain.registry,
+      VITE_TEE_URL: tee.url,
+      VITE_STORAGE_URL: storage.url,
+      VITE_TEE_STORAGE_BUCKET: bucket,
+      VITE_MOCK_TRUST_ROOT: Buffer.from(pki.rootDer).toString('base64'),
+    },
+    registry,
+    registryAddress: chain.registry,
+    teeUrl: tee.url,
+    rpcHost: 'sepolia.example.org',
+    walletScript: testWalletScript(chain.rpcUrl),
+    startTee: (examId) => tee.init(examId),
+    stop: async () => {
+      await tee.stop();
+      pki.stop();
+      await storage.stop();
+      await chain.stop();
+    },
+  };
+}

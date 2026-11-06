@@ -7,8 +7,10 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const planFile = resolve(root, process.argv[2] ?? '.ui/video-plan.json');
+const planFile = resolve(root, process.argv[2] ?? '.ui/live-video-plan.json');
 const outDir = resolve(root, process.argv[3] ?? 'videos');
+// A prefix names the kind of run in every file, such as `mock` for the mock run.
+const prefix = process.argv[4] ? `${process.argv[4]}-` : '';
 const plan = JSON.parse(readFileSync(planFile, 'utf8'));
 
 /** Seconds before `from` and after `to` are kept, so a viewer sees the screen settle. */
@@ -32,16 +34,16 @@ for (const cut of cuts) {
   const mark = (name) => entry?.marks.find((m) => m.name === name);
   const from = mark(cut.from);
   const to = mark(cut.to);
-  const out = resolve(outDir, `${cut.name}.mp4`);
+  const out = resolve(outDir, `${prefix}${cut.name}.mp4`);
   if (!entry?.file || !existsSync(entry.file) || !from || !to) {
-    rows.push({ name: cut.name, result: `NOT RECORDED (${!entry?.file ? 'no video' : !from ? `no mark ${cut.from}` : `no mark ${cut.to}`})`, seconds: '-' });
+    rows.push({ name: `${prefix}${cut.name}`, result: `NOT RECORDED (${!entry?.file ? 'no video' : !from ? `no mark ${cut.from}` : `no mark ${cut.to}`})`, seconds: '-' });
     continue;
   }
   const start = Math.max(0, (from.at - entry.startedAt) / 1000 - cut.before);
   const end = (to.at - entry.startedAt) / 1000 + cut.after;
   rmSync(out, { force: true });
   const run = spawnSync('ffmpeg', ['-y', '-loglevel', 'error', '-ss', start.toFixed(2), '-to', end.toFixed(2), '-i', entry.file, '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p', '-an', '-movflags', '+faststart', out], { stdio: 'inherit' });
-  rows.push({ name: cut.name, result: run.status === 0 ? 'OK' : 'FFMPEG FAILED', seconds: (end - start).toFixed(1), file: out });
+  rows.push({ name: `${prefix}${cut.name}`, result: run.status === 0 ? 'OK' : 'FFMPEG FAILED', seconds: (end - start).toFixed(1), file: out });
 }
 for (const row of rows) console.log(`${row.name.padEnd(36)} ${row.result.padEnd(14)} ${String(row.seconds).padStart(6)}s  ${row.file ?? ''}`);
 process.exit(rows.every((r) => r.result === 'OK') ? 0 : 1);
