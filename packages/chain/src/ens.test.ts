@@ -494,6 +494,14 @@ describe('checkPasskeyName', () => {
     });
   });
 
+  it('reads the record at the block it is given, and at the latest block without one', async () => {
+    const asked: (bigint | undefined)[] = [];
+    const text = (_: string, __: string, block?: bigint) => (asked.push(block), Promise.resolve(null));
+    await checkPasskeyName(holderName, key, { lookup: lookup({ text }), atBlock: 12_078_300n });
+    await checkPasskeyName(holderName, key, { lookup: lookup({ text }) });
+    expect(asked).toEqual([12_078_300n, undefined]);
+  });
+
   it('reads the paperseal.passkey record', async () => {
     const asked: string[] = [];
     await checkPasskeyName(holderName, key, { lookup: lookup({ text: (_, k) => (asked.push(k), Promise.resolve(null)) }) });

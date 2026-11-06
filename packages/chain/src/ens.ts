@@ -90,7 +90,8 @@ export interface EnsLookup {
   address(name: string): Promise<Address | null>;
   /** The primary name by reverse resolution, or null when unset. */
   primaryName(address: Address): Promise<string | null>;
-  text(name: string, key: string): Promise<string | null>;
+  /** At `blockNumber` when given, and at the latest block otherwise. */
+  text(name: string, key: string, blockNumber?: bigint): Promise<string | null>;
   /** The deployed code at `address`, or undefined when there is none. */
   code(address: Address): Promise<Hex | undefined>;
   /** `ExamRegistry.board()`. Reverts when `registry` is not an ExamRegistry. */
@@ -113,7 +114,7 @@ export function createEnsLookup(options: EnsOptions): EnsLookup {
   return {
     address: (name) => client.getEnsAddress({ name }),
     primaryName: (address) => client.getEnsName({ address }),
-    text: (name, key) => client.getEnsText({ name, key }),
+    text: (name, key, blockNumber) => client.getEnsText({ name, key, ...(blockNumber === undefined ? {} : { blockNumber }) }),
     code: (address) => client.getCode({ address }),
     board: (registry) => createExamRegistry({ address: registry, transport, ccipRead: false }).board(),
   };
@@ -359,12 +360,14 @@ export interface PasskeyNameResult {
  * Reads `name`'s `ens.records.passkey` record on chain, with CCIP-Read off and the viewer's own RPC, and
  * compares it with `passkeyRecordValue(passkeyPublicKey)`. A label and a proof of who holds this key,
  * never a check anything depends on: every state other than `confirmed` only means "not confirmed".
+ * With `atBlock` the record is read as it stood at that block, so a name given a new key later says
+ * nothing about a past exam. An RPC that keeps no state that old leaves it `unreadable`, never a match.
  * Never throws for a chain or RPC failure.
  */
 export async function checkPasskeyName(
   name: string,
   passkeyPublicKey: Hex,
-  options: EnsOptions & { lookup?: EnsLookup },
+  options: EnsOptions & { lookup?: EnsLookup; atBlock?: bigint },
 ): Promise<PasskeyNameResult> {
   const expected = passkeyRecordValue(passkeyPublicKey);
   const result = (state: PasskeyNameState, reason: string, found?: string | null): PasskeyNameResult => ({
@@ -380,7 +383,7 @@ export async function checkPasskeyName(
   const key = ens.records.passkey;
   let found: string | null;
   try {
-    found = await lookup.text(name, key);
+    found = await lookup.text(name, key, options.atBlock);
   } catch (error) {
     const failure = readFailure(error);
     if (failure === 'unreadable') return result('unreadable', `The RPC failed before ${name} could be read: ${messageOf(error)}`);
