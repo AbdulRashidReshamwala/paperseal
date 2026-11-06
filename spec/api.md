@@ -175,7 +175,7 @@ Every client reads `entries` and `criteria` this way. `getExam` returns `created
 | `approvedList` | TEE | `bytes32 examId`, `bytes entries` |
 | `questionSubmission` | Passkey | `bytes32 examId`, `bytes challenge`, `bytes32 questionHash` |
 | `questionReceipt` | TEE | `bytes32 examId`, `bytes passkeyPublicKey`, `bytes32 questionHash` |
-| `build` | TEE | `bytes32 examId`, `bytes32 approvedListHash`, `bytes32 paperHash`, `bytes32 storageManifestHash`, `bytes32 saltedPaperHash`, `uint32 selected`, `uint32 bankSize`, `bytes32 criteriaHash` |
+| `build` | TEE | `bytes32 examId`, `bytes32 approvedListHash`, `bytes32 paperHash`, `bytes32 storageManifestHash`, `bytes32 saltedPaperHash`, `uint32 selected`, `uint32 bankSize`, `bytes32 criteriaHash`, `uint64 builtRound` |
 | `shareRelease` | Passkey | `bytes32 examId`, `bytes challenge` |
 | `releaseLog` | TEE | `bytes32 examId`, `bytes32 entriesHash`, `bytes32 filesHash` |
 
@@ -184,6 +184,7 @@ Every client reads `entries` and `criteria` this way. `getExam` returns `created
 - `questionHash` is the plain SHA-256 of the question ciphertext. It is never a hash of the plaintext, because that would let people test guesses at a question.
 - `paperHash` is the plain SHA-256 of the encrypted paper file.
 - `saltedPaperHash` uses the `paperHash` domain tag, with fields `bytes32 seed`, `bytes paper`. It never hashes the plaintext unsalted, because that would let people test guesses at the paper.
+- `builtRound` is the newest verified drand round when the TEE sealed the paper, read from the relay's latest round as release entries read theirs. A stale relay can only understate it. It is the signed time of sealing, whatever time the board posts the Build. Round `r` is published at `genesisTime + (r - 1) * periodSeconds`. `postBuild` takes the `build` fields after `examId` as one `BuildFields` struct in hash order, and rejects a zero `builtRound`, which is a format rule only. The rounds themselves are checked by readers, not by `ExamRegistry`: a Build is sound only if `lockRound <= builtRound`, and it was sealed in time if `builtRound < unlockRound`. If the TEE can't read the latest round while sealing, it retries and doesn't fail the exam.
 - `shareRelease` doesn't cover a share hash. One WebAuthn request gives both the signature and the PRF output, so the share isn't decrypted yet when the passkey signs.
 - `shareHash` uses the `shareHash` domain tag, with the field `bytes share`.
 

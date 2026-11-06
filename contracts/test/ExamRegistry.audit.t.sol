@@ -54,6 +54,8 @@ abstract contract AuditBase is Test {
 }
 
 contract ExamRegistryAuditTest is AuditBase {
+    uint64 internal constant BUILT_ROUND = 1000;
+
     function _keyOfLength(uint256 length) internal pure returns (bytes memory key) {
         key = new bytes(length);
         key[0] = 0x04;
@@ -67,7 +69,12 @@ contract ExamRegistryAuditTest is AuditBase {
         bytes32 listHash = _listHash(EXAM_ID, entries);
         vm.prank(BOARD);
         vm.expectRevert(ExamRegistry.InvalidPublicKey.selector);
-        registry.postBuild(EXAM_ID, listHash, HASH, HASH, HASH, 20, 200, hash, new bytes(64), key);
+        registry.postBuild(
+            EXAM_ID,
+            ExamRegistry.BuildFields(listHash, HASH, HASH, HASH, 20, 200, hash, BUILT_ROUND),
+            new bytes(64),
+            key
+        );
     }
 
     function test_PostBuild_RejectsShortKeyWithRightPrefix() public {
@@ -115,7 +122,12 @@ contract ExamRegistryAuditTest is AuditBase {
         assertNotEq(own, other);
         vm.prank(BOARD);
         vm.expectRevert(abi.encodeWithSelector(ExamRegistry.ApprovedListHashMismatch.selector, own, other));
-        registry.postBuild(EXAM_ID, other, HASH, HASH, HASH, 20, 200, hash, new bytes(64), _key());
+        registry.postBuild(
+            EXAM_ID,
+            ExamRegistry.BuildFields(other, HASH, HASH, HASH, 20, 200, hash, BUILT_ROUND),
+            new bytes(64),
+            _key()
+        );
         assertEq(registry.getBuild(EXAM_ID).postedAt, 0);
     }
 
@@ -152,6 +164,7 @@ contract ExamRegistryAuditTest is AuditBase {
 
 /// @dev Random writes against a few exam IDs, keeping the first value written to each slot.
 contract WriteOnceHandler is Test {
+    uint64 internal constant BUILT_ROUND = 1000;
     address internal constant BOARD = address(0xB0A2D);
     uint64 internal constant GENESIS = 1692803367;
 
@@ -197,7 +210,12 @@ contract WriteOnceHandler is Test {
         bytes32 listHash = registry.getApprovedList(examId).listHash;
         bytes32 criteriaHash = registry.getExam(examId).settings.criteriaHash;
         vm.prank(BOARD);
-        try registry.postBuild(examId, listHash, paper, paper, paper, 1, 1, criteriaHash, new bytes(64), key) {
+        try registry.postBuild(
+            examId,
+            ExamRegistry.BuildFields(listHash, paper, paper, paper, 1, 1, criteriaHash, BUILT_ROUND),
+            new bytes(64),
+            key
+        ) {
             firstBuild[examId] = paper;
         } catch {}
     }

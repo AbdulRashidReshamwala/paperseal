@@ -12,6 +12,7 @@
 
 - Only the board's address can write. It is set once at deployment, for every exam in that deployment.
 - Each record can be written once. The commit hash, image digest and exam settings, including the rounds that set the exam date, can never change.
+- `postBuild` takes `examId`, the `build` message's other fields as one `BuildFields` struct in hash order, the signature and the instance key. The struct keeps the call within the compiler's stack. `builtRound` must be nonzero and nothing else: readers compare it with the exam's rounds.
 - `postApprovedList` stores `sha256(abi.encode(tag, examId, entries))` and emits the full bytes, where `entries` is `abi.encode(Entry[])`. The contract doesn't decode the entries, because the TEE checks their content.
 - `postApprovedList` reverts with `EntriesTooLarge` if `entries` is over 130000 bytes (`limits.entriesBytes`), and `createExam` reverts with `CriteriaTooLarge` if `criteria` is over 16384 bytes (`limits.criteriaBytes`). Both checks are by length alone and come before any hashing, with no decoding. Both caps equal the spec limits, and the entries cap is what one transaction can carry. See "Size Limits" in `spec/api.md`. A test checks both limits against `spec/constants.json`.
 - The Build stores the TEE's signature and instance public key. The contract doesn't verify the signature, because the attested key only exists off-chain. Apps verify it against the attestation token.

@@ -40,6 +40,7 @@ contract ExamRegistryTest is Test {
     uint256 internal constant CONTRACT_ENTRIES_CAP = 130000;
     /// @dev geth's `txMaxSize`, the largest transaction its mempool accepts.
     uint256 internal constant MEMPOOL_TX_BYTES = 131072;
+    uint64 internal constant BUILT_ROUND = 1000;
     uint32 internal constant QUESTIONS = 200;
     uint32 internal constant SELECTED = 20;
     string internal constant RPC_HOST = "rpc.example.org";
@@ -146,7 +147,12 @@ contract ExamRegistryTest is Test {
 
     function _build() internal {
         registry.postBuild(
-            EXAM_ID, listHash, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, SELECTED, QUESTIONS, criteriaHash, sig, key
+            EXAM_ID,
+            ExamRegistry.BuildFields(
+                listHash, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, SELECTED, QUESTIONS, criteriaHash, BUILT_ROUND
+            ),
+            sig,
+            key
         );
     }
 
@@ -297,7 +303,9 @@ contract ExamRegistryTest is Test {
         _postBuild();
         vm.expectRevert(abi.encodeWithSelector(ExamRegistry.NotBoard.selector, STRANGER));
         vm.prank(STRANGER);
-        registry.postBuild(EXAM_ID, OTHER, OTHER, OTHER, OTHER, 1, 1, OTHER, sig, key);
+        registry.postBuild(
+            EXAM_ID, ExamRegistry.BuildFields(OTHER, OTHER, OTHER, OTHER, 1, 1, OTHER, BUILT_ROUND), sig, key
+        );
     }
 
     // Write-once
@@ -349,7 +357,12 @@ contract ExamRegistryTest is Test {
         _postBuild();
         vm.expectRevert(abi.encodeWithSelector(ExamRegistry.BuildAlreadyPosted.selector, EXAM_ID));
         vm.prank(BOARD);
-        registry.postBuild(EXAM_ID, listHash, OTHER, OTHER, OTHER, 1, 1, criteriaHash, otherSig, otherKey);
+        registry.postBuild(
+            EXAM_ID,
+            ExamRegistry.BuildFields(listHash, OTHER, OTHER, OTHER, 1, 1, criteriaHash, BUILT_ROUND),
+            otherSig,
+            otherKey
+        );
 
         ExamRegistry.Build memory build = registry.getBuild(EXAM_ID);
         assertEq(build.paperHash, PAPER_HASH);
@@ -382,7 +395,12 @@ contract ExamRegistryTest is Test {
         vm.expectRevert(abi.encodeWithSelector(ExamRegistry.ApprovedListNotPosted.selector, OTHER_EXAM_ID));
         vm.prank(BOARD);
         registry.postBuild(
-            OTHER_EXAM_ID, listHash, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, SELECTED, QUESTIONS, criteriaHash, sig, key
+            OTHER_EXAM_ID,
+            ExamRegistry.BuildFields(
+                listHash, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, SELECTED, QUESTIONS, criteriaHash, BUILT_ROUND
+            ),
+            sig,
+            key
         );
     }
 
@@ -713,7 +731,12 @@ contract ExamRegistryTest is Test {
         vm.expectRevert(abi.encodeWithSelector(ExamRegistry.ApprovedListHashMismatch.selector, listHash, OTHER));
         vm.prank(BOARD);
         registry.postBuild(
-            EXAM_ID, OTHER, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, SELECTED, QUESTIONS, criteriaHash, sig, key
+            EXAM_ID,
+            ExamRegistry.BuildFields(
+                OTHER, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, SELECTED, QUESTIONS, criteriaHash, BUILT_ROUND
+            ),
+            sig,
+            key
         );
     }
 
@@ -722,7 +745,12 @@ contract ExamRegistryTest is Test {
         vm.expectRevert(abi.encodeWithSelector(ExamRegistry.CriteriaHashMismatch.selector, criteriaHash, OTHER));
         vm.prank(BOARD);
         registry.postBuild(
-            EXAM_ID, listHash, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, SELECTED, QUESTIONS, OTHER, sig, key
+            EXAM_ID,
+            ExamRegistry.BuildFields(
+                listHash, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, SELECTED, QUESTIONS, OTHER, BUILT_ROUND
+            ),
+            sig,
+            key
         );
     }
 
@@ -731,16 +759,56 @@ contract ExamRegistryTest is Test {
         vm.startPrank(BOARD);
         vm.expectRevert(ExamRegistry.InvalidSelection.selector);
         registry.postBuild(
-            EXAM_ID, listHash, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, 0, QUESTIONS, criteriaHash, sig, key
+            EXAM_ID,
+            ExamRegistry.BuildFields(
+                listHash, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, 0, QUESTIONS, criteriaHash, BUILT_ROUND
+            ),
+            sig,
+            key
         );
         vm.expectRevert(ExamRegistry.InvalidSelection.selector);
         registry.postBuild(
-            EXAM_ID, listHash, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, QUESTIONS + 1, QUESTIONS, criteriaHash, sig, key
+            EXAM_ID,
+            ExamRegistry.BuildFields(
+                listHash, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, QUESTIONS + 1, QUESTIONS, criteriaHash, BUILT_ROUND
+            ),
+            sig,
+            key
         );
         registry.postBuild(
-            EXAM_ID, listHash, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, QUESTIONS, QUESTIONS, criteriaHash, sig, key
+            EXAM_ID,
+            ExamRegistry.BuildFields(
+                listHash, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, QUESTIONS, QUESTIONS, criteriaHash, BUILT_ROUND
+            ),
+            sig,
+            key
         );
         vm.stopPrank();
+    }
+
+    function test_PostBuild_RejectsZeroBuiltRoundAndAcceptsAnyOther() public {
+        _postList();
+        vm.startPrank(BOARD);
+        vm.expectRevert(ExamRegistry.ZeroValue.selector);
+        registry.postBuild(
+            EXAM_ID,
+            ExamRegistry.BuildFields(
+                listHash, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, SELECTED, QUESTIONS, criteriaHash, 0
+            ),
+            sig,
+            key
+        );
+        // No ordering rule against the exam's rounds: readers apply those.
+        registry.postBuild(
+            EXAM_ID,
+            ExamRegistry.BuildFields(
+                listHash, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, SELECTED, QUESTIONS, criteriaHash, type(uint64).max
+            ),
+            sig,
+            key
+        );
+        vm.stopPrank();
+        assertEq(registry.getBuild(EXAM_ID).builtRound, type(uint64).max);
     }
 
     function test_PostBuild_RejectsZeroHashes() public {
@@ -748,15 +816,30 @@ contract ExamRegistryTest is Test {
         vm.startPrank(BOARD);
         vm.expectRevert(ExamRegistry.ZeroValue.selector);
         registry.postBuild(
-            EXAM_ID, listHash, bytes32(0), MANIFEST_HASH, SALTED_HASH, SELECTED, QUESTIONS, criteriaHash, sig, key
+            EXAM_ID,
+            ExamRegistry.BuildFields(
+                listHash, bytes32(0), MANIFEST_HASH, SALTED_HASH, SELECTED, QUESTIONS, criteriaHash, BUILT_ROUND
+            ),
+            sig,
+            key
         );
         vm.expectRevert(ExamRegistry.ZeroValue.selector);
         registry.postBuild(
-            EXAM_ID, listHash, PAPER_HASH, bytes32(0), SALTED_HASH, SELECTED, QUESTIONS, criteriaHash, sig, key
+            EXAM_ID,
+            ExamRegistry.BuildFields(
+                listHash, PAPER_HASH, bytes32(0), SALTED_HASH, SELECTED, QUESTIONS, criteriaHash, BUILT_ROUND
+            ),
+            sig,
+            key
         );
         vm.expectRevert(ExamRegistry.ZeroValue.selector);
         registry.postBuild(
-            EXAM_ID, listHash, PAPER_HASH, MANIFEST_HASH, bytes32(0), SELECTED, QUESTIONS, criteriaHash, sig, key
+            EXAM_ID,
+            ExamRegistry.BuildFields(
+                listHash, PAPER_HASH, MANIFEST_HASH, bytes32(0), SELECTED, QUESTIONS, criteriaHash, BUILT_ROUND
+            ),
+            sig,
+            key
         );
         vm.stopPrank();
     }
@@ -768,11 +851,21 @@ contract ExamRegistryTest is Test {
         vm.startPrank(BOARD);
         vm.expectRevert(ExamRegistry.InvalidSignatureLength.selector);
         registry.postBuild(
-            EXAM_ID, listHash, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, SELECTED, QUESTIONS, criteriaHash, shortSig, key
+            EXAM_ID,
+            ExamRegistry.BuildFields(
+                listHash, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, SELECTED, QUESTIONS, criteriaHash, BUILT_ROUND
+            ),
+            shortSig,
+            key
         );
         vm.expectRevert(ExamRegistry.InvalidSignatureLength.selector);
         registry.postBuild(
-            EXAM_ID, listHash, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, SELECTED, QUESTIONS, criteriaHash, longSig, key
+            EXAM_ID,
+            ExamRegistry.BuildFields(
+                listHash, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, SELECTED, QUESTIONS, criteriaHash, BUILT_ROUND
+            ),
+            longSig,
+            key
         );
         vm.stopPrank();
     }
@@ -785,26 +878,18 @@ contract ExamRegistryTest is Test {
         vm.expectRevert(ExamRegistry.InvalidPublicKey.selector);
         registry.postBuild(
             EXAM_ID,
-            listHash,
-            PAPER_HASH,
-            MANIFEST_HASH,
-            SALTED_HASH,
-            SELECTED,
-            QUESTIONS,
-            criteriaHash,
+            ExamRegistry.BuildFields(
+                listHash, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, SELECTED, QUESTIONS, criteriaHash, BUILT_ROUND
+            ),
             sig,
             compressed
         );
         vm.expectRevert(ExamRegistry.InvalidPublicKey.selector);
         registry.postBuild(
             EXAM_ID,
-            listHash,
-            PAPER_HASH,
-            MANIFEST_HASH,
-            SALTED_HASH,
-            SELECTED,
-            QUESTIONS,
-            criteriaHash,
+            ExamRegistry.BuildFields(
+                listHash, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, SELECTED, QUESTIONS, criteriaHash, BUILT_ROUND
+            ),
             sig,
             wrongPrefix
         );
@@ -816,7 +901,12 @@ contract ExamRegistryTest is Test {
         bytes memory garbage = _filled(0xFF, 64);
         vm.prank(BOARD);
         registry.postBuild(
-            EXAM_ID, listHash, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, SELECTED, QUESTIONS, criteriaHash, garbage, key
+            EXAM_ID,
+            ExamRegistry.BuildFields(
+                listHash, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, SELECTED, QUESTIONS, criteriaHash, BUILT_ROUND
+            ),
+            garbage,
+            key
         );
         assertEq(registry.getBuild(EXAM_ID).teeSignature, garbage);
     }
@@ -855,7 +945,17 @@ contract ExamRegistryTest is Test {
         _postList();
         vm.expectEmit(true, true, true, true, address(registry));
         emit ExamRegistry.BuildPosted(
-            EXAM_ID, listHash, PAPER_HASH, MANIFEST_HASH, SALTED_HASH, SELECTED, QUESTIONS, criteriaHash, sig, key
+            EXAM_ID,
+            listHash,
+            PAPER_HASH,
+            MANIFEST_HASH,
+            SALTED_HASH,
+            SELECTED,
+            QUESTIONS,
+            criteriaHash,
+            BUILT_ROUND,
+            sig,
+            key
         );
         vm.prank(BOARD);
         _build();
@@ -947,6 +1047,7 @@ contract ExamRegistryTest is Test {
         assertEq(build.saltedPaperHash, SALTED_HASH);
         assertEq(build.selected, SELECTED);
         assertEq(build.bankSize, QUESTIONS);
+        assertEq(build.builtRound, BUILT_ROUND);
         assertEq(build.postedAt, at);
         assertEq(build.criteriaHash, criteriaHash);
         assertEq(build.teeSignature, sig);
