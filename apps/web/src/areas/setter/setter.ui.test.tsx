@@ -61,7 +61,7 @@ describe('a first visit', () => {
     const world = await makeWorld();
     mount(world);
     expect(await screen.findByRole('heading', { name: 'Register your security key' })).toBeTruthy();
-    expect(screen.getByText(/Your name is never published/)).toBeTruthy();
+    expect(screen.getByText(/Your name is not published/)).toBeTruthy();
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(screen.getAllByRole('button')).toHaveLength(1);
 
