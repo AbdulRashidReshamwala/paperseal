@@ -1,0 +1,26 @@
+{
+  "name": "@paperseal/relay",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Mirrors an exam's public unlock evidence (release log and release token) to Arkiv, as in spec/arkiv.md \"Writers\".",
+  "scripts": {
+    "mirror": "node cli.mjs mirror",
+    "watch": "node cli.mjs watch",
+    "status": "node cli.mjs status",
+    "dry-check": "node cli.mjs dry-check",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@paperseal/arkiv": "workspace:*",
+    "@paperseal/protocol": "workspace:*",
+    "@paperseal/tee-client": "workspace:*",
+    "viem": "2.57.16",
+    "vite": "8.3.6"
+  },
+  "devDependencies": {
+    "vitest": "5.1.0"
+  }
+}

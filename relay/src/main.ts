@@ -1,0 +1,139 @@
+import { arkiv, createArkivReader, createArkivWriter } from '@paperseal/arkiv';
+import { chain } from '@paperseal/protocol';
+import type { Address } from 'viem';
+
+import { parseCommand, usage, UsageError, type MirrorTarget } from './args';
+import { relayEnv, type RelayEnv } from './config';
+import { dryCheck } from './dry-check';
+import { keystoreAddress, loadSigner } from './keystore';
+import { explorerLinks, mirrorPass, tally, type PassReport, type RelayWriter } from './mirror';
+import { errorText, print, printError, registerSecret } from './output';
+import { statusRows } from './status';
+import { abortableSleep, watch } from './watch';
+
+const links = explorerLinks(arkiv.network.explorer);
+
+function accessKeyLine(env: RelayEnv): string {
+  return env.accessKey.value
+    ? `access key from ${env.accessKey.source ?? 'unknown'}`
+    : 'no access key: the public RPC, which is rate limited';
+}
+
+/** Prints one pass: every outcome, with its entity, transaction and explorer link, then notes. */
+export function printReport(report: PassReport): void {
+  const counts = tally(report);
+  print(
+    `[${report.at.toISOString()}] written ${String(counts.written)}, skipped ${String(counts.skipped)}, held ${String(counts.held)}, refused ${String(counts.refused)}, failed ${String(counts.failed)}${report.tee.stage ? `  (TEE stage ${report.tee.stage})` : ''}`,
+  );
+  for (const o of report.outcomes) {
+    print(`  ${o.kind.padEnd(5)} ${o.source.padEnd(7)} ${o.result.padEnd(7)} ${o.detail}`);
+    if (o.entityKey) print(`        entity ${o.entityKey}  ${links.entity(o.entityKey)}`);
+    if (o.txHash) print(`        tx     ${o.txHash}  ${links.tx(o.txHash)}`);
+  }
+  for (const note of report.notes) print(`  note  ${note}`);
+}
+
+function header(env: RelayEnv, target: MirrorTarget, writer: Address): void {
+  print(`Arkiv     ${arkiv.network.name} (chain ${String(arkiv.network.chainId)}), ${accessKeyLine(env)}`);
+  print(`writer    ${writer}  ${links.address(writer)}`);
+  print(`exam      ${target.examId}`);
+  print(`registry  ${target.registry} (chain ${String(chain.chainId)})`);
+  print(`sources   ${[target.storageUrl && `storage ${target.storageUrl}`, target.teeUrl && `TEE ${target.teeUrl}`].filter(Boolean).join(', ')}`);
+}
+
+async function signedWriter(env: RelayEnv): Promise<RelayWriter> {
+  const account = await loadSigner(env.keystore);
+  return createArkivWriter({ account, accessKey: env.accessKey.value });
+}
+
+/** Every error is printed through output.ts, so the access key can't leak in an RPC URL. */
+export async function main(argv: string[]): Promise<void> {
+  try {
+    await run(argv);
+  } catch (error) {
+    printError(`\nERROR ${errorText(error)}`);
+    process.exitCode = 1;
+  }
+}
+
+async function run(argv: string[]): Promise<void> {
+  let command;
+  try {
+    command = parseCommand(argv);
+  } catch (error) {
+    if (!(error instanceof UsageError)) throw error;
+    printError(`${error.message}\n\n${usage}`);
+    process.exitCode = 2;
+    return;
+  }
+
+  if (command.command === 'help') {
+    print(usage);
+    return;
+  }
+  if (command.command === 'dry-check') {
+    await dryCheck();
+    return;
+  }
+
+  const env = relayEnv();
+  registerSecret(env.accessKey.value);
+
+  if (command.command === 'status') {
+    const writer = command.writer ?? (await keystoreAddress(env.keystore));
+    const reader = createArkivReader({ accessKey: env.accessKey.value });
+    print(`Arkiv     ${arkiv.network.name}, ${accessKeyLine(env)}`);
+    print(`writer    ${writer}${command.writer ? '' : ` (keystore ${env.keystore.account})`}  ${links.address(writer)}`);
+    print(`exam      ${command.examId}`);
+    const { rows, latest } = await statusRows(reader, command.examId, writer);
+    print(`${String(rows.length)} row${rows.length === 1 ? '' : 's'} from this writer${latest ? ` (latest Arkiv block ${String(latest.number)})` : ''}, newest first`);
+    for (const row of rows) {
+      const when = row.writtenAt ? new Date(row.writtenAt * 1000).toISOString() : 'unknown time';
+      print(`  ${row.kind.padEnd(5)} block ${String(row.createdAtBlock)}  ~${when}  registry ${row.registry}`);
+      print(`        ${row.detail}`);
+      print(`        entity ${row.entityKey}  ${links.entity(row.entityKey)}`);
+    }
+    return;
+  }
+
+  const writer = await signedWriter(env);
+  header(env, command.target, writer.address);
+  const deps = { fetch: globalThis.fetch, writer, chainId: chain.chainId };
+
+  if (command.command === 'mirror') {
+    const report = await mirrorPass(command.target, deps);
+    printReport(report);
+    const counts = tally(report);
+    if (counts.failed > 0 || counts.refused > 0) process.exitCode = 1;
+    return;
+  }
+
+  // watch
+  const controller = new AbortController();
+  let interrupts = 0;
+  const onSignal = () => {
+    interrupts += 1;
+    if (interrupts > 1) process.exit(130);
+    print('stopping after this pass (Ctrl+C again to quit now)');
+    controller.abort();
+  };
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
+  print(`watching every ${String(command.everySeconds)}s until the TEE says released or failed, or Ctrl+C`);
+  try {
+    const end = await watch(command.target, command.everySeconds, {
+      ...deps,
+      sleep: abortableSleep,
+      signal: controller.signal,
+      onReport: printReport,
+      onError: (message) => printError(`  error ${message}`),
+    });
+    print(end === 'stopped' ? 'stopped' : `the TEE says ${end}; the mirror is done`);
+  } catch (error) {
+    printError(`watch stopped: ${errorText(error)}`);
+    process.exitCode = 1;
+  } finally {
+    process.off('SIGINT', onSignal);
+    process.off('SIGTERM', onSignal);
+  }
+}
