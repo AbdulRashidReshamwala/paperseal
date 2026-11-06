@@ -313,6 +313,20 @@ describe('step 1, create the exam', () => {
     expect(button('Continue').disabled).toBe(true);
   });
 
+  it('takes only digits in the number fields', () => {
+    const { env } = environment();
+    renderBoard(env);
+    fillCreate();
+    type('Length, in minutes', '12a');
+    expect((field('Length, in minutes') as HTMLInputElement).value).toBe('12');
+    type('Minutes before the exam', 'abc');
+    expect((field('Minutes before the exam') as HTMLInputElement).value).toBe('');
+    type('Minutes before the exam', times.delta);
+    fillTopics();
+    type('Topic 1 questions', 'aaa');
+    expect((field('Topic 1 questions') as HTMLInputElement).value).toBe('');
+  });
+
   it('refuses a lock after the release, in plain words', () => {
     const { env } = environment();
     renderBoard(env);

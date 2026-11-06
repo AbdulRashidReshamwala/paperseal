@@ -837,16 +837,38 @@
   color: var(--ps-ink);
 }
 
-/* Buttons beside a field match its height and sit level with it. */
+/*
+ * Rows line up from the top, so an error under one field never moves the one beside it. Buttons
+ * match the field's height, and the labels show once, above the first topic.
+ */
 .board-draft-card .board-topic,
 .board-draft-card .board-invite-form {
-  align-items: end;
+  gap: var(--ps-space-3);
+  align-items: start;
+  margin: 0;
+}
+
+.board-draft-card .board-topic .ps-field,
+.board-draft-card .board-invite-form .ps-field {
+  margin: 0;
 }
 
 .board-draft-card .board-topic .ps-button,
 .board-draft-card .board-invite-form .ps-button {
   min-height: 44px;
-  margin: 0;
+  margin: var(--board-label-room) 0 0;
+}
+
+.board-draft-card {
+  --board-label-room: 28px;
+}
+
+.board-draft-card .board-topic + .board-topic .ps-button {
+  margin-top: 0;
+}
+
+.board-topic + .board-topic .ps-field > span:first-child {
+  display: none;
 }
 
 .board-draft-card .board-note {

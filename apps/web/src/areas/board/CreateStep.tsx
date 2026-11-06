@@ -93,7 +93,7 @@ export function DetailsStep(props: { rail: DraftRail; onContinue: () => void }) 
             aria-label="Minutes before the exam to release the paper to centres"
             value={plan.releaseMinutes}
             onChange={(event) => {
-              set({ releaseMinutes: event.target.value });
+              set({ releaseMinutes: event.target.value.replace(/\D/g, '') });
             }}
           />
           {schedule.errors.deltaMinutes && plan.releaseMinutes.trim() !== '' ? (
@@ -160,7 +160,8 @@ export function TopicsStep(props: { rail: DraftRail; onBack: () => void; onConti
       {plan.topics.map((topic, index) => (
         <div className="board-topic" key={index}>
           <Input
-            label={`Topic ${String(index + 1)} name`}
+            label="Topic name"
+            ariaLabel={`Topic ${String(index + 1)} name`}
             error={whenTyped(topic.name, blueprint.topicErrors[index]?.name)}
             value={topic.name}
             onChange={(name) => {
@@ -168,7 +169,8 @@ export function TopicsStep(props: { rail: DraftRail; onBack: () => void; onConti
             }}
           />
           <Input
-            label={`Topic ${String(index + 1)} questions`}
+            label="Question count"
+            ariaLabel={`Topic ${String(index + 1)} questions`}
             numeric
             error={whenTyped(topic.questions, blueprint.topicErrors[index]?.questions)}
             value={topic.questions}

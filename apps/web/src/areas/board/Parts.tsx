@@ -58,7 +58,10 @@ export function Input(props: {
   value: string;
   onChange: (value: string) => void;
   type?: HTMLInputTypeAttribute;
+  /** Takes digits only, so a stray letter never reaches the field. */
   numeric?: boolean;
+  /** The field's name for a screen reader, when the visible label is shared by several rows. */
+  ariaLabel?: string;
 }) {
   return (
     <label className="ps-field">
@@ -67,12 +70,13 @@ export function Input(props: {
         className="ps-input"
         type={props.type ?? 'text'}
         inputMode={props.numeric ? 'numeric' : undefined}
+        aria-label={props.ariaLabel}
         value={props.value}
         spellCheck={false}
         autoComplete="off"
         aria-invalid={props.error ? true : undefined}
         onChange={(event) => {
-          props.onChange(event.target.value);
+          props.onChange(props.numeric ? event.target.value.replace(/\D/g, '') : event.target.value);
         }}
       />
       {props.error ? <span className="ps-field-error">{plainWords(props.error)}</span> : null}
