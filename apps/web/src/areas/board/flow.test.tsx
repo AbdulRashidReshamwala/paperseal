@@ -501,7 +501,8 @@ describe('step 7, exam status', () => {
     cleanup();
     vi.stubEnv('VITE_VERIFIER_URL', 'https://verify.example.org/');
     renderBoard(env, fakeTee());
-    expect((await screen.findByText('Open the public page')).closest('a')?.getAttribute('href')).toBe('https://verify.example.org/');
+    expect((await screen.findByText('Open the public page')).closest('a')?.getAttribute('href')).toBe(`https://verify.example.org/?exam=${examId}`);
+    expect(screen.getByRole('button', { name: 'Copy public link' })).toBeTruthy();
   });
 
   it('opens once the end time has passed', async () => {

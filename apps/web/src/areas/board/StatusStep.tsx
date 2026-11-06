@@ -1,6 +1,8 @@
 import { roundTimeSeconds } from '@paperseal/protocol';
-import { Check, Countdown, Row, Rows, Stage, type SealState } from '@paperseal/ui';
+import { Check, Countdown, CopyButton, Row, Rows, Stage, type SealState } from '@paperseal/ui';
 import { Link } from 'react-router';
+
+import { useCurrentExamId } from '../../shared/currentExam';
 
 import { useBoardForm } from './BoardForm';
 import { ExamRecord } from './ExamRecord';
@@ -27,7 +29,8 @@ export function StatusStep(props: { eyebrow: string; snapshot: Snapshot }) {
   const endSeconds = roundTimeSeconds(endRound);
   const seal = sealStateAt(now, unlockSeconds * 1000, endSeconds * 1000);
   const { status, teeProblem } = snapshot;
-  const verifier = verifierUrl();
+  const examId = useCurrentExamId();
+  const verifier = verifierUrl(undefined, examId);
   const justSealed = receipts.some((receipt) => receipt.kind === 'build' && receipt.outcome.matches);
 
   const copy: Record<SealState, { title: string; lede: string; next: string }> = {
@@ -62,9 +65,12 @@ export function StatusStep(props: { eyebrow: string; snapshot: Snapshot }) {
         </Row>
         <Row label="Public page">
           {verifier ? (
-            <a href={verifier} target="_blank" rel="noreferrer">
-              Open the public page
-            </a>
+            <span className="board-link">
+              <a href={verifier} target="_blank" rel="noreferrer">
+                Open the public page
+              </a>
+              <CopyButton text={verifier}>Copy public link</CopyButton>
+            </span>
           ) : (
             <Check status="not-checked">The link is not set up yet. Ask whoever installed Paper Seal to add it.</Check>
           )}

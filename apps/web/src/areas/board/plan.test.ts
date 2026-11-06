@@ -75,6 +75,12 @@ describe('configuration', () => {
     expect(verifierUrl({ VITE_VERIFIER_URL: 'https://verify.example.org/' })).toBe('https://verify.example.org/');
     expect(verifierUrl({ VITE_VERIFIER_URL: 'javascript:alert(1)' })).toBeNull();
     expect(verifierUrl({})).toBeNull();
+    const id = `0x${'ab'.repeat(32)}`;
+    expect(verifierUrl({ VITE_VERIFIER_URL: 'https://verify.example.org/' }, id)).toBe(`https://verify.example.org/?exam=${id}`);
+    expect(verifierUrl({ VITE_VERIFIER_URL: 'https://verify.example.org/app#/old' }, id.toUpperCase().replace('0X', '0x'))).toBe(
+      `https://verify.example.org/app?exam=${id}`,
+    );
+    expect(verifierUrl({ VITE_VERIFIER_URL: 'javascript:alert(1)' }, id)).toBeNull();
   });
 });
 

@@ -142,14 +142,24 @@ export function defaultRpcHost(
   }
 }
 
-/** The public verifier is a separate app, hosted on its own, so its address is configuration. */
+/**
+ * The public verifier is a separate app, hosted on its own, so its address is configuration. With an
+ * exam ID it is the share link from spec/agent-verification.md, `<verifier URL>/?exam=<examId>`,
+ * which names the exam in the part of the address a server sees, so it also works for an agent.
+ */
 export function verifierUrl(
   env: Record<string, string | undefined> = import.meta.env as Record<string, string | undefined>,
+  examId?: string | null,
 ): string | null {
   const given = env.VITE_VERIFIER_URL?.trim();
   if (!given) return null;
   try {
-    return ['http:', 'https:'].includes(new URL(given).protocol) ? given : null;
+    const url = new URL(given);
+    if (!['http:', 'https:'].includes(url.protocol)) return null;
+    if (!examId) return given;
+    url.hash = '';
+    url.searchParams.set('exam', examId.toLowerCase());
+    return url.toString();
   } catch {
     return null;
   }
