@@ -39,8 +39,8 @@ export interface Job {
 }
 
 /** Between two people, so a public RPC is read politely. */
-export const PAUSE_BETWEEN_PEOPLE_MS = 600;
-const PAUSE_BETWEEN_QUESTIONS_MS = 150;
+export const PAUSE_BETWEEN_PEOPLE_MS = 100;
+const PAUSE_BETWEEN_QUESTIONS_MS = 20;
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -49,12 +49,31 @@ export interface RunOptions {
   /** Asked before each person. Once true, nobody else is needed. */
   enough?: () => Promise<boolean>;
   pauseMs?: number;
+  /** Everyone at once, for steps that don't depend on each other. `enough` is not asked. */
+  together?: boolean;
 }
 
 /** One person at a time. A failure stays that person's, and the next person still gets their turn. */
 export async function runEach(jobs: readonly Job[], options: RunOptions): Promise<void> {
   const { onState, enough, pauseMs = PAUSE_BETWEEN_PEOPLE_MS } = options;
   const todo = jobs.filter((job) => !job.done);
+  if (options.together) {
+    await Promise.all(
+      todo.map(async (job) => {
+        const id = job.persona.id;
+        onState(id, { kind: 'working', note: 'Working' });
+        try {
+          await job.run((note) => {
+            onState(id, { kind: 'working', note });
+          });
+          onState(id, { kind: 'done', note: 'Done' });
+        } catch (error) {
+          onState(id, { kind: 'failed', reason: describeError(error) });
+        }
+      }),
+    );
+    return;
+  }
   for (const [index, job] of todo.entries()) {
     const id = job.persona.id;
     const stop = await (enough?.() ?? Promise.resolve(false)).catch(() => false);

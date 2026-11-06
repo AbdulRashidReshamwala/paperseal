@@ -174,7 +174,7 @@ function Everyone(props: PanelProps & { stage: PanelStage }) {
         onState: (id, state) => {
           setStates((all) => ({ ...all, [id]: state }));
         },
-        ...(stage === 'release' ? { enough: async () => releaseEnough(await acting.tee.status()) } : {}),
+        ...(stage === 'release' ? { enough: async () => releaseEnough(await acting.tee.status()) } : { together: true }),
       });
     }
     setBusy(false);

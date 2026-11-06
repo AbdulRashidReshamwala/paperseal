@@ -5,15 +5,15 @@ import { activePersona, type Persona } from './personas';
 import { touchForShow } from './touch';
 
 /*
- * What `createWebAuthnKeys` calls in demo mode. It answers as the named person's planted key, or else
- * the active person's, after the touch for show. All of the key handling stays in the real code, which
+ * What `createWebAuthnKeys` calls in demo mode. It answers as the named person's planted key, with no
+ * touch because the board's buttons act for them, or else as the active person's, after the touch for show. All of the key handling stays in the real code, which
  * sees a security key.
  */
 export function demoCredentials(named?: Persona): Pick<CredentialsContainer, 'create' | 'get'> {
   async function key() {
     const persona = named ?? activePersona();
     if (!persona.keyed) throw new DOMException('The exam board has no security key here. It uses its wallet.', 'NotAllowedError');
-    await touchForShow();
+    if (!named) await touchForShow();
     return softwareCredentials(await plantedKey(persona.id), globalThis.location.origin);
   }
   return {
