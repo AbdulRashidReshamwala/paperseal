@@ -21,8 +21,8 @@ const cuts = [
   { name: 'board-posts-the-paper-record', who: 'board', from: 'paper-ready', to: 'build-posted', before: 2, after: 3 },
   { name: 'key-holder-releases-part-of-key', who: 'neutral-1', from: 'release-visible', to: 'count-8', before: 15, after: 3 },
   { name: 'centre-releases-part-of-key', who: 'centre-1', from: 'release-visible', to: 'release-sent', before: 6, after: 12 },
-  { name: 'centre-waits-for-key-holders', who: 'centre-8', from: 'holders-waiting', to: 'open-visible', before: 3, after: 2 },
-  { name: 'centre-opens-the-paper', who: 'centre-8', from: 'open-visible', to: 'paper-shown', before: 2, after: 2 },
+  { name: 'centre-waits-for-key-holders', who: 'centre-8', from: 'holders-waiting', to: 'open-seen', before: 3, after: 3 },
+  { name: 'centre-opens-the-paper', who: 'centre-8', from: 'open-start', to: 'paper-shown', before: 2, after: 2 },
   { name: 'centre-hands-out-the-paper', who: 'centre-8', from: 'handout-start', to: 'handout-end', before: 2, after: 2 },
   { name: 'verifier-finished-exam', who: 'verifier', from: 'after-end', to: 'verifier-shown', before: 2, after: 10 },
 ];

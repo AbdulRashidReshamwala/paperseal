@@ -446,7 +446,11 @@ describe('real exam through the screens', () => {
                 sealed += 1;
                 await page.getByText(composer.sealedSoFar(sealed)).first().waitFor({ timeout: 90_000 });
                 if (sealed === 1) await a.shot(`${PREFIX}24-first-receipt`);
-                if (a.paced) await a.beat(3500);
+                if (a.paced) {
+                  await page.getByText(/Sealed at/).first().scrollIntoViewIfNeeded().catch(() => undefined);
+                  await a.say('Setter: the receipt is kept on the page');
+                  await a.beat(4000);
+                }
                 if (index === 0 && topic === liveCriteria.topics[0] && k === 3) a.mark('sealed-choice');
               }
             }
@@ -517,8 +521,19 @@ describe('real exam through the screens', () => {
 
     // ---------------------------------------------------------------- unlock window: key holders release, centres open
     await untilUnix(unlockUnix + 2);
-    await Promise.all(
-      holders.map((who, order) =>
+    await Promise.all([
+      // The centre with no part of the key only waits. Its count goes up as the key holders release, one after another.
+      step('centre-8 waits while key holders release, and the count goes up', async () => {
+        const a = people['centre-8'];
+        if (!a) throw new Error('no window');
+        await a.seeHeading(/Waiting for key holders/, 120_000);
+        a.mark('holders-waiting');
+        await a.say('Centre: waiting while key holders release their parts. The count goes up');
+        await a.shot(`${PREFIX}52-centre-without-share-waiting`);
+        await a.page.getByRole('button', { name: centreText.openPaper }).waitFor({ timeout: 4 * 60_000 });
+        a.mark('open-seen');
+      }),
+      ...holders.map((who, order) =>
         step(`${who} releases their part of the key with one touch`, async () => {
           const a = people[who];
           if (!a) throw new Error('no window');
@@ -544,7 +559,7 @@ describe('real exam through the screens', () => {
           });
         }),
       ),
-    );
+    ]);
     await step('neutral-1 watches the count of released parts go up to eight', async () => {
       const a = people['neutral-1'];
       if (!a) throw new Error('no window');
@@ -571,17 +586,9 @@ describe('real exam through the screens', () => {
           const a = people[who];
           if (!a) throw new Error('no window');
           await a.flow('open the paper', async () => {
-            if (who === 'centre-8') {
-              await a.seeHeading(/Waiting for key holders|Open the paper/, 120_000);
-              await a.shot(`${PREFIX}52-centre-without-share-waiting`);
-              a.mark('holders-waiting');
-              await a.say('Centre: waiting while key holders release their parts. The count goes up');
-              await a.page.getByText(/^(8|9|10) of 8 parts of the key released$/).waitFor({ timeout: 120_000 }).catch(() => undefined);
-              await a.beat(3000);
-            }
             const openBtn = a.page.getByRole('button', { name: centreText.openPaper });
             await openBtn.waitFor({ timeout: 4 * 60_000 });
-            a.mark('open-visible');
+            a.mark(who === 'centre-8' ? 'open-start' : 'open-visible');
             await a.say('Centre: open the paper with one touch of the security key');
             await a.beat(3000);
             await openBtn.click();
