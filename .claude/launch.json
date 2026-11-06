@@ -30,6 +30,18 @@
         "preview"
       ],
       "port": 5179
+    },
+    {
+      "name": "presentation",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5180",
+        "--directory",
+        "presentation"
+      ],
+      "port": 5180
     }
   ]
 }
