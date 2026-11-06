@@ -42,7 +42,7 @@ export function refusalFor(step: UnlockStep | null, error: unknown): Refusal {
   if (error instanceof PaperHashMismatchError) {
     return {
       title: 'This paper failed its check and is not shown',
-      why: 'It does not match the fingerprint in the public record, so it may not be the paper that was sealed.',
+      why: 'It does not match the published record, so it may not be the paper that was sealed.',
       contact: TELL_THE_BOARD,
       canRetry: false,
       detail,
@@ -68,16 +68,16 @@ export function refusalFor(step: UnlockStep | null, error: unknown): Refusal {
         };
       case 'timelock':
         return {
-          title: 'The time seal did not open',
-          why: 'This computer could not get the opening from the public clock. It may be a network problem.',
+          title: 'The paper is not ready to open yet',
+          why: 'This computer could not get what it needs to open the paper. It may be a network problem.',
           contact: RETRY_THEN_BOARD,
           canRetry: true,
           detail,
         };
       case 'keyPriv':
         return {
-          title: 'Your centre’s key has not arrived',
-          why: 'Your centre’s copy of the key could not be downloaded.',
+          title: 'Your centre’s part of the key has not arrived',
+          why: 'Your centre’s part of the key could not be downloaded.',
           contact: RETRY_THEN_BOARD,
           canRetry: true,
           detail,

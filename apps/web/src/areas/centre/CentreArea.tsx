@@ -17,11 +17,11 @@ import './paper.css';
 function FilesLine({ files }: { files: Files }) {
   switch (files.state) {
     case 'ready':
-      return <Check status="pass">Sealed paper downloaded and checked</Check>;
+      return <Check status="pass">The sealed paper is downloaded and checked</Check>;
     case 'unavailable':
-      return <Check status="pending">The sealed paper can't be downloaded yet. This page keeps trying.</Check>;
+      return <Check status="pending">The sealed paper is not ready to download yet. This page keeps trying.</Check>;
     case 'refused':
-      return <Check status="fail">Download check</Check>;
+      return <Check status="fail">The sealed paper did not pass its check</Check>;
     case 'running':
       return <Check status="pending">Downloading and checking the sealed paper</Check>;
     case 'idle':
@@ -81,16 +81,16 @@ export function CentreView(props: {
       case 'awaiting-build':
         return (
           <Stage
-            title="The paper has not been sealed yet"
-            next="Once it is, this page downloads it and checks it by itself. You can leave this page open."
+            title="The paper is not ready yet"
+            next="Nothing to do. Once it is ready, this page downloads it and checks it by itself. You can leave this page open, or come back later."
           />
         );
       case 'waiting':
         return (
           <Stage
             title={files.state === 'ready' ? 'The sealed paper is here. Nothing to do yet.' : 'Getting the sealed paper'}
-            {...(holdsShare ? { lede: 'Your centre holds a share. You will release it here at unlock.' } : {})}
-            next="At unlock, this page asks for one touch of your security key to open the paper."
+            {...(holdsShare ? { lede: 'Your centre holds part of the key. You will release it here when the paper unlocks.' } : {})}
+            next="When the paper unlocks, this page asks for one touch of your security key to open the paper. Come back to this page then."
           >
             <FilesLine files={files} />
             {round !== null ? <Countdown at={roundTimeSeconds(round) * 1000} round={round} label="Paper unlocks in" /> : null}
@@ -99,8 +99,8 @@ export function CentreView(props: {
       case 'files-refused':
         return (
           <Stage
-            title="The sealed paper failed its check"
-            lede="The download does not match the public record, so it will not be used. Contact your exam board now and tell them the download check failed at your centre."
+            title="The sealed paper did not pass its check"
+            lede="The download is not the one that was published, so it will not be used. Contact your exam board now and tell them the download check failed at your centre."
             action={<PrimaryAction onClick={props.retryFiles}>Download and check again</PrimaryAction>}
             next="The paper can't be opened from this computer until this check passes."
           >
@@ -120,7 +120,11 @@ export function CentreView(props: {
         );
       case 'holders':
         return (
-          <Stage title="Waiting for key holders" next="Once enough have released, this page lets you open the paper. You don't need to do anything.">
+          <Stage
+            title="Waiting for key holders"
+            {...(holdsShare ? {} : { lede: 'Your centre gets the key when enough key holders have released their parts.' })}
+            next="Nothing for you to do. Once enough have released, this page lets you open the paper. Keep it open."
+          >
             <ReleaseCount status={status} />
           </Stage>
         );
@@ -134,7 +138,7 @@ export function CentreView(props: {
         return (
           <Stage
             title="Open the paper"
-            lede="It shows only after it has passed its check."
+            lede="The paper appears here once it has passed its check."
             action={<OpenAction open={open} />}
             next="The paper appears on this page, ready to print."
           />
@@ -175,15 +179,15 @@ export function CentreView(props: {
       case 'machine-waiting':
         return (
           <Stage
-            title="Waiting for the sealed machine"
-            lede="The unlock time has come, but the sealed machine is not ready yet."
+            title="Waiting for Paper Seal"
+            lede="The unlock time has come, but Paper Seal is not ready yet."
             next="This page moves on by itself. If nothing changes within a few minutes, contact your exam board."
           />
         );
       case 'machine-unreachable':
         return (
           <Stage
-            title="The sealed machine can't be reached"
+            title="Can't connect right now"
             lede="Check this computer's internet connection. This page keeps trying by itself."
             next="If this stays for more than a few minutes, contact your exam board."
           />
@@ -191,8 +195,8 @@ export function CentreView(props: {
       case 'machine-failed':
         return (
           <Stage
-            title="The sealed machine has stopped"
-            lede="It reported a failure, so the paper can't be delivered. Contact your exam board now and tell them your centre can't open the paper."
+            title="Paper Seal has stopped"
+            lede="It reported a problem, so the paper can't be delivered. Contact your exam board now and tell them your centre can't open the paper."
             next="The paper stays sealed. Your exam board decides what happens next."
           />
         );

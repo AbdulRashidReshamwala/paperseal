@@ -1,5 +1,5 @@
 import { OnChainBytesError, type ExamRegistry } from '@paperseal/chain';
-import { decodeApprovedList, fromHex, toHex, type Hex } from '@paperseal/protocol';
+import { decodeApprovedList, fromHex, roundTimeSeconds, toHex, type Hex } from '@paperseal/protocol';
 import type { ReleaseLogResponse } from '@paperseal/tee-client';
 import { Check, Row, Rows } from '@paperseal/ui';
 import { useMemo } from 'react';
@@ -16,6 +16,12 @@ import { verifyReleaseLog, type LogVerdict } from './logCheck';
 /** How long to wait before reading a log that could not be read. */
 const LOG_RETRY_MS = 15000;
 
+/** When a key holder released, as a clock time. The log holds a round, which has a fixed time. */
+const releasedAt = (round: string): string => {
+  const at = new Date(roundTimeSeconds(Number(round)) * 1000);
+  return `Released ${at.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short' })}`;
+};
+
 const result = (ok: boolean) => <Check status={ok ? 'pass' : 'fail'} />;
 
 /**
@@ -27,15 +33,15 @@ async function readOwners(reader: ExamRegistry, exam: Hex): Promise<{ owners: Ma
   const owners = new Map<string, string>();
   try {
     const encoded = await reader.getApprovedListEntries(exam);
-    if (!encoded) return { owners, problem: 'No approved list is posted on-chain, so entries are shown by passkey.' };
+    if (!encoded) return { owners, problem: 'The list of people for this exam could not be found, so entries show a security key code instead of a name.' };
     for (const entry of decodeApprovedList(fromHex(encoded))) owners.set(toHex(entry.passkeyPublicKey), entry.owner);
     return { owners, problem: null };
   } catch (error) {
     const reason =
       error instanceof OnChainBytesError
-        ? `The on-chain list's bytes could not be trusted: ${error.message}`
-        : `The on-chain list could not be read: ${error instanceof Error ? error.message : String(error)}`;
-    return { owners: new Map(), problem: `${reason} Entries are shown by passkey.` };
+        ? `The list of people could not be trusted: ${error.message}`
+        : `The list of people could not be read: ${error instanceof Error ? error.message : String(error)}`;
+    return { owners: new Map(), problem: `${reason} Entries show a security key code instead of a name.` };
   }
 }
 
@@ -52,7 +58,7 @@ export function LogView({ log, owners, problem, verdict }: LogViewProps) {
   return (
     <>
       {problem ? <p className="centre-log-note">{problem}</p> : null}
-      {verdict.pass ? null : <p className="centre-log-note">The log did not verify, so the entries below are not shown as fact.</p>}
+      {verdict.pass ? null : <p className="centre-log-note">This log could not be confirmed, so do not rely on the entries below.</p>}
       {log.entries.length === 0 ? (
         <p className="centre-log-note">No releases yet.</p>
       ) : (
@@ -63,15 +69,15 @@ export function LogView({ log, owners, problem, verdict }: LogViewProps) {
               label={owners.get(entry.passkeyPublicKey.toLowerCase()) ?? entry.passkeyPublicKey}
               muted={!verdict.pass}
             >
-              Public clock round {entry.round}
+              {releasedAt(entry.round)}
             </Row>
           ))}
         </Rows>
       )}
       <Rows>
         <Row label="The list of releases is complete">{result(verdict.entriesHash)}</Row>
-        <Row label="Signed by the sealed machine">{result(verdict.signature)}</Row>
-        <Row label="Proof it's running the published code">
+        <Row label="Signed by Paper Seal">{result(verdict.signature)}</Row>
+        <Row label="Paper Seal is running the published code">
           {result(verdict.token.passed)}
           {verdict.token.failures.length > 0 ? ` ${verdict.token.failures.join('; ')}` : ''}
         </Row>
@@ -114,7 +120,7 @@ export function UnlockLog() {
       </summary>
       {loaded ? <LogView {...loaded} /> : null}
       {!loaded && error ? <p className="centre-log-note">The log can't be read right now. This page keeps trying.</p> : null}
-      {!load ? <p className="centre-log-note">This page is not connected to the sealed machine, so the log can't be read.</p> : null}
+      {!load ? <p className="centre-log-note">This page can't reach Paper Seal, so the log can't be read.</p> : null}
     </details>
   );
 }
