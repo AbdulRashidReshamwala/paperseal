@@ -1,5 +1,6 @@
 import { createArkivReader } from '@paperseal/arkiv';
 import { resolveExamName, type ExamNameResult } from '@paperseal/chain';
+import { createSwarmClient } from '@paperseal/swarm';
 import { requireHardwareAttestation, type Hex, type Paper } from '@paperseal/protocol';
 import {
   Button,
@@ -16,6 +17,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 
 import { teeStorageBucket } from './attest';
+import { createBackupCache, type BackupSource } from './backup';
 import { loadChain, type ChainData } from './checks';
 import { clockTime, custody, dayTime, REPOSITORY, type Custody, type CustodyStep, type Failure } from './custody';
 import { Evidence } from './evidence';
@@ -90,11 +92,41 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
   const latest = useLatestRound(drand);
   const now = useNow();
 
+  // The Arkiv mirror is read only from published writers: on a name route the ones the name lists
+  // now, plus the viewer's own (spec/arkiv.md, "Writers").
+  const nameWriters = onName ? (resolved?.arkivWriters ?? null) : null;
+  const nameWritersKey = nameWriters ? nameWriters.join(',') : null;
+  const writers = useMemo(
+    () => arkivWriters(settings.arkivWriters, nameWritersKey === null ? null : nameWritersKey.split(',').filter(Boolean)),
+    [settings.arkivWriters, nameWritersKey],
+  );
+  const wantsArkiv = writers.length > 0 && settings.arkivRpcUrl !== '';
+  const arkivReader = useMemo(
+    () => (wantsArkiv ? (arkiv?.reader ?? createArkivReader({ rpcUrl: settings.arkivRpcUrl })) : null),
+    [wantsArkiv, arkiv, settings.arkivRpcUrl],
+  );
+
+  // The Swarm backup, found on Arkiv from the same writers and read through the viewer's own Swarm
+  // API (spec/arkiv.md, "Backups"). Off without writers or without a Swarm API.
+  const swarmApiUrl = settings.swarmApiUrl;
+  const backup = useMemo<BackupSource | null>(() => {
+    if (!arkivReader || !swarmApiUrl || !registry || !examId) return null;
+    return {
+      rows: arkivReader,
+      swarm: createSwarmClient({ apiUrl: swarmApiUrl }),
+      swarmApiUrl,
+      writers: writers.map((writer) => writer.address),
+      examId,
+      registry: registry.address as Hex,
+      cache: createBackupCache(),
+    };
+  }, [arkivReader, swarmApiUrl, registry, examId, writers]);
+
   const loadRecordsNow = useMemo(() => {
     const chain = loadChain(registry, examId);
     if (!chain || !registry || !examId) return null;
-    return () => loadRecords({ chain, storage, examId, registry: registry.address as Hex, bucket });
-  }, [registry, examId, storage, bucket]);
+    return () => loadRecords({ chain, storage, examId, registry: registry.address as Hex, bucket, backup });
+  }, [registry, examId, storage, bucket, backup]);
   const records = usePoll(loadRecordsNow, pollMs.records);
 
   const chain = records.state === 'ready' ? records.value.chain : null;
@@ -110,19 +142,7 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
   }, [tee, registry, examId, examPublished, bucket]);
   const live = usePoll(loadLiveNow, pollMs.live);
 
-  // The Arkiv mirror is read as often as the live TEE, and only from published writers: on a name
-  // route the ones the name lists now, plus the viewer's own (spec/arkiv.md, "Writers").
-  const nameWriters = onName ? (resolved?.arkivWriters ?? null) : null;
-  const nameWritersKey = nameWriters ? nameWriters.join(',') : null;
-  const writers = useMemo(
-    () => arkivWriters(settings.arkivWriters, nameWritersKey === null ? null : nameWritersKey.split(',').filter(Boolean)),
-    [settings.arkivWriters, nameWritersKey],
-  );
-  const wantsArkiv = writers.length > 0 && settings.arkivRpcUrl !== '';
-  const arkivReader = useMemo(
-    () => (wantsArkiv ? (arkiv?.reader ?? createArkivReader({ rpcUrl: settings.arkivRpcUrl })) : null),
-    [wantsArkiv, arkiv, settings.arkivRpcUrl],
-  );
+  // The Arkiv mirror is read as often as the live TEE.
   const loadArkivNow = useMemo(() => {
     if (!arkivReader || !registry || !examId || !examPublished) return null;
     const addresses = writers.map((writer) => writer.address);
@@ -138,6 +158,7 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
     chain,
     latest,
     now,
+    backup,
     ...(pollMs.proofRetry === undefined ? {} : { retryMs: pollMs.proofRetry }),
   });
 
@@ -411,6 +432,13 @@ export function OwnConnection({ open }: { open: boolean }) {
           value={draft.arkivWriters}
           error={errors.arkivWriters}
           onChange={edit('arkivWriters')}
+        />
+        <Field
+          label="Where to read the backup on Swarm (optional)"
+          hint="The web address of a Swarm node's API, usually your own Bee node (the Swarm API URL). The exam board can keep a second copy of the public files on Swarm, found through the copy on Arkiv. This page reads it only when the public files are missing or do not match, and checks every file against the public record before it counts. Leave this empty to turn the backup off."
+          value={draft.swarmApiUrl}
+          error={errors.swarmApiUrl}
+          onChange={edit('swarmApiUrl')}
         />
         <div className="vf-actions">
           <Button type="submit">Save</Button>

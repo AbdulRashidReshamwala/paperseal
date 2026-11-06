@@ -10,11 +10,17 @@
     "releaseToken": "paperseal.v1.release-token",
     "relayHeartbeat": "paperseal.v1.relay-heartbeat",
     "exam": "paperseal.v1.exam",
-    "participant": "paperseal.v1.participant"
+    "participant": "paperseal.v1.participant",
+    "backup": "paperseal.v1.backup"
   },
   "lifetimeDays": 180,
   "staleAfterSeconds": 120,
   "heartbeatSeconds": 60,
   "heartbeatLifetimeHours": 24,
-  "logChunkBlocks": 10000
+  "logChunkBlocks": 10000,
+  "swarm": {
+    "network": "sepolia",
+    "chunkBytes": 4096,
+    "defaultApiUrl": "http://127.0.0.1:1633"
+  }
 }

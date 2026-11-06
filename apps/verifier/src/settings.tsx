@@ -2,6 +2,7 @@ import { arkiv, createArkivReader } from '@paperseal/arkiv';
 import { createExamRegistry } from '@paperseal/chain';
 import { quicknetClient, type ChainClient } from '@paperseal/crypto';
 import type { Hex } from '@paperseal/protocol';
+import { swarm } from '@paperseal/swarm';
 import { createTeeClient } from '@paperseal/tee-client';
 import { createContext, use, useMemo, useState, type ReactNode } from 'react';
 import { getAddress, isAddress } from 'viem';
@@ -20,6 +21,8 @@ export interface Settings {
   arkivRpcUrl: string;
   /** The Arkiv writers this viewer trusts to find rows, comma-separated. Empty turns Arkiv off. */
   arkivWriters: string;
+  /** The Swarm API backups are read through, the viewer's own Bee node by default. Empty turns backups off. */
+  swarmApiUrl: string;
 }
 
 const STORAGE_KEY = 'paperseal.verifier.settings';
@@ -35,6 +38,7 @@ export const defaultSettings: Settings = {
   examId: env.VITE_EXAM_ID ?? '',
   arkivRpcUrl: arkiv.network.rpcUrl,
   arkivWriters: env.VITE_ARKIV_WRITERS ?? '',
+  swarmApiUrl: swarm.defaultApiUrl,
 };
 
 /** The writer addresses in `arkivWriters`, in the order given. Empty entries are skipped. */
@@ -118,6 +122,9 @@ export function validateSettings(settings: Settings): SettingsErrors {
   }
   if (settings.arkivRpcUrl && !isHttpUrl(settings.arkivRpcUrl)) {
     errors.arkivRpcUrl = 'Enter a web address that starts with http:// or https://.';
+  }
+  if (settings.swarmApiUrl && !isHttpUrl(settings.swarmApiUrl)) {
+    errors.swarmApiUrl = 'Enter a web address that starts with http:// or https://.';
   }
   const writers = writerError(settings.arkivWriters);
   if (writers) errors.arkivWriters = writers;

@@ -6,6 +6,7 @@ import { getAddress, hexToBytes, isAddressEqual, type Address, type Hex } from '
 import { arkivChain, arkivTransport, examIdColumn, type ArkivConnection } from './client';
 import { allPages } from './pages';
 import {
+  backupSchema,
   examSchema,
   participantSchema,
   relayHeartbeatSchema,
@@ -104,6 +105,27 @@ export interface ParticipantQuery {
   /** SHA-256 of the passkey public key, `0x` hex. */
   passkeyKeyHash?: string | undefined;
 }
+
+/**
+ * A backup row (spec/arkiv.md, "Backups"). Every column is what the writer says: callers use the
+ * collection only if its `manifest.json` hashes to the Build's `storageManifestHash` on Sepolia.
+ */
+export interface BackupRow {
+  entityKey: Hex;
+  creator: Address;
+  createdAtBlock: bigint;
+  examId: string;
+  registry: Address;
+  phase: 'build' | 'unlock';
+  /** 64 lowercase hex characters, no `0x`. */
+  swarmRef: string;
+  swarmNetwork: string;
+  manifestHash: string;
+  files: number;
+  batchId: string;
+}
+
+export type BackupRowsOptions = ReleaseRowsOptions;
 
 export type ArkivReaderOptions = ArkivConnection;
 
@@ -319,13 +341,85 @@ export function createArkivReader(options: ArkivReaderOptions = {}) {
       }));
   }
 
+  /**
+   * The `backup` rows for one exam created by any of `writers`, and only for `options.registry`
+   * when given, `unlock` before `build` and the newest first (spec/arkiv.md, "Backups", "Reading",
+   * rule 1). Rows with another phase, or a reference that isn't a plain 64-character one, are
+   * dropped, as are any a node returns that the query didn't ask for.
+   */
+  async function backupRows(
+    examId: Hex,
+    writers: readonly Address[],
+    options: BackupRowsOptions = {},
+  ): Promise<BackupRow[]> {
+    const id = examIdColumn(examId);
+    const trusted = trustedSet(writers);
+    const registry = options.registry === undefined ? undefined : getAddress(options.registry);
+    if (trusted.size === 0) return [];
+    const filters =
+      registry === undefined
+        ? [eq('examId', id), byCreator(trusted)]
+        : [eq('examId', id), eq('registry', addr(registry)), byCreator(trusted)];
+    const rows = await allPages((offset) =>
+      client
+        .select({
+          $key: true,
+          $creator: true,
+          $createdAt: true,
+          examId: true,
+          registry: true,
+          phase: true,
+          swarmRef: true,
+          swarmNetwork: true,
+          manifestHash: true,
+          files: true,
+          batchId: true,
+        })
+        .from(backupSchema)
+        .where(...filters)
+        .orderBy(asc('$key'))
+        .limit(MAX_LIMIT)
+        .offset(offset)
+        .fetch(),
+    );
+    const rank = (phase: string) => (phase === 'unlock' ? 0 : 1);
+    return rows
+      .filter(
+        (row) =>
+          trusted.has(getAddress(row.$creator)) &&
+          row.examId.value === id &&
+          (registry === undefined || isAddressEqual(row.registry.value, registry)) &&
+          (row.phase.value === 'build' || row.phase.value === 'unlock') &&
+          /^[0-9a-f]{64}$/.test(row.swarmRef.value),
+      )
+      .sort(
+        (a, b) =>
+          rank(a.phase.value) - rank(b.phase.value) ||
+          (a.$createdAt === b.$createdAt ? 0 : a.$createdAt > b.$createdAt ? -1 : 1) ||
+          (a.$key < b.$key ? 1 : a.$key > b.$key ? -1 : 0),
+      )
+      .map((row) => ({
+        entityKey: row.$key,
+        creator: getAddress(row.$creator),
+        createdAtBlock: row.$createdAt,
+        examId: row.examId.value,
+        registry: getAddress(row.registry.value),
+        phase: row.phase.value as BackupRow['phase'],
+        swarmRef: row.swarmRef.value,
+        swarmNetwork: row.swarmNetwork.value,
+        manifestHash: row.manifestHash.value,
+        files: row.files.value,
+        batchId: row.batchId.value,
+      }));
+  }
+
   /** Arkiv's latest block and its time in Unix seconds, to tell how long ago a row was written. */
   async function latestBlock(): Promise<{ number: bigint; time: number }> {
     const { currentBlock, currentBlockTime } = await client.getBlockTiming();
     return { number: currentBlock, time: currentBlockTime };
   }
 
-  return { releaseRows, examRows, participantRows, latestBlock };
+  return { releaseRows, examRows, participantRows, backupRows, latestBlock };
 }
 
 export type ArkivReader = ReturnType<typeof createArkivReader>;

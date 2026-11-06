@@ -32,6 +32,20 @@ Once an exam ID is known and writers are set, the page reads the exam's `release
 - The mirror's last sign of life is its newest heartbeat or log row. Its age is the distance from Arkiv's latest block, at 2 seconds a block, and never uses this device's clock. While unlock is open, an age over `staleAfterSeconds` in `spec/arkiv.json` warns that the copy has stopped updating, and no heartbeat or log row at all says that no relay has written for this exam since unlock opened. Silence is never treated as proof that nothing happened.
 - An Arkiv read that fails shows as not read, never as a failed check.
 
+## Swarm backup
+
+The page can read the exam's files from a backup on Swarm when the bucket loses them, as in "Backups", "Reading" in `spec/arkiv.md`. The backup is only a second copy, and a file from it counts only after it passes the same checks as a bucket file.
+
+The Swarm API URL defaults to `swarm.defaultApiUrl` in `spec/arkiv.json`, the viewer's own Bee node at `http://127.0.0.1:1633`. Viewers can change it under "Check it yourself", and an empty one turns the backup off. Backups are found with the same Arkiv node and writers as the Arkiv copy, so with no writers nothing is read either.
+
+- The bucket is always read first. Swarm is read only for a file the bucket doesn't have or can't serve, or one that fails its hash: `manifest.json` against the Build's `storageManifestHash`, and any file the manifest lists against its `sha256` there. While the bucket works, nothing is read from Arkiv or Swarm.
+- It finds the exam's `backup` rows from those writers, for the registry this view reads, `unlock` before `build` and newest first. Nothing is read until the Build is on the public record.
+- A collection is used only if its row's `manifestHash` and the SHA-256 of its own `manifest.json` both equal the Build's `storageManifestHash`. A file the manifest lists must match its `sha256`. A collection or file that fails is ignored and the next row is tried.
+- The unlock files, `release-log.json`, `release-token.jwt`, `key-priv.tlock` and `key-priv/*`, come only from an `unlock` collection, and the page checks them exactly as it checks the bucket's: the release log against an attested key, and `key-priv.tlock` by opening the paper.
+- If no backup passes, the bucket's own answer stands, so a bucket file that fails still fails its check.
+- Swarm content never changes under a reference, so each file read is kept for the visit.
+- Steps 2, 5, 6 and 7 say which of their files came from the backup, with the Swarm reference, the backup row's entity key and its link to the Arkiv explorer, and a link to `<Swarm API>/bzz/<reference>/<file>`. A backup that Arkiv or Swarm can't serve shows as not read, never as a failed check.
+
 ## Exam history
 
 `#/exams` lists the exams in the viewer's registry that the viewer's Arkiv writers have indexed, as in "Exam Index" in `spec/arkiv.md`, "Reading". The main page links to it under the exam box. It uses the same settings as the rest of the page: the RPC URL and registry address under "Check it yourself", the Arkiv RPC URL, and the viewer's own Arkiv writers. Without a registry or without writers it explains what to add and reads nothing. It reads once when opened, and again when the viewer presses "Read again".

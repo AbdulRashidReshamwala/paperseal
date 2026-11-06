@@ -3,12 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Mirrors an exam's public unlock evidence (release log and release token) and a registry's exam index to Arkiv, as in spec/arkiv.md \"Writers\" and \"Exam Index\".",
+  "description": "Mirrors an exam's public unlock evidence (release log and release token), a registry's exam index and Swarm backups of an exam's storage files to Arkiv, as in spec/arkiv.md \"Writers\", \"Exam Index\" and \"Backups\".",
   "scripts": {
     "mirror": "node cli.mjs mirror",
     "watch": "node cli.mjs watch",
     "status": "node cli.mjs status",
     "index": "node cli.mjs index",
+    "backup": "node cli.mjs backup",
+    "swarm-status": "node cli.mjs swarm-status",
     "dry-check": "node cli.mjs dry-check",
     "test": "vitest run",
     "lint": "eslint .",
@@ -18,6 +20,7 @@
     "@paperseal/arkiv": "workspace:*",
     "@paperseal/chain": "workspace:*",
     "@paperseal/protocol": "workspace:*",
+    "@paperseal/swarm": "workspace:*",
     "@paperseal/tee-client": "workspace:*",
     "viem": "2.57.16",
     "vite": "8.3.6"

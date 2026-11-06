@@ -5,7 +5,7 @@ import {
   type WalletArkivClient,
 } from '@arkiv-network/sdk';
 import { asc, eq, MAX_LIMIT } from '@arkiv-network/sdk/query';
-import { addr, MAX_ENTITY_BYTES, MAX_STRING_BYTES, u64 } from '@arkiv-network/sdk/schema';
+import { addr, I32_MAX, MAX_ENTITY_BYTES, MAX_STRING_BYTES, u64 } from '@arkiv-network/sdk/schema';
 import {
   getAddress,
   hexToBytes,
@@ -22,6 +22,7 @@ import {
 import { arkivChain, arkivTransport, examIdColumn, type ArkivConnection } from './client';
 import { allPages } from './pages';
 import {
+  backupSchema,
   examSchema,
   participantSchema,
   relayHeartbeatSchema,
@@ -137,6 +138,31 @@ export interface MirrorParticipantsResult {
   txHashes: Hash[];
 }
 
+/** `build` covers the files the Build covers; `unlock` adds the unlock files. */
+export type BackupPhase = 'build' | 'unlock';
+
+export const backupPhases: readonly BackupPhase[] = ['build', 'unlock'];
+
+/**
+ * One Swarm collection already uploaded and checked as spec/arkiv.md, "Backups", "Writing" asks:
+ * this writer doesn't download or check the collection.
+ */
+export interface BackupInput {
+  examId: Hex;
+  registry: Address;
+  phase: BackupPhase;
+  /** The collection's plain (unencrypted) Swarm reference: 64 hex characters, no `0x`. */
+  swarmRef: string;
+  /** `swarm.network` in spec/arkiv.json. */
+  swarmNetwork: string;
+  /** SHA-256 of the collection's `manifest.json`, `0x` hex. */
+  manifestHash: Hex;
+  /** How many files the collection holds. */
+  files: number;
+  /** The postage batch the upload was stamped with: 64 hex characters, no `0x`. */
+  batchId: string;
+}
+
 /** The `role` column for list roles 1 to 4 ("Approved List" in spec/api.md). */
 export const participantRoles: Readonly<Record<number, string>> = {
   1: 'setter',
@@ -233,6 +259,53 @@ function hashColumn(value: Hex | null, what: string): string {
 
 /** The `passkeyKeyHash` and `derivedKeyHash` columns: SHA-256 of the key bytes, lowercase hex. */
 const keyHash = (key: Uint8Array): string => (key.length === 0 ? '' : sha256(key).toLowerCase());
+
+const hex64 = /^[0-9a-fA-F]{64}$/;
+
+/** A Swarm reference or batch ID column: 64 hex characters, lowercase, no `0x`. */
+function swarmHex(value: string, what: string): string {
+  if (typeof value !== 'string') throw new MirrorInputError(`${what} is not a string`);
+  if (value.startsWith('0x') || value.startsWith('0X')) {
+    throw new MirrorInputError(`${what} must be 64 hex characters without 0x`);
+  }
+  if (!hex64.test(value)) throw new MirrorInputError(`${what} is not 64 hex characters`);
+  return value.toLowerCase();
+}
+
+/**
+ * The `swarmRef` column. A 128-character reference is an encrypted one, which carries its own
+ * decryption key, so it never goes on Arkiv (spec/arkiv.md, "What Is Backed Up").
+ */
+function swarmRefColumn(value: string): string {
+  if (typeof value === 'string' && /^(?:0[xX])?[0-9a-fA-F]{128}$/.test(value)) {
+    throw new MirrorInputError(
+      'swarmRef is a 128-character encrypted Swarm reference, which contains its own decryption key; upload the collection unencrypted and mirror its 64-character reference',
+    );
+  }
+  return swarmHex(value, 'swarmRef');
+}
+
+function backupColumns(input: BackupInput) {
+  if (!backupPhases.includes(input.phase)) {
+    throw new MirrorInputError(`phase ${String(input.phase)} is not one of ${backupPhases.join(', ')}`);
+  }
+  if (input.swarmNetwork !== arkiv.swarm.network) {
+    throw new MirrorInputError(`swarmNetwork ${String(input.swarmNetwork)} is not ${arkiv.swarm.network}, swarm.network in spec/arkiv.json`);
+  }
+  const manifestHash = hashColumn(input.manifestHash, 'manifestHash');
+  if (manifestHash === '') throw new MirrorInputError('manifestHash is required');
+  if (!Number.isSafeInteger(input.files) || input.files < 1 || input.files > I32_MAX) {
+    throw new MirrorInputError(`files ${String(input.files)} is not a positive i32`);
+  }
+  return {
+    phase: input.phase,
+    swarmRef: swarmRefColumn(input.swarmRef),
+    swarmNetwork: input.swarmNetwork,
+    manifestHash,
+    files: input.files,
+    batchId: swarmHex(input.batchId, 'batchId'),
+  };
+}
 
 /** The values of an exam row, as plain values, for comparing with a row and building a write. */
 interface ExamColumns {
@@ -530,7 +603,39 @@ export function createArkivWriter(options: ArkivWriterOptions) {
     return result;
   }
 
-  return { address, mirrorReleaseLog, mirrorReleaseToken, heartbeat, upsertExam, mirrorParticipants };
+  /**
+   * Writes a backup row unless this writer already has one for the same exam, registry, phase and
+   * Swarm reference. Checks every column first, so a bad input sends nothing.
+   */
+  async function mirrorBackup(input: BackupInput): Promise<MirrorResult> {
+    const examId = examIdColumn(input.examId);
+    const registry = addr(getAddress(input.registry));
+    const columns = backupColumns(input);
+
+    const { entities } = await client
+      .select({ $key: true })
+      .from(backupSchema)
+      .where(
+        eq('examId', examId),
+        eq('registry', registry),
+        eq('phase', columns.phase),
+        eq('swarmRef', columns.swarmRef),
+      )
+      .createdBy(address)
+      .limit(1)
+      .fetch();
+    const existing = entities[0];
+    if (existing) return { written: false, entityKey: existing.$key };
+
+    const { entityKey, txHash } = await wallet.createEntity(
+      backupSchema,
+      { examId, registry, ...columns },
+      createOptions(),
+    );
+    return { written: true, entityKey, txHash };
+  }
+
+  return { address, mirrorReleaseLog, mirrorReleaseToken, heartbeat, upsertExam, mirrorParticipants, mirrorBackup };
 }
 
 export type ArkivWriter = ReturnType<typeof createArkivWriter>;

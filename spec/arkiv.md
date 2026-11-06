@@ -57,6 +57,8 @@ For the exam index, only what `ExamRegistry`'s events already publish, plus an e
 
 These never go on Arkiv, because Arkiv is public and permanent: questions, even encrypted; setter receipts, keys or submission times; invite secrets; shares; and anything that isn't already public.
 
+For backups ("Backups" below), Swarm may also hold a copy of the exam's files in public storage. That includes the encrypted paper and the shares, each already encrypted to its holder, but only the files the exam's on-chain `storageManifestHash` covers, and the unlock files the signed release log covers. Arkiv then holds only a Swarm reference and hashes, never a file. Questions, setter data and invite secrets go on neither.
+
 ## Writers
 
 A writer, which the code calls the relay, reads the TEE and public storage and creates a row for each new log or token. A writer doesn't write a log again if it already has a row with the same `examId`, `registry` and `entriesHash`, and the same goes for a token with the same `examId`, `registry` and `instanceKeyHash`. An empty log has the same `entriesHash` in every exam, and one instance can run Unlock for several exams, so the hash alone isn't enough. The check runs before the write, so two runs of one writer at once may both write. Readers ignore the duplicate.
@@ -135,3 +137,47 @@ To list a registry's exams, a reader:
 4. Says that the list holds only the exams its writers have indexed, so a missing exam isn't proof that the exam doesn't exist.
 
 To find exams by participant, a reader looks up `participant` rows by `owner` or `passkeyKeyHash`. It shows an exam only if that entry is in the exam's approved list on Sepolia, which `getApprovedListEntries` reads and checks against the list hash.
+
+## Backups
+
+The board's bucket holds every file an exam needs: the encrypted paper, `K_pub`'s timelock, each key holder's encrypted share, and, after unlock, the centres' copies of `K_priv`. If that bucket fails or is emptied at `T−Δ`, holders can't release and centres can't open the paper. A backup keeps a second copy on [Swarm](https://docs.ethswarm.org), where a file's address is its own hash and the board can't delete it. Arkiv records where the backup is, so anyone can find it by exam ID.
+
+### What Is Backed Up
+
+One Swarm collection per exam, holding the exam's storage files under the same names as in the bucket (`api.md`, "Storage"):
+
+- **Before unlock:** `manifest.json` and every file it lists. The manifest must hash to the Build's `storageManifestHash` on Sepolia, and each file must match its `sha256` in the manifest.
+- **After unlock:** a second collection that also holds `release-log.json`, `release-token.jwt`, `key-priv.tlock` and `key-priv/*`. The signed release log covers `release-log.json` itself, and `release-token.jwt` binds the log's signer to the exam. Nothing on-chain or in the log hashes `key-priv.tlock` or `key-priv/*`. A backup gives them availability only. They are still safe to take from one: each is authenticated encryption, so a changed copy fails to open, and the paper's salted hash check catches any wrong key.
+
+Every file is already public, and already encrypted or signed, so it is uploaded as a plain, unencrypted Swarm collection. An encrypted Swarm reference contains its own decryption key, so one never goes on Arkiv.
+
+### Rows
+
+`paperseal.v1.backup` records one Swarm collection:
+
+| Column | Type | Indexed | Holds |
+| --- | --- | --- | --- |
+| `examId` | `str` | Yes | The exam ID, lowercase `0x` hex |
+| `registry` | `addr` | Yes | The `ExamRegistry` the exam is in |
+| `phase` | `str` | Yes | `build`, for the files the Build covers, or `unlock`, which adds the unlock files |
+| `swarmRef` | `str` | Yes | The collection's Swarm reference, 64 lowercase hex characters with no `0x` |
+| `swarmNetwork` | `str` | No | `swarm.network` in `arkiv.json`: `sepolia` here, `mainnet` once the build moves |
+| `manifestHash` | `str` | No | The SHA-256 of the collection's `manifest.json`, lowercase `0x` hex |
+| `files` | `i32` | No | The number of files in the collection |
+| `batchId` | `str` | No | The postage batch the upload was stamped with, lowercase hex |
+
+A backup row is `readonly`. It lives for `lifetimeDays`, and anyone can extend it. A writer doesn't write a second row for the same `examId`, `registry`, `phase` and `swarmRef`.
+
+### Writing
+
+A backup writer reads `manifest.json` from public storage. It checks the manifest against the Build's `storageManifestHash`, downloads each file it lists, and checks each one against the manifest's `sha256`. For `unlock`, it also checks that `release-log.json` is for this exam and that its `entriesHash` recomputes from its entries. It checks that `release-token.jwt` binds the log's signer to the exam, and that `key-priv.tlock` and one `key-priv/<derivedPublicKey>.bin` per approved centre (list roles 3 and 4) are present. A file that fails stops the upload, and nothing is written. Then the writer uploads the collection through a Bee node, stamped with a postage batch it controls, and writes the backup row.
+
+### Reading
+
+A reader uses a backup only when the bucket can't give it a file, or gives it one that fails its hash:
+
+1. It finds the `backup` rows for the exam and registry from published writers, preferring `unlock` over `build`, and the newest first.
+2. It reads `manifest.json` from the collection through the viewer's own Swarm API, which defaults to `swarm.defaultApiUrl`. It uses the collection only if the manifest hashes to the Build's `storageManifestHash` on Sepolia.
+3. It reads the file it needs from the collection and checks it against its hash in the manifest. For unlock files, it applies the same checks it applies to the bucket's copies: the release log's signature, the token, and finally the decryption and the paper's salted hash. A file that fails is ignored, exactly as if the bucket had served it.
+4. It says which files came from the Swarm backup. A backup that can't be read isn't treated as a failure of the exam, only as "not read".
+

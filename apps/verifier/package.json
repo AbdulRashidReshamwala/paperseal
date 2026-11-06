@@ -17,6 +17,7 @@
     "@paperseal/chain": "workspace:*",
     "@paperseal/crypto": "workspace:*",
     "@paperseal/protocol": "workspace:*",
+    "@paperseal/swarm": "workspace:*",
     "@paperseal/tee-client": "workspace:*",
     "@paperseal/ui": "workspace:*",
     "react": "19.3.1",

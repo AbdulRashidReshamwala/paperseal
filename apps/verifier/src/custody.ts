@@ -17,6 +17,7 @@ import {
 import type { CheckStatus, SealState, StepState, Tone } from '@paperseal/ui';
 
 import type { Build, Exam } from './attest';
+import type { BackupFile, BackupUse, BucketGap } from './backup';
 import { chainChecks, computedListHash, sameHex, type ChainData, type ChainProblem, type CheckResult } from './checks';
 import { roundStatus, type LatestRound } from './live';
 import {
@@ -32,6 +33,7 @@ import {
   type Sourced,
 } from './load';
 import type { Polled } from './poll';
+import { releaseTokenName } from './storage';
 import type { ProofChecks } from './proof';
 import type { SourcedWriter, WriterOrigin } from './settings';
 import type { LogVerdict, ReleaseProgress } from './unlock';
@@ -248,6 +250,55 @@ function claimRow(check: ClaimCheck): Item {
   if (check.ok) return { kind: 'check', label: { code: check.claim }, status: 'pass', detail: short(check.actual) };
   const detail = `${short(check.actual)}, expected ${short(check.expected)}${check.note ? ` (${check.note})` : ''}`;
   return fail({ code: check.claim }, 'The proof that Paper Seal runs the published code does not match what was published.', detail);
+}
+
+const gapWords: Record<BucketGap, string> = {
+  missing: 'The public files do not have it.',
+  unreadable: 'The public files could not be read.',
+  mismatch: 'The copy in the public files does not match.',
+};
+
+/**
+ * Which of this step's files came from the Swarm backup, and where, as spec/arkiv.md "Backups",
+ * "Reading", rule 4 says. A backup that could not be read is only "not read", never a failure.
+ */
+function backupItems(use: BackupUse | undefined, names: readonly string[]): Item[] {
+  if (!use) return [];
+  const wanted = new Set(names);
+  const served = use.served.filter((file) => wanted.has(file.name));
+  const notRead = use.missed.filter((miss) => wanted.has(miss.name) && miss.kind === 'not-read');
+  if (served.length === 0 && notRead.length === 0) return [];
+  const collections = new Map<string, BackupFile>();
+  for (const file of served) if (!collections.has(file.swarmRef)) collections.set(file.swarmRef, file);
+  const ignored = [
+    use.ignored.collections > 0 ? `${plural(use.ignored.collections, 'backup')} whose file list does not match the public record` : null,
+    use.ignored.files > 0 ? `${plural(use.ignored.files, 'file')} that did not match the file list` : null,
+  ].filter((part) => part !== null);
+  return [
+    { kind: 'heading', text: 'Backup on Swarm' },
+    ...served.flatMap((file): Item[] => [
+      file.inManifest
+        ? {
+            kind: 'check',
+            label: { code: file.name },
+            status: 'pass',
+            detail: `From the Swarm backup, checked against the exam's on-chain record. ${gapWords[file.bucket]}`,
+          }
+        : {
+            kind: 'fact',
+            label: { code: file.name },
+            value: `From the Swarm backup. ${gapWords[file.bucket]} The checks in this step apply to it as to the public files.`,
+          },
+      { kind: 'link', href: file.url, text: `Open ${file.name} on Swarm` },
+    ]),
+    ...[...collections.values()].flatMap((file): Item[] => [
+      { kind: 'hash', label: 'Swarm reference', value: file.swarmRef },
+      { kind: 'hash', label: 'Arkiv entity key of the backup row', value: file.entityKey },
+      { kind: 'link', href: `${arkiv.network.explorer}/entity/${file.entityKey}`, text: 'Open the backup row in the Arkiv explorer' },
+    ]),
+    ...notRead.map((miss) => notChecked({ code: miss.name }, `Not read from the Swarm backup. ${miss.reason}`)),
+    ...(ignored.length > 0 ? [{ kind: 'fact' as const, label: 'Backups ignored', value: ignored.join(', ') }] : []),
+  ];
 }
 
 interface Draft {
@@ -560,6 +611,7 @@ function attestedStep(c: Context): Draft {
     items: [
       { kind: 'heading', text: 'Published proof' },
       ...publishedTokenItems(token),
+      ...backupItems(c.records?.backup, [storageNames.token]),
       ...liveTokenItems(c),
       { kind: 'heading', text: 'Security key hardware' },
       ...hardware,
@@ -794,6 +846,7 @@ function sealedStep(c: Context): Draft {
         : []),
       signature.item,
       ...manifest.items,
+      ...backupItems(records?.backup, [storageNames.manifest]),
     ],
   };
 }
@@ -1129,6 +1182,7 @@ function unlockStep(c: Context, sealedOff: boolean): Draft {
       ...(shown ? [{ kind: 'fact' as const, label: 'Progress shown is from', value: sourceNames[shown.source] }] : []),
       { kind: 'heading', text: 'Published release log' },
       ...logs.items,
+      ...backupItems(c.records?.backup, [storageNames.releaseLog, releaseTokenName]),
       ...liveReleaseItems(c),
       ...arkivItems(c, complete || c.endReached || noPaper || sealedOff),
       ...(build ? machineFailed(c) : []),
@@ -1193,6 +1247,9 @@ function proofItems(proof: Extract<ProofRun, { ok: true }>['result']): { items: 
   }
 }
 
+/** The files the proof reads. */
+const proofFiles = [storageNames.keyPriv, storageNames.keyPub, storageNames.paper];
+
 function openStep(c: Context): Draft {
   const { exam, build } = c;
   const endRound = exam ? Number(exam.settings.endRound) : null;
@@ -1222,10 +1279,21 @@ function openStep(c: Context): Draft {
   if (!c.view.sources.storage) return { ...base, complete: false, note: 'This page needs to know where the public files are kept.', items: [notChecked('Proof', needsStorage)] };
   if (!proof) return { ...base, complete: false, note: 'Opening the paper.', items: [notChecked('Proof', 'Opening the paper.')] };
   if (!proof.ok) {
-    return { ...base, complete: false, note: 'The paper could not be opened just now. This page tries again by itself.', items: [notChecked('Proof', `Could not be read: ${proof.message}`)] };
+    return {
+      ...base,
+      complete: false,
+      note: 'The paper could not be opened just now. This page tries again by itself.',
+      items: [notChecked('Proof', `Could not be read: ${proof.message}`), ...backupItems(proof.backup, proofFiles)],
+    };
   }
   const result = proofItems(proof.result);
-  return { ...base, complete: result.complete, notApplicable: proof.result.state === 'sealed', note: result.note, items: result.items };
+  return {
+    ...base,
+    complete: result.complete,
+    notApplicable: proof.result.state === 'sealed',
+    note: result.note,
+    items: [...result.items, ...backupItems(proof.backup, proofFiles)],
+  };
 }
 
 const label = (item: CheckItem) => (typeof item.label === 'string' ? item.label : item.label.code);

@@ -19,6 +19,14 @@ describe('Rabdi', () => {
     expect(await reader.releaseRows(examId, [writer], { registry })).toEqual(empty);
   }, 30_000);
 
+  it('finds no backup rows for a random exam', async () => {
+    const examId = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
+    const writer = bytesToHex(crypto.getRandomValues(new Uint8Array(20)));
+    const registry = bytesToHex(crypto.getRandomValues(new Uint8Array(20)));
+    expect(await reader.backupRows(examId, [writer])).toEqual([]);
+    expect(await reader.backupRows(examId, [writer], { registry })).toEqual([]);
+  }, 30_000);
+
   it('finds no exam or participant rows for a random registry and writer', async () => {
     const writer = bytesToHex(crypto.getRandomValues(new Uint8Array(20)));
     const registry = bytesToHex(crypto.getRandomValues(new Uint8Array(20)));

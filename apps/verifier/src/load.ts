@@ -5,6 +5,7 @@ import { roundTimeSeconds, storageNames, type Hex } from '@paperseal/protocol';
 import type { StatusResponse, TeeClient } from '@paperseal/tee-client';
 import { useEffect, useRef, useState } from 'react';
 
+import { withBackup, type BackupSource, type BackupUse } from './backup';
 import { checkFreshToken, checkPublishedToken, checkRecordToken, type Build, type FreshVerdict, type PublishedVerdict, type RecordVerdict } from './attest';
 import type { ChainData } from './checks';
 import { approvedEntries, checkManifest, holdersOf, type ManifestReport } from './commitments';
@@ -48,6 +49,8 @@ export interface Records {
   token: Sourced<PublishedResult>;
   manifest: Sourced<ManifestResult>;
   log: Sourced<LogResult>;
+  /** Which files came from the Swarm backup, and which it could not give. Absent with backups off. */
+  backup?: BackupUse;
 }
 
 const neutral = (message: string): Neutral => ({ kind: 'neutral', message });
@@ -143,16 +146,20 @@ export async function loadRecords(args: {
   registry: Hex;
   /** The bucket the TEE must name, from an exam name. `teeStorageBucket` when left out. */
   bucket?: string;
+  /** Where to find a Swarm backup of the files. Null or left out, the bucket is all there is. */
+  backup?: BackupSource | null;
 }): Promise<Records> {
-  const { storage, examId, registry, bucket } = args;
+  const { examId, registry, bucket } = args;
   const chain = await args.chain();
   const off: Off = { kind: 'off' };
+  // The backup is checked against this read's Build, so it is set up again for each read.
+  const storage = args.storage ? withBackup(args.storage, args.backup ?? null, chain.build) : null;
   const [token, manifest, log] = await Promise.all([
     storage ? guarded(() => readToken(chain, storage, examId, registry, bucket)) : off,
     storage ? guarded(() => readManifest(chain, storage, examId)) : off,
     storage ? guarded(() => readLog(chain, storage, examId, registry, bucket)) : off,
   ]);
-  return { chain, token, manifest, log };
+  return { chain, token, manifest, log, ...(storage && args.backup ? { backup: storage.use() } : {}) };
 }
 
 export type LiveRead<T> = { ok: true; value: T } | { ok: false; message: string };
@@ -394,7 +401,14 @@ export async function loadArkiv(args: {
   };
 }
 
-export type ProofRun = { ok: true; result: ProofState } | { ok: false; message: string };
+export type ProofRun =
+  | {
+      ok: true;
+      result: ProofState;
+      /** Which files the proof took from the Swarm backup. Absent with backups off. */
+      backup?: BackupUse;
+    }
+  | { ok: false; message: string; backup?: BackupUse };
 
 /** The end round decides, as drand reports it. This device's clock stands in until drand answers. */
 export const roundReached = (round: number, latest: number | null, now: number) =>
@@ -415,8 +429,10 @@ export function useProof(args: {
   latest: LatestRound;
   now: number;
   retryMs?: number;
+  /** Where to find a Swarm backup of the files, or null with backups off. */
+  backup?: BackupSource | null;
 }): ProofRun | null {
-  const { storage, examId, client, chain, latest, now, retryMs = PROOF_RETRY_MS } = args;
+  const { storage, examId, client, chain, latest, now, retryMs = PROOF_RETRY_MS, backup = null } = args;
   const endRound = chain?.exam ? Number(chain.exam.settings.endRound) : null;
   const reached = endRound !== null && roundReached(endRound, latest.round, now);
   const key = `${String(reached)}|${String(latest.round !== null)}|${String(chain?.build?.postedAt)}`;
@@ -433,8 +449,10 @@ export function useProof(args: {
     if (!reached) return;
     let live = true;
     const { chain: data, currentRound } = inputs.current;
+    const backed = storage ? withBackup(storage, backup, data?.build ?? null) : null;
+    const used = () => (backed && backup ? { backup: backed.use() } : {});
     runProof({
-      storage,
+      storage: backed,
       examId,
       exam: data?.exam ?? null,
       build: data?.build ?? null,
@@ -444,17 +462,17 @@ export function useProof(args: {
       client,
     }).then(
       (result) => {
-        if (live) setRun({ key, storage, value: { ok: true, result } });
+        if (live) setRun({ key, storage, value: { ok: true, result, ...used() } });
       },
       (error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
-        if (live) setRun({ key, storage, value: { ok: false, message } });
+        if (live) setRun({ key, storage, value: { ok: false, message, ...used() } });
       },
     );
     return () => {
       live = false;
     };
-  }, [key, reached, attempts, storage, examId, client]);
+  }, [key, reached, attempts, storage, examId, client, backup]);
 
   const current = run?.key === key && run.storage === storage ? run.value : null;
   const opened = current?.ok === true && current.result.state === 'opened';

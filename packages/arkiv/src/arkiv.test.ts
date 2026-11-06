@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   arkiv,
   arkivChain,
+  backupSchema,
   createArkivReader,
   createArkivWriter,
   examSchema,
@@ -136,7 +137,7 @@ describe('schemas', () => {
   function specTables(): Map<string, [string, string, boolean][]> {
     const text = readFileSync(resolve(import.meta.dirname, '../../../spec/arkiv.md'), 'utf8');
     const tables = new Map<string, [string, string, boolean][]>();
-    for (const [, name = '', table = ''] of text.matchAll(/^`([\w.-]+)` (?:holds|says|describes)[^\n]*\n\n((?:\|[^\n]*\n)+)/gm)) {
+    for (const [, name = '', table = ''] of text.matchAll(/^`([\w.-]+)` (?:holds|says|describes|records)[^\n]*\n\n((?:\|[^\n]*\n)+)/gm)) {
       const rows = table.trim().split('\n').slice(2);
       tables.set(
         name,
@@ -160,8 +161,9 @@ describe('schemas', () => {
       arkiv.schemas.relayHeartbeat,
       arkiv.schemas.exam,
       arkiv.schemas.participant,
+      arkiv.schemas.backup,
     ]);
-    for (const schema of [releaseLogSchema, releaseTokenSchema, relayHeartbeatSchema, examSchema, participantSchema]) {
+    for (const schema of [releaseLogSchema, releaseTokenSchema, relayHeartbeatSchema, examSchema, participantSchema, backupSchema]) {
       const columns = Object.entries(schema.columns).map(([name, column]) => [
         name,
         column.type,
@@ -759,5 +761,176 @@ describe('exam index reader', () => {
     const reader = createArkivReader({ transport: stubRpc().transport });
     await expect(reader.participantRows({}, [writerA])).rejects.toThrow(TypeError);
     await expect(reader.participantRows({ passkeyKeyHash: '0x12' }, [writerA])).rejects.toThrow(/32 bytes/);
+  });
+});
+
+const swarmRef = 'a1'.repeat(32);
+const batchId = 'b2'.repeat(32);
+const manifestHash: Hex = `0x${'3c'.repeat(32)}`;
+
+/** A backup entity as the node returns it. */
+function backupEntity(
+  n: number,
+  creator: Address,
+  { phase = 'build', createdAt = 0x50, ref = swarmRef, rowRegistry = registry }: { phase?: string; createdAt?: number; ref?: string; rowRegistry?: Address } = {},
+) {
+  return {
+    key: keyOf(n),
+    creator,
+    createdAt: `0x${createdAt.toString(16)}`,
+    attributes: [
+      str('arkiv.schema', arkiv.schemas.backup),
+      str('examId', examId),
+      addrAttr('registry', rowRegistry),
+      str('phase', phase),
+      str('swarmRef', ref),
+      str('swarmNetwork', arkiv.swarm.network),
+      str('manifestHash', manifestHash),
+      { name: 'files', type: 'i32', value: 7 },
+      str('batchId', batchId),
+    ],
+  };
+}
+
+describe('backup writer', () => {
+  const created = { entityKey: keyOf(0xee), txHash: keyOf(0xff), expiresAt: 1n };
+  const backup = {
+    examId: `0x${'AB'.repeat(32)}` as Hex,
+    registry,
+    phase: 'unlock' as const,
+    swarmRef: swarmRef.toUpperCase(),
+    swarmNetwork: arkiv.swarm.network,
+    manifestHash: `0x${'3C'.repeat(32)}` as Hex,
+    files: 7,
+    batchId,
+  };
+
+  function setup(existing: unknown[] = []) {
+    const rpc = stubRpc(() => existing);
+    const createEntity = vi.fn((..._args: unknown[]) => Promise.resolve(created));
+    const writer = createArkivWriter({ account: writerA, transport: rpc.transport, walletClient: { createEntity } });
+    return { rpc, createEntity, writer };
+  }
+
+  it('creates a readonly, publicly extendable backup row with lowercase columns', async () => {
+    const { rpc, createEntity, writer } = setup();
+    expect(await writer.mirrorBackup(backup)).toEqual({ written: true, entityKey: created.entityKey, txHash: created.txHash });
+    const [schema, values, options] = createEntity.mock.calls[0] ?? [];
+    expect(schema).toBe(backupSchema);
+    expect(values).toMatchObject({ examId, phase: 'unlock', swarmRef, swarmNetwork: 'sepolia', manifestHash, files: 7, batchId });
+    expect(Object.keys(values as object).sort()).toEqual(
+      ['batchId', 'examId', 'files', 'manifestHash', 'phase', 'registry', 'swarmNetwork', 'swarmRef'],
+    );
+    expect((values as Record<string, { value: unknown }>).registry?.value).toBe(getAddress(registry));
+    expect(options).toEqual({
+      expiration: ExpirationTime.fromDays(arkiv.lifetimeDays),
+      flags: { readonly: true, permissionlessExtension: true },
+    });
+    const [query] = rpc.queries();
+    expect(query?.text).toContain(`arkiv.schema = str('${arkiv.schemas.backup}')`);
+    expect(query?.text).toContain(`examId = str('${examId}')`);
+    expect(query?.text.toLowerCase()).toContain(`registry = addr(${registry})`);
+    expect(query?.text).toContain(`phase = str('unlock')`);
+    expect(query?.text).toContain(`swarmRef = str('${swarmRef}')`);
+    expect(query?.text.toLowerCase()).toContain(`$creator = addr(${writerA})`);
+    expect(query?.options.limit).toBe('0x1');
+  });
+
+  it('skips a backup this writer already has for the exam, registry, phase and reference', async () => {
+    const { createEntity, writer } = setup([existingRow(keyOf(3), arkiv.schemas.backup)]);
+    expect(await writer.mirrorBackup(backup)).toEqual({ written: false, entityKey: keyOf(3) });
+    expect(createEntity).not.toHaveBeenCalled();
+  });
+
+  it('refuses an encrypted Swarm reference, because it contains its key', async () => {
+    const { rpc, createEntity, writer } = setup();
+    const encrypted = 'e5'.repeat(64);
+    await expect(writer.mirrorBackup({ ...backup, swarmRef: encrypted })).rejects.toThrow(/encrypted.*contains its own decryption key/);
+    await expect(writer.mirrorBackup({ ...backup, swarmRef: `0x${encrypted}` })).rejects.toThrow(MirrorInputError);
+    expect(rpc.calls).toEqual([]);
+    expect(createEntity).not.toHaveBeenCalled();
+  });
+
+  it('refuses malformed columns before sending anything', async () => {
+    const { rpc, createEntity, writer } = setup();
+    const bad = (overrides: Record<string, unknown>) => writer.mirrorBackup({ ...backup, ...overrides } as never);
+    await expect(bad({ swarmRef: `0x${swarmRef}` })).rejects.toThrow(/without 0x/);
+    await expect(bad({ swarmRef: 'a1'.repeat(31) })).rejects.toThrow(/swarmRef is not 64 hex/);
+    await expect(bad({ batchId: `0x${batchId}` })).rejects.toThrow(/batchId must be 64 hex characters without 0x/);
+    await expect(bad({ batchId: 'zz'.repeat(32) })).rejects.toThrow(/batchId is not 64 hex/);
+    await expect(bad({ manifestHash: '0x12' })).rejects.toThrow(/manifestHash is not 32 bytes/);
+    await expect(bad({ manifestHash: '3c'.repeat(32) })).rejects.toThrow(/manifestHash/);
+    await expect(bad({ phase: 'done' })).rejects.toThrow(/phase done is not one of build, unlock/);
+    await expect(bad({ swarmNetwork: 'mainnet' })).rejects.toThrow(/swarmNetwork/);
+    await expect(bad({ files: 0 })).rejects.toThrow(/positive i32/);
+    await expect(bad({ files: 1.5 })).rejects.toThrow(/positive i32/);
+    await expect(bad({ files: 2 ** 31 })).rejects.toThrow(/positive i32/);
+    await expect(bad({ examId: '0x12' })).rejects.toThrow(TypeError);
+    expect(rpc.calls).toEqual([]);
+    expect(createEntity).not.toHaveBeenCalled();
+  });
+});
+
+describe('backup reader', () => {
+  it('reads nothing without writers', async () => {
+    const rpc = stubRpc();
+    const reader = createArkivReader({ transport: rpc.transport });
+    expect(await reader.backupRows(examId, [])).toEqual([]);
+    expect(await reader.backupRows(examId, [], { registry })).toEqual([]);
+    expect(rpc.calls).toEqual([]);
+  });
+
+  it('filters by schema, examId and creator, and by registry when given one', async () => {
+    const rpc = stubRpc();
+    const reader = createArkivReader({ transport: rpc.transport });
+    await reader.backupRows(`0x${'AB'.repeat(32)}`, [writerA, writerB]);
+    await reader.backupRows(examId, [writerA], { registry });
+    const [all, one] = rpc.queries();
+    expect(all?.text).toContain(`arkiv.schema = str('${arkiv.schemas.backup}')`);
+    expect(all?.text).toContain(`examId = str('${examId}')`);
+    expect(all?.text.toLowerCase()).toContain(`$creator = addr(${writerA}) or $creator = addr(${writerB})`);
+    expect(all?.text).toContain('ORDER BY $key');
+    expect(all?.text).not.toContain('registry');
+    expect(all?.options.limit).toBe('0x64');
+    expect(one?.text.toLowerCase()).toContain(`registry = addr(${registry})`);
+  });
+
+  it('puts unlock before build, then the newest first', async () => {
+    const rpc = stubRpc(() => [
+      backupEntity(1, writerA, { phase: 'build', createdAt: 0x90 }),
+      backupEntity(2, writerA, { phase: 'unlock', createdAt: 0x60 }),
+      backupEntity(3, writerB, { phase: 'build', createdAt: 0x70 }),
+      backupEntity(4, writerB, { phase: 'unlock', createdAt: 0x80 }),
+    ]);
+    const reader = createArkivReader({ transport: rpc.transport });
+    const rows = await reader.backupRows(examId, [writerA, writerB]);
+    expect(rows.map((row) => row.entityKey)).toEqual([keyOf(4), keyOf(2), keyOf(1), keyOf(3)]);
+    expect(rows[0]).toEqual({
+      entityKey: keyOf(4),
+      creator: getAddress(writerB),
+      createdAtBlock: 0x80n,
+      examId,
+      registry: getAddress(registry),
+      phase: 'unlock',
+      swarmRef,
+      swarmNetwork: arkiv.swarm.network,
+      manifestHash,
+      files: 7,
+      batchId,
+    });
+  });
+
+  it('drops rows a node should not have sent, or that no reader can use', async () => {
+    const rpc = stubRpc(() => [
+      backupEntity(1, writerA),
+      backupEntity(2, writerB),
+      backupEntity(3, writerA, { rowRegistry: otherRegistry }),
+      backupEntity(4, writerA, { phase: 'restore' }),
+      backupEntity(5, writerA, { ref: 'e5'.repeat(64) }),
+      backupEntity(6, writerA, { ref: `0x${swarmRef}` }),
+    ]);
+    const reader = createArkivReader({ transport: rpc.transport });
+    expect((await reader.backupRows(examId, [writerA], { registry })).map((row) => row.entityKey)).toEqual([keyOf(1)]);
+    expect((await reader.backupRows(examId, [writerA])).map((row) => row.entityKey)).toEqual([keyOf(3), keyOf(1)]);
   });
 });

@@ -1,17 +1,20 @@
 import { existsSync } from 'node:fs';
 
-import { arkiv, createArkivWriter, instanceKeyHash, releaseLogSchema, releaseTokenSchema, type ExamIndexInput } from '@paperseal/arkiv';
+import { arkiv, backupSchema, createArkivWriter, instanceKeyHash, releaseLogSchema, releaseTokenSchema, type ExamIndexInput } from '@paperseal/arkiv';
 import type { ExamNameResult, ScanEventsResult } from '@paperseal/chain';
-import { chain, encodeApprovedList, setterOwner, toHex, type ApprovedListEntry } from '@paperseal/protocol';
+import { chain, encodeApprovedList, setterOwner, storageNames, toHex, type ApprovedListEntry } from '@paperseal/protocol';
+import type { CollectionFile, UploadOptions } from '@paperseal/swarm';
 import { bytesToString, custom, type Address, type Hex } from 'viem';
 
-import { defaultSepoliaRpc, parseCommand, UsageError, type IndexTarget } from './args';
+import { defaultSepoliaRpc, parseCommand, UsageError, type BackupTarget, type IndexTarget } from './args';
+import { BackupRefused, checkBatch, prepareBackup, sha256Hex, uploadBackup, type BackupRegistry } from './backup';
 import { relayEnv } from './config';
 import { indexPass, newIndexState, type IndexRegistry, type IndexWriter } from './indexer';
 import { castAddressArgs, castPrivateKeyArgs } from './keystore';
 import { explorerLinks, mirrorPass, type RelayWriter } from './mirror';
 import { print } from './output';
 import { releaseFiles, storageObjectUrl, type Fetch } from './storage';
+import { buyStamp } from './swarm-node';
 
 /* `dry-check`: everything that can be checked with no network, no Arkiv write and no key. */
 
@@ -116,6 +119,66 @@ async function offlineIndex(scan: ScanEventsResult, names: Record<string, ExamNa
   const resolveName = (name: string) => Promise.resolve(names[name] ?? { ok: false as const, failed: 'name' as const, reason: 'unknown', partial: {} });
   const report = await indexPass(target, { registry, writer, resolveName, chainId: chain.chainId }, newIndexState(10n));
   return { report, upserts, participants };
+}
+
+/** A build-phase backup against in-memory storage, chain and Bee. Nothing leaves the process. */
+async function offlineBackup(options: { tamper?: boolean; chainHash?: Hex } = {}) {
+  const base = 'https://s.example';
+  const files: Record<string, string> = { [storageNames.paper]: 'paper', [storageNames.keyPub]: 'kpub', [storageNames.token]: JWT };
+  const manifest = JSON.stringify({
+    examId: EXAM,
+    files: Object.keys(files).sort().map((name) => ({ name, sha256: sha256Hex(new TextEncoder().encode(files[name])) })),
+  });
+  const served = { ...files, [storageNames.manifest]: manifest, ...(options.tamper ? { [storageNames.paper]: 'tampered' } : {}) };
+  const fetch = offlineFetch(Object.fromEntries(Object.entries(served).map(([name, body]) => [storageObjectUrl(base, EXAM, name), body])));
+  const registry: BackupRegistry = {
+    getBuild: () => Promise.resolve({ storageManifestHash: options.chainHash ?? sha256Hex(new TextEncoder().encode(manifest)) } as never),
+    getApprovedListEntries: () => Promise.resolve(sampleList()),
+  };
+  const uploads: { paths: string[]; options: UploadOptions }[] = [];
+  const batchId = 'b7'.repeat(32);
+  const swarm = {
+    stamps: () => Promise.resolve([{ batchId, usable: true, label: '', depth: 19, bucketDepth: 16, amount: 1n, utilization: 0, immutable: true, exists: true, ttlSeconds: 86_400, blockNumber: 1 }]),
+    uploadCollection: (uploaded: readonly CollectionFile[], uploadOptions: UploadOptions) => {
+      uploads.push({ paths: uploaded.map((f) => f.path), options: uploadOptions });
+      return Promise.resolve({ reference: 'ce'.repeat(32) });
+    },
+    download: () => Promise.resolve(new TextEncoder().encode(manifest)),
+  };
+  const created: { schema: string; values: Record<string, unknown> }[] = [];
+  const writer = createArkivWriter({
+    account: '0x1111111111111111111111111111111111111111',
+    transport: custom({
+      request: ({ method }: { method: string }) =>
+        method === 'arkiv_query' ? Promise.resolve({ data: [], blockNumber: '0x1' }) : Promise.reject(new Error(`offline: ${method}`)),
+    }),
+    walletClient: {
+      createEntity: ((schema: { name: string }, values: Record<string, unknown>) => {
+        created.push({ schema: schema.name, values });
+        return Promise.resolve({ entityKey: `0x${'05'.repeat(32)}`, txHash: `0x${'06'.repeat(32)}` });
+      }) as never,
+    },
+  });
+  const target: BackupTarget = {
+    examId: EXAM,
+    registry: REGISTRY,
+    storageUrl: base,
+    batchId,
+    phase: undefined,
+    swarm: { url: arkiv.swarm.defaultApiUrl, source: 'default' },
+    rpcUrl: defaultSepoliaRpc,
+    rpcSource: 'default',
+    dryRun: false,
+  };
+  try {
+    const plan = await prepareBackup(target, { fetch, registry });
+    await checkBatch(swarm, batchId);
+    const result = await uploadBackup(target, plan, { swarm, writer });
+    return { plan, result, uploads, created, refused: undefined };
+  } catch (error) {
+    if (!(error instanceof BackupRefused)) throw error;
+    return { uploads, created, refused: error.message };
+  }
 }
 
 export async function dryCheck(): Promise<void> {
@@ -291,6 +354,69 @@ export async function dryCheck(): Promise<void> {
     expect(log.values.entriesHash === ENTRIES_HASH && log.values.released === 1 && log.values.examId === EXAM, 'log columns');
     expect(JSON.stringify(log.flags) === JSON.stringify({ readonly: true, permissionlessExtension: true }), 'flags');
     return `${releaseTokenSchema.name}, ${releaseLogSchema.name}, readonly, ${String(arkiv.lifetimeDays)} days`;
+  });
+
+  await check('arguments: backup, swarm-status and buy-stamp parse; the Bee API defaults to swarm.defaultApiUrl', () => {
+    const backup = parseCommand(['backup', '--exam', EXAM, '--registry', REGISTRY, '--storage', 'https://s.example', '--batch', `0x${'B7'.repeat(32)}`], {});
+    expect(backup.command === 'backup' && backup.target.batchId === 'b7'.repeat(32) && backup.target.phase === undefined, 'backup target');
+    expect(backup.command === 'backup' && backup.target.swarm.url === arkiv.swarm.defaultApiUrl && backup.target.swarm.source === 'default', 'default Bee API');
+    const env = parseCommand(['swarm-status'], { RELAY_SWARM_API: 'http://bee:1633' });
+    expect(env.command === 'swarm-status' && env.swarm.source === 'RELAY_SWARM_API', 'RELAY_SWARM_API');
+    const buy = parseCommand(['buy-stamp', '--depth', '19', '--days', '7'], {});
+    expect(buy.command === 'buy-stamp' && !buy.yes && buy.depth === 19 && buy.days === 7, 'buy-stamp without --yes');
+    for (const argv of [['backup', '--exam', EXAM, '--registry', REGISTRY, '--storage', 'https://s.example'], ['buy-stamp', '--depth', '16', '--days', '7']]) {
+      let threw = false;
+      try {
+        parseCommand(argv, {});
+      } catch (error) {
+        threw = error instanceof UsageError;
+      }
+      expect(threw, `accepted ${argv.join(' ')}`);
+    }
+    return `backup, swarm-status, buy-stamp; Bee API default ${arkiv.swarm.defaultApiUrl}; 2 refused`;
+  });
+
+  await check('backup: a bad manifest hash or a tampered file is refused before any upload or row', async () => {
+    const wrong = await offlineBackup({ chainHash: `0x${'99'.repeat(32)}` });
+    expect(wrong.refused?.includes("not the Build's storageManifestHash") === true, String(wrong.refused));
+    const tampered = await offlineBackup({ tamper: true });
+    expect(tampered.refused?.includes('paper.bin hashes to') === true, String(tampered.refused));
+    expect(wrong.uploads.length + tampered.uploads.length === 0 && wrong.created.length + tampered.created.length === 0, 'uploaded or wrote');
+    return 'manifest hash mismatch and file hash mismatch: nothing uploaded, nothing written';
+  });
+
+  await check('backup: a build backup uploads the storage paths with deferred false and fills the backup row (stub Bee and RPC)', async () => {
+    const { plan, result, uploads, created } = await offlineBackup();
+    if (!plan || !result) throw new Error('refused');
+    const upload = uploads[0];
+    expect(upload?.paths.join() === 'manifest.json,key-pub.tlock,paper.bin,token.jwt', String(upload?.paths.join()));
+    expect(upload?.options.deferred === false, 'deferred is not false');
+    const row = created[0];
+    if (!row) throw new Error('no row prepared');
+    expect(row.schema === backupSchema.name, row.schema);
+    const v = row.values;
+    expect(v.phase === 'build' && v.swarmRef === 'ce'.repeat(32) && v.swarmNetwork === arkiv.swarm.network && v.files === 4 && v.manifestHash === plan.manifestHash, JSON.stringify(v));
+    expect(result.readBack.result === 'match', result.readBack.result);
+    return `${backupSchema.name}: phase build, 4 files, ${arkiv.swarm.network}; read-back matched`;
+  });
+
+  await check('buy-stamp: without --yes it prints the cost and buys nothing (stub Bee)', async () => {
+    let bought = false;
+    const outcome = await buyStamp(
+      { api: { url: arkiv.swarm.defaultApiUrl, source: 'default' }, depth: 19, days: 7, label: undefined, yes: false },
+      {
+        chainState: () => Promise.resolve({ chainTip: 1, block: 1, totalAmount: 0n, currentPrice: 24_000n }),
+        wallet: () => Promise.resolve({ bzzBalance: 10n ** 17n, nativeTokenBalance: 0n, chainId: 11_155_111, walletAddress: '0x' }),
+        buyStamp: () => {
+          bought = true;
+          return Promise.resolve('fe'.repeat(32));
+        },
+      },
+    );
+    expect(!bought && outcome.exitCode === 0, 'bought without --yes');
+    const cost = outcome.lines.find((line) => line.trim().startsWith('cost'));
+    expect(cost !== undefined, 'no cost line');
+    return cost?.trim().replace(/\s+/g, ' ');
   });
 
   await check('keystore: cast gets the account and the password file path, never a password', () => {

@@ -59,3 +59,18 @@ export const participantSchema = defineSchema(arkiv.schemas.participant, {
   passkeyKeyHash: str().indexed(),
   derivedKeyHash: str(),
 });
+
+/**
+ * Where one Swarm backup of an exam's storage files is (spec/arkiv.md, "Backups"). Readonly. Readers
+ * use a collection only after its `manifest.json` hashes to the Build's `storageManifestHash`.
+ */
+export const backupSchema = defineSchema(arkiv.schemas.backup, {
+  examId: str().indexed(),
+  registry: addr().indexed(),
+  phase: str().indexed(),
+  swarmRef: str().indexed(),
+  swarmNetwork: str(),
+  manifestHash: str(),
+  files: i32(),
+  batchId: str(),
+});

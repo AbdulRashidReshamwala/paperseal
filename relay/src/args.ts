@@ -1,5 +1,7 @@
 import { parseArgs, type ParseArgsOptionsConfig } from 'node:util';
 
+import { arkiv, backupPhases, type BackupPhase } from '@paperseal/arkiv';
+import { minDepth } from '@paperseal/swarm';
 import { getAddress, isAddress, isHex, size, type Address, type Hex } from 'viem';
 
 /** What one pass mirrors. `examId` is lowercase, `registry` checksummed, URLs without a trailing slash. */
@@ -29,12 +31,37 @@ export interface IndexTarget {
   everySeconds: number | undefined;
 }
 
+/** The Bee API to use, and where it came from, for the header line. */
+export interface SwarmApi {
+  url: string;
+  source: '--swarm' | 'RELAY_SWARM_API' | 'default';
+}
+
+/** What `backup` checks, uploads and records (spec/arkiv.md "Backups"). */
+export interface BackupTarget {
+  examId: Hex;
+  registry: Address;
+  storageUrl: string;
+  /** 64 lowercase hex characters, no `0x`. */
+  batchId: string;
+  /** Undefined: `unlock` if storage has `release-log.json`, else `build`. */
+  phase: BackupPhase | undefined;
+  swarm: SwarmApi;
+  rpcUrl: string;
+  rpcSource: RpcSource;
+  /** Run every check, then stop: no upload, no Arkiv write, no key. */
+  dryRun: boolean;
+}
+
 export type Command =
   | { command: 'mirror'; target: MirrorTarget }
   | { command: 'watch'; target: MirrorTarget; everySeconds: number; heartbeat: boolean }
   | { command: 'status'; examId: Hex; writer: Address | undefined; registry: Address | undefined }
   | { command: 'status-index'; registry: Address; writer: Address | undefined }
   | { command: 'index'; target: IndexTarget }
+  | { command: 'backup'; target: BackupTarget }
+  | { command: 'swarm-status'; swarm: SwarmApi }
+  | { command: 'buy-stamp'; swarm: SwarmApi; depth: number; days: number; label: string | undefined; yes: boolean }
   | { command: 'dry-check' }
   | { command: 'help' };
 
@@ -44,6 +71,9 @@ export class UsageError extends Error {
     this.name = 'UsageError';
   }
 }
+
+/** The batch `swarm-status` prices: deep enough for an exam's files, and a week of life. */
+export const recommendedBatch = { depth: 19, days: 7 } as const;
 
 export const usage = `Paper Seal relay: mirrors an exam's public unlock evidence to Arkiv (spec/arkiv.md)
 
@@ -62,10 +92,21 @@ export const usage = `Paper Seal relay: mirrors an exam's public unlock evidence
       Mirrors the registry's exams (ExamCreated, ApprovedListPosted, BuildPosted) and their
       approved lists to the Arkiv exam index. --every repeats it from the last block scanned.
       Sepolia RPC: --rpc, else RELAY_SEPOLIA_RPC, else ${defaultSepoliaRpc}.
+  node relay/cli.mjs backup --exam <examId> --registry <address> --storage <url> --batch <batchId>
+                            [--phase build|unlock] [--swarm <bee api>] [--rpc <sepolia url>] [--dry-run]
+      Checks the exam's storage files against the Build's storageManifestHash on Sepolia, uploads
+      them to Swarm as one collection and writes a paperseal.v1.backup row. Phase defaults to
+      unlock if storage has release-log.json, else build. --dry-run stops after the checks.
+  node relay/cli.mjs swarm-status [--swarm <bee api>]
+      Read-only: the Bee node's health, address, wallet, price and postage batches, and what a
+      depth-${String(recommendedBatch.depth)}, ${String(recommendedBatch.days)}-day batch would cost.
+  node relay/cli.mjs buy-stamp --depth <n> --days <n> [--label <text>] [--swarm <bee api>] [--yes]
+      Prints the exact cost of a postage batch. Only with --yes does it buy one, with the node's sBZZ.
   node relay/cli.mjs dry-check
       Offline self-test of argument parsing and payload preparation. No network, no key.
 
-mirror and watch need at least one of --storage and --tee.`;
+mirror and watch need at least one of --storage and --tee.
+Bee API: --swarm, else RELAY_SWARM_API, else ${arkiv.swarm.defaultApiUrl} (swarm.defaultApiUrl in spec/arkiv.json).`;
 
 export function parseExamId(value: string | undefined): Hex {
   if (value === undefined) throw new UsageError('--exam <examId> is required');
@@ -139,6 +180,63 @@ function parseRpcUrl(flag: string, value: string): string {
   }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new UsageError(`${flag} must be an http(s) URL`);
   return value;
+}
+
+/** `--swarm`, else `RELAY_SWARM_API`, else `swarm.defaultApiUrl` in spec/arkiv.json. */
+export function swarmApi(flag: string | undefined, env: NodeJS.ProcessEnv): SwarmApi {
+  if (flag !== undefined) return { url: parseBaseUrl('--swarm', flag) ?? flag, source: '--swarm' };
+  const fromEnv = env.RELAY_SWARM_API?.trim();
+  if (fromEnv) return { url: parseBaseUrl('RELAY_SWARM_API', fromEnv) ?? fromEnv, source: 'RELAY_SWARM_API' };
+  return { url: arkiv.swarm.defaultApiUrl.replace(/\/+$/, ''), source: 'default' };
+}
+
+/** A postage batch ID: 64 hex characters. A `0x` prefix is dropped, and the rest lowercased. */
+export function parseBatchId(value: string | undefined): string {
+  if (value === undefined) throw new UsageError('--batch <batchId> is required: a usable postage batch on the Bee node (see swarm-status)');
+  const bare = value.replace(/^0[xX]/, '');
+  if (!/^[0-9a-fA-F]{64}$/.test(bare)) throw new UsageError(`--batch must be a 64-hex postage batch ID, got ${JSON.stringify(value)}`);
+  return bare.toLowerCase();
+}
+
+export function parsePhase(value: string | undefined): BackupPhase | undefined {
+  if (value === undefined) return undefined;
+  if (!(backupPhases as readonly string[]).includes(value)) throw new UsageError(`--phase must be ${backupPhases.join(' or ')}, got ${JSON.stringify(value)}`);
+  return value as BackupPhase;
+}
+
+/** A whole number in `[min, max]`. */
+export function parseWhole(flag: string, value: string | undefined, min: number, max: number): number {
+  if (value === undefined) throw new UsageError(`${flag} <n> is required`);
+  if (!/^\d+$/.test(value)) throw new UsageError(`${flag} must be a whole number, got ${JSON.stringify(value)}`);
+  const n = Number(value);
+  if (n < min || n > max) throw new UsageError(`${flag} must be from ${String(min)} to ${String(max)}`);
+  return n;
+}
+
+const backupFlags = {
+  exam: { type: 'string' },
+  registry: { type: 'string' },
+  storage: { type: 'string' },
+  batch: { type: 'string' },
+  phase: { type: 'string' },
+  swarm: { type: 'string' },
+  rpc: { type: 'string' },
+  'dry-run': { type: 'boolean' },
+} as const;
+
+function backupTarget(values: Partial<Record<Exclude<keyof typeof backupFlags, 'dry-run'>, string>> & { 'dry-run'?: boolean }, env: NodeJS.ProcessEnv): BackupTarget {
+  const storageUrl = parseBaseUrl('--storage', values.storage);
+  if (storageUrl === undefined) throw new UsageError('--storage <url> is required: the public bucket the files are read from');
+  return {
+    examId: parseExamId(values.exam),
+    registry: parseAddress('--registry', values.registry),
+    storageUrl,
+    batchId: parseBatchId(values.batch),
+    phase: parsePhase(values.phase),
+    swarm: swarmApi(values.swarm, env),
+    ...sepoliaRpc(values.rpc, env),
+    dryRun: values['dry-run'] === true,
+  };
 }
 
 const indexFlags = {
@@ -229,6 +327,29 @@ export function parseCommand(argv: readonly string[], env: NodeJS.ProcessEnv = p
     }
     case 'index':
       return { command, target: indexTarget(flags(rest, indexFlags) as Partial<Record<keyof typeof indexFlags, string>>, env) };
+    case 'backup':
+      return { command, target: backupTarget(flags(rest, backupFlags) as Parameters<typeof backupTarget>[0], env) };
+    case 'swarm-status': {
+      const values = flags(rest, { swarm: { type: 'string' } }) as { swarm?: string };
+      return { command, swarm: swarmApi(values.swarm, env) };
+    }
+    case 'buy-stamp': {
+      const values = flags(rest, {
+        depth: { type: 'string' },
+        days: { type: 'string' },
+        label: { type: 'string' },
+        swarm: { type: 'string' },
+        yes: { type: 'boolean' },
+      }) as { depth?: string; days?: string; label?: string; swarm?: string; yes?: boolean };
+      return {
+        command,
+        swarm: swarmApi(values.swarm, env),
+        depth: parseWhole('--depth', values.depth, minDepth, 255),
+        days: parseWhole('--days', values.days, 1, 3650),
+        label: values.label,
+        yes: values.yes === true,
+      };
+    }
     case 'dry-check':
       flags(rest, {});
       return { command };

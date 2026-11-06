@@ -1,9 +1,11 @@
 import { arkiv, createArkivReader, createArkivWriter, type ArkivWriter } from '@paperseal/arkiv';
 import { createExamRegistry, resolveExamName } from '@paperseal/chain';
 import { chain } from '@paperseal/protocol';
+import { createSwarmClient } from '@paperseal/swarm';
 import type { Address } from 'viem';
 
-import { parseCommand, usage, UsageError, type IndexTarget, type MirrorTarget } from './args';
+import { parseCommand, usage, UsageError, type BackupTarget, type IndexTarget, type MirrorTarget } from './args';
+import { backupFailed, BackupRefused, batchCheckLine, checkBatch, planLines, prepareBackup, resultLines, uploadBackup } from './backup';
 import { relayEnv, type RelayEnv } from './config';
 import { dryCheck } from './dry-check';
 import { indexLoop, indexPass, indexReportLines, indexTally, newIndexState, rpcLabel, type IndexDeps, type IndexReport } from './indexer';
@@ -11,6 +13,7 @@ import { keystoreAddress, loadSigner } from './keystore';
 import { explorerLinks, mirrorPass, tally, type PassReport } from './mirror';
 import { errorText, print, printError, registerSecret } from './output';
 import { ageText, indexStatus, indexStatusLines, statusRows, type StatusRow } from './status';
+import { apiLine, buyStamp, swarmSnapshot, swarmStatusLines } from './swarm-node';
 import { abortableSleep, watch, type Beat } from './watch';
 
 const links = explorerLinks(arkiv.network.explorer);
@@ -129,6 +132,54 @@ async function runIndex(env: RelayEnv, target: IndexTarget): Promise<void> {
   }
 }
 
+async function runBackup(env: RelayEnv, target: BackupTarget): Promise<void> {
+  for (const secret of rpcLabel(target.rpcUrl).secrets) registerSecret(secret);
+  const swarm = createSwarmClient({ apiUrl: target.swarm.url });
+  print(`exam      ${target.examId}`);
+  print(`registry  ${target.registry} (chain ${String(chain.chainId)})`);
+  print(`storage   ${target.storageUrl}`);
+  print(`Sepolia   ${rpcLabel(target.rpcUrl).shown}, ${rpcSourceText[target.rpcSource]}`);
+  print(apiLine(target.swarm));
+  print(`network   ${arkiv.swarm.network} (swarm.network in spec/arkiv.json)`);
+
+  const refused = (error: unknown) => {
+    if (!(error instanceof BackupRefused)) throw error;
+    printError(`REFUSED   ${errorText(error)}`);
+    printError('          nothing was uploaded and nothing was written');
+    process.exitCode = 1;
+  };
+  let plan;
+  try {
+    plan = await prepareBackup(target, {
+      fetch: globalThis.fetch,
+      registry: createExamRegistry({ address: target.registry, rpcUrl: target.rpcUrl }),
+    });
+  } catch (error) {
+    refused(error);
+    return;
+  }
+  for (const line of planLines(plan)) print(line);
+  try {
+    print(batchCheckLine(await checkBatch(swarm, target.batchId)));
+  } catch (error) {
+    refused(error);
+    return;
+  }
+  if (target.dryRun) {
+    print('dry run: every check passed; nothing was uploaded and nothing was written');
+    return;
+  }
+
+  // The key is loaded before the upload, so a keystore problem stops the run with nothing sent.
+  const writer = await signedWriter(env);
+  print(`Arkiv     ${arkiv.network.name} (chain ${String(arkiv.network.chainId)}), ${accessKeyLine(env)}`);
+  print(`writer    ${writer.address}  ${links.address(writer.address)}`);
+  print(`uploading ${String(plan.files.length)} files, waiting for Bee to push every chunk (Swarm-Deferred-Upload: false)…`);
+  const result = await uploadBackup(target, plan, { swarm, writer });
+  for (const line of resultLines(result, target.swarm.url, links)) print(line);
+  if (backupFailed(result)) process.exitCode = 1;
+}
+
 async function signedWriter(env: RelayEnv): Promise<ArkivWriter> {
   const account = await loadSigner(env.keystore);
   return createArkivWriter({ account, accessKey: env.accessKey.value });
@@ -163,6 +214,16 @@ async function run(argv: string[]): Promise<void> {
     await dryCheck();
     return;
   }
+  if (command.command === 'swarm-status') {
+    for (const line of swarmStatusLines(await swarmSnapshot(command.swarm, createSwarmClient({ apiUrl: command.swarm.url })))) print(line);
+    return;
+  }
+  if (command.command === 'buy-stamp') {
+    const outcome = await buyStamp({ api: command.swarm, depth: command.depth, days: command.days, label: command.label, yes: command.yes }, createSwarmClient({ apiUrl: command.swarm.url }));
+    for (const line of outcome.lines) print(line);
+    process.exitCode = outcome.exitCode;
+    return;
+  }
 
   const env = relayEnv();
   registerSecret(env.accessKey.value);
@@ -179,6 +240,11 @@ async function run(argv: string[]): Promise<void> {
 
   if (command.command === 'index') {
     await runIndex(env, command.target);
+    return;
+  }
+
+  if (command.command === 'backup') {
+    await runBackup(env, command.target);
     return;
   }
 

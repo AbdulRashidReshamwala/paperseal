@@ -92,6 +92,7 @@ const settings: Settings = {
   examId,
   arkivRpcUrl: 'https://arkiv.example',
   arkivWriters: '',
+  swarmApiUrl: 'http://bee.example:1633',
 };
 
 function arrange(world: World, files: Record<string, Uint8Array> = {}) {
@@ -523,6 +524,134 @@ describe('step 6, the copy on Arkiv', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(await screen.findByText(/Enter each address as 0x followed by 40 letters or digits/)).toBeTruthy();
     expect(arkivReaders).toEqual([]);
+  });
+});
+
+describe('the backup on Swarm', () => {
+  const writer = '0x1111111111111111111111111111111111111111';
+  const swarmRef = 'ab'.repeat(32);
+  const entityKey = `0x${'0e'.repeat(32)}` as const;
+  const bee = 'http://bee.example:1633';
+
+  /** The bucket, empty or as built, a Swarm node with the world's files or none, and one backup row on Arkiv. */
+  function arrangeBackup(world: World, options: { bucket: 'empty' | 'full'; swarm: 'up' | 'down' }) {
+    arrange(world);
+    const storageFetch = vi.mocked(fetch).getMockImplementation() as (i: string | URL | Request) => Promise<Response>;
+    const swarmReads: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request) => {
+        const url = String(input);
+        if (url.startsWith(`${bee}/`)) {
+          swarmReads.push(url);
+          if (options.swarm === 'down') return Promise.reject(new TypeError('fetch failed'));
+          const bytes = world.files.get(decodeURIComponent(url.replace(`${bee}/bzz/${swarmRef}/`, '')));
+          return Promise.resolve(bytes ? new Response(new Uint8Array(bytes)) : new Response('no', { status: 404 }));
+        }
+        return options.bucket === 'empty' ? Promise.resolve(new Response('no', { status: 404 })) : storageFetch(input);
+      }),
+    );
+    const backupRows = vi.fn(() =>
+      Promise.resolve([
+        {
+          entityKey,
+          creator: writer,
+          createdAtBlock: 9_000n,
+          examId,
+          registry: registryAddress,
+          phase: 'unlock',
+          swarmRef,
+          swarmNetwork: 'sepolia',
+          manifestHash: world.build.storageManifestHash,
+          files: world.files.size,
+          batchId: 'cd'.repeat(32),
+        },
+      ]),
+    );
+    arkivReader = {
+      releaseRows: () => Promise.resolve({ logs: [], tokens: [], heartbeats: [] }),
+      latestBlock: () => Promise.resolve({ number: 10_000n, time: Math.floor(Date.now() / 1000) }),
+      backupRows,
+    } as never;
+    return { swarmReads, backupRows };
+  }
+
+  it('opens the paper from the backup when the bucket is empty, and says which files came from it', async () => {
+    const world = await buildWorld();
+    const { backupRows } = arrangeBackup(world, { bucket: 'empty', swarm: 'up' });
+    open(1000, { arkivWriters: writer });
+    expect(await screen.findByText('Differentiate x squared.', {}, { timeout: 5000 })).toBeTruthy();
+    const step = stepNamed(/^7\. Paper opens to everyone$/);
+    expect(stateOf(step)).toBe('done');
+    expect(within(step).getByText('Backup on Swarm')).toBeTruthy();
+    for (const name of ['paper.bin', 'key-pub.tlock']) {
+      const row = within(step).getByText(name).closest('li') as HTMLElement;
+      expect(row.textContent).toMatch(/From the Swarm backup, checked against the exam's on-chain record\. The public files do not have it\./);
+      expect(within(step).getByText(`Open ${name} on Swarm`).getAttribute('href')).toBe(`${bee}/bzz/${swarmRef}/${name}`);
+    }
+    expect((within(step).getByText('key-priv.tlock').closest('li') as HTMLElement).textContent).toMatch(/From the Swarm backup\./);
+    expect(within(step).getByLabelText(`Copy Swarm reference: ${swarmRef}`)).toBeTruthy();
+    expect(within(step).getByLabelText(`Copy Arkiv entity key of the backup row: ${entityKey}`)).toBeTruthy();
+    expect(within(step).getByText('Open the backup row in the Arkiv explorer').getAttribute('href')).toMatch(new RegExp(`/entity/${entityKey}$`));
+    expect(within(step).queryByText('Fail')).toBeNull();
+
+    const sealed = stepNamed(/^5\. Paper built and sealed$/);
+    await within(sealed).findByText('Backup on Swarm');
+    expect((within(sealed).getAllByText('manifest.json')[0]?.closest('li') as HTMLElement).textContent).toMatch(/From the Swarm backup/);
+    expect((within(sealed).getByText(/^Manifest hash matches/).closest('li') as HTMLElement).textContent).toMatch(/Pass/);
+    const unlock = stepNamed(/^6\. Paper unlocks for centres$/);
+    expect(within(unlock).getByText('Open release-log.json on Swarm')).toBeTruthy();
+    expect(backupRows).toHaveBeenCalledWith(examId, [writer], { registry: registryAddress });
+  });
+
+  it('is neutral, and says the backup was not read, when Swarm does not answer', async () => {
+    const world = await buildWorld();
+    arrangeBackup(world, { bucket: 'empty', swarm: 'down' });
+    open(1000, { arkivWriters: writer });
+    const step = await findStep(/^5\. Paper built and sealed$/);
+    await within(step).findByText(/^Not read from the Swarm backup\. The backup could not be read/, {}, { timeout: 5000 });
+    expect(stateOf(step)).not.toBe('failed');
+    const open7 = stepNamed(/^7\. Paper opens to everyone$/);
+    await within(open7).findAllByText(/^Not read from the Swarm backup/);
+    expect(stateOf(open7)).not.toBe('failed');
+    expect(screen.queryByRole('alert')?.textContent ?? '').not.toMatch(/Step [567]/);
+  });
+
+  it('reads no backup without writers, or with no Swarm API', async () => {
+    const world = await buildWorld();
+    const first = arrangeBackup(world, { bucket: 'empty', swarm: 'up' });
+    const view = open(1000);
+    await within(await findStep(/^5\. Paper built and sealed$/)).findByText(/manifest.json is not in storage yet/);
+    view.unmount();
+    expect(first.backupRows).not.toHaveBeenCalled();
+    expect(first.swarmReads).toEqual([]);
+
+    const second = arrangeBackup(world, { bucket: 'empty', swarm: 'up' });
+    open(1000, { arkivWriters: writer, swarmApiUrl: '' });
+    await within(await findStep(/^5\. Paper built and sealed$/)).findByText(/manifest.json is not in storage yet/);
+    expect(second.backupRows).not.toHaveBeenCalled();
+    expect(second.swarmReads).toEqual([]);
+  });
+
+  it('reads nothing from Swarm while the bucket works', async () => {
+    const world = await buildWorld();
+    const { swarmReads, backupRows } = arrangeBackup(world, { bucket: 'full', swarm: 'up' });
+    open(1000, { arkivWriters: writer });
+    expect(await screen.findByText('Differentiate x squared.', {}, { timeout: 5000 })).toBeTruthy();
+    expect(screen.queryByText('Backup on Swarm')).toBeNull();
+    expect(backupRows).not.toHaveBeenCalled();
+    expect(swarmReads).toEqual([]);
+  });
+
+  it('can be pointed at another Swarm API, or turned off, under "Check it yourself"', async () => {
+    const world = await buildWorld();
+    arrange(world);
+    open(1000);
+    const field = screen.getByLabelText(/^Where to read the backup on Swarm/);
+    expect((field as HTMLInputElement).value).toBe(bee);
+    fireEvent.change(field, { target: { value: 'bzz://nope' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findAllByText('Enter a web address that starts with http:// or https://.')).toHaveLength(1);
   });
 });
 

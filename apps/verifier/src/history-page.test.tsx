@@ -59,6 +59,7 @@ const settings: Settings = {
   examId: '',
   arkivRpcUrl: 'https://arkiv.example',
   arkivWriters: writer,
+  swarmApiUrl: '',
 };
 
 function examRow(n: number, over: Partial<ExamRow> = {}): ExamRow {
