@@ -1,6 +1,6 @@
 import { examIdInToken } from '../shared/machineExam';
 import type { Hex } from '@paperseal/protocol';
-import { Button, Check, PrimaryAction, Row, Rows } from '@paperseal/ui';
+import { Button, PrimaryAction } from '@paperseal/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { Snapshot } from '../areas/board/examState';
@@ -13,7 +13,7 @@ import { nameLookup } from '../shared/names';
 import { registry, registryAddress } from '../shared/registry';
 import { tee } from '../shared/tee';
 import { keysFor } from './credentials';
-import { questionJobs, registerJobs, releaseEnough, releaseJobs, runEach, type Job, type PersonState, type World } from './everyone';
+import { bankMet, questionJobs, registerJobs, releaseEnough, releaseJobs, runEach, type Job, type PersonState, type World } from './everyone';
 import { personas, withStorageOf } from './personas';
 
 /*
@@ -97,31 +97,38 @@ async function planFor(stage: PanelStage, acting: World, { snapshot, parties }: 
   return { jobs: await releaseJobs(acting, { entries, released: release.released }), note: null };
 }
 
-function Line(props: { job: Job; state: PersonState | undefined; idle: boolean; onRetry: () => void }) {
-  const { job, idle } = props;
-  const waiting: PersonState = { kind: 'waiting', ...(job.note ? { note: job.note } : {}) };
-  const state = props.state ?? (job.done ? ({ kind: 'done', note: 'Already done' } as const) : waiting);
+/** Where a person stands, as a word and a tone for its dot. */
+function standing(job: Job, given: PersonState | undefined): { tone: 'quiet' | 'pass' | 'pending' | 'fail'; words: string } {
+  const state = given ?? (job.done ? ({ kind: 'done', note: 'Already done' } as const) : ({ kind: 'waiting', ...(job.note ? { note: job.note } : {}) } as const));
   switch (state.kind) {
     case 'done':
-      return <Check status="pass">{state.note}</Check>;
+      return { tone: 'pass', words: state.note };
     case 'not-needed':
-      return <Check status="not-checked">Not needed</Check>;
+      return { tone: 'quiet', words: 'Not needed' };
     case 'working':
-      return <Check status="pending">{state.note}</Check>;
+      return { tone: 'pending', words: state.note };
     case 'failed':
-      return (
-        <span className="board-link">
-          <Check status="fail">{state.reason}</Check>
-          {idle ? (
-            <Button aria-label={`Try again for ${job.persona.label}`} onClick={props.onRetry}>
-              Try again
-            </Button>
-          ) : null}
-        </span>
-      );
+      return { tone: 'fail', words: state.reason };
     default:
-      return <Check status="not-checked">{state.note ?? 'Waiting'}</Check>;
+      return { tone: 'quiet', words: state.note ?? 'Waiting' };
   }
+}
+
+/** One person: a small chip, and a wider one when something went wrong and there is more to say. */
+function Person(props: { job: Job; state: PersonState | undefined; idle: boolean; onRetry: () => void }) {
+  const { job, idle } = props;
+  const { tone, words } = standing(job, props.state);
+  return (
+    <li className="board-person" data-tone={tone}>
+      <span>{job.persona.label}</span>
+      <span className="board-person-state">{words}</span>
+      {tone === 'fail' && idle ? (
+        <Button aria-label={`Try again for ${job.persona.label}`} onClick={props.onRetry}>
+          Try again
+        </Button>
+      ) : null}
+    </li>
+  );
 }
 
 function Everyone(props: PanelProps & { stage: PanelStage }) {
@@ -182,28 +189,45 @@ function Everyone(props: PanelProps & { stage: PanelStage }) {
 
   if (!acting || !plan) return null;
   const { what, action, busy: busyLabel } = copy[stage];
-  const { status } = props.snapshot;
-  const enough = stage === 'release' && status !== null && releaseEnough(status);
+  const { status, found } = props.snapshot;
+  const criteria = found?.criteria ?? null;
+  // This browser's receipts only know what it sent, so the machine's own count decides whether the bank is met.
+  const met = stage === 'questions' && status !== null && criteria !== null && bankMet(status.questionCount, criteria);
+  const enough = met || (stage === 'release' && status !== null && releaseEnough(status));
   const left = !enough && plan.jobs.some((job) => !job.done && !['done', 'not-needed'].includes(states[job.persona.id]?.kind ?? ''));
+  const ran = Object.keys(states).length > 0;
+  if (!left && !busy && !ran) {
+    return (
+      <section className="board-demo" aria-label="Everyone else">
+        <p>
+          <strong>Everyone else:</strong> {plan.note ?? (met ? 'nothing left to do. The question count is met.' : 'nothing left to do here.')}
+        </p>
+      </section>
+    );
+  }
   return (
-    <section className="board-draft-card board-people-job" aria-label="Everyone else">
-      <h2>Everyone else</h2>
-      <p className="board-note">{what}</p>
-      {plan.note ? <p className="board-note">{plan.note}</p> : null}
-      {problem ? <p className="board-note">This could not be read just now. The page keeps trying. {problem}</p> : null}
-      {left || busy ? (
-        <PrimaryAction status={busy ? 'busy' : 'idle'} busyLabel={busyLabel} onClick={() => void run()}>
-          {action}
-        </PrimaryAction>
-      ) : null}
+    <section className="board-demo" aria-label="Everyone else">
+      <div className="board-demo-head">
+        <div>
+          <h2>Everyone else</h2>
+          <p>{what}</p>
+        </div>
+        {left || busy ? (
+          <div>
+            <PrimaryAction status={busy ? 'busy' : 'idle'} busyLabel={busyLabel} onClick={() => void run()}>
+              {action}
+            </PrimaryAction>
+          </div>
+        ) : null}
+      </div>
+      {plan.note ? <p>{plan.note}</p> : null}
+      {problem ? <p>This could not be read just now. The page keeps trying. {problem}</p> : null}
       {plan.jobs.length > 0 ? (
-        <Rows>
+        <ul className="board-people">
           {plan.jobs.map((job) => (
-            <Row key={job.persona.id} label={job.persona.label}>
-              <Line job={job} state={states[job.persona.id] ?? (enough && !job.done ? { kind: 'not-needed' } : undefined)} idle={!busy} onRetry={() => void run(job.persona.id)} />
-            </Row>
+            <Person key={job.persona.id} job={job} state={states[job.persona.id] ?? (enough && !job.done ? { kind: 'not-needed' } : undefined)} idle={!busy} onRetry={() => void run(job.persona.id)} />
           ))}
-        </Rows>
+        </ul>
       ) : null}
     </section>
   );

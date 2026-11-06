@@ -1,5 +1,5 @@
 import type { Hex } from '@paperseal/protocol';
-import { Check, Row, Rows, Stage } from '@paperseal/ui';
+import { Check, Stage } from '@paperseal/ui';
 import { useEffect, useState } from 'react';
 
 import { verifyTee } from '../../shared/attest';
@@ -86,14 +86,19 @@ export function BuildStep(props: { examId: Hex; snapshot: Snapshot; onPosted: ()
       next="Centres can then download the sealed paper. You have nothing else to do until the exam, and you can close this page."
     >
       {build ? (
-        <Rows>
-          <Row label="Record">
+        <div className="board-summary">
+          <div>
+            <p className="ps-eyebrow">Paper</p>
+            <p className="board-figure">
+              <strong>{build.selected}</strong>
+              <span> questions, chosen from the {build.bankSize} sent in</span>
+            </p>
+          </div>
+          <div>
+            <p className="ps-eyebrow">Record</p>
             <Check status="pass">Checked. It comes from Paper Seal for this exam.</Check>
-          </Row>
-          <Row label="Paper">
-            {build.selected} questions, chosen from the {build.bankSize} sent in
-          </Row>
-        </Rows>
+          </div>
+        </div>
       ) : null}
       <ExamRecord snapshot={props.snapshot} />
     </Stage>

@@ -1,6 +1,9 @@
 import { Button, PrimaryAction } from '@paperseal/ui';
 import type { ReactNode } from 'react';
+import { Link } from 'react-router';
 
+import { ExamJourney } from './ExamJourney';
+import type { Snapshot } from './examState';
 import { draftSteps, type DraftStep } from './plan';
 
 const LABELS: Record<DraftStep, string> = {
@@ -47,10 +50,16 @@ export function DraftShell(props: DraftRail & { children: ReactNode }) {
   );
 }
 
-/** A published exam's page: one column, because the board only ever has the one thing in front of it. */
-export function ExamShell(props: { children: ReactNode }) {
+/** A published exam's page: where the exam has got to down the side, and the one thing in front of the board beside it. */
+export function ExamShell(props: { snapshot: Snapshot; children: ReactNode }) {
   return (
     <div className="board-draft board-exam">
+      <aside className="board-exam-side">
+        <ExamJourney snapshot={props.snapshot} />
+        <p className="board-exam-home">
+          <Link to="/board">All your exams and drafts</Link>
+        </p>
+      </aside>
       <div className="board-draft-main">{props.children}</div>
     </div>
   );
