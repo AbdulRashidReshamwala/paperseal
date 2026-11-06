@@ -198,3 +198,14 @@ export function ReceiptRows() {
     </Row>
   ));
 }
+
+/** A small icon in the top right of a card, that fills it in for a demo. */
+export function DemoFill(props: { label: string; onClick: () => void }) {
+  return (
+    <button type="button" className="board-demo-fill" aria-label={props.label} title={props.label} onClick={props.onClick}>
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+        <path d="M13 2 4 14h6l-1 8 9-12h-6z" />
+      </svg>
+    </button>
+  );
+}

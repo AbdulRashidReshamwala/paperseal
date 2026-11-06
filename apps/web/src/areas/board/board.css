@@ -722,6 +722,7 @@
 }
 
 .board-draft-card {
+  position: relative;
   display: grid;
   gap: var(--ps-space-4);
   padding: var(--ps-space-5);
@@ -1004,4 +1005,22 @@
 
 .board-exam .board-draft-main {
   max-width: none;
+}
+
+.board-demo-fill {
+  position: absolute;
+  top: var(--ps-space-3);
+  right: var(--ps-space-3);
+  display: inline-flex;
+  padding: 6px;
+  color: var(--ps-ink-soft);
+  cursor: pointer;
+  background: none;
+  border: 1px solid var(--ps-rule);
+  border-radius: 50%;
+}
+
+.board-demo-fill:hover {
+  color: var(--ps-ink);
+  border-color: var(--ps-ink);
 }

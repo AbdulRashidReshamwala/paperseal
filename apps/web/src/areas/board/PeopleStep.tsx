@@ -13,7 +13,7 @@ import { withDetails } from './details';
 import { ExamRecord } from './ExamRecord';
 import type { Snapshot } from './examState';
 import { InviteBackup } from './InviteBackup';
-import { Fold, PostAction, ReadBackRows } from './Parts';
+import { DemoFill, Fold, PostAction, ReadBackRows } from './Parts';
 import { demoSetters } from '../../shared/demoKeys';
 import { createInvite, linkFor, reissueInvite, type BoardInvite } from './invites';
 import { defaultRole, partyEntries, partyRoles, partyState, useDirectoryNames, useParties, usePartyRecords, type ChosenParty, type PartyState } from './parties';
@@ -388,6 +388,16 @@ export function PeopleStep(props: { examId: Hex; snapshot: Snapshot; onPosted: (
         </p>
       ) : null}
       <section className="board-draft-card board-people-job">
+        {sampleSetters !== null && invites.length < sampleSetters ? (
+          <DemoFill
+            label={`Add invites for all ${String(sampleSetters)} setters`}
+            onClick={() => {
+              const next = [...invites];
+              while (next.length < sampleSetters) next.push(createInvite(next, `Setter ${String(next.length + 1)}`));
+              update(next);
+            }}
+          />
+        ) : null}
         <h2>
           <span>1</span> Invite the setters
         </h2>
@@ -400,17 +410,6 @@ export function PeopleStep(props: { examId: Hex; snapshot: Snapshot; onPosted: (
             update([...invites, invite]);
           }}
         />
-        {sampleSetters !== null && invites.length < sampleSetters ? (
-          <Button
-            onClick={() => {
-              const next = [...invites];
-              while (next.length < sampleSetters) next.push(createInvite(next, `Setter ${String(next.length + 1)}`));
-              update(next);
-            }}
-          >
-            Add invites for all {sampleSetters} setters
-          </Button>
-        ) : null}
         {invites.length > 0 ? (
           <Rows>
             {matching.rows.map(({ invite, state }) => (

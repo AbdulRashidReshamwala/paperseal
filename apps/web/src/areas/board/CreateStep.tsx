@@ -5,7 +5,7 @@ import { demoTopics } from '../../shared/demoKeys';
 import { useBoardForm, useEvaluated } from './BoardForm';
 import { DraftPage, type DraftRail } from './DraftFrame';
 import { evaluatePublish, parseLocalTime, whenTyped } from './form';
-import { Fold, Input, Problem } from './Parts';
+import { DemoFill, Fold, Input, Problem } from './Parts';
 import { bankNeeded, durationError, examLabel, formatWhen, isTight, plainWords, type PlanInput } from './plan';
 
 const sampleTopics = demoTopics();
@@ -160,6 +160,14 @@ export function TopicsStep(props: { rail: DraftRail; onBack: () => void; onConti
       onBack={props.onBack}
       onContinue={props.onContinue}
     >
+      {sampleTopics ? (
+        <DemoFill
+          label="Add 5 topics with 5 questions"
+          onClick={() => {
+            set({ topics: sampleTopics });
+          }}
+        />
+      ) : null}
       {plan.topics.map((topic, index) => (
         <div className="board-topic" key={index}>
           <Input
@@ -201,15 +209,6 @@ export function TopicsStep(props: { rail: DraftRail; onBack: () => void; onConti
         >
           Add topic
         </Button>
-        {sampleTopics ? (
-          <Button
-            onClick={() => {
-              set({ topics: sampleTopics });
-            }}
-          >
-            Add 5 topics with 5 questions
-          </Button>
-        ) : null}
       </div>
       {needs ? (
         <p className="board-note" role="status">
