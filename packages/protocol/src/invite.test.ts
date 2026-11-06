@@ -26,7 +26,7 @@ const point = (n: number) => {
   key[0] = 0x04;
   return key;
 };
-const holder: Invite = { examId, role: 'keyholder', owner: 'Ada Lovelace', inviteSecret: secret };
+const holder: Invite = { examId, role: 'keyholder', owner: 'ada.eth', inviteSecret: secret };
 const setter: Invite = { examId, role: 'setter', inviteSecret: secret };
 
 describe('inviteTag', () => {
@@ -62,7 +62,7 @@ describe('inviteTag', () => {
 
 describe('invite links', () => {
   it('round-trips a holder and a setter, and keeps the secret in the fragment only', () => {
-    for (const invite of [holder, setter, { ...holder, owner: 'Zoë & Co = "centre" 100%' }]) {
+    for (const invite of [holder, setter, { ...holder, role: 'centre' as const, owner: 'north-1.centres.maths-board.eth' }]) {
       const link = encodeInviteLink('https://app.example/exam/', invite);
       const url = new URL(link);
       expect(url.search).toBe('');
@@ -91,8 +91,8 @@ describe('invite links', () => {
     ['a secret with no 0x', good.replace('secret=0x', 'secret=')],
     ['a short exam', good.replace(examId, examId.slice(0, -2))],
     ['an empty owner', good.replace(/owner=[^&]*/, 'owner=')],
-    ['a padded owner', good.replace('owner=Ada+Lovelace', 'owner=+Ada')],
-    ['a control character in the owner', good.replace('Ada', 'A%00da')],
+    ['a padded owner', good.replace('owner=ada.eth', 'owner=+ada.eth')],
+    ['a control character in the owner', good.replace('ada', 'a%00da')],
     ['a long owner', good.replace(/owner=[^&]*/, `owner=${'a'.repeat(limits.ownerBytes + 1)}`)],
     ['an owner on a setter', `${encodeInviteFragment(setter)}&owner=x`],
   ];
@@ -103,14 +103,29 @@ describe('invite links', () => {
   it('allows an owner of exactly limits.ownerBytes and refuses one byte more, the approved list cap', () => {
     expect(maxOwnerBytes).toBe(limits.ownerBytes);
     expect(ownerProblem('a'.repeat(limits.ownerBytes))).toBeNull();
-    expect(() => checkInvite({ ...holder, owner: 'a'.repeat(limits.ownerBytes) })).not.toThrow();
+    const fits = `${'a'.repeat(limits.ownerBytes - 4)}.eth`;
+    expect(() => checkInvite({ ...holder, owner: fits })).not.toThrow();
     expect(ownerProblem('a'.repeat(limits.ownerBytes + 1))).toBe(`The name is longer than ${String(limits.ownerBytes)} bytes.`);
-    expect(() => checkInvite({ ...holder, owner: 'a'.repeat(limits.ownerBytes + 1) })).toThrow(InviteError);
+    expect(() => checkInvite({ ...holder, owner: `a${fits}` })).toThrow(InviteError);
   });
 
   it('counts owner bytes, not characters', () => {
     expect(ownerProblem('é'.repeat(limits.ownerBytes / 2))).toBeNull();
     expect(ownerProblem('é'.repeat(limits.ownerBytes / 2 + 1))).toMatch(/longer than/);
+  });
+
+  it.each(['Ada Lovelace', 'neutral-1', 'Dr-Rao.maths-board.eth', 'ada..eth', '.eth'])('refuses %s as a key holder or centre name', (owner) => {
+    for (const role of ['keyholder', 'centre'] as const) {
+      expect(() => checkInvite({ ...holder, role, owner })).toThrow(InviteError);
+      expect(() => encodeInviteFragment({ ...holder, role, owner })).toThrow(InviteError);
+    }
+    const link = `#/join?exam=${examId}&role=keyholder&owner=${encodeURIComponent(owner)}&secret=${secret}`;
+    expect(() => decodeInviteFragment(link)).toThrow(InviteError);
+  });
+
+  it('says what to use, and what the name should be', () => {
+    expect(() => checkInvite({ ...holder, owner: 'Dr Rao' })).toThrow('Use an ENS name, like iit-delhi.eth.');
+    expect(() => checkInvite({ ...holder, owner: 'Dr-Rao.maths-board.eth' })).toThrow('Did you mean dr-rao.maths-board.eth?');
   });
 
   it('checks an invite before encoding it', () => {
@@ -129,15 +144,15 @@ describe('registrationMatchesInvite', () => {
   const derived = toHex(point(2));
 
   it('matches a holder by tag and name', () => {
-    expect(registrationMatchesInvite(holder, registration(holder, 'Ada Lovelace', derived))).toBe(true);
+    expect(registrationMatchesInvite(holder, registration(holder, 'ada.eth', derived))).toBe(true);
   });
 
   it('refuses another name, another secret, a copied tag and a missing derived key', () => {
     expect(registrationMatchesInvite(holder, registration(holder, 'Someone Else', derived))).toBe(false);
-    expect(registrationMatchesInvite({ ...holder, inviteSecret: `0x${'44'.repeat(32)}` }, registration(holder, 'Ada Lovelace', derived))).toBe(false);
-    const copied = { ...registration(holder, 'Ada Lovelace', derived, point(1)), passkeyPublicKey: toHex(point(3)) };
+    expect(registrationMatchesInvite({ ...holder, inviteSecret: `0x${'44'.repeat(32)}` }, registration(holder, 'ada.eth', derived))).toBe(false);
+    const copied = { ...registration(holder, 'ada.eth', derived, point(1)), passkeyPublicKey: toHex(point(3)) };
     expect(registrationMatchesInvite(holder, copied)).toBe(false);
-    expect(registrationMatchesInvite(holder, registration(holder, 'Ada Lovelace', '0x'))).toBe(false);
+    expect(registrationMatchesInvite(holder, registration(holder, 'ada.eth', '0x'))).toBe(false);
   });
 
   it('matches a setter only by its own setterOwner hash and without a derived key', () => {
@@ -148,6 +163,6 @@ describe('registrationMatchesInvite', () => {
   });
 
   it('treats a malformed tag as no match', () => {
-    expect(registrationMatchesInvite(holder, { ...registration(holder, 'Ada Lovelace', derived), inviteTag: '0x12' })).toBe(false);
+    expect(registrationMatchesInvite(holder, { ...registration(holder, 'ada.eth', derived), inviteTag: '0x12' })).toBe(false);
   });
 });

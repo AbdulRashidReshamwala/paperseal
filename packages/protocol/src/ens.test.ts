@@ -5,6 +5,10 @@ import { labelhash, namehash } from 'viem/ens';
 import { describe, expect, it } from 'vitest';
 
 import {
+  ApprovedListError,
+  checkPartyNames,
+  partyNameProblem,
+  roles,
   ens,
   ensNameProblem,
   examIdFromName,
@@ -115,5 +119,29 @@ describe('party names', () => {
     expect(passkeyRecordValue(key)).toBe(setterOwner(key));
     expect(passkeyRecordValue(key)).toMatch(/^0x[0-9a-f]{64}$/);
     expect(passkeyRecordValue(`0x${Buffer.from(key).toString('hex')}`)).toBe(passkeyRecordValue(key));
+  });
+});
+
+describe('party names for key holders and centres', () => {
+  const entry = (role: number, owner: string) => ({
+    role,
+    owner,
+    passkeyPublicKey: new Uint8Array(65),
+    derivedPublicKey: new Uint8Array(0),
+  });
+
+  it('gives the one plain line, or the normalised name', () => {
+    expect(partyNameProblem('iit-delhi.eth')).toBeNull();
+    expect(partyNameProblem('north-1.centres.maths-board.eth')).toBeNull();
+    expect(partyNameProblem('Dr Rao')).toBe('Use an ENS name, like iit-delhi.eth.');
+    expect(partyNameProblem('plain')).toBe('Use an ENS name, like iit-delhi.eth.');
+    expect(partyNameProblem('Dr-Rao.eth')).toContain('Did you mean dr-rao.eth?');
+  });
+
+  it('refuses a list with a plain owner for a key holder or centre, and ignores setters', () => {
+    expect(() => checkPartyNames([entry(roles.setter, '0xabc'), entry(roles.neutral, 'a.eth'), entry(roles.centre, 'b.centres.x.eth')])).not.toThrow();
+    for (const role of [roles.neutral, roles.centreKeyHolder, roles.centre]) {
+      expect(() => checkPartyNames([entry(role, 'centre-1')])).toThrow(ApprovedListError);
+    }
   });
 });
