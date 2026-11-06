@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 import { fromHex, padding, parseQuestion, setterOwner, unpadQuestion } from '@paperseal/protocol';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { clearHeldInvites, holdInvite } from '../../shared/invite';
 import { saveCredential } from '../../shared/Register';
-import { CONFIRMATION_TTL_MS } from './confirm';
+import { CONFIRMATION_REFRESH_MS, CONFIRMATION_TTL_MS } from './confirm';
 import { loadReceipts, saveReceipt } from './receipts';
 import SetterArea from './SetterArea';
 import { saveTopic } from './state';
@@ -450,6 +450,37 @@ describe('an expired or lost confirmation', () => {
     expect(area.value).toBe('A long question, written slowly');
     await ready();
     expect(await writingArea()).toBe(area);
+  });
+
+  it('checks again at about four minutes while the writer is still writing, with no pause and no second press', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const world = await makeWorld();
+      mount(world);
+      await ready();
+      const area = await write('Still writing this one');
+      const before = world.verifyToken.mock.calls.length;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(CONFIRMATION_REFRESH_MS + 1000);
+      });
+      await vi.waitFor(() => {
+        expect(world.verifyToken.mock.calls.length).toBeGreaterThan(before);
+      });
+      // Past the old five minutes, sealing is still open and the words are still there.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(CONFIRMATION_TTL_MS - CONFIRMATION_REFRESH_MS);
+      });
+      expect(await writingArea()).toBe(area);
+      expect(area.value).toBe('Still writing this one');
+      expect(sealButton()).not.toBeNull();
+      fireEvent.click(sealButton() as HTMLButtonElement);
+      await vi.waitFor(() => {
+        expect(loadReceipts(examId)).toHaveLength(1);
+      });
+      expect(world.teeQuestion).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shuts sealing and keeps the draft when the sealed system shows different keys', async () => {
