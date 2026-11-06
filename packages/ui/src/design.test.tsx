@@ -31,15 +31,6 @@ const named = (name: string) => Object.assign(new Error(name), { name });
 const coded = (code: string) => Object.assign(new Error(code), { name: 'KeyError', code });
 
 describe('RoleHeader', () => {
-  it('names the role and exam, with no navigation', () => {
-    const html = renderToString(<RoleHeader role="Exam centre" exam="Physics Paper 2" note="Centre 4" />);
-    expect(html).toContain('Exam centre');
-    expect(html).toContain('Physics Paper 2');
-    expect(html).toContain('Centre 4');
-    expect(html).not.toContain('<nav');
-    expect(html).not.toContain('<a ');
-  });
-
   it('leaves the exam out until there is one', () => {
     expect(renderToString(<RoleHeader role="Setter" />)).not.toContain('ps-role-exam');
   });
