@@ -1,7 +1,7 @@
 import type { Directory } from '@paperseal/chain';
 import { matchInvites, ownerProblem, partyNameProblem, roles, setterEntries, threshold, type Hex, type InviteState } from '@paperseal/protocol';
 import type { RegistrationEntry, TeeClient } from '@paperseal/tee-client';
-import { Button, Check, Field, Hash, LoadingSeal, Row, Rows, Stamp, useLoaded } from '@paperseal/ui';
+import { Button, Check, CopyButton, Field, Hash, LoadingSeal, Row, Rows, Stamp, useLoaded } from '@paperseal/ui';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 
 import { useMachineElsewhere } from '../../shared/machineExam';
@@ -72,39 +72,6 @@ function usePostGate(tee: TeeClient | null, examId: Hex): PostGate {
 /** The public page's link, by the exam's verified name when it has one. */
 export const examPageLink = (base: string, exam: string) => `${base.split('#')[0] ?? ''}#/exam?exam=${exam}`;
 
-function CopyLink(props: { label: string; url: string }) {
-  const [copy, setCopy] = useState<'idle' | 'copied' | 'failed'>('idle');
-  const onClick = () => {
-    // navigator.clipboard is missing outside a secure context.
-    const written = (globalThis.navigator as Navigator | undefined)?.clipboard?.writeText(props.url);
-    if (!written) {
-      setCopy('failed');
-      return;
-    }
-    written.then(
-      () => {
-        setCopy('copied');
-      },
-      () => {
-        setCopy('failed');
-      },
-    );
-  };
-  return (
-    <span className="board-link">
-      <Button aria-label={props.label} onClick={onClick}>
-        {copy === 'copied' ? 'Copied' : 'Copy link'}
-      </Button>
-      {copy === 'failed' ? (
-        <>
-          <span role="status">The link could not be copied. Select it below and copy it yourself.</span>
-          <span className="ps-mono">{props.url}</span>
-        </>
-      ) : null}
-    </span>
-  );
-}
-
 /** Makes one setter invite: an optional private note, then a link to copy. */
 function AddInvite(props: { invites: readonly BoardInvite[]; onAdd: (invite: BoardInvite) => void }) {
   const [text, setText] = useState('');
@@ -134,7 +101,9 @@ function InviteRow(props: { invite: BoardInvite; state: InviteState; link: strin
     <Row label={invite.label}>
       <span className="board-link">
         <Check status={state.kind === 'matched' ? 'pass' : state.kind === 'conflict' ? 'fail' : 'pending'}>{stateWords[state.kind]}</Check>
-        {state.kind === 'waiting' ? <CopyLink label={`Copy the link for ${invite.label}`} url={props.link} /> : null}
+        {state.kind === 'waiting' ? <CopyButton aria-label={`Copy the link for ${invite.label}`} text={props.link}>
+            Copy link
+          </CopyButton> : null}
         {state.kind === 'conflict' ? (
           <Button aria-label={`Make a new link for ${invite.label}`} onClick={props.onReissue}>
             Make a new link
@@ -428,7 +397,9 @@ export function PeopleStep(props: { examId: Hex; snapshot: Snapshot; onPosted: (
         </h2>
         <p className="board-link">
           <span>Send this link to every centre and neutral party so they can register.</span>
-          <CopyLink label="Copy the exam link" url={examPageLink(base, verifiedName ?? examId)} />
+          <CopyButton aria-label="Copy the exam link" text={examPageLink(base, verifiedName ?? examId)}>
+            Copy link
+          </CopyButton>
         </p>
         <Fold summary={`Centres and neutral parties, ${String(registeredNames)} of ${String(parties.length)} registered`} open={!peopleChosen}>
           {seen ? (

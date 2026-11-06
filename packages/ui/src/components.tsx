@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useRef,
   useState,
   type ButtonHTMLAttributes,
   type ReactNode,
@@ -76,7 +77,8 @@ export function Button(props: ButtonHTMLAttributes<HTMLButtonElement>) {
 
 /**
  * Copies `text` (a function is read at the press, so a link always has its fragment) and says so.
- * When the browser won't allow it, the text is shown to select by hand.
+ * "Copied" lasts 2 seconds and pressing again copies again and restarts them.
+ * When the browser won't allow it, the text is shown to select by hand until a later press works.
  */
 export function CopyButton(props: {
   text: string | (() => string);
@@ -86,7 +88,26 @@ export function CopyButton(props: {
 }) {
   const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
   const [shown, setShown] = useState("");
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  useEffect(
+    () => () => {
+      clearTimeout(timer.current);
+    },
+    [],
+  );
+
   const onClick = () => {
+    const settle = (result: "copied" | "failed") => {
+      setState(result);
+      clearTimeout(timer.current);
+      // A failure stays up, because its text is there to select.
+      if (result === "copied") {
+        timer.current = setTimeout(() => {
+          setState("idle");
+        }, 2000);
+      }
+    };
     const text = typeof props.text === "function" ? props.text() : props.text;
     setShown(text);
     // navigator.clipboard is missing outside a secure context.
@@ -98,15 +119,15 @@ export function CopyButton(props: {
       written = undefined;
     }
     if (!written) {
-      setState("failed");
+      settle("failed");
       return;
     }
     written.then(
       () => {
-        setState("copied");
+        settle("copied");
       },
       () => {
-        setState("failed");
+        settle("failed");
       },
     );
   };

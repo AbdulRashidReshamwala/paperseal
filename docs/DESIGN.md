@@ -307,7 +307,7 @@ Six steps, each with its number in the `Stage` eyebrow. The wallet is not a step
    Setters are a separate panel: an optional private note, "Add invite", then "Copy the link for ...". The `Rows` show each invite as waiting, registered, or two keys on one invite ("Two security keys used this invite, so neither is on the list.", with "Make a new link"). Registrations that fit nothing show only as a count in one line, so anyone can register without burying the list. The list composes itself, and "Post the list" opens when the numbers are right. The step says who decides each name: whoever runs the directory.
 4. **Questions are coming in:** a wait screen with a `Countdown` to the closing time. It says the board must come back after that time to post the paper's record, and that it is safe to close the page until then.
 5. **The paper is ready:** one action, "Post the paper's record". Nothing else competes with it.
-6. **Status:** `seal` follows the unlock and end rounds, with `stampSeal` once the paper's record is posted, and the count of key holders released. It links the public verifier when `VITE_VERIFIER_URL` is set, and "Copy public link" copies the verifier's share link, `<verifier URL>/?exam=<examId>` (see `spec/agent-verification.md`), so it names the exam.
+6. **Status:** `seal` follows the unlock and end rounds, with `stampSeal` once the paper's record is posted, and the count of key holders released. It links the public verifier when `VITE_VERIFIER_URL` is set, and the link and "Copy public link" use `<verifier URL>/#/name/<name>` when the exam has a verified name, otherwise the share link `<verifier URL>/?exam=<examId>` (see `spec/agent-verification.md`).
 
 ### Enrol
 

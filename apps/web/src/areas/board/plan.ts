@@ -195,7 +195,7 @@ export function examNameValues(env: Record<string, string | undefined> = appEnv(
 
 /** The verifier's page for a name, `<verifier>/#/name/<name>`. */
 export function verifierNameUrl(verifier: string, name: string): string {
-  return `${verifier.replace(/\/+$/, '')}/#/name/${name}`;
+  return `${(verifier.split('#')[0] ?? '').replace(/\/+$/, '')}/#/name/${name}`;
 }
 
 /** The pages before an exam exists, in order. */

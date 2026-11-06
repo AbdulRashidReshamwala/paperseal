@@ -2,12 +2,12 @@ import { roundTimeSeconds, type Hex } from '@paperseal/protocol';
 import { Check, Countdown, CopyButton, Stage, type SealState } from '@paperseal/ui';
 import { Link } from 'react-router';
 
-import { useBoardForm } from './BoardForm';
+import { useBoardForm, useVerifiedName } from './BoardForm';
 import { ExamRecord } from './ExamRecord';
 import type { Snapshot } from './examState';
 import { useNow } from './hooks';
 import { sayOf } from './details';
-import { formatTimeOnly, plainWords, verifierUrl } from './plan';
+import { formatTimeOnly, plainWords, verifierNameUrl, verifierUrl } from './plan';
 
 /** Time alone opens the seal, so the state follows the scheduled times. */
 export function sealStateAt(nowMs: number, unlockMs: number, endMs: number): Exclude<SealState, 'broken'> {
@@ -28,7 +28,10 @@ export function StatusStep(props: { examId: Hex; snapshot: Snapshot }) {
   const seal = sealStateAt(now, unlockSeconds * 1000, endSeconds * 1000);
   const { status, teeProblem } = snapshot;
   const { examId } = props;
-  const verifier = verifierUrl(undefined, examId);
+  const verifiedName = useVerifiedName(examId);
+  const verifierBase = verifierUrl();
+  // By name once it passes its checks, and by exam ID until then.
+  const verifier = verifierBase && verifiedName ? verifierNameUrl(verifierBase, verifiedName) : verifierUrl(undefined, examId);
   const justSealed = receipts.some((receipt) => receipt.kind === 'build' && receipt.outcome.matches);
 
   const copy: Record<ReturnType<typeof sealStateAt>, { title: string; lede: string; next: string }> = {

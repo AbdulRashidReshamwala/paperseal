@@ -10,6 +10,7 @@ import {
   plainWords,
   toLocalInput,
   toSchedule,
+  verifierNameUrl,
   verifierUrl,
 } from './plan';
 
@@ -81,6 +82,7 @@ describe('configuration', () => {
       `https://verify.example.org/app?exam=${id}`,
     );
     expect(verifierUrl({ VITE_VERIFIER_URL: 'javascript:alert(1)' }, id)).toBeNull();
+    expect(verifierNameUrl('https://verify.example.org/app#/old', 'maths.board.eth')).toBe('https://verify.example.org/app/#/name/maths.board.eth');
   });
 });
 

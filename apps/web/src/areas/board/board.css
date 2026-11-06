@@ -77,6 +77,11 @@
   gap: var(--ps-space-1);
 }
 
+.board-link .ps-copy {
+  display: grid;
+  gap: var(--ps-space-1);
+}
+
 .board-link .ps-button {
   justify-self: start;
 }

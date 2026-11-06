@@ -42,6 +42,12 @@
   word-break: break-all;
 }
 
+.enrol-card .ps-copy {
+  display: grid;
+  gap: var(--ps-space-1);
+  justify-items: start;
+}
+
 .enrol-card .ps-mono {
   word-break: break-all;
 }

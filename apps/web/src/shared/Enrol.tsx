@@ -1,6 +1,6 @@
 import { KeyError, type Keys } from '@paperseal/keys';
 import { fromHex, keyCardText, requireHardwareAttestation, toHex, type KeyCard } from '@paperseal/protocol';
-import { Button, KeyTouch, LoadingSeal, Page, RoleHeader, Row, Rows, Stage, type KeyTouchState, useLoaded } from '@paperseal/ui';
+import { Button, CopyButton, KeyTouch, LoadingSeal, Page, RoleHeader, Row, Rows, Stage, type KeyTouchState, useLoaded } from '@paperseal/ui';
 import { useState } from 'react';
 
 import '../release/holder.css';
@@ -35,34 +35,6 @@ export async function enrol(keys: Pick<Keys, 'generateKey'>, known: readonly Uin
   return enrolment;
 }
 
-function CopyCard(props: { text: string }) {
-  const [copy, setCopy] = useState<'idle' | 'copied' | 'failed'>('idle');
-  const onClick = () => {
-    // navigator.clipboard is missing outside a secure context.
-    const written = (globalThis.navigator as Navigator | undefined)?.clipboard?.writeText(props.text);
-    if (!written) {
-      setCopy('failed');
-      return;
-    }
-    written.then(
-      () => {
-        setCopy('copied');
-      },
-      () => {
-        setCopy('failed');
-      },
-    );
-  };
-  return (
-    <>
-      <Button aria-label="Copy your key card" onClick={onClick}>
-        {copy === 'copied' ? 'Copied' : 'Copy your key card'}
-      </Button>
-      {copy === 'failed' ? <p role="status">The card could not be copied. Open the full card below and copy it yourself.</p> : null}
-    </>
-  );
-}
-
 function CardView(props: { card: KeyCard }) {
   const text = keyCardText(props.card);
   return (
@@ -75,7 +47,9 @@ function CardView(props: { card: KeyCard }) {
           <span className="ps-mono">{props.card.credentialId}</span>
         </Row>
       </Rows>
-      <CopyCard text={text} />
+      <CopyButton aria-label="Copy your key card" text={text}>
+        Copy your key card
+      </CopyButton>
       <details>
         <summary>The full card</summary>
         <pre className="ps-mono" aria-label="Your key card">
