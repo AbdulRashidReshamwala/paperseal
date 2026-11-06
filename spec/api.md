@@ -164,9 +164,11 @@ Each TEE instance generates two P-256 keys in memory at start and never stores t
 
 ## Paper Format
 
-A question is the JSON `{"topic": string, "text": string}`. `topic` must name a criteria topic.
+A question is the JSON `{"topic": string, "text": string}`, or `{"topic": string, "text": string, "options": [string]}` for a multiple choice question. `topic` must name a criteria topic.
 
-The paper is the JSON `{"examId": hex, "questions": [{"topic": string, "text": string}]}`. `paper` in `saltedPaperHash` means these bytes, before padding.
+`options` holds between `limits.questionOptionsMin` and `limits.questionOptionsMax` strings, in the order the setter wrote them. Each is non-empty after trimming, and no two are equal. A written question has no `options` key, so `null` and an empty list are refused. A question's correct answer is never part of it, because the paper becomes public at the end round.
+
+The paper is the JSON `{"examId": hex, "questions": [question]}`, with each question's keys in the order above. `paper` in `saltedPaperHash` means these bytes, before padding.
 
 The encrypted paper file is AES-256-GCM under `K` over the 32-byte `seed`, then the paper padded to `padding.paperBytes`.
 

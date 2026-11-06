@@ -107,7 +107,7 @@ Setters talk to the TEE directly, and the board's infrastructure only ever carri
 1. **Confirm:** the setter app checks the TEE's attestation and confirms that the list hash the TEE signed matches the on-chain hash.
 2. **Encrypt:** the app pads each question to a fixed size and encrypts it with HPKE to the TEE's attested key.
 3. **Sign:** the setter touches their security key. The passkey signs the exam ID, a fresh TEE challenge and a hash of the ciphertext.
-4. **Check:** the TEE confirms that the setter is on the list and the signature is valid, then decrypts the question, checks its format and topic, and holds it in memory.
+4. **Check:** the TEE confirms that the setter is on the list and the signature is valid, then decrypts the question, checks its format and topic, and holds it in memory. A question is written or multiple choice. Correct answers are never sent, because the paper becomes public after the exam.
 5. **Receipt:** the TEE signs a receipt with the question hash, using its instance key, and the app shows "sealed ✓". After the Build, the app checks that the same instance key signed the Build, which shows the question went to the TEE that built the paper.
 
 ### Share Release
