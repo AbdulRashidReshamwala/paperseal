@@ -131,11 +131,6 @@ export function useOpenPaper(downloaded: Downloaded | null, identity: StoredCred
   const wipe = (held: Early | null) => {
     held?.prepared.kPub.fill(0);
   };
-  const forget = () => {
-    const held = early.current;
-    early.current = null;
-    void held?.then(wipe);
-  };
   // Nothing is held once this page is gone.
   useEffect(
     () => () => {
