@@ -1,11 +1,12 @@
 import type { TeeClient } from '@paperseal/tee-client';
 import { LoadingSeal, Page, RoleHeader, Stage } from '@paperseal/ui';
-import { useEffect, useMemo, type ReactNode } from 'react';
+import { Suspense, useEffect, useMemo, type ReactNode } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { Hex } from '@paperseal/protocol';
 
 import { Area, type AreaScreen } from '../../shared/Area';
 import { useCurrentExamId } from '../../shared/currentExam';
+import { demoPanel } from '../../shared/demoKeys';
 import { TEE_STATUS_POLL_MS } from '../../shared/TeeStatus';
 import './board.css';
 import { BoardFormProvider, useBoardForm, useEvaluated, useReader } from './BoardForm';
@@ -18,6 +19,7 @@ import { usePoll } from './hooks';
 import { MachineCheck } from './MachineCheck';
 import { PeopleStep } from './PeopleStep';
 import { Fold } from './Parts';
+import { loadParties, type ChosenParty } from './parties';
 import { PartyStep } from './PartyStep';
 import { centresProblem, draftScreen, furthestStep, neutralsProblem, plainWords } from './plan';
 import type { PublishEnvironment } from './publishFlow';
@@ -29,6 +31,8 @@ import { StatusStep } from './StatusStep';
 import { WaitStep } from './WaitStep';
 
 const step = (n: number) => `Step ${String(n)} of 6`;
+
+const DemoPanel = demoPanel<{ examId: Hex; snapshot: Snapshot; parties: readonly ChosenParty[] }>();
 
 /** The pages before there is an exam. They live in the browser until the exam is published. */
 function Draft(props: { review: boolean }) {
@@ -214,6 +218,11 @@ function BoardFlow(props: { mode: Mode }) {
       <ExamShell>
         <MachineCheck examId={examId} snapshot={value} />
         {children}
+        {DemoPanel ? (
+          <Suspense fallback={null}>
+            <DemoPanel examId={examId} snapshot={value} parties={loadParties(examId)} />
+          </Suspense>
+        ) : null}
       </ExamShell>,
     );
   if (decided === 'people') return onExam(<PeopleStep examId={examId} snapshot={value} onPosted={reload} />);
