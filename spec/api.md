@@ -38,6 +38,13 @@ The startup arguments are one `--<name>=<value>` each, in the order of this tabl
 - `unlockRound` is the first quicknet round at or after `examStart − delta`, which is `ceil((examStart − delta − genesisTime) / periodSeconds) + 1`. The paper can't open early by rounding.
 - `endRound` is produced after `examStart`.
 
+`schedule` in `constants.json` adds two bounds that the contract doesn't check, so each reader does:
+
+- `delta` is at most `schedule.maxDeltaSeconds`, 24 hours. The paper is with centres from `T−Δ`, so a long `Δ` means a long time to leak.
+- `endRound` is produced at most `schedule.maxEndAfterStartSeconds`, 7 days, after `examStart`. An end round far ahead, or one drand will never reach, would mean the paper never opens to everyone and the proof never happens.
+
+The TEE refuses to start with settings outside these, the board app refuses them before publishing, and the verifier fails the exam's first step. The development and `finalized` schedules in `e2e/live/config.ts` fit them, and `dry-check` checks this.
+
 `createExam` also stores two values that are not startup arguments:
 
 | Field | Type |
@@ -46,6 +53,29 @@ The startup arguments are one `--<name>=<value>` each, in the order of this tabl
 | `imageDigest` | `bytes32`, the raw image digest without the `sha256:` prefix |
 
 The TEE has no board key. Its settings name `ExamRegistry`, and that contract's immutable `board` address is the only writer.
+
+## Registry Code
+
+An address on its own doesn't show that a contract is `ExamRegistry`, so every reader that trusts one checks the code there against one pin. `spec/registry.json` holds it, and `make abi` writes it from the Foundry build:
+
+| Field | Meaning |
+| --- | --- |
+| `runtimeCodeHash` | SHA-256 of the executable code, with each `board` word zeroed |
+| `executableBytes` | The length of the executable code |
+| `boardOffsets` | Byte offsets of the 32-byte `board` words, which the constructor fills in |
+
+A reader takes the bytes `eth_getCode` returns, then:
+
+1. Removes the CBOR metadata that solc appends. Its length is the code's last two bytes, big-endian, plus those two bytes. It never runs, and it hashes the source including comments, so a comment edit would otherwise change the pin. A contract built from older comments has different metadata, and its executable code still matches.
+2. Checks that `executableBytes` bytes remain.
+3. Checks that every `board` word holds the same value, and that the value is a non-zero address left-padded with zeros. That address is the board.
+4. Zeroes those words, and compares the SHA-256 of the result with `runtimeCodeHash`.
+
+The TEE reads the code at the `chain.readBlock` block, once, before it trusts any read from `registry`. Code that differs fails the exam. No code at all, or a failed read, is retried and never fails the exam, because at `finalized` a new contract isn't visible yet and a lagging node answers the same way. Nothing from the address is used in the meantime.
+
+The verifier makes the same check on every read of the public record, and fails the exam's first step if the code differs or is missing. It reads nothing else from that address, and it shows the board address the code holds. The Exam Names check uses the same pin.
+
+After a change to the contract's code, `make abi` updates the pin, its copy in the TEE and `spec/fixtures/registry-code.json`, the sample code the tests use. The pin is in the attested image, so it also needs a new TEE release. `node e2e/live/cli.mjs registry-check` compares the deployed contract with the pin, read-only. Code can't show how storage was set at deployment. See the note in Exam Names, check 2.
 
 ## TEE Releases
 
@@ -232,7 +262,7 @@ Unlock may run on a different instance from the Build, so the log names its sign
 
 ## Dev Mode
 
-`chain.readBlock` is `latest` during development, so a full test exam takes under 5 minutes, and must be `finalized` for any real exam. A block at `latest` can be reorged, so a run may fail, but `ExamRegistry` still rejects a mismatched Build. The value is in the attested image, like `webauthn.requireHardwareAttestation`, and the verifier shows both.
+`chain.readBlock` is `latest` during development, so a full test exam takes under 5 minutes, and must be `finalized` for any real exam. A block at `latest` can be reorged, so a run may fail, but `ExamRegistry` still rejects a mismatched Build. The value is in the attested image, like `webauthn.requireHardwareAttestation`, and the verifier shows both in its folded evidence, as the values it was built with.
 
 ## Size Limits
 
@@ -242,6 +272,10 @@ Unlock may run on a different instance from the Build, so the log names its sign
 - Its array offsets don't start right after the array's head and increase strictly, with each element ending at or before the next one starts.
 
 After decoding, readers also apply `limits.entries`, `limits.topics`, `limits.ownerBytes` and `limits.topicNameBytes`. `ExamRegistry` rejects oversized `entries` and `criteria` by length alone, and still doesn't decode them.
+
+`limits.entriesBytes` and `limits.entries` are set by what one transaction can carry. geth's mempool refuses a transaction over 131,072 bytes, and most public nodes run it, so a longer list would never reach a block. An entry with an owner at `limits.ownerBytes` takes 576 bytes, so 225 entries take 129,664 bytes with the array's head, and `limits.entriesBytes` is 130,000. Calldata adds at most 131 bytes to that, which leaves about 900 bytes for the transaction's own fields and signature. The board app refuses a list over either limit before it asks the wallet to sign.
+
+`ExamRegistry`'s own cap on `entries` is 327,680 bytes. That cap is an upper bound, and `limits.entriesBytes` is the working limit. Readers reject a list between the two.
 
 ## Exam Names
 
@@ -259,7 +293,7 @@ A board may give an exam an ENS name `<name>.<parent>`, where `parent` is the bo
 A reader checks a name with the viewer's own RPC, on-chain only (`ens.ccipRead` is `false`, so no offchain gateway is asked), and fails unless all of these hold:
 
 1. The whole name is normalised, its first label is a valid exam name, and that label's `labelhash` is the `examId` used for every other check.
-2. The name's `addr` record is set, and the code at that address is exactly `ExamRegistry`'s deployed bytecode with its `board` immutable filled in by the address `board()` returns. The CBOR metadata that solc appends to the end of the code is left out of the comparison. Its length is the code's last two bytes, plus those two bytes. It never runs, and it hashes the source including comments, so a comment edit would otherwise change it. After deployment, only that board can write to a contract running this code. Answering `board()` alone isn't enough, because any contract can return the real board's address. Code can't show how storage was set at deployment, because a custom constructor can fill it before returning this code, so whoever can set the name's `addr` record must be trusted as much as the board.
+2. The name's `addr` record is set, the code at that address passes the check in [Registry Code](#registry-code), and the board it holds is the address `board()` returns. After deployment, only that board can write to a contract running this code. Answering `board()` alone isn't enough, because any contract can return the real board's address. Code can't show how storage was set at deployment, because a custom constructor can fill it before returning this code, so whoever can set the name's `addr` record must be trusted as much as the board.
 3. That board address's primary name, read by reverse resolution, is exactly `parent`.
 4. `parent`'s own `addr` record is that board address, so the primary name is verified both ways.
 

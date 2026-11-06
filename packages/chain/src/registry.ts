@@ -107,6 +107,8 @@ export function createExamRegistry(options: ExamRegistryOptions) {
   return {
     address,
     board: () => client.readContract({ address, abi, functionName: 'board' }),
+    /** The deployed code here, or undefined when there is none. For `checkRegistryCode`. */
+    code: () => client.getCode({ address }),
 
     getExam: async (examId: ExamId) => {
       const exam = await client.readContract({
@@ -157,8 +159,8 @@ export function createExamRegistry(options: ExamRegistryOptions) {
         fromBlock: list.postedBlock,
         toBlock: list.postedBlock,
       });
-      // The contract allows one post per exam.
-      const entries = logs[0]?.args.entries;
+      // The contract allows one post per exam. A log a reorg removed is not on the chain any more.
+      const entries = logs.find((log) => !log.removed)?.args.entries;
       if (entries === undefined) {
         throw new OnChainBytesError(
           'approvedList',
@@ -195,7 +197,7 @@ export function createExamRegistry(options: ExamRegistryOptions) {
         fromBlock: exam.createdBlock,
         toBlock: exam.createdBlock,
       });
-      const criteria = logs[0]?.args.criteria;
+      const criteria = logs.find((log) => !log.removed)?.args.criteria;
       if (criteria === undefined) {
         throw new OnChainBytesError(
           'criteria',

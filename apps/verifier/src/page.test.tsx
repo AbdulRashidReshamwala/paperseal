@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { teeStorageBucket } from './attest';
 import { VerifierPage } from './page';
-import { buildWorld, examId, offlineQuicknet, registryAddress, type World } from './fixtures';
+import { buildWorld, examId, offlineQuicknet, registryAddress, registryMatches, type World } from './fixtures';
 import { SettingsProvider, type Settings } from './settings';
 
 let chainData: unknown;
@@ -87,6 +87,7 @@ const settings: Settings = {
 
 function arrange(world: World, files: Record<string, Uint8Array> = {}) {
   chainData = {
+    registryCode: registryMatches,
     exam: world.exam,
     list: { listHash: world.build.approvedListHash },
     build: world.build,
@@ -325,7 +326,7 @@ describe('failures', () => {
   it('do not appear for missing data', async () => {
     const world = await buildWorld();
     arrange(world);
-    chainData = { exam: world.exam, list: null, build: null, criteria: world.criteriaHex, entries: null };
+    chainData = { registryCode: registryMatches, exam: world.exam, list: null, build: null, criteria: world.criteriaHex, entries: null };
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('no', { status: 404 }))));
     open(1);
     await findStep(/^3\. People approved$/);
@@ -603,6 +604,16 @@ describe('verify by name', () => {
   });
   const failed = (check: ExamNameCheck): ExamNameResult => ({ ok: false, failed: check, reason: 'The record says otherwise.', partial: { name } });
   const noteOf = (step: HTMLElement) => step.querySelector('.ps-step-note')?.textContent ?? '';
+
+  it('warns on the main view when the name leads to another registry than the one set up', async () => {
+    arrange(await buildWorld());
+    nameAnswer = () => passed();
+    open(1000, saved, `/name/${name}`);
+    await waitFor(() => {
+      expect(document.querySelector('.vf-warnings')?.textContent).toMatch(/This name leads to a different exam record/);
+    });
+    expect(noteOf(await findStep(/^1\. Name$/))).toMatch(/On Sepolia, a test network/);
+  });
 
   it('passes the Name step first, then reads the chain with the name\'s registry and exam', async () => {
     const world = await buildWorld();

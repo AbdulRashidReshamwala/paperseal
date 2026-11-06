@@ -6,8 +6,10 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { criteriaHash, encodeApprovedList, approvedListHash, encodeCriteria, fromHex, toHex, type Hex } from '@paperseal/protocol';
+import type { ExamRegistry } from '@paperseal/chain';
+import sampleCode from '../../../spec/fixtures/registry-code.json';
 import { App } from './App';
-import { chainChecks } from './checks';
+import { chainChecks, loadChain } from './checks';
 import { examLink, routeOfHash } from './link';
 import {
   clearSettings,
@@ -247,6 +249,42 @@ describe('independent hosting', () => {
   });
 });
 
+describe('loadChain', () => {
+  const id = `0x${'11'.repeat(32)}` as Hex;
+  const reads: string[] = [];
+  const read = (name: string, value: unknown) => () => {
+    reads.push(name);
+    return Promise.resolve(value);
+  };
+  const registry = (code: Hex | undefined) =>
+    ({
+      code: read('code', code),
+      getExam: read('getExam', null),
+      getApprovedList: read('getApprovedList', null),
+      getBuild: read('getBuild', null),
+      getCriteria: read('getCriteria', null),
+      getApprovedListEntries: read('getApprovedListEntries', null),
+    }) as unknown as ExamRegistry;
+
+  it('reads nothing else from an address that is not ExamRegistry', async () => {
+    reads.length = 0;
+    const other = await loadChain(registry('0x6080'), id)?.();
+    expect(other?.registryCode).toEqual({ state: 'different' });
+    expect(other?.exam).toBeNull();
+    const empty = await loadChain(registry(undefined), id)?.();
+    expect(empty?.registryCode).toEqual({ state: 'none' });
+    expect(reads).toEqual(['code', 'code']);
+  });
+
+  it('reads the exam from an address that is', async () => {
+    reads.length = 0;
+    const sample = sampleCode as { board: string; code: Hex };
+    const data = await loadChain(registry(sample.code), id)?.();
+    expect(data?.registryCode).toMatchObject({ state: 'match' });
+    expect(reads).toContain('getExam');
+  });
+});
+
 describe('commitments logic', () => {
   const id = `0x${'11'.repeat(32)}` as Hex;
   const encoded = encodeCriteria({
@@ -283,7 +321,7 @@ describe('commitments logic', () => {
   });
 
   it('is absent, not failing, when nothing is posted', () => {
-    const empty = { exam: null, list: null, build: null, criteria: null, entries: null };
+    const empty = { registryCode: { state: 'none' as const }, exam: null, list: null, build: null, criteria: null, entries: null };
     expect(chainChecks(id, empty)).toEqual({ published: false, criteria: 'absent', list: 'absent', build: false });
   });
 });

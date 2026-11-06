@@ -129,7 +129,7 @@ func limitsVector() LimitsVector {
 	return LimitsVector{Reject: []RejectVector{
 		{"entries one byte over the cap", "entries", "overCap", x(validList), l.EntriesBytes + 1},
 		{"criteria one byte over the cap", "criteria", "overCap", x(validCriteria), l.CriteriaBytes + 1},
-		sharedEntries(100, l.EntriesBytes-1024),
+		sharedEntries(100, (l.EntriesBytes-1024)/32*32), // Whole words, so only the shared offsets are wrong.
 		sharedTopics(20, l.CriteriaBytes-1024),
 	}}
 }

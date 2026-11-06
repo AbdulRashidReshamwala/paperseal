@@ -37,6 +37,9 @@ contract ExamRegistryTest is Test {
     bytes32 internal constant MANIFEST_HASH = keccak256("manifest");
     bytes32 internal constant SALTED_HASH = keccak256("salted");
     bytes32 internal constant OTHER = keccak256("other");
+    uint256 internal constant CONTRACT_ENTRIES_CAP = 327680;
+    /// @dev geth's `txMaxSize`, the largest transaction its mempool accepts.
+    uint256 internal constant MEMPOOL_TX_BYTES = 131072;
     uint32 internal constant QUESTIONS = 200;
     uint32 internal constant SELECTED = 20;
     string internal constant RPC_HOST = "rpc.example.org";
@@ -190,20 +193,29 @@ contract ExamRegistryTest is Test {
         assertEq(vm.parseJsonUint(json, ".drand.genesisTime"), GENESIS);
     }
 
+    /// @dev `limits.criteriaBytes` is the contract's own cap. `limits.entriesBytes` is lower on purpose: the
+    ///      contract's 327680-byte cap is an upper bound, and the spec sets what fits in one transaction
+    ///      through geth's mempool. No reader accepts a list between the two.
     function test_Limits_MatchSpec() public {
         string memory json = _constants();
         uint256 entriesBytes = vm.parseJsonUint(json, ".limits.entriesBytes");
         uint256 criteriaBytes = vm.parseJsonUint(json, ".limits.criteriaBytes");
-        assertEq(entriesBytes, 327680);
+        assertLe(entriesBytes, CONTRACT_ENTRIES_CAP);
         assertEq(criteriaBytes, 16384);
 
-        // The contract's constants are private, so check them through behaviour at the spec values.
+        // The selector and three words of calldata, padding, and room for the transaction's own fields.
+        uint256 calldataBytes = 4 + 3 * 32 + (entriesBytes + 31) / 32 * 32;
+        assertLe(calldataBytes + 512, MEMPOOL_TX_BYTES);
+        // abi.encode(Entry[]) at the longest owners: two words, then 576 bytes per entry.
+        assertLe(64 + vm.parseJsonUint(json, ".limits.entries") * 576, entriesBytes);
+
+        // The contract's constants are private, so check them through behaviour at the cap.
         _create();
         vm.prank(BOARD);
         vm.expectRevert(ExamRegistry.EntriesTooLarge.selector);
-        registry.postApprovedList(EXAM_ID, _filled(0x01, entriesBytes + 1));
+        registry.postApprovedList(EXAM_ID, _filled(0x01, CONTRACT_ENTRIES_CAP + 1));
         vm.prank(BOARD);
-        registry.postApprovedList(EXAM_ID, _filled(0x01, entriesBytes));
+        registry.postApprovedList(EXAM_ID, _filled(0x01, CONTRACT_ENTRIES_CAP));
 
         _expectCriteriaLength(criteriaBytes, bytes4(0));
         _expectCriteriaLength(criteriaBytes + 1, ExamRegistry.CriteriaTooLarge.selector);
@@ -222,7 +234,7 @@ contract ExamRegistryTest is Test {
 
     function test_PostApprovedList_AcceptsExactlyMaxEntries() public {
         _create();
-        bytes memory list = _filled(0x01, 327680);
+        bytes memory list = _filled(0x01, CONTRACT_ENTRIES_CAP);
         vm.prank(BOARD);
         registry.postApprovedList(EXAM_ID, list);
         assertEq(registry.getApprovedList(EXAM_ID).listHash, _expectedListHash(EXAM_ID, list));
@@ -232,7 +244,7 @@ contract ExamRegistryTest is Test {
         _create();
         vm.expectRevert(ExamRegistry.EntriesTooLarge.selector);
         vm.prank(BOARD);
-        registry.postApprovedList(EXAM_ID, _filled(0x01, 327681));
+        registry.postApprovedList(EXAM_ID, _filled(0x01, CONTRACT_ENTRIES_CAP + 1));
         assertEq(registry.getApprovedList(EXAM_ID).postedAt, 0);
     }
 

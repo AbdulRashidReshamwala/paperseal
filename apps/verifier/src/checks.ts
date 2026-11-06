@@ -1,4 +1,4 @@
-import { OnChainBytesError, type ExamRegistry } from '@paperseal/chain';
+import { checkRegistryCode, OnChainBytesError, type ExamRegistry, type RegistryCodeCheck } from '@paperseal/chain';
 import { approvedListHash, criteriaHash, fromHex, toHex, type Hex } from '@paperseal/protocol';
 
 export type CheckResult = 'pass' | 'fail' | 'absent';
@@ -29,6 +29,8 @@ export interface ChainProblems {
 }
 
 export interface ChainData {
+  /** What the code at the registry address says about it. Anything but `match` means nothing else was read. */
+  registryCode: RegistryCodeCheck;
   exam: Awaited<ReturnType<ExamRegistry['getExam']>>;
   list: Awaited<ReturnType<ExamRegistry['getApprovedList']>>;
   build: Awaited<ReturnType<ExamRegistry['getBuild']>>;
@@ -52,6 +54,8 @@ async function readBytes(read: () => Promise<Hex | null>): Promise<{ value: Hex 
 export function loadChain(registry: ExamRegistry | null, examId: Hex | null) {
   if (!registry || !examId) return null;
   return async (): Promise<ChainData> => {
+    const registryCode = checkRegistryCode(await registry.code());
+    if (registryCode.state !== 'match') return { registryCode, exam: null, list: null, build: null, criteria: null, entries: null };
     const [exam, list, build, criteria, entries] = await Promise.all([
       registry.getExam(examId),
       registry.getApprovedList(examId),
@@ -64,6 +68,7 @@ export function loadChain(registry: ExamRegistry | null, examId: Hex | null) {
       ...(entries.problem ? { list: entries.problem } : {}),
     };
     return {
+      registryCode,
       exam,
       list,
       build,

@@ -16,7 +16,7 @@ It must not look like a dashboard or a crypto app. That rules out purple gradien
 2. **The fewest clicks.** Do what can be done without asking. Skip any step the system can work out, and never ask someone to confirm something they cannot judge.
 3. **State decides the screen, not tabs.** Read the exam's state and show the one screen it calls for. Nobody chooses where to go, and there is no navigation to learn.
 4. **Plain words.** No crypto jargon on primary surfaces. See [Writing](#writing).
-5. **Hashes only where they are evidence.** A hash appears inside folded evidence on the verifier, or on a receipt someone may need to quote. It never appears on a primary surface.
+5. **Hashes only where they are evidence.** The exam board's address on the verifier is the one exception on a main view, because people compare it with what the board announces. A hash appears inside folded evidence on the verifier, or on a receipt someone may need to quote. It never appears on a primary surface.
 6. **Always say what happens next.** Every screen, including a screen where the person only waits, ends with one sentence on what comes next.
 7. **Never fake it.** A check that has not run shows `Not checked`. An unfinished flow shows that it is unfinished. A screen must never imply more certainty than the code has.
 
@@ -352,3 +352,6 @@ A link opened from email, WhatsApp or Safari shows "Open this page in Chrome", w
 3. Put the existing evidence (`Attestation`, `Commitments`, `Proof`) inside each step's `evidence`, with `Check` and `Hash`.
 4. A check not yet run is `Not checked`. A step that doesn't apply is `not-applicable`. If demo mode is on, because `requireHardwareAttestation` is false, say so visibly as a `note` in plain words: this is a demonstration and the security keys are simulated.
 5. The connection settings stay at the foot of the page, under "Check it yourself".
+6. The first exam step fails if the address does not run the published contract, or the exam's times are outside the allowed limits. Nothing else is read from such an address, and the headline says it is not a Paper Seal exam record. When the code matches, the step's note names the exam board's account.
+7. A warning sits under the failure banner, quieter than it, and never counts as a failed check. There are two: the paper was recorded after its unlock time, and a name leads to a different exam record from the one the page is set up to read. The name warning shows as soon as the name is read, and the Name step keeps its line about Sepolia.
+8. The folded evidence for "Paper Seal runs the published code" also shows how the public record is read (`chain.readBlock`).

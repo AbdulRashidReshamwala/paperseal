@@ -1,5 +1,5 @@
 import { examRegistryAbi, OnChainBytesError, type ExamRegistry } from '@paperseal/chain';
-import { approvedListHash, chain, fromHex, toHex, type Hex } from '@paperseal/protocol';
+import { approvedListHash, chain, entriesOverLimit, fromHex, limits, toHex, type Hex } from '@paperseal/protocol';
 import { BaseError, ContractFunctionRevertedError, UserRejectedRequestError, type Address } from 'viem';
 
 import { currentAccount, switchToSepolia, walletChainId, walletClientFor } from '../../shared/wallet';
@@ -154,6 +154,15 @@ export async function postApprovedListFlow(
   options: PostOptions = {},
 ): Promise<PostOutcome> {
   const { examId, entries } = input;
+  // Checked before the wallet is asked: the network would drop a list this long and never say so.
+  if (entriesOverLimit(fromHex(entries))) {
+    throw new PublishBlockedError(
+      withDetails(
+        'The list is too long to post, and nothing was posted. Take some people off the list, or shorten their names, then try again.',
+        `${String(fromHex(entries).length)} bytes. The limits are ${String(limits.entriesBytes)} bytes and ${String(limits.entries)} people.`,
+      ),
+    );
+  }
   const existing = environment.createRegistry ? await environment.createRegistry().getApprovedList(examId) : null;
   if (existing) {
     throw new PublishBlockedError('The list of people is already posted for this exam. It cannot be replaced.');

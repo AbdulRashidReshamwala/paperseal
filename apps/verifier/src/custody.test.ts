@@ -1,11 +1,11 @@
 import type { ExamNameCheck, ExamNameResult } from '@paperseal/chain';
 import { describe, expect, beforeAll, it, vi } from 'vitest';
-import { roundTimeSeconds, sortReleaseFiles, storageNames, toHex, type Hex } from '@paperseal/protocol';
+import { chain as chainSpec, roundTimeSeconds, sortReleaseFiles, storageNames, toHex, type Hex } from '@paperseal/protocol';
 
 import { checkPublishedToken, checkRecordToken, type Build, type FreshVerdict } from './attest';
 import { approvedEntries, checkManifest, holdersOf } from './commitments';
 import { clockTime, custody, inWords, repository, type Custody, type CustodyStep, type Item, type NameView, type StepId, type View } from './custody';
-import { buildWorld, examId, random, registryAddress, type World } from './fixtures';
+import { boardAddress, buildWorld, examId, random, registryAddress, registryMatches, type World } from './fixtures';
 import type { LiveReport, ProofRun, Records } from './load';
 import type { ProofChecks, ProofState } from './proof';
 import { checkReleaseFiles, checkReleaseLog, parseReleaseLog, releaseProgress } from './unlock';
@@ -51,7 +51,7 @@ async function checkedLog(w: World, replace: Record<string, Uint8Array | null> =
 /** Every record checked for real, against the fixture's own root in place of Google's. */
 async function checkedRecords(): Promise<Records> {
   const { exam, build, pki } = world;
-  const chain = { exam, build, list: { listHash: build.approvedListHash }, criteria: world.criteriaHex, entries: world.entriesHex } as Records['chain'];
+  const chain = { registryCode: registryMatches, exam, build, list: { listHash: build.approvedListHash }, criteria: world.criteriaHex, entries: world.entriesHex } as Records['chain'];
   const args = { exam, examId, registry: registryAddress, trustedRoot: pki.root };
   const list = approvedEntries(world.entriesHex);
   return {
@@ -220,9 +220,73 @@ describe('step 1, exam published', () => {
   it('current, and nothing passes, when the exam is not published', () => {
     const result = scene({ chain: { exam: null, list: null, build: null, criteria: null, entries: null }, records: notReadyFiles });
     expect(step(result, 'published').state).toBe('current');
-    expect(result.steps.flatMap(checks).filter((c) => c.status === 'pass')).toEqual([]);
+    // The address itself is checked, but nothing about an exam.
+    expect(result.steps.flatMap(checks).filter((c) => c.status === 'pass').map((c) => c.label)).toEqual(['The exam record runs the published ExamRegistry code']);
     expect(result.headline).toBe('This exam is not on the public record.');
     expect(result.seal).toBe(null);
+  });
+});
+
+describe('the code at the registry address', () => {
+  const nothing = { exam: null, list: null, build: null, criteria: null, entries: null };
+
+  it('passes, and shows the board its code holds', () => {
+    const result = scene();
+    const published = step(result, 'published');
+    expect(published.items).toContainEqual(expect.objectContaining({ kind: 'check', label: 'The exam record runs the published ExamRegistry code', status: 'pass' }));
+    expect(published.items).toContainEqual(expect.objectContaining({ kind: 'hash', value: boardAddress }));
+    expect(published.aside).toContain(boardAddress);
+  });
+
+  it.each([
+    ['different', 'not a Paper Seal exam record'],
+    ['none', 'no exam record at this address'],
+  ] as const)('fails the first step and holds the rest when it is %s', (state, words) => {
+    const result = scene({ chain: { ...nothing, registryCode: { state } }, records: notReadyFiles });
+    expect(step(result, 'published').state).toBe('failed');
+    expect(result.failures.map((failure) => failure.message).join()).toContain(words);
+    expect(result.headline).toBe('This is not a Paper Seal exam record.');
+    expect(result.verdict).toContain('Do not rely on this exam');
+    expect(result.steps.slice(1).every((one) => one.state === 'waiting')).toBe(true);
+    expect(result.seal).toBeNull();
+  });
+});
+
+describe('how the public record is read', () => {
+  it('shows chain.readBlock with the setting beside it', () => {
+    const rows = step(scene(), 'attested').items;
+    expect(rows).toContainEqual(expect.objectContaining({ kind: 'tag', label: { code: 'chain.readBlock' }, tag: chainSpec.readBlock }));
+  });
+});
+
+describe('schedule bounds', () => {
+  it('fail the first step', () => {
+    const { settings } = world.exam;
+    const long = scene({ chain: { exam: { ...world.exam, settings: { ...settings, delta: 86_401n } } } });
+    expect(step(long, 'published').state).toBe('failed');
+    expect(long.failures.map((failure) => failure.message)).toContain('The paper reaches centres too long before the exam. Paper Seal does not allow a gap this long.');
+    const never = scene({ chain: { exam: { ...world.exam, settings: { ...settings, endRound: 2n ** 64n - 1n } } } });
+    expect(never.failures.map((failure) => failure.message)).toContain('This exam ends too long after it starts, so the paper may never open to everyone.');
+    expect(step(never, 'published').items).toContainEqual(expect.objectContaining({ value: expect.stringContaining('too far away') }));
+  });
+
+  it('pass for an exam inside them', () => {
+    expect(step(scene(), 'published').items).toContainEqual(expect.objectContaining({ label: 'Exam times are within the allowed limits', status: 'pass' }));
+  });
+});
+
+describe('a Build posted after the unlock time', () => {
+  const unlockAt = () => roundTimeSeconds(Number(world.exam.settings.unlockRound));
+  const posted = (postedAt: number) => scene({ chain: { build: { ...world.build, postedAt: BigInt(postedAt) } as Build } });
+
+  it('warns, and fails nothing', () => {
+    const on = posted(unlockAt());
+    expect(on.warnings).toEqual([]);
+    const late = posted(unlockAt() + 1);
+    expect(late.warnings).toEqual([expect.stringContaining('recorded after its unlock time')]);
+    expect(late.failures).toEqual(on.failures);
+    expect(step(late, 'sealed').state).toBe(step(on, 'sealed').state);
+    expect(step(late, 'sealed').items).toContainEqual(expect.objectContaining({ kind: 'text', tone: 'warn' }));
   });
 });
 
@@ -716,7 +780,34 @@ describe('step 1 on a name route, the name', () => {
     value: { name, label: 'jee-main-2026', parent: 'board.eth', examId, registry: registryAddress, board: `0x${'bb'.repeat(20)}`, teeUrl: null, storageUrl: 'https://files.example/bucket', bucket: null },
   };
   const named = (result: NameView['result'], over: Scene = {}) =>
-    custody({ ...sceneView(over), name: { name, result, used } });
+    custody({ ...sceneView(over), name: { name, result, used, configuredRegistry: '' } });
+
+  describe('with a registry other than the one this page is set up to read', () => {
+    const other = `0x${'cd'.repeat(20)}`;
+    const set = (result: NameView['result'], configuredRegistry: string) => custody({ ...sceneView(), name: { name, result, used, configuredRegistry } });
+    const ready: NameView['result'] = { state: 'ready', value: passed, readAt: 0 };
+
+    it('warns on the main view, and keeps the Sepolia line', () => {
+      const result = set(ready, other);
+      expect(result.warnings).toEqual([expect.stringContaining('different exam record')]);
+      expect(step(result, 'name').aside).toContain('Sepolia');
+      expect(step(result, 'name').state).toBe('done');
+      expect(step(result, 'name').items).toContainEqual(expect.objectContaining({ kind: 'hash', value: other }));
+    });
+
+    it('warns too when the name went on to fail', () => {
+      const failed: ExamNameResult = { ok: false, failed: 'primaryName', reason: 'no', partial: { registry: registryAddress } };
+      const result = set({ state: 'ready', value: failed, readAt: 0 }, other);
+      expect(result.warnings).toHaveLength(1);
+      expect(step(result, 'name').aside).toContain('Sepolia');
+    });
+
+    it('says nothing when they match in any case, or none is set', () => {
+      expect(set(ready, registryAddress.toUpperCase().replace('0X', '0x')).warnings).toEqual([]);
+      expect(set(ready, '').warnings).toEqual([]);
+      expect(set({ state: 'loading' }, other).warnings).toEqual([]);
+    });
+  });
 
   it('passes first, and the exam then runs as usual', () => {
     const result = named({ state: 'ready', value: passed, readAt: 0 }, { round: END, proof: opened() });
@@ -771,7 +862,7 @@ describe('step 1 on a name route, the name', () => {
     ['reading', { state: 'loading' }, 'Checking the exam name.'],
     ["can't read ENS", { state: 'error', message: 'RPC down' }, 'The exam name could not be read.'],
   ] as const)('%s is neutral, with no Pass and no seal', (_, polled, headline) => {
-    const result = custody({ ...sceneView(), examId: null, records: { state: 'off' }, name: { name, result: polled, used } });
+    const result = custody({ ...sceneView(), examId: null, records: { state: 'off' }, name: { name, result: polled, used, configuredRegistry: '' } });
     expect(result.headline).toBe(headline);
     expect(step(result, 'name').state).toBe('current');
     expect(result.failures).toEqual([]);

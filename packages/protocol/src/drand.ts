@@ -1,4 +1,4 @@
-import { chain, drand } from './constants';
+import { chain, drand, schedule } from './constants';
 import type { ExamSettings } from './types';
 
 /** Unix seconds at which a quicknet round is produced. */
@@ -26,9 +26,11 @@ export type ScheduleErrorCode =
   | 'delta_zero'
   | 'before_genesis'
   | 'unlock_round'
-  | 'end_round';
+  | 'end_round'
+  | 'delta_too_long'
+  | 'end_too_far';
 
-/** A `createExam` rejection from "Exam Settings" in spec/api.md, caught before spending gas. */
+/** A `createExam` rejection or a broken schedule bound from "Exam Settings" in spec/api.md, caught before spending gas. */
 export class ScheduleError extends Error {
   readonly code: ScheduleErrorCode;
 
@@ -39,7 +41,18 @@ export class ScheduleError extends Error {
   }
 }
 
-/** Throws a `ScheduleError` for the first rule `createExam` (or the chain check) would reject. */
+/**
+ * Which `schedule` bound in spec/constants.json some exam settings break, or null. `ExamRegistry` doesn't
+ * check these, so a reader has to. An end round far ahead is the risky one: the paper's proof waits for it.
+ */
+export function scheduleBoundsProblem(settings: { examStart: bigint; delta: bigint; endRound: bigint }): 'delta_too_long' | 'end_too_far' | null {
+  const { examStart, delta, endRound } = settings;
+  if (delta > BigInt(schedule.maxDeltaSeconds)) return 'delta_too_long';
+  const endTime = BigInt(drand.genesisTime) + (endRound - 1n) * BigInt(drand.periodSeconds);
+  return endTime - examStart > BigInt(schedule.maxEndAfterStartSeconds) ? 'end_too_far' : null;
+}
+
+/** Throws a `ScheduleError` for the first rule `createExam`, the chain check or the schedule bounds reject. */
 export function checkSchedule(
   settings: Pick<ExamSettings, 'examStart' | 'delta' | 'lockRound' | 'unlockRound' | 'endRound' | 'chainId'>,
 ): void {
@@ -65,6 +78,11 @@ export function checkSchedule(
   }
   if (BigInt(drand.genesisTime) + (end - 1n) * BigInt(drand.periodSeconds) <= BigInt(examStart)) {
     throw new ScheduleError('end_round', 'endRound must be produced after examStart');
+  }
+  const bound = scheduleBoundsProblem({ examStart: BigInt(examStart), delta: BigInt(delta), endRound: end });
+  if (bound === 'delta_too_long') throw new ScheduleError(bound, `delta must be at most ${String(schedule.maxDeltaSeconds)} seconds`);
+  if (bound === 'end_too_far') {
+    throw new ScheduleError(bound, `endRound must be produced within ${String(schedule.maxEndAfterStartSeconds)} seconds of examStart`);
   }
 }
 

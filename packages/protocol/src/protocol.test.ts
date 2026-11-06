@@ -37,6 +37,10 @@ import {
   type ExamSettings,
   ScheduleError,
   checkSchedule,
+  chain,
+  drand,
+  schedule as specSchedule,
+  scheduleBoundsProblem,
   firstRoundAtOrAfter,
   startupArgs,
   type MessageName,
@@ -444,6 +448,38 @@ describe('tee/ cross-language vectors', () => {
     const fields = { instancePublicKey: fromHex(vector.instancePublicKey), examId: fromHex(vector.examId) };
     expect(toHex(encodeMessage('attestationNonce', fields))).toBe(vector.preimage);
     expect(attestationNonce(fromHex(vector.instancePublicKey), fromHex(vector.examId))).toBe(vector.nonce);
+  });
+});
+
+describe('schedule bounds', () => {
+  const examStart = 1_800_000_000n;
+  const inTime = (seconds: bigint) => (seconds - BigInt(drand.genesisTime)) / BigInt(drand.periodSeconds) + 1n;
+  const lastEnd = inTime(examStart + BigInt(specSchedule.maxEndAfterStartSeconds));
+
+  it('accepts each bound exactly and refuses one step past it', () => {
+    const ok = { examStart, delta: BigInt(specSchedule.maxDeltaSeconds), endRound: lastEnd };
+    expect(scheduleBoundsProblem(ok)).toBeNull();
+    expect(scheduleBoundsProblem({ ...ok, delta: ok.delta + 1n })).toBe('delta_too_long');
+    expect(scheduleBoundsProblem({ ...ok, endRound: lastEnd + 1n })).toBe('end_too_far');
+    expect(scheduleBoundsProblem({ ...ok, endRound: 2n ** 64n - 1n })).toBe('end_too_far');
+  });
+
+  it('is part of checkSchedule', () => {
+    const delta = specSchedule.maxDeltaSeconds + 1;
+    const unlock = firstRoundAtOrAfter(Number(examStart) - delta);
+    const settings = { examStart: Number(examStart), lockRound: String(unlock - 1), chainId: chain.chainId };
+    const code = (over: object) => {
+      try {
+        checkSchedule({ ...settings, delta, unlockRound: String(unlock), endRound: String(lastEnd), ...over });
+      } catch (error) {
+        return (error as ScheduleError).code;
+      }
+      return null;
+    };
+    expect(code({})).toBe('delta_too_long');
+    const fine = { delta: 60, unlockRound: String(firstRoundAtOrAfter(Number(examStart) - 60)) };
+    expect(code(fine)).toBeNull();
+    expect(code({ ...fine, endRound: String(lastEnd + 1n) })).toBe('end_too_far');
   });
 });
 

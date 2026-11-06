@@ -4,6 +4,7 @@ import {
   encodeApprovedList,
   encodeMessage,
   fromHex,
+  limits,
   roles,
   setterOwner,
   toHex,
@@ -108,6 +109,16 @@ describe('postApprovedListFlow', () => {
     const declined = environment({ chainId: 1, switchable: 'decline' });
     await expect(postApprovedListFlow(declined.env, { examId, entries: encoded }, undefined, noWait)).rejects.toThrow('wrong network');
     expect(declined.node.sent).toHaveLength(0);
+  });
+
+  it('refuses a list too long to post, before the wallet is asked', async () => {
+    const { node, env } = environment();
+    const tooLong = toHex(new Uint8Array(limits.entriesBytes + 1));
+    await expect(postApprovedListFlow(env, { examId, entries: tooLong }, undefined, noWait)).rejects.toThrow('The list is too long to post');
+    const many = entries();
+    const padded = Array.from({ length: limits.entries + 1 }, (_, i) => ({ role: roles.setter, owner: 'x', derivedPublicKey: new Uint8Array(), passkeyPublicKey: fromHex(key(i % 200)), ...many[0] }));
+    await expect(postApprovedListFlow(env, { examId, entries: toHex(encodeApprovedList(padded)) }, undefined, noWait)).rejects.toThrow('The list is too long to post');
+    expect(node.sent).toHaveLength(0);
   });
 
   it('blocks an account that is not the board', async () => {

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -92,6 +93,31 @@ func lockAndBuild(t *testing.T, w *world, m *lifecycle.Machine) {
 	t.Helper()
 	w.beacon.Set(lockRound)
 	stepUntil(t, m, lifecycle.StageUnlock)
+}
+
+// Other code at the registry address ends the exam. A failed read of the code
+// doesn't, however often it happens.
+func TestRegistryCodeMismatchFailsAndRPCErrorsRetry(t *testing.T) {
+	w := newWorld(t)
+	m, _, _ := w.machine()
+	w.chain.mu.Lock()
+	w.chain.examErr = errors.New("chainread: eth_getCode: status 503")
+	w.chain.mu.Unlock()
+	for range 5 {
+		if err := m.Step(context.Background()); err == nil {
+			t.Fatal("a failed read returned no error")
+		}
+		if m.Stage() != lifecycle.StageOnboard {
+			t.Fatalf("stage %s after an RPC error", m.Stage())
+		}
+	}
+	w.chain.mu.Lock()
+	w.chain.examErr = fmt.Errorf("%w: code hash 0x00", chainread.ErrWrongRegistry)
+	w.chain.mu.Unlock()
+	_ = m.Step(context.Background())
+	if m.Stage() != lifecycle.StageFailed || !errors.Is(m.Failure(), chainread.ErrWrongRegistry) {
+		t.Fatalf("stage %s, failure %v", m.Stage(), m.Failure())
+	}
 }
 
 func TestFullLifecycle(t *testing.T) {
