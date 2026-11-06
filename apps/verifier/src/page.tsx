@@ -361,6 +361,7 @@ function Head({ view, chosen, agent }: { view: Custody; chosen: boolean; agent: 
         <div className="ps-stage-lede">
           <p>{view.verdict}</p>
         </div>
+        {chosen && view.testNetwork ? <p className="vf-test-network">{view.testNetwork}</p> : null}
         {agent}
         <p className="ps-stage-next">
           <span className="ps-stage-next-label">What happens next</span>

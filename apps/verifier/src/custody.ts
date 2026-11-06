@@ -141,6 +141,8 @@ export interface Custody {
   warnings: string[];
   /** Null until the code has established a seal state. Never a stand-in for a check not run. */
   seal: SealState | null;
+  /** Shown under the headline with the seal: what an independent check reports for a test exam. */
+  testNetwork: string | null;
   /** Why the seal is not shown. */
   noSeal: string;
   headline: string;
@@ -432,6 +434,18 @@ const nameFailures: Record<ExamNameCheck, string> = {
 };
 
 export const sepoliaName = 'On Sepolia, a test network, anyone can register a similar name, so this check is only a demo.';
+
+/**
+ * The note under the headline while the seal shows, so a whole seal never reads as a full
+ * verification: until exams carry a production mode, the independent checker reports `partial`
+ * (spec/agent-verification.md, "Report"). A broken seal has no note, because that check reports a
+ * failure, and the failure banner already says so.
+ */
+export function testNetworkNote(seal: SealState | null): string | null {
+  if (seal === null || seal === 'broken') return null;
+  const network = chainSpec.name.charAt(0).toUpperCase() + chainSpec.name.slice(1);
+  return `Test exam on ${network}. An independent check reports it as partial, not verified, until exams carry a production mode.`;
+}
 
 const otherRegistry =
   'This name leads to a different exam record from the one this page is set up to read. Ask your exam board if this is the right exam before you rely on it.';
@@ -1783,6 +1797,7 @@ export function custody(given: View): Custody {
     failures,
     warnings: [...(given.name && differentRegistry(given.name) ? [otherRegistry] : []), ...(buildWarning(c) ? [buildWarning(c) as string] : []), ...(notEnsNameWarning(chain) ? [notEnsNameWarning(chain) as string] : [])],
     seal,
+    testNetwork: testNetworkNote(seal),
     noSeal: build ? 'Not confirmed yet' : 'Not sealed yet',
     headline: words.headline,
     verdict: verdictLine(c, steps, failures),
