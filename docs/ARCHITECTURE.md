@@ -30,7 +30,7 @@ Each signed-in role has a code-split route area in `apps/web`:
 
 The README names separate setter and centre apps. One app is simpler to host and keeps one passkey domain. Keyholder routes still never import paper or `K_priv` handling, and a lint rule or test enforces that.
 
-`apps/verifier` covers the public checks, live unlock status and the post-exam proof, with no sign-in. It exists to check the board, so the board must not be the only party serving it. It is a static build with relative paths that anyone can host, it uses no passkeys, and viewers can set their own RPC and TEE URLs. The TEE must allow cross-origin reads on its public routes for this to work. `#/name/<ENS name>` checks an exam by name first ("Exam Names" in `spec/api.md`): it reads ENS through the viewer's RPC, with CCIP-Read off, and saves nothing it resolves.
+`apps/verifier` covers the public checks, live unlock status and the post-exam proof, with no sign-in. It exists to check the board, so the board must not be the only party serving it. It is a static build with relative paths that anyone can host, it uses no passkeys, and viewers can set their own RPC and TEE URLs. The TEE must allow cross-origin reads on its public routes for this to work. `#/name/<ENS name>` checks an exam by name first ("Exam Names" in `spec/api.md`): it reads ENS through the viewer's RPC, with CCIP-Read off, and saves nothing it resolves. In the people step it also reads each key holder's and centre's ENS name the same way ("Party Names" in `spec/api.md`), as a label and a proof of who holds a key. That never decides a check.
 
 ## Dependency Rules
 

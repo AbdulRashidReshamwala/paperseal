@@ -106,6 +106,14 @@ An exam's name is a plain ENS label such as `jee-main-2026`, and its exam ID is 
 
 The verifier page fails the name unless it points to a contract running exactly `ExamRegistry`'s code, whose board address has that parent as its primary name, verified both ways. Every read is on-chain, through the viewer's own RPC. It then runs every other check as usual. ENS only helps people find the real exam. The TEE and `ExamRegistry` never read it, and a name that points somewhere wrong makes the later checks fail, not pass. On Sepolia anyone can register a look-alike name, so the check only means something with a mainnet name. [ENS setup](docs/ens-setup.md) shows how to name an exam.
 
+### Party Names
+
+A key holder or a centre can be invited under an ENS name, such as `dr-rao.eth`, instead of a plain display name. The name goes on the public list exactly as a plain name would, and a person without an ENS name can still be invited under a plain one. Setters never have a name on the list.
+
+A key holder who uses their own ENS name proves it once, by setting one text record on it, `paperseal.passkey`, to the hash of their security key. After they register, the Register screen shows the exact value. The board app reads the record: a match shows "Name confirmed", a record that names another key keeps them off the list, and a missing record shows as waiting, which the board may choose to go ahead without, marked unconfirmed. A centre can use a subname the board issues, which needs no record. The board can change such a name, so it is a readable label and says nothing about independence, and the verifier shows it as a label only.
+
+The verifier page shows, for each listed party with an ENS name, whether the record matches their security key, with the evidence folded. This is a label and a proof of who holds a key, not something the exam depends on. A name that can't be read shows "not confirmed" and never fails a check. The TEE and `ExamRegistry` never read ENS, and the invite link, its secret and the invite match work as before. Names are read on Sepolia through the viewer's own RPC with no gateway, so they prove nothing until a mainnet name is used. Resolution may still run through ENSv1, and nothing here depends on ENSv2.
+
 ### Question Submission
 
 Setters talk to the TEE directly, and the board's infrastructure only ever carries ciphertext.

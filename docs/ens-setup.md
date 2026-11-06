@@ -63,3 +63,12 @@ Open the verifier, type the full name into the exam box, or open `<verifier>/#/n
 | Not the board’s name | The board wallet's primary name isn't the parent name, or isn't set |
 | Not confirmed by the board | The parent name's ETH address isn't the board wallet |
 | Can't read the name | The RPC URL under "Check it yourself" is down or isn't Sepolia |
+
+## 4. Names for key holders and centres
+
+Optional. The board can invite a key holder or a centre under an ENS name by typing it in "Invite people". A person with no ENS name can be invited under a plain name instead. Setters never have one.
+
+- **A key holder uses their own name.** After they register, their Register page shows one value. They add a text record named `paperseal.passkey` to their own name with that value, using the ENS app on Sepolia. The board app then shows "Name confirmed". Until then it shows the key holder as waiting, and the board can choose to go ahead with the name marked unconfirmed.
+- **A centre uses a name the board issues,** such as `north-1.centres.paperseal-mumbai.eth`. It needs no record. The board can change such a name, so the verifier shows it as a label only, and it proves nothing about independence.
+
+Both the board app and the verifier read these names on Sepolia through their own RPC, on chain only. The board app uses `VITE_RPC_URL`, and the verifier uses the RPC under "Check it yourself". A name that can't be read shows as not confirmed and never fails the exam.

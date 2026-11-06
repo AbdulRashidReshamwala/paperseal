@@ -102,7 +102,7 @@ There are two kinds of name, and they prove different things:
 
 A reader reads the record with the viewer's own RPC, on chain only (`ens.ccipRead` is `false`), with no fallback RPC, on the chain in `constants.json` (Sepolia in this build). It gives one of these states: confirmed (the record matches the passkey), mismatch (set to something else), missing (not set), refused (the chain would not answer on chain, an offchain lookup included), unreadable (the RPC failed), or invalid (not a normalised ENS name). Resolution goes through whatever the RPC's Universal Resolver does and is not tied to ENSv2.
 
-This is a label and a proof of who holds a key, never a check the exam depends on. The TEE and `ExamRegistry` never read it. A name that is missing, wrong or unreadable shows as "not confirmed" in the verifier and never fails the exam. On Sepolia anyone can register a look-alike name, so a confirmed name there proves nothing.
+This is a label and a proof of who holds a key, never a check the exam depends on. The TEE and `ExamRegistry` never read it. A key holder's name that is missing, wrong or unreadable shows as "not confirmed" in the verifier, and a centre's as a label only, and neither ever fails the exam. On Sepolia anyone can register a look-alike name, so a confirmed name there proves nothing.
 
 The board app resolves a name typed for a key holder or centre. For a key holder, a mismatch keeps them off the list, a missing record shows as waiting and the board may go ahead with it marked unconfirmed, and a match shows as confirmed. The registrant's Register screen shows a key holder with an ENS name the exact record value after they register. The invite is never overwritten once it has matched a registration.
 
