@@ -425,11 +425,13 @@ function Preview() {
 
       <Section title="Type">
         <div className="pv-type">
-          <p style={{ fontFamily: 'var(--ps-serif)', fontSize: 'var(--ps-text-display)', lineHeight: 1.12 }}>Unlock the paper</p>
+          <p style={{ fontFamily: 'var(--ps-display)', fontSize: 'var(--ps-text-display)', lineHeight: 1.08, letterSpacing: '-0.01em' }}>Unlock the paper</p>
+          <p style={{ fontSize: 'var(--ps-text-meta)' }}>Display, in Libre Caslon Display, for the Stage title only</p>
           <p style={{ fontFamily: 'var(--ps-serif)', fontSize: 'var(--ps-text-title)' }}>Title, in Libre Caslon Text</p>
           <p style={{ fontFamily: 'var(--ps-serif)', fontSize: 'var(--ps-text-section)' }}>Section, in Libre Caslon Text</p>
+          <p style={{ fontSize: 'var(--ps-text-lede)' }}>Lede, in Public Sans, under a Stage title.</p>
           <p>Body, in Public Sans. Clear at small sizes, and plain enough for instructions.</p>
-          <p style={{ fontSize: 'var(--ps-text-small)' }}>Small, for notes and field hints.</p>
+          <p style={{ fontSize: 'var(--ps-text-meta)', fontVariantNumeric: 'tabular-nums' }}>Meta, for times, labels and badges: Sat 7 Nov, 21:30</p>
           <p className="ps-eyebrow">Eyebrow, for a step’s place in the flow</p>
           <p>
             <Mono>{HASH}</Mono>

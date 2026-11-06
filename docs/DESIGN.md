@@ -49,7 +49,7 @@ All tokens are CSS custom properties in `packages/ui/src/tokens.css`. Use the to
 | --- | --- | --- | --- |
 | `--ps-paper` | `#f3ecdf` | `#12141b` | Page background |
 | `--ps-paper-deep` | `#e8dfcd` | `#1c1f29` | Hover, notes, disabled fill |
-| `--ps-field` | `#fbf7ee` | `#1c1f29` | Inside form inputs |
+| `--ps-field` | `#fbf7ee` | `#1c1f29` | Inside form inputs, the one framed surface |
 | `--ps-ink` | `#191a23` | `#ece5d6` | Text, strong rules, focus ring |
 | `--ps-ink-soft` | `#544e45` | `#aea897` | Secondary text |
 | `--ps-rule` | `#cbbfa8` | `#363946` | Hairlines between rows, decorative only |
@@ -63,7 +63,7 @@ All tokens are CSS custom properties in `packages/ui/src/tokens.css`. Use the to
 | `--ps-pending` | `#75500a` | `#e2b868` | Pending, waiting |
 | `--ps-fail` | `#a12f00` | `#ff9a70` | Fail, failed |
 
-**Wax is rationed.** On any one screen, wax appears on the seal, the primary action, the current step and the logo. It never decorates. A plain `Button` is ink, so a screen with several controls still has one red thing to press.
+**Wax is rationed.** On any one screen, wax appears on the seal, the primary action and the logo. The current step is ink, because people read red as an error. It never decorates. A plain `Button` is ink, so a screen with several controls still has one red thing to press.
 
 **Fail is not wax.** Fail is a vermilion, more orange than the seal, because a seal is good news and a failure is not. Colour never carries the difference alone: `Check` and `Stepper` always add a word and a different shape.
 
@@ -73,24 +73,29 @@ Paper is the theme. It applies whatever the operating system prefers, and `color
 
 ### Type
 
-There are three self-hosted families, each pinned to an exact `@fontsource` version in `packages/ui/package.json` and loaded by `src/fonts.css`. Their files ship inside the build, so a board-hosted site calls no third party. `src/tokens.test.ts` checks this.
+There are three self-hosted families, plus Caslon's display cut, each pinned to an exact `@fontsource` version in `packages/ui/package.json` and loaded by `src/fonts.css`. Their files ship inside the build, so a board-hosted site calls no third party. `src/tokens.test.ts` checks this.
 
 | Family | Token | Use | Why |
 | --- | --- | --- | --- |
+| Libre Caslon Display | `--ps-display` | `Stage` title only | The text cut looks heavy and loose above 32px; this cut is drawn for headline sizes |
 | Libre Caslon Text | `--ps-serif` | Headings, step labels | The printed voice of gazettes and certificates |
-| Public Sans | `--ps-sans` | Everything else | Strong and neutral, designed for government services |
-| IBM Plex Mono | `--ps-code` | Hashes, times, the countdown | Clear `0`/`O` and `1`/`l`, and it keeps a typewriter's feel |
+| Public Sans | `--ps-sans` | Everything else, including times with `tabular-nums` | Strong and neutral, designed for government services |
+| IBM Plex Mono | `--ps-code` | Hashes and the countdown | Clear `0`/`O` and `1`/`l`, and it keeps a typewriter's feel |
+
+Six sizes, each a clear step from the next:
 
 | Token | Size | Family | Use |
 | --- | --- | --- | --- |
-| `--ps-text-display` | 32px | Serif, 1.2 line height | `Stage` title |
+| `--ps-text-display` | 36–48px | Display serif, 1.08 line height | `Stage` title |
 | `--ps-text-title` | 28px | Serif | Older `Screen` titles, reached state of `Countdown` |
-| `--ps-text-section` | 20px | Serif | Section headings, `KeyTouch` title |
-| `--ps-text-body` | 16px | Sans, 1.55 line height | Body |
-| `--ps-text-small` | 14px | Sans | Notes, hints, labels |
-| `--ps-text-code` | 13px | Mono | Hashes and times |
+| `--ps-text-section` | 21px | Serif | Section headings, step labels, `KeyTouch` title |
+| `--ps-text-lede` | 18px | Sans | The sentence under a `Stage` title |
+| `--ps-text-body` | 16px | Sans, 1.55 line height | Body, notes, buttons: anything a person has to read |
+| `--ps-text-meta` | 13px | Sans or mono | Times, labels, badges, hashes |
 
-Don't add weights: Caslon has 400 and 700, Public Sans has 400, 500 and 600, and Plex Mono has 400 and 500. Public Sans has no small capitals, so don't use `font-variant-caps`. Don't upper-case text with CSS, apart from `Stamp`.
+`--ps-text-small` and `--ps-text-code` are older names for `--ps-text-meta`.
+
+Don't add weights: Caslon Display has 400, Caslon Text has 400 and 700, Public Sans has 400, 500 and 600, and Plex Mono has 400 and 500. Public Sans has no small capitals, so don't use `font-variant-caps`. Don't upper-case text with CSS, apart from `Stamp`.
 
 ### Spacing
 
@@ -98,7 +103,7 @@ Spacing sits on a 4px grid: `--ps-space-1` to `--ps-space-8` are 4, 8, 12, 16, 2
 
 ### Shape and rules
 
-- **Corners** are soft. `--ps-radius` is 6px for buttons and fields, and panels use 8px.
+- **Corners** are soft. `--ps-radius` is 6px for everything rounded. Don't hard-code a radius; the tests check.
 - **One surface.** A group of content sits in one rounded panel. `Panel` and a `Stage`'s action are that surface, and anything inside them stays flat.
 - **Rules:** a 1px `--ps-rule` under the header and between rows.
 - **No shadows,** apart from the wax itself.
@@ -203,7 +208,7 @@ The chain of custody, and the centrepiece of the verifier. Pass `steps`, each wi
 | State | Marker | Word |
 | --- | --- | --- |
 | `done` | Solid ink disc with a tick | Done |
-| `current` | Wax ring with a dot | In progress |
+| `current` | Ink ring with a dot, word in `--ps-pending` | In progress |
 | `waiting` | Empty ring, dashed rail | Waiting |
 | `failed` | Square with a cross | Failed |
 | `not-applicable` | Dashed ring with a dash | Not applicable |
