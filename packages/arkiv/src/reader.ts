@@ -127,6 +127,12 @@ export interface BackupRow {
 
 export type BackupRowsOptions = ReleaseRowsOptions;
 
+/** What `copyRows` finds. Unchecked: a caller says what it could and could not check. */
+export interface CopyRows {
+  logs: { examId: string }[];
+  backups: { examId: string; manifestHash: string }[];
+}
+
 export type ArkivReaderOptions = ArkivConnection;
 
 /** The writers to read from, checksummed. A mistyped writer throws instead of matching nobody. */
@@ -413,13 +419,51 @@ export function createArkivReader(options: ArkivReaderOptions = {}) {
       }));
   }
 
+  /**
+   * For every exam in `registry`, the writers' `release-log` and `backup` rows without their bodies,
+   * so a list of exams can say which have copies in one read. Every column is what the writer says.
+   */
+  async function copyRows(registry: Address, writers: readonly Address[]): Promise<CopyRows> {
+    const wanted = getAddress(registry);
+    const trusted = trustedSet(writers);
+    if (trusted.size === 0) return { logs: [], backups: [] };
+    const filters = [eq('registry', addr(wanted)), byCreator(trusted)];
+    const ours = (row: { $creator: Hex; registry: { value: Address } }) => trusted.has(getAddress(row.$creator)) && isAddressEqual(row.registry.value, wanted);
+    const [logs, backups] = await Promise.all([
+      allPages((offset) =>
+        client
+          .select({ $key: true, $creator: true, examId: true, registry: true })
+          .from(releaseLogSchema)
+          .where(...filters)
+          .orderBy(asc('$key'))
+          .limit(MAX_LIMIT)
+          .offset(offset)
+          .fetch(),
+      ),
+      allPages((offset) =>
+        client
+          .select({ $key: true, $creator: true, examId: true, registry: true, manifestHash: true })
+          .from(backupSchema)
+          .where(...filters)
+          .orderBy(asc('$key'))
+          .limit(MAX_LIMIT)
+          .offset(offset)
+          .fetch(),
+      ),
+    ]);
+    return {
+      logs: logs.filter(ours).map((row) => ({ examId: row.examId.value })),
+      backups: backups.filter(ours).map((row) => ({ examId: row.examId.value, manifestHash: row.manifestHash.value })),
+    };
+  }
+
   /** Arkiv's latest block and its time in Unix seconds, to tell how long ago a row was written. */
   async function latestBlock(): Promise<{ number: bigint; time: number }> {
     const { currentBlock, currentBlockTime } = await client.getBlockTiming();
     return { number: currentBlock, time: currentBlockTime };
   }
 
-  return { releaseRows, examRows, participantRows, backupRows, latestBlock };
+  return { releaseRows, examRows, participantRows, backupRows, copyRows, latestBlock };
 }
 
 export type ArkivReader = ReturnType<typeof createArkivReader>;

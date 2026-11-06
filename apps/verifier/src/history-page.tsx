@@ -1,28 +1,39 @@
 import { resolveExamName } from '@paperseal/chain';
 import type { Hex } from '@paperseal/protocol';
-import { Button, Check, Field, Mono, Panel, RoleHeader, Row, Rows, shortenHash } from '@paperseal/ui';
+import { Badge, Button, Check, Field, Mono, Panel, RoleHeader, Row, Rows, shortenHash, type Tone } from '@paperseal/ui';
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router';
 
 import { dayTime } from './custody';
 import {
+  examStatus,
   findParticipant,
   loadExamHistory,
   roleWords,
+  statusWords,
   type ExamHistory,
-  type ExamStage,
+  type ExamStatus,
+  type HistoryExam,
   type ParticipantSearch,
   type UnreadExam,
 } from './history';
+import { useLatestRound, useNow } from './live';
 import { OwnConnection } from './page';
 import { usePoll, type Polled } from './poll';
 import { arkivWriters, useConnections } from './settings';
 
-const stageWords: Record<ExamStage, string> = {
-  published: 'Exam published',
-  listed: 'People approved',
-  built: 'Paper built and sealed',
+const statusTones: Record<ExamStatus, Tone> = {
+  setup: 'neutral',
+  questions: 'neutral',
+  waiting: 'neutral',
+  sealed: 'ok',
+  'under-way': 'ok',
+  finished: 'ok',
+  'never-ran': 'neutral',
 };
+
+/** How often the public clock is read here. It only moves an exam from one status to the next. */
+const CLOCK_POLL_MS = 30_000;
 
 const plural = (n: number, one: string, many: string) => `${String(n)} ${n === 1 ? one : many}`;
 
@@ -69,7 +80,36 @@ function UnreadRow({ exam, children }: { exam: UnreadExam; children: ReactNode }
 
 const missingNote = 'This list shows the exams these writers have indexed. An exam missing here may still exist.';
 
+function copyWords(copies: HistoryExam['copies']): string {
+  if (!copies) return 'Copies not read';
+  if (copies.arkiv && copies.swarm) return 'Copies on Arkiv and Swarm';
+  if (copies.arkiv) return 'Copy on Arkiv';
+  return copies.swarm ? 'Copy on Swarm' : 'No copies yet';
+}
+
+function ExamRow({ exam, status }: { exam: HistoryExam; status: ExamStatus }) {
+  return (
+    <Row label={<ExamLink examId={exam.examId} name={exam.name} />} muted={status === 'never-ran'}>
+      <Badge tone={statusTones[status]}>{statusWords[status]}</Badge>
+      <span>
+        {status === 'never-ran' ? 'Was due' : 'Starts'} {dayTime(Number(exam.examStart))}
+      </span>
+      {exam.people === null ? null : <span>{plural(exam.people, 'person', 'people')}</span>}
+      <span>{copyWords(exam.copies)}</span>
+      {status === 'never-ran' ? <span className="vf-aside">No paper was built before its start.</span> : null}
+      {exam.behind ? <span className="vf-aside">The Arkiv copy is behind.</span> : null}
+    </Row>
+  );
+}
+
+const statusOrder: readonly ExamStatus[] = ['setup', 'questions', 'waiting', 'sealed', 'under-way', 'finished', 'never-ran'];
+
 function ExamList({ history, onReload }: { history: Polled<ExamHistory>; onReload: () => void }) {
+  const { drand } = useConnections();
+  const latest = useLatestRound(drand, CLOCK_POLL_MS);
+  const now = useNow();
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<ExamStatus | 'all'>('all');
   if (history.state === 'off') return null;
   if (history.state === 'loading') return <p className="ps-empty">Reading the exam history. This takes a few seconds.</p>;
   if (history.state === 'error') {
@@ -82,25 +122,67 @@ function ExamList({ history, onReload }: { history: Polled<ExamHistory>; onReloa
   }
   const { exams, unread, ignored } = history.value;
   const rowsIgnored = ignored.notOnChain + ignored.differs + ignored.malformed;
+  const wanted = search.trim().toLowerCase();
+  const shown = exams
+    .map((exam) => ({ exam, status: examStatus(exam, latest.round, now) }))
+    .filter(({ exam, status }) => (filter === 'all' || status === filter) && (wanted === '' || exam.examId.includes(wanted) || (exam.name ?? '').toLowerCase().includes(wanted)));
+  // Exams that never ran stay in the list, folded away until someone looks for them.
+  const foldable = filter === 'all' && wanted === '';
+  const main = foldable ? shown.filter(({ status }) => status !== 'never-ran') : shown;
+  const neverRan = foldable ? shown.filter(({ status }) => status === 'never-ran') : [];
+  const present = statusOrder.filter((status) => exams.some((exam) => examStatus(exam, latest.round, now) === status));
   return (
     <>
       {exams.length === 0 && unread.length === 0 ? (
         <p className="ps-empty">These writers have not indexed any exam on the public record yet.</p>
       ) : (
-        <Rows>
-          {exams.map((exam) => (
-            <Row key={exam.examId} label={<ExamLink examId={exam.examId} name={exam.name} />}>
-              <span>Starts {dayTime(Number(exam.examStart))}</span>
-              <span>{stageWords[exam.stage]}</span>
-              {exam.behind ? <span className="vf-aside">The Arkiv copy is behind.</span> : null}
-            </Row>
-          ))}
-          {unread.map((exam) => (
-            <UnreadRow key={exam.examId} exam={exam}>
-              Could not be read yet.
-            </UnreadRow>
-          ))}
-        </Rows>
+        <>
+          <div className="vf-filters">
+            <Field label="Find an exam" hint="By its name or its ID." value={search} onChange={setSearch} />
+            <label className="vf-filter">
+              <span>Show</span>
+              <select
+                value={filter}
+                onChange={(event) => {
+                  setFilter(event.target.value as ExamStatus | 'all');
+                }}
+              >
+                <option value="all">All exams</option>
+                {present.map((status) => (
+                  <option key={status} value={status}>
+                    {statusWords[status]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          {main.length === 0 && neverRan.length === 0 ? <p className="ps-empty">No exam matches this.</p> : null}
+          <Rows>
+            {main.map(({ exam, status }) => (
+              <ExamRow key={exam.examId} exam={exam} status={status} />
+            ))}
+            {filter === 'all'
+              ? unread.map((exam) => (
+                  <UnreadRow key={exam.examId} exam={exam}>
+                    Could not be read yet.
+                  </UnreadRow>
+                ))
+              : null}
+          </Rows>
+          {neverRan.length > 0 ? (
+            <details className="vf-connection vf-fold">
+              <summary>{plural(neverRan.length, 'exam never ran', 'exams never ran')}</summary>
+              <div className="vf-fold-body">
+                <Rows>
+                  {neverRan.map(({ exam, status }) => (
+                    <ExamRow key={exam.examId} exam={exam} status={status} />
+                  ))}
+                </Rows>
+              </div>
+            </details>
+          ) : null}
+          <p className="vf-aside">Copies are as recorded here. Open an exam to see each one checked.</p>
+        </>
       )}
       {unread.length > 0 ? (
         <p className="vf-aside">

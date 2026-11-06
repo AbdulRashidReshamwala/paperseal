@@ -134,6 +134,8 @@ export interface Custody {
   /** Present only when the proof opened the paper and it matches the Build. */
   paper: Paper | null;
   withheld: boolean;
+  /** Where the release count shown came from, or null with none verified. */
+  progressSource: ProgressSource | null;
 }
 
 /** A `#/name/` route: the name as written, what reading it found, and the locators in use. */
@@ -414,7 +416,7 @@ const nameFailures: Record<ExamNameCheck, string> = {
   unreadable: 'The name could not be read.',
 };
 
-const sepoliaName = 'On Sepolia, a test network, anyone can register a similar name, so this check is only a demo.';
+export const sepoliaName = 'On Sepolia, a test network, anyone can register a similar name, so this check is only a demo.';
 
 const otherRegistry =
   'This name leads to a different exam record from the one this page is set up to read. Ask your exam board if this is the right exam before you rely on it.';
@@ -740,7 +742,7 @@ function directoryOf(name: string): string | null {
 }
 
 /** Says who vouches for the listed names. Whoever controls a parent decides which key each name under it holds. */
-function vouchNote(names: readonly string[]): string {
+export function vouchNote(names: readonly string[]): string {
   const owners = [...new Set(names.flatMap((name) => directoryOf(name) ?? []))];
   if (owners.length === 0) return ensNote;
   return `${ensNote} Whoever controls ${owners.join(' and ')} vouches for the names under it: they decide which key each one holds, and can change it publicly. That says nothing about whether a party is independent of them.`;
@@ -1214,7 +1216,7 @@ function liveReleaseItems(c: Context, recorded: boolean): Item[] {
   ];
 }
 
-type ProgressSource = 'storage' | 'tee' | 'arkiv';
+export type ProgressSource = 'storage' | 'tee' | 'arkiv';
 
 const sourceNames: Record<ProgressSource, string> = {
   storage: 'The public files',
@@ -1750,5 +1752,6 @@ export function custody(given: View): Custody {
     next: failures.length > 0 ? 'Contact your exam board and tell them which check failed. This page keeps checking by itself.' : words.next,
     paper,
     withheld: proof?.state === 'opened' && proof.paper === null,
+    progressSource: shownProgress(c, publishedLogItems(records?.log ?? null).verified)?.source ?? null,
   };
 }

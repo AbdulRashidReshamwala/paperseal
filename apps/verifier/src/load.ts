@@ -22,6 +22,15 @@ import {
   type ReleaseProgress,
 } from './unlock';
 
+/** One entry of a signed release log. */
+export interface Release {
+  passkeyPublicKey: Hex;
+  /** The public clock round the sealed machine took it at. */
+  round: bigint;
+}
+
+const releasesOf = (log: ReleaseLogResponse): Release[] => log.entries.map((entry) => ({ passkeyPublicKey: entry.passkeyPublicKey, round: BigInt(entry.round) }));
+
 /** Nothing to judge yet. Never red, because nothing failed. */
 export interface Neutral {
   kind: 'neutral';
@@ -53,6 +62,8 @@ export type LogResult =
       files: ReleaseFilesReport | null;
       /** The key that signed the log, which `token` attests when it is verified. */
       signer: Hex;
+      /** Who released and at which round, in the order received. Evidence only once the log is valid. */
+      releases?: Release[];
     };
 
 /** One polled read of the public record: the chain, and each public file checked against it. */
@@ -63,6 +74,8 @@ export interface Records {
   log: Sourced<LogResult>;
   /** Which files came from the Swarm backup, and which it could not give. Absent with backups off. */
   backup?: BackupUse;
+  /** When the store says it wrote each file, by name, for display. */
+  stored?: Record<string, number>;
 }
 
 const neutral = (message: string): Neutral => ({ kind: 'neutral', message });
@@ -193,6 +206,7 @@ async function readLog(
       : null,
     files: isValidLog(verdict, token) ? await checkReleaseFiles(log, list, storage) : null,
     signer: log.instancePublicKey,
+    releases: releasesOf(log),
   };
 }
 
@@ -208,6 +222,15 @@ export const releaseRecorded = (log: Records['log']): boolean =>
 export function signedKeyPriv(log: Records['log']): Hex | null {
   if (log.kind !== 'ready' || !log.files) return null;
   return log.files.files.find((file) => file.name === storageNames.keyPriv)?.sha256 ?? null;
+}
+
+function storedTimes(storage: StorageReader): Record<string, number> {
+  const times: [string, number][] = [];
+  for (const name of [storageNames.token, storageNames.manifest, storageNames.releaseLog, releaseTokenName, storageNames.keyPriv]) {
+    const at = storage.modified?.(name) ?? null;
+    if (at !== null) times.push([name, at]);
+  }
+  return Object.fromEntries(times);
 }
 
 export async function loadRecords(args: {
@@ -232,7 +255,8 @@ export async function loadRecords(args: {
     storage ? guarded(() => readManifest(chain, storage, examId)) : off,
     storage ? guarded(() => readLog(chain, storage, examId, registry, bucket, trustedRoot)) : off,
   ]);
-  return { chain, token, manifest, log, ...(storage && args.backup ? { backup: storage.use() } : {}) };
+  const stored = storage ? storedTimes(storage) : {};
+  return { chain, token, manifest, log, stored, ...(storage && args.backup ? { backup: storage.use() } : {}) };
 }
 
 export type LiveRead<T> = { ok: true; value: T } | { ok: false; message: string };
@@ -295,6 +319,15 @@ export interface ArkivLog {
   instancePublicKey: Hex;
   verdict: LogVerdict;
   progress: ReleaseProgress | null;
+  /** Who released and when, from this verified log. */
+  releases?: Release[];
+}
+
+/** The newest token row that passed the same check as `release-token.jwt` in storage. */
+export interface ArkivToken {
+  entityKey: Hex;
+  creator: Hex;
+  writtenAt: number;
 }
 
 /** The newest heartbeat from the writers. Only a sign of life: it is never evidence and never counts. */
@@ -324,6 +357,8 @@ export interface ArkivReport {
   read: { logs: number; tokens: number; heartbeats: number };
   /** Null until a log passes every check. */
   log: ArkivLog | null;
+  /** Null until a token attests a key a log names. */
+  token?: ArkivToken | null;
   ignored: ArkivIgnored;
   /** The newest heartbeat, or null with none. */
   heartbeat: ArkivHeartbeat | null;
@@ -383,6 +418,7 @@ export async function loadArkiv(args: {
   // A token binds its instance key only through a hash, so it is checked against each key a log names.
   const keys = [...new Set(parsed.flatMap(({ log }) => (log ? [log.instancePublicKey] : [])))];
   const attested = new Set<Hex>();
+  let passedToken: (typeof tokens)[number] | null = null;
   for (const row of tokens) {
     const token = utf8Text(row.body).trim();
     let passed = false;
@@ -399,6 +435,7 @@ export async function loadArkiv(args: {
       if (verdict?.verified) {
         attested.add(instancePublicKey);
         passed = true;
+        if (!passedToken || row.createdAtBlock > passedToken.createdAtBlock) passedToken = row;
         break;
       }
     }
@@ -439,6 +476,7 @@ export async function loadArkiv(args: {
               log.entries.map((entry) => entry.passkeyPublicKey),
             )
           : null,
+        releases: releasesOf(log),
       };
     }
   }
@@ -455,6 +493,7 @@ export async function loadArkiv(args: {
     writers,
     read: { logs: logs.length, tokens: tokens.length, heartbeats: heartbeats.length },
     log: best,
+    token: passedToken ? { entityKey: passedToken.entityKey, creator: passedToken.creator, writtenAt: writtenAt(passedToken.createdAtBlock) } : null,
     ignored,
     heartbeat: newestBeat
       ? {

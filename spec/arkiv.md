@@ -188,3 +188,5 @@ A reader uses a backup only when the bucket can't give it a file, or gives it on
 3. It reads the file it needs from the collection and checks it against its hash in the manifest. For unlock files, it applies the same checks it applies to the bucket's copies: the release log's signature, the token, and finally the decryption and the paper's salted hash. A file that fails is ignored, exactly as if the bucket had served it, and the reader tries the same file from the next backup row. A backup file that fails is never shown as a failure of the exam; only the bucket's own copies can fail a check.
 4. It says which files came from the Swarm backup. A backup that can't be read isn't treated as a failure of the exam, only as "not read".
 
+A reader may also read a backup just to show whether it holds a copy that passes, through the same checks as a copy in the bucket. What it finds is shown as that copy's own state and goes no further: it never decides a check, and it never replaces a file the bucket gave.
+
