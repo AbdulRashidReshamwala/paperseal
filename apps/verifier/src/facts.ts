@@ -257,6 +257,7 @@ function bucketLog(records: Records | null, stored: number | undefined): Copy {
 function bucketToken(records: Records | null, stored: number | undefined): Copy {
   const base = { source: 'bucket' as const, ...(stored === undefined ? {} : { at: stored }) };
   const log = records?.log;
+  if (log?.kind === 'unavailable') return { ...base, ...gap('unavailable', log.message) };
   if (log?.kind !== 'ready') return { ...base, state: 'missing', note: 'Checked with the record of releases, which is not here yet.' };
   if (!log.token) return { ...base, state: 'missing', note: 'Not in the bucket.' };
   return log.token.verified ? { ...base, state: 'checked', note: 'Google’s signature and every claim passed.' } : { ...base, state: 'failed', note: 'It does not attest the key that signed the record.' };
@@ -277,6 +278,7 @@ function manifestCopy(manifest: Records['manifest'] | undefined, source: 'bucket
 function bucketKeys(records: Records | null, stored: number | undefined): Copy {
   const base = { source: 'bucket' as const, ...(stored === undefined ? {} : { at: stored }) };
   const log = records?.log;
+  if (log?.kind === 'unavailable') return { ...base, ...gap('unavailable', log.message) };
   if (log?.kind !== 'ready' || !log.files) return { ...base, state: 'missing', note: 'Checked against a signed record of releases, which is not here yet.' };
   const { files } = log;
   if (files.pending) return { ...base, state: 'missing', note: 'Not written yet. They are written once enough key holders release.' };

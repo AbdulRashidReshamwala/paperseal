@@ -21,6 +21,7 @@ import {
 import { useLatestRound, useNow } from './live';
 import { OwnConnection } from './page';
 import { usePoll, type Polled } from './poll';
+import { readTransport } from './rpc';
 import { arkivWriters, useConnections } from './settings';
 
 const statusTones: Record<ExamStatus, Tone> = {
@@ -52,7 +53,7 @@ function ExamLink({ examId, name }: { examId: Hex; name: string | null }) {
 
 function Unread({ children, message }: { children: ReactNode; message: string }) {
   return (
-    <p className="vf-gap">
+    <div className="vf-gap">
       <Check status="not-checked">
         {children}
         <details>
@@ -60,7 +61,7 @@ function Unread({ children, message }: { children: ReactNode; message: string })
           {message}
         </details>
       </Check>
-    </p>
+    </div>
   );
 }
 
@@ -287,7 +288,7 @@ function useExamHistory(reads: number) {
   const loadHistory = useMemo(() => {
     if (!reader || !registry || writers.length === 0) return null;
     void reads;
-    return () => loadExamHistory({ reader, registry, writers, checkName: (name) => resolveExamName(name, { rpcUrl }) });
+    return () => loadExamHistory({ reader, registry, writers, checkName: (name) => resolveExamName(name, { transport: readTransport(rpcUrl) }) });
   }, [reader, registry, writers, rpcUrl, reads]);
   return usePoll(loadHistory, null);
 }

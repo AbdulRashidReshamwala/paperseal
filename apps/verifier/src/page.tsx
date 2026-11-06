@@ -15,22 +15,22 @@ import {
   type Step,
   useLoaded,
 } from '@paperseal/ui';
-import { approvedEntries, createBackupCache, createStorage, loadChain, type BackupSource, type ChainData } from '@paperseal/verify';
+import { approvedEntries, createBackupCache, createStorage, type BackupSource, type ChainData } from '@paperseal/verify';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { http } from 'viem';
 
 import { AgentCheck } from './agent-check';
 import { RecentExams } from './history-page';
-import { clockTime, custody, dayTime, REPOSITORY, type Custody, type CustodyStep, type Failure, type PartyName } from './custody';
+import { busyWords, clockTime, custody, dayTime, REPOSITORY, type Custody, type CustodyStep, type Failure, type PartyName } from './custody';
 import { Evidence } from './evidence';
 import { checkedCopies, copies, people, timeline, type Copies, type People } from './facts';
 import { readBoardName, readExamName, readVersion } from './identity';
 import { useExamLink, useShareAddress } from './link';
 import { useLatestRound, useNow } from './live';
-import { loadArkiv, loadLive, loadRecords, releaseRecorded, roundReached, signedKeyPriv, useProof, withinTime, type Records } from './load';
+import { chainReader, loadArkiv, loadLive, loadRecords, releaseRecorded, roundReached, signedKeyPriv, useProof, withinTime, type Records } from './load';
 import { eachLimited } from './history';
 import { READ_TIMEOUT_MS, usePoll, type Polled } from './poll';
+import { readTransport, sourceBusy } from './rpc';
 import { CopiesSection, Glance, IdentitySection, PeopleSection, TimelineSection } from './sections';
 import { loadSwarm } from './swarm';
 import {
@@ -68,7 +68,7 @@ function useExamName(name: string | null, rpcUrl: string, everyMs: number): Poll
   const load = useMemo(() => {
     if (name === null || !rpcUrl) return null;
     return async () => {
-      const result = await resolveExamName(name, { rpcUrl });
+      const result = await resolveExamName(name, { transport: readTransport(rpcUrl) });
       if (!result.ok && result.failed === 'unreadable') throw new Error(result.reason);
       return result;
     };
@@ -93,9 +93,9 @@ function usePartyNames(entries: Hex | null, postedBlock: bigint | null, rpcUrl: 
     });
     if (named.length === 0 || !rpcUrl || postedBlock === null) return null;
     const readName = async (name: string, key: Hex): Promise<PartyName> => {
-      const then = await checkPasskeyName(name, key, { rpcUrl, atBlock: postedBlock });
+      const then = await checkPasskeyName(name, key, { transport: readTransport(rpcUrl), atBlock: postedBlock });
       if (then.state !== 'confirmed') return then;
-      const today = await checkPasskeyName(name, key, { rpcUrl });
+      const today = await checkPasskeyName(name, key, { transport: readTransport(rpcUrl) });
       return today.state === 'mismatch' ? { ...then, changedSince: true } : then;
     };
     // A name that answered is kept for the visit. Only one the RPC could not answer is read again.
@@ -125,7 +125,7 @@ function useIdentity(args: {
   const { rpcUrl, board, examId, registry, known, reader, writers, commit, imageDigest } = args;
   const loadBoard = useMemo(() => {
     if (!rpcUrl || !board) return null;
-    const lookup = createEnsLookup({ transport: http(rpcUrl, { batch: true }) });
+    const lookup = createEnsLookup({ transport: readTransport(rpcUrl) });
     return () => readBoardName(board, lookup);
   }, [rpcUrl, board]);
   const loadName = useMemo(() => {
@@ -145,7 +145,7 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
   const { drand, settings, examId: savedExam, arkiv } = connections;
   const link = useExamLink();
   useShareAddress(link);
-  const name = useExamName(link.kind === 'name' ? link.name : null, settings.rpcUrl, pollMs.records);
+  const name = useExamName(link.kind === 'name' ? link.name : null, settings.rpcUrl, SLOW_POLL_MS);
   const resolved = name?.state === 'ready' && name.value.ok ? name.value.value : null;
 
   // On a name route the name supplies the registry and exam, and any TEE, storage and bucket it
@@ -207,8 +207,8 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
   }, [arkivReader, swarmApiUrl, registry, examId, writers]);
 
   const loadRecordsNow = useMemo(() => {
-    const chain = loadChain(registry, examId);
-    if (!chain || !registry || !examId) return null;
+    if (!registry || !examId) return null;
+    const chain = chainReader(registry, examId);
     return () => loadRecords({ chain, storage, examId, registry: registry.address as Hex, bucket, backup });
   }, [registry, examId, storage, bucket, backup]);
   const records = usePoll(loadRecordsNow, recordsEvery);
@@ -498,7 +498,9 @@ function Freshness({ records, zone }: { records: Polled<Records>; zone: string }
   const time = new Intl.DateTimeFormat('en-GB', { timeStyle: 'medium' }).format(records.readAt);
   return (
     <p className="vf-fresh">
-      {records.stale
+      {records.stale && sourceBusy(records.stale)
+        ? `The source of the public record is busy, so this shows what it said at ${time}. This page is retrying. Times are in ${zone}.`
+        : records.stale
         ? `The public record could not be read again, so this shows what it said at ${time}. This page keeps trying. Times are in ${zone}.`
         : `Last read at ${time}. Times are in ${zone}.`}
     </p>
@@ -698,22 +700,22 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
         />
         <Glance items={recordedExam ? glanceOf(boardLabel, found, held) : []} />
         {view.records.state === 'error' ? (
-          <p className="vf-gap">
+          <div className="vf-gap">
             <Check status="not-checked">
-              The public record could not be read. This page keeps trying.
+              {sourceBusy(view.records.message) ? busyWords : 'The public record could not be read. This page keeps trying.'}
               <details>
                 <summary>Details</summary>
                 {view.records.message}
               </details>
             </Check>
-          </p>
+          </div>
         ) : null}
         {view.latest.error && view.latest.round === null ? (
-          <p className="vf-gap">
+          <div className="vf-gap">
             <Check status="not-checked">
               The public clock could not be reached, so times come from this device&apos;s clock. Nothing opens early because of this.
             </Check>
-          </p>
+          </div>
         ) : null}
         {chosen ? (
           <Stepper steps={result.steps.map((step) => toStep(step, view.now))} evidenceLabel="Show the evidence" />

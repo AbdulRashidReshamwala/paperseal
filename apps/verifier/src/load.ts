@@ -1,7 +1,9 @@
+import type { ExamRegistry } from '@paperseal/chain';
 import type { ChainClient } from '@paperseal/crypto';
 import type { Hex } from '@paperseal/protocol';
 import {
   loadArkiv as verifyArkiv,
+  loadChain,
   loadLive as verifyLive,
   loadRecords as verifyRecords,
   roundReached,
@@ -18,6 +20,7 @@ import { useEffect, useRef, useState } from 'react';
 
 import type { LatestRound } from './live';
 import { rootOption } from './mockMode';
+import { keepAnswers } from './poll';
 
 export {
   ARKIV_BLOCK_SECONDS,
@@ -55,6 +58,30 @@ export {
 export const loadRecords = (args: Parameters<typeof verifyRecords>[0]) => verifyRecords({ ...rootOption(), ...args });
 export const loadLive = (args: Parameters<typeof verifyLive>[0]) => verifyLive({ ...rootOption(), ...args });
 export const loadArkiv = (args: Parameters<typeof verifyArkiv>[0]) => verifyArkiv({ ...rootOption(), ...args });
+
+/**
+ * Reads an exam's records from the chain, so that a read that failed part of the way asks again only
+ * for what got no answer. Each new read after a whole one asks for everything.
+ */
+export function chainReader(registry: ExamRegistry, examId: Hex): () => Promise<ChainData> {
+  const answers = keepAnswers();
+  const reading: ExamRegistry = {
+    ...registry,
+    code: () => answers.read('code', registry.code),
+    getExam: (id) => answers.read('exam', () => registry.getExam(id)),
+    getApprovedList: (id) => answers.read('list', () => registry.getApprovedList(id)),
+    getBuild: (id) => answers.read('build', () => registry.getBuild(id)),
+    getCriteria: (id) => answers.read('criteria', () => registry.getCriteria(id)),
+    getApprovedListEntries: (id) => answers.read('entries', () => registry.getApprovedListEntries(id)),
+  };
+  const read = loadChain(reading, examId);
+  if (!read) throw new Error('The exam ID is missing.');
+  return async () => {
+    const chain = await read();
+    answers.forget();
+    return chain;
+  };
+}
 
 /** How long to wait before trying again a proof that did not open the paper. */
 export const PROOF_RETRY_MS = 60_000;

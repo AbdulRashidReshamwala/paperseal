@@ -7,6 +7,7 @@ import { createStorage } from '@paperseal/verify';
 import { createContext, use, useMemo, useState, type ReactNode } from 'react';
 import { getAddress, isAddress } from 'viem';
 
+import { readTransport } from './rpc';
 import { resolveDefaults } from './runtime-config';
 
 /** Who this viewer trusts. Stored in their browser, so the board can't choose for them. */
@@ -198,7 +199,7 @@ export function endpoints(settings: Pick<Settings, 'rpcUrl' | 'teeUrl' | 'storag
     tee: teeUrl ? createTeeClient({ baseUrl: teeUrl }) : null,
     registry:
       rpcUrl && registryAddress
-        ? createExamRegistry({ rpcUrl, address: registryAddress as Hex, ccipRead: false })
+        ? createExamRegistry({ transport: readTransport(rpcUrl), address: registryAddress as Hex, ccipRead: false })
         : null,
     examId: examId ? (examId as Hex) : null,
   };

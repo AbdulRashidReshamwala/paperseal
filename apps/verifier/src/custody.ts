@@ -56,6 +56,7 @@ import {
   type Sourced,
 } from './load';
 import type { Polled } from './poll';
+import { sourceBusy } from './rpc';
 import { runtimeConfig, viteEnv, type ViteEnv } from './runtime-config';
 import type { SourcedWriter, WriterOrigin } from './settings';
 import { defaultRepository, repositoryPattern } from './repository';
@@ -268,6 +269,19 @@ function verdict(label: Label, result: CheckResult | boolean, words: { failure: 
   return { kind: 'check', label, status: 'not-checked', detail: words.absent ?? 'Not posted', ...hash };
 }
 
+/** What the page says while the source of the public record is limiting requests. It says nothing about the exam. */
+export const busyWords = 'The source of the public record is busy. This page is retrying.';
+
+/**
+ * What a step says while the public record has given no answer, or null once it has. Only an answer
+ * from the chain can show that something did not happen, so a failed read never says it did not.
+ */
+export function recordGap(records: View['records']): string | null {
+  if (records.state === 'ready') return null;
+  if (records.state === 'error') return sourceBusy(records.message) ? busyWords : 'Could not read this yet. This page keeps trying.';
+  return records.state === 'loading' ? 'Reading the public record.' : 'Not read yet.';
+}
+
 /** A check that has not run, with the reason in words. */
 const notChecked = (label: Label, detail: string): Item => ({ kind: 'check', label, status: 'not-checked', detail });
 
@@ -369,6 +383,8 @@ interface Draft {
 
 interface Context {
   view: View;
+  /** Set until the chain has answered. See `recordGap`. */
+  gap: string | null;
   chain: ChainData | null;
   exam: Exam | null;
   build: Build | null;
@@ -491,7 +507,7 @@ function nameStep(named: NameView): Draft {
   const unreadable = (message: string): Draft => ({
     ...base,
     aside: sepoliaName,
-    note: `${nameTitles.unreadable}. This page will try again.`,
+    note: sourceBusy(message) ? busyWords : `${nameTitles.unreadable}. This page will try again.`,
     items: [notChecked(nameTitles.unreadable, message)],
   });
   const { result } = named;
@@ -605,14 +621,14 @@ function publishedStep(c: Context): Draft {
       ? 'This page is not reading a Paper Seal exam record.'
       : exam
         ? "The exam's rules and the exact version of the sealed machine's code are on the public record."
-        : 'The exam board has not published this exam.',
+        : (c.gap ?? 'The exam board has not published this exam.'),
     items: [
       ...registryCodeItems(c),
       ...(exam
         ? [{ kind: 'check' as const, label: 'Exam published', status: 'pass' as const, detail: 'Published' }, boundsItem(exam), ...settingsItems(exam, c.view.examId)]
         : wrongAddress
           ? []
-          : [notChecked('Exam published', 'Not published')]),
+          : [notChecked('Exam published', c.gap ?? 'Not published')]),
     ],
   };
 }
@@ -727,7 +743,7 @@ function attestedStep(c: Context): Draft {
     ? 'A proof signed by Google says Paper Seal runs the published code.'
     : build
       ? 'The lasting proof has not been checked yet.'
-      : 'Not recorded yet. The proof is published together with the paper.';
+      : (c.gap ?? 'Not recorded yet. The proof is published together with the paper.');
   const at = published?.issuedAt ?? null;
   return {
     id: 'attested',
@@ -885,8 +901,8 @@ function peopleStep(c: Context): Draft {
     return {
       ...base,
       complete: false,
-      note: 'The exam board has not yet published the list of approved people.',
-      items: [notChecked('Approved list', 'Not posted')],
+      note: c.gap ?? 'The exam board has not yet published the list of approved people.',
+      items: [notChecked('Approved list', c.gap ?? 'Not posted')],
     };
   }
   const bytes = fromHex(chain.entries);
@@ -915,7 +931,7 @@ function peopleStep(c: Context): Draft {
 
 function criteriaItems(c: Context): { items: Item[]; ok: boolean } {
   const { exam, chain, checks } = c;
-  if (!exam) return { items: [notChecked('Criteria', 'Not published')], ok: false };
+  if (!exam) return { items: [notChecked('Criteria', c.gap ?? 'Not published')], ok: false };
   const problem = chain?.problems?.criteria;
   if (problem) return { items: [problemRow('Criteria', problem)], ok: false };
   if (!chain?.criteria) return { items: [notChecked('Criteria', 'Not published')], ok: false };
@@ -963,7 +979,7 @@ function lockedStep(c: Context): Draft {
       ? `${plural(Number(build.selected), 'question')} chosen from a question bank of ${String(build.bankSize)}.`
       : 'A paper is recorded, but its files can’t be checked yet, so the number of questions chosen is not confirmed.'
     : !exam || lockAt === null
-      ? 'Waiting for the exam board to publish the exam.'
+      ? (c.gap ?? 'Waiting for the exam board to publish the exam.')
       : c.lockReached
         ? 'Questions have closed. The paper is published next.'
         : `Setters can send questions until ${c.when(lockAt)}.`;
@@ -978,7 +994,7 @@ function lockedStep(c: Context): Draft {
       ...items,
       build
         ? { kind: 'fact', label: 'Selected from question bank', value: `${String(build.selected)} of ${String(build.bankSize)}` }
-        : notChecked('Selected from question bank', 'No Build yet'),
+        : notChecked('Selected from question bank', c.gap ?? 'No Build yet'),
       ...(exam ? [roundRow('Questions close', exam.settings.lockRound, c)] : []),
       ...(build ? [] : machineFailed(c)),
     ],
@@ -1089,14 +1105,14 @@ function sealedStep(c: Context): Draft {
     at,
     round: roundOf(at),
     note: !build
-      ? 'Paper Seal builds the paper after questions close. No person sees it.'
+      ? (c.gap ?? 'Paper Seal builds the paper after questions close. No person sees it.')
       : complete
         ? 'The paper is built and sealed. Its files match the public record.'
         : 'The paper is recorded. Its files and signature are not all checked yet.',
     items: [
       build
         ? { kind: 'check', label: 'Build', status: 'pass', detail: 'Exists' }
-        : notChecked('Build', 'No Build yet'),
+        : notChecked('Build', c.gap ?? 'No Build yet'),
       ...(build
         ? ([
             { kind: 'hash', label: 'Paper fingerprint, paperHash', value: build.paperHash },
@@ -1471,7 +1487,7 @@ function unlockStep(c: Context, sealedOff: boolean): Draft {
       : sealedOff
         ? 'The paper was never unlocked.'
         : !exam || unlockAt === null
-          ? 'Waiting for the exam board to publish the exam.'
+          ? (c.gap ?? 'Waiting for the exam board to publish the exam.')
           : c.unlockReached
             ? `Unlocked. ${releaseLine(c, logs.verified, logs.said)}`
             : `Opens to centres at ${c.when(unlockAt)}. Nothing can open it sooner.`;
@@ -1567,7 +1583,12 @@ function openStep(c: Context): Draft {
   const endAt = endRound === null ? null : roundTimeSeconds(endRound);
   const base = { id: 'open' as const, label: 'Paper opens to everyone', at: endAt, round: endRound };
   if (!exam || endRound === null || endAt === null) {
-    return { ...base, complete: false, note: 'Waiting for the exam board to publish the exam.', items: [notChecked('Proof', 'The exam is not on the public record yet.')] };
+    return {
+      ...base,
+      complete: false,
+      note: c.gap ?? 'Waiting for the exam board to publish the exam.',
+      items: [notChecked('Proof', c.gap ?? 'The exam is not on the public record yet.')],
+    };
   }
   if (!c.endReached) {
     return {
@@ -1664,6 +1685,8 @@ function sealOf(c: Context, steps: readonly CustodyStep[]): SealState | null {
   return c.unlockReached ? 'opening' : 'sealed';
 }
 
+const busyHeadline = 'The source of the public record is busy.';
+
 interface Words {
   headline: string;
   next: string;
@@ -1677,7 +1700,8 @@ function noExamWords(view: View): Words | null {
     if (result.state === 'off') return { headline: 'This page cannot read the public record yet.', next: 'Add where to read it under "Check it yourself" below. Nothing has been checked yet.' };
     if (result.state === 'loading') return { headline: 'Checking the exam name.', next: 'This takes a few seconds. Keep this page open.' };
     if (result.state === 'error' || (!result.value.ok && result.value.failed === 'unreadable')) {
-      return { headline: 'The exam name could not be read.', next: again };
+      const message = result.state === 'error' ? result.message : result.value.ok ? '' : result.value.reason;
+      return { headline: sourceBusy(message) ? busyHeadline : 'The exam name could not be read.', next: again };
     }
     if (!result.value.ok) return { headline: 'This name does not lead to a verified exam.', next: 'Ask your exam board for the right name. Nothing after the name has been checked.' };
   }
@@ -1685,7 +1709,7 @@ function noExamWords(view: View): Words | null {
   if (!view.examId) return { headline: 'Choose an exam to check.', next: 'Enter the exam ID below, or open the link your exam board shared.' };
   if (!view.sources.chain) return { headline: 'This page cannot read the public record yet.', next: 'Add where to read it under "Check it yourself" below. Nothing has been checked yet.' };
   if (view.records.state === 'loading') return { headline: 'Reading the public record.', next: 'This takes a few seconds. Keep this page open.' };
-  if (view.records.state === 'error') return { headline: 'The public record could not be read.', next: again };
+  if (view.records.state === 'error') return { headline: sourceBusy(view.records.message) ? busyHeadline : 'The public record could not be read.', next: again };
   return null;
 }
 
@@ -1707,6 +1731,9 @@ function examWords(c: Context, steps: readonly CustodyStep[], seal: SealState | 
   }
   if (c.endReached) {
     if (!build) return { headline: 'The exam ended and no paper was published.', next: 'Nothing more is needed. Contact your exam board if you expected a paper.' };
+    if (proofState === 'sealed' && c.records?.log.kind === 'unavailable') {
+      return { headline: 'The exam is over. Its record of releases could not be read yet.', next: 'This page keeps trying.' };
+    }
     if (proofState === 'sealed') return { headline: 'The paper stays sealed. It was never unlocked.', next: 'Nobody can open this paper now. Contact your exam board if you expected it to open.' };
     if (proofState === 'failed') return { headline: 'The paper could not be opened.', next: 'Contact your exam board and tell them which check failed.' };
     return { headline: 'The exam is over. The paper is opening.', next: 'The public clock has opened the paper. This page is checking it now.' };
@@ -1760,6 +1787,7 @@ export function custody(given: View): Custody {
 
   const c: Context = {
     view,
+    gap: recordGap(view.records),
     chain,
     exam,
     build,
@@ -1776,7 +1804,8 @@ export function custody(given: View): Custody {
   const proof = view.proof?.ok === true ? view.proof.result : null;
   const logReady = records?.log.kind === 'ready';
   // Nothing in storage at the end round: no copy of the key exists, so the unlock never happened.
-  const unlockOff = proof?.state === 'sealed' && !logReady;
+  // A log that could not be read says nothing about that.
+  const unlockOff = proof?.state === 'sealed' && !logReady && records?.log.kind !== 'unavailable';
   const examSteps = [
     publishedStep(c),
     attestedStep(c),
@@ -1798,7 +1827,7 @@ export function custody(given: View): Custody {
     warnings: [...(given.name && differentRegistry(given.name) ? [otherRegistry] : []), ...(buildWarning(c) ? [buildWarning(c) as string] : []), ...(notEnsNameWarning(chain) ? [notEnsNameWarning(chain) as string] : [])],
     seal,
     testNetwork: testNetworkNote(seal),
-    noSeal: build ? 'Not confirmed yet' : 'Not sealed yet',
+    noSeal: c.gap ? 'Not read yet' : build ? 'Not confirmed yet' : 'Not sealed yet',
     headline: words.headline,
     verdict: verdictLine(c, steps, failures),
     next: failures.length > 0 ? 'Contact your exam board and tell them which check failed. This page keeps checking by itself.' : words.next,

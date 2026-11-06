@@ -183,6 +183,16 @@ describe('the other copies', () => {
     expect(copyIn(copies(viewOf({ arkiv: { state: 'error', message: '429' } }), none), 'log', 'arkiv').state).toBe('unread');
   });
 
+  it('does not call a record of releases absent when it could not be read', () => {
+    const view = viewOf();
+    if (view.records.state !== 'ready') throw new Error('no records');
+    const log = { kind: 'unavailable', message: 'Storage returned 503' } as const;
+    const found = copies({ ...view, records: { ...view.records, value: { ...view.records.value, log } } }, none);
+    expect(copyIn(found, 'token', 'bucket').state).toBe('unread');
+    expect(copyIn(found, 'keys', 'bucket').state).toBe('unread');
+    expect(copyIn(found, 'keys', 'bucket').note).not.toMatch(/not here yet/);
+  });
+
   it('gives the time the bucket says it wrote a file', () => {
     expect(copyIn(copies(viewOf(), none), 'log', 'bucket').at).toBe(Date.parse('2026-11-06T18:05:46Z') / 1000);
   });

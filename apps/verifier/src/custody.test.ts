@@ -206,6 +206,57 @@ describe('the whole chain', () => {
   });
 });
 
+describe('a public record that gave no answer', () => {
+  const claims = /has not|Not published|Not posted|No Build yet|Not recorded yet|Not sealed yet|Waiting for the exam board|builds the paper after/;
+  const unread = (records: View['records']): Custody => custody({ ...sceneView(), records });
+
+  it('says each step could not be read yet, and claims nothing about it', () => {
+    const result = unread({ state: 'error', message: 'Failed to fetch' });
+    for (const id of ['published', 'attested', 'people', 'locked', 'sealed', 'unlock', 'open'] as const) {
+      expect(step(result, id).note).toBe('Could not read this yet. This page keeps trying.');
+    }
+    const words = result.steps.flatMap((one) => [one.note, ...one.items.map((item) => ('detail' in item ? (item.detail ?? '') : ''))]);
+    expect(words.filter((line) => claims.test(line))).toEqual([]);
+    expect(result.noSeal).toBe('Not read yet');
+  });
+
+  it('never passes or fails a check, and finishes no step', () => {
+    const result = unread({ state: 'error', message: 'Failed to fetch' });
+    expect(result.failures).toEqual([]);
+    expect(result.seal).toBe(null);
+    expect(result.steps.some((one) => one.state === 'done')).toBe(false);
+    const statuses = result.steps.flatMap((one) => checks(one).map((check) => check.status));
+    expect(statuses).not.toContain('pass');
+  });
+
+  it('says the source is busy when it is limiting requests, and nothing about the exam', () => {
+    const result = unread({ state: 'error', message: 'Request exceeds defined limit.' });
+    expect(result.headline).toBe('The source of the public record is busy.');
+    expect(step(result, 'published').note).toBe('The source of the public record is busy. This page is retrying.');
+    expect(checks(step(result, 'published')).find((check) => check.label === 'Exam published')).toMatchObject({ status: 'not-checked', detail: 'The source of the public record is busy. This page is retrying.' });
+  });
+
+  it('says it is reading while the first read is under way', () => {
+    const result = unread({ state: 'loading' });
+    expect(step(result, 'published').note).toBe('Reading the public record.');
+    expect(step(result, 'people').note).toBe('Reading the public record.');
+  });
+
+  it('says not published only when the chain answered that way', () => {
+    const result = scene({ chain: { exam: null, list: null, build: null, criteria: null, entries: null } });
+    expect(step(result, 'published').note).toBe('The exam board has not published this exam.');
+    expect(checks(step(result, 'published')).find((check) => check.label === 'Exam published')).toMatchObject({ detail: 'Not published' });
+    expect(step(result, 'people').note).toBe('The exam board has not yet published the list of approved people.');
+    expect(result.noSeal).toBe('Not sealed yet');
+  });
+
+  it('does not say the paper was never unlocked when the release log could not be read', () => {
+    const result = scene({ round: END, records: { log: { kind: 'unavailable', message: 'Storage returned 503' } }, proof: { ok: true, result: { state: 'sealed' } } });
+    expect(step(result, 'unlock').note).not.toMatch(/never unlocked/);
+    expect(result.headline).toBe('The exam is over. Its record of releases could not be read yet.');
+  });
+});
+
 describe('the test network note', () => {
   it('names the network from the spec and says partial, not verified', () => {
     expect(chainSpec.name).toBe('sepolia');
