@@ -151,16 +151,17 @@ describe('KeyTouch', () => {
     expect(render('idle', { purpose: 'to open the paper' })).toContain('Use your security key to open the paper');
   });
 
-  it('shows the DevTools hint only when no key answered', () => {
-    expect(VIRTUAL_KEY_HINT).toContain('DevTools → WebAuthn');
-    const hint = 'DevTools → WebAuthn';
+  it('shows the pnpm demo hint only when no key answered', () => {
+    expect(VIRTUAL_KEY_HINT).toContain('pnpm demo');
+    expect(VIRTUAL_KEY_HINT).not.toContain('DevTools');
+    const hint = 'pnpm demo';
     expect(render('failed', { error: named('NotAllowedError') })).toContain(hint);
     expect(render('idle')).not.toContain(hint);
     expect(render('failed', { error: new Error('boom') })).not.toContain(hint);
   });
 
   it('hides the hint outside the demo', () => {
-    expect(render('failed', { error: named('NotAllowedError'), demo: false })).not.toContain('DevTools');
+    expect(render('failed', { error: named('NotAllowedError'), demo: false })).not.toContain('pnpm demo');
   });
 
   it('raises failure as an alert', () => {

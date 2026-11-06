@@ -48,8 +48,8 @@ const FAILURE: Record<KeyProblem, { title: string; body: string }> = {
   other: { title: 'Your security key didn’t work', body: 'Try again. If it keeps failing, contact your exam board.' },
 };
 
-/** The demo's security key is Chrome's virtual authenticator, which a page cannot turn on for itself. */
-export const VIRTUAL_KEY_HINT = 'Demo: turn on Chrome’s virtual security key in DevTools → WebAuthn, then try again.';
+/** The demo's security key is Chrome's virtual authenticator, which a page cannot turn on for itself. `pnpm demo` opens Chrome with one attached. */
+export const VIRTUAL_KEY_HINT = 'Demo: open this site in the Chrome window started by `pnpm demo`, which has a security key built in, then try again.';
 
 /**
  * The prompt for touching a security key. Run the WebAuthn call from `onUse` and move `state`

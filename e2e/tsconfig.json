@@ -7,5 +7,5 @@
       "@paperseal/tee-client": ["../packages/tee-client/src/index.ts"]
     }
   },
-  "include": ["src", "tests", "keys-page", "live", "vitest.config.ts"]
+  "include": ["src", "tests", "keys-page", "live", "demo", "vitest.config.ts"]
 }

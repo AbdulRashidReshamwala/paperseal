@@ -70,14 +70,14 @@ describe('KeyTouch', () => {
     vi.stubGlobal('navigator', { credentials: {} });
     render(<KeyTouch state="failed" onUse={vi.fn()} error={new DOMException('no', 'NotAllowedError')} />);
     expect(screen.getByRole('alert').textContent).toContain('No security key answered');
-    expect(screen.getByRole('alert').textContent).toContain('DevTools → WebAuthn');
+    expect(screen.getByRole('alert').textContent).toContain('pnpm demo');
   });
 
   it('gives different guidance when the browser has no credentials API', () => {
     vi.stubGlobal('navigator', {});
     render(<KeyTouch state="failed" onUse={vi.fn()} error={new DOMException('no', 'NotAllowedError')} />);
     expect(screen.getByRole('alert').textContent).toContain('can’t reach a security key');
-    expect(screen.getByRole('alert').textContent).not.toContain('DevTools');
+    expect(screen.getByRole('alert').textContent).not.toContain('pnpm demo');
   });
 
   it('lets a screen explain the failure itself', () => {

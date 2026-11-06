@@ -6,7 +6,9 @@
   "description": "Recorded end-to-end runs against the real apps, contract and test suites. No test script on purpose: `pnpm test` at the root must not start browsers.",
   "scripts": {
     "record": "node scripts/record.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "demo": "node demo/cli.mjs main",
+    "demo:check": "node demo/cli.mjs check"
   },
   "dependencies": {
     "@paperseal/crypto": "workspace:*",
