@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createBackupCache, withBackup, type BackupRowSource, type BackupSource } from './backup';
 import type { ChainData } from './checks';
-import { buildWorld, examId, registryAddress, type World } from './fixtures';
+import { buildWorld, examId, registryAddress, storageBucket, type World } from './fixtures';
 import { loadRecords } from './load';
 import { runProof } from './proof';
 
@@ -264,6 +264,7 @@ describe('unlock files from the Swarm backup', () => {
         storage: world.storage(lost),
         examId,
         registry: registryAddress,
+        bucket: storageBucket,
         backup: source([row(world, 2), row(world, 1)], swarm),
         trustedRoot: world.pki.root,
       });
@@ -289,6 +290,7 @@ describe('unlock files from the Swarm backup', () => {
       storage: world.storage({ 'release-log.json': null }),
       examId,
       registry: registryAddress,
+      bucket: storageBucket,
       backup: source([row(world, 2), row(world, 1)], swarm),
       trustedRoot: world.pki.root,
     });
@@ -306,6 +308,7 @@ describe('unlock files from the Swarm backup', () => {
         storage: world.storage(bucket),
         examId,
         registry: registryAddress,
+        bucket: storageBucket,
         backup: source([row(world, 2), row(world, 1)], swarmWith(collections)),
         trustedRoot: world.pki.root,
       });

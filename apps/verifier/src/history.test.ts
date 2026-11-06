@@ -2,9 +2,9 @@ import type { ExamRow, ParticipantRow } from '@paperseal/arkiv';
 import { OnChainBytesError, type ExamNameResult, type ResolvedExamName } from '@paperseal/chain';
 import { encodeApprovedList, roundTimeSeconds, toHex, type ApprovedListEntry, type Hex } from '@paperseal/protocol';
 import { sha256, type Address } from 'viem';
-import { describe, expect, it, vi, type Mock } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
-import { approvedList, registryAddress } from './fixtures';
+import { approvedList, registryAddress } from '@paperseal/verify/fixtures';
 import { examStatus, findParticipant, isAbandoned, loadExamHistory, roleWords, type HistoryReader, type HistoryRegistry } from './history';
 
 /*
@@ -321,5 +321,80 @@ describe('isAbandoned', () => {
     expect(isAbandoned({ examStart: 100n, built: true }, 500)).toBe(false);
     expect(isAbandoned({ examStart: 100n, built: null }, 500)).toBe(false);
     expect(isAbandoned({ examStart: null, built: false }, 500)).toBe(false);
+  });
+});
+
+describe('a slow or limiting source', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const never = <T,>() => new Promise<T>(() => undefined);
+  const load = (reader: HistoryReader, registry: HistoryRegistry) =>
+    loadExamHistory({ reader, registry, writers: [writer], checkName: () => Promise.reject(new Error('unused')) });
+
+  it('tries Arkiv again with a pause, and the first answer that comes back is shown', async () => {
+    const reader = readerOf([examRow(1)]);
+    reader.examRows.mockRejectedValueOnce(new Error('HTTP 429')).mockRejectedValueOnce(new Error('HTTP 429'));
+    const read = load(reader, registryOf({ [idOf(1)]: onChain(1) }));
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(reader.examRows).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(reader.examRows).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(4000);
+    expect((await read).exams.map((exam) => exam.examId)).toEqual([idOf(1)]);
+    expect(reader.examRows).toHaveBeenCalledTimes(3);
+  });
+
+  it('fails after the deadline when Arkiv never answers, and not before', async () => {
+    const reader = readerOf([]);
+    reader.examRows.mockImplementation(() => never());
+    let failure: unknown = null;
+    void load(reader, registryOf({})).catch((error: unknown) => {
+      failure = error;
+    });
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(failure).toBeNull();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect((failure as Error).message).toBe('Arkiv took too long to answer.');
+    expect(reader.examRows).toHaveBeenCalledTimes(3);
+  });
+
+  it('gives up on a person search the same way', async () => {
+    const reader = readerOf([]);
+    reader.participantRows.mockRejectedValue(new Error('HTTP 429'));
+    const read = findParticipant({ reader, registry: registryOf({}), writers: [writer], owner: 'someone.eth' });
+    const failed = expect(read).rejects.toThrow('HTTP 429');
+    await vi.advanceTimersByTimeAsync(30_000);
+    await failed;
+    expect(reader.participantRows).toHaveBeenCalledTimes(3);
+  });
+
+  it('shows an exam whose registry read never answers as not read, and the others as usual', async () => {
+    const registry = registryOf({ [idOf(1)]: onChain(1), [idOf(2)]: onChain(2) });
+    const answer = registry.getExam.getMockImplementation();
+    registry.getExam.mockImplementation((examId) => (examId === idOf(2) ? never() : (answer?.(examId) as ReturnType<HistoryRegistry['getExam']>)));
+    const read = load(readerOf([examRow(1), examRow(2)]), registry);
+    await vi.advanceTimersByTimeAsync(30_000);
+    const { exams, unread } = await read;
+    expect(exams.map((exam) => exam.examId)).toEqual([idOf(1)]);
+    expect(unread).toEqual([{ examId: idOf(2), reason: 'The public record took too long to answer.' }]);
+  });
+
+  it('shows the exams with their copies not read when that read never answers', async () => {
+    const reader = { ...readerOf([examRow(1)]), copyRows: vi.fn(() => never<{ logs: []; backups: [] }>()) };
+    const read = load(reader, registryOf({ [idOf(1)]: onChain(1) }));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect((await read).exams[0]?.copies).toBeNull();
+    expect(reader.copyRows).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips the read of copies when there are no exams', async () => {
+    const reader = { ...readerOf([]), copyRows: vi.fn(() => Promise.resolve({ logs: [], backups: [] })) };
+    await load(reader, registryOf({}));
+    expect(reader.copyRows).not.toHaveBeenCalled();
   });
 });

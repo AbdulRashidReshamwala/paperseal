@@ -7,9 +7,9 @@ import { getAddress } from 'viem';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from './App';
-import { teeStorageBucket } from './attest';
+import { teeStorageBucket } from './env';
 import { VerifierPage } from './page';
-import { buildWorld, examId, offlineQuicknet, registryAddress, registryMatches, signedReleaseLog, type World } from './fixtures';
+import { buildWorld, examId, offlineQuicknet, registryAddress, registryMatches, signedReleaseLog, type World } from '@paperseal/verify/fixtures';
 import type { ArkivSource } from './load';
 import { SettingsProvider, type Settings } from './settings';
 
@@ -18,8 +18,9 @@ let chainData: unknown;
 let chainReads: { registry: string; examId: unknown }[] = [];
 
 // The chain is the one thing these tests stub whole: everything read from it is built with real encodings.
-vi.mock('./checks', async (original) => ({
-  ...(await original<typeof import('./checks')>()),
+// The checks live in @paperseal/verify. Mocking its source files reaches the package's own imports too.
+vi.mock('../../../packages/verify/src/checks', async (original) => ({
+  ...(await original<typeof import('../../../packages/verify/src/checks')>()),
   loadChain: (registry: { address: string } | null, id: unknown) => {
     if (!registry || !id) return null;
     chainReads.push({ registry: registry.address, examId: id });
@@ -73,10 +74,12 @@ let buckets: (string | undefined)[] = [];
 
 /** Whether `release-token.jwt` counts as verified. The test PKI does not lead to Google's root, so by default it does not. */
 let tokenVerified = false;
+/** Whether `token.jwt` counts as verified too, as on a healthy exam. By default it fails, for the same reason. */
+let publishedVerified = false;
 /** What a fresh attestation from the live TEE comes to. */
 let freshTrusted = false;
-vi.mock('./attest', async (original) => {
-  const real = await original<typeof import('./attest')>();
+vi.mock('../../../packages/verify/src/attest', async (original) => {
+  const real = await original<typeof import('../../../packages/verify/src/attest')>();
   return {
     ...real,
     checkFreshToken: (args: { bucket?: string }) => {
@@ -89,6 +92,10 @@ vi.mock('./attest', async (original) => {
         instancePublicKey: `0x04${'dd'.repeat(64)}`,
       });
     },
+    checkPublishedToken: (args: Parameters<typeof real.checkPublishedToken>[0]) =>
+      publishedVerified
+        ? Promise.resolve({ verified: true, signature: { ok: true }, claims: [], build: { ok: true } })
+        : real.checkPublishedToken(args),
     checkRecordToken: (args: Parameters<typeof real.checkRecordToken>[0]) => {
       buckets.push(args.bucket);
       return tokenVerified ? Promise.resolve({ verified: true, signature: { ok: true }, claims: [] }) : real.checkRecordToken(args);
@@ -158,6 +165,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   tokenVerified = false;
+  publishedVerified = false;
   freshTrusted = false;
   chainReads = [];
   nameAnswer = null;
@@ -274,7 +282,7 @@ describe('step evidence', () => {
   });
 
   it('step 2 still lists demo mode in its evidence, with nothing connected', () => {
-    open(1000, { rpcUrl: '', storageUrl: '', registryAddress: '', examId: '' });
+    open(1000, { rpcUrl: '', storageUrl: '', registryAddress: '' });
     expect(screen.getByText(/Demo mode/)).toBeTruthy();
   });
 
@@ -753,6 +761,8 @@ describe('step 7, proof', () => {
   it('opens the paper after the end round and shows each of the 7 checks as Pass', async () => {
     const world = await buildWorld();
     arrange(world);
+    tokenVerified = true;
+    publishedVerified = true;
     open(1000);
     expect(await screen.findByText('Differentiate x squared.', {}, { timeout: 5000 })).toBeTruthy();
     expect(screen.getByText('Integrate 2x.')).toBeTruthy();
@@ -765,7 +775,18 @@ describe('step 7, proof', () => {
     expect(within(step).getAllByText('Pass')).toHaveLength(7);
     expect(within(step).queryByText('Fail')).toBeNull();
     expect(stateOf(step)).toBe('done');
+    expect(screen.queryByRole('alert')).toBeNull();
     expect(document.querySelector('.ps-seal')?.getAttribute('data-state')).toBe('open');
+  });
+
+  it('breaks the seal when the paper opens but an earlier step failed', async () => {
+    const world = await buildWorld();
+    arrange(world);
+    tokenVerified = true;
+    open(1000);
+    expect(await screen.findByText('Differentiate x squared.', {}, { timeout: 5000 })).toBeTruthy();
+    expect(stateOf(stepNamed(/^2\. Paper Seal runs the published code$/))).toBe('failed');
+    expect(document.querySelector('.ps-seal')?.getAttribute('data-state')).toBe('broken');
   });
 
   it('withholds a paper that does not match the Build and fails loudly', async () => {

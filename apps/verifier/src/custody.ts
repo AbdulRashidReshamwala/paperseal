@@ -19,10 +19,26 @@ import {
   type Paper,
 } from '@paperseal/protocol';
 import type { CheckStatus, SealState, StepState, Tone } from '@paperseal/ui';
+import {
+  chainChecks,
+  computedListHash,
+  releaseTokenName,
+  sameHex,
+  type BackupFile,
+  type BackupUse,
+  type BucketGap,
+  type Build,
+  type ChainData,
+  type ChainProblem,
+  type CheckResult,
+  type Exam,
+  type LogVerdict,
+  type ProofChecks,
+  type ReleaseFileReport,
+  type ReleaseFilesReport,
+  type ReleaseProgress,
+} from '@paperseal/verify';
 
-import type { Build, Exam } from './attest';
-import type { BackupFile, BackupUse, BucketGap } from './backup';
-import { chainChecks, computedListHash, sameHex, type ChainData, type ChainProblem, type CheckResult } from './checks';
 import { roundStatus, type LatestRound } from './live';
 import {
   ARKIV_STALE_AFTER_SECONDS,
@@ -38,10 +54,10 @@ import {
   type Sourced,
 } from './load';
 import type { Polled } from './poll';
-import { releaseTokenName } from './storage';
-import type { ProofChecks } from './proof';
 import type { SourcedWriter, WriterOrigin } from './settings';
-import type { LogVerdict, ReleaseFileReport, ReleaseFilesReport, ReleaseProgress } from './unlock';
+import { defaultRepository, repositoryPattern } from './repository';
+
+export { defaultRepository };
 
 /*
  * Turns everything the checks found into the chain of custody. It decides what each step's state
@@ -52,9 +68,6 @@ import type { LogVerdict, ReleaseFileReport, ReleaseFilesReport, ReleaseProgress
  * its step and reaches the top of the page, and a step can only be done when `complete` says so.
  */
 
-export const defaultRepository = 'AbdulRashidReshamwala/paperseal';
-
-const repositoryPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 /**
  * The repository the code and build links point at: VITE_RELEASES_REPO, or the default. A fork
