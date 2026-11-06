@@ -15,6 +15,7 @@ import {
   BaseError,
   ContractFunctionRevertedError,
   createPublicClient,
+  encodeFunctionData,
   ExecutionRevertedError,
   http,
   getAddress,
@@ -23,17 +24,20 @@ import {
   isAddressEqual,
   isHex,
   offchainLookupSignature,
+  parseAbi,
   RpcError,
   RpcRequestError,
   SocketClosedError,
   TimeoutError,
+  toHex,
   WebSocketRequestError,
+  zeroAddress,
   type Address,
   type PublicClient,
   type Transport,
 } from 'viem';
 import { sepolia } from 'viem/chains';
-import { normalize } from 'viem/ens';
+import { normalize, packetToBytes } from 'viem/ens';
 
 import { isExamRegistryCode } from './code';
 import { createExamRegistry } from './registry';
@@ -96,6 +100,8 @@ export interface EnsLookup {
   code(address: Address): Promise<Hex | undefined>;
   /** `ExamRegistry.board()`. Reverts when `registry` is not an ExamRegistry. */
   board(registry: Address): Promise<Address>;
+  /** The resolver that holds records for `name` and the names under it, or null when there is none. */
+  resolver(name: string): Promise<Address | null>;
 }
 
 interface EnsOptions {
@@ -117,6 +123,10 @@ export function createEnsLookup(options: EnsOptions): EnsLookup {
     text: (name, key, blockNumber) => client.getEnsText({ name, key, ...(blockNumber === undefined ? {} : { blockNumber }) }),
     code: (address) => client.getCode({ address }),
     board: (registry) => createExamRegistry({ address: registry, transport, ccipRead: false }).board(),
+    resolver: async (name) => {
+      const resolver = await client.getEnsResolver({ name });
+      return isAddressEqual(resolver, zeroAddress) ? null : resolver;
+    },
   };
 }
 
@@ -333,6 +343,62 @@ export async function resolveExamName(
     if (error instanceof CheckFailure) return fail(error.check, error.message);
     return fail('unreadable', `The RPC failed before the name could be checked: ${messageOf(error)}`);
   }
+}
+
+/* -------------------------------------------------------------- Writing an exam's name */
+
+/** An ENS v2 PermissionedResolver: records are written by DNS-encoded name, and `multicall` keeps the sender. */
+export const examNameResolverAbi = parseAbi([
+  'function setAddress(bytes name, uint256 coinType, bytes value)',
+  'function setText(bytes name, string key, string value)',
+  'function multicall(bytes[] data) returns (bytes[] results)',
+]);
+
+const ethCoinType = 60n;
+
+/** What an exam's name holds, from "Exam Names" in spec/api.md. Only `registry` is required: a missing value is not written. */
+export interface ExamNameRecords {
+  registry: Address;
+  teeUrl?: string | null | undefined;
+  storageUrl?: string | null | undefined;
+  bucket?: string | null | undefined;
+  /** The writer addresses, separated by commas, as the record holds them. */
+  arkivWriters?: string | null | undefined;
+}
+
+/** The text records to write, by their key in `spec/ens.json`, leaving out any without a value. */
+function textRecords(records: ExamNameRecords): [string, string][] {
+  const texts: [string, string | null | undefined][] = [
+    [ens.records.tee, records.teeUrl],
+    [ens.records.storage, records.storageUrl],
+    [ens.records.bucket, records.bucket],
+    [ens.records.arkivWriters, records.arkivWriters],
+  ];
+  return texts.flatMap(([key, value]) => (value ? [[key, value]] : []));
+}
+
+/** One `setAddress` and a `setText` per value, in one `multicall`, so the board confirms once. */
+export function encodeExamNameRecords(name: string, records: ExamNameRecords): Hex {
+  const encoded = toHex(packetToBytes(name));
+  const calls = [
+    encodeFunctionData({ abi: examNameResolverAbi, functionName: 'setAddress', args: [encoded, ethCoinType, records.registry] }),
+    ...textRecords(records).map(([key, value]) =>
+      encodeFunctionData({ abi: examNameResolverAbi, functionName: 'setText', args: [encoded, key, value] }),
+    ),
+  ];
+  return encodeFunctionData({ abi: examNameResolverAbi, functionName: 'multicall', args: [calls] });
+}
+
+/** Whether a name that passed `resolveExamName` holds every value in `records`. Values not in `records` are not compared. */
+export function examNameHolds(resolved: ResolvedExamName, records: ExamNameRecords): boolean {
+  if (!isAddressEqual(resolved.registry, records.registry)) return false;
+  const writers = (list: Address[] | null) => [...(list ?? [])].sort().join();
+  return textRecords(records).every(([key, value]) => {
+    if (key === ens.records.tee) return resolved.teeUrl === value;
+    if (key === ens.records.storage) return resolved.storageUrl === value;
+    if (key === ens.records.bucket) return resolved.bucket === value;
+    return writers(resolved.arkivWriters) === writers(parseArkivWriters(value).arkivWriters);
+  });
 }
 
 /* -------------------------------------------------------------- Party names */

@@ -2,21 +2,27 @@ import {
   ContractFunctionExecutionError,
   ContractFunctionRevertedError,
   custom,
+  decodeFunctionData,
   encodeErrorResult,
   getAddress,
   HttpRequestError,
   parseAbi,
   RpcRequestError,
+  toHex,
   type Address,
   type Hex,
 } from 'viem';
 import { sepolia } from 'viem/chains';
+import { packetToBytes } from 'viem/ens';
 import { ens, registryCode as registryPin, passkeyRecordValue } from '@paperseal/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   checkPasskeyName,
   createEnsLookup,
+  encodeExamNameRecords,
+  examNameHolds,
+  examNameResolverAbi,
   examRegistryAbi,
   checkRegistryCode,
   examRegistryBoard,
@@ -61,6 +67,7 @@ function lookup(overrides: Partial<EnsLookup> = {}): EnsLookup {
     text: (n, key) => Promise.resolve(n === name ? (records[key] ?? null) : null),
     code: (a) => Promise.resolve(a === registry ? registryCode(board) : undefined),
     board: (r) => Promise.resolve(r === registry ? board : '0x0000000000000000000000000000000000000000'),
+    resolver: () => Promise.resolve('0x00000000000000000000000000000000000000d1'),
     ...overrides,
   };
 }
@@ -607,5 +614,56 @@ describe('readDirectory', () => {
     expect(
       await readDirectory('paperseal-demo.eth', { lookup: { text: () => Promise.reject(new HttpRequestError({ url: 'https://rpc.example.org', status: 503 })) } as unknown as EnsLookup }),
     ).toMatchObject({ state: 'unreadable' });
+  });
+});
+
+describe('writing an exam name', () => {
+  const values = {
+    registry,
+    teeUrl: 'https://tee.example.org',
+    storageUrl: 'https://storage.example.org',
+    bucket: 'exam-bucket',
+    arkivWriters: '0x00000000000000000000000000000000000000aa',
+  };
+
+  /** Each inner call of the multicall, decoded. */
+  const decoded = (data: Hex) => {
+    const outer = decodeFunctionData({ abi: examNameResolverAbi, data });
+    expect(outer.functionName).toBe('multicall');
+    return (outer.args as readonly [readonly Hex[]])[0].map((call) => decodeFunctionData({ abi: examNameResolverAbi, data: call }));
+  };
+
+  it('puts the address and every text record in one multicall, by DNS-encoded name', () => {
+    const calls = decoded(encodeExamNameRecords(name, values));
+    const dnsName = toHex(packetToBytes(name));
+    expect(calls.map((call) => [call.functionName, ...(call.args as readonly unknown[])])).toEqual([
+      ['setAddress', dnsName, 60n, registry.toLowerCase()],
+      ['setText', dnsName, ens.records.tee, values.teeUrl],
+      ['setText', dnsName, ens.records.storage, values.storageUrl],
+      ['setText', dnsName, ens.records.bucket, values.bucket],
+      ['setText', dnsName, ens.records.arkivWriters, values.arkivWriters],
+    ]);
+  });
+
+  it('leaves out a value this app does not have', () => {
+    const calls = decoded(encodeExamNameRecords(name, { registry, teeUrl: '', bucket: null }));
+    expect(calls.map((call) => call.functionName)).toEqual(['setAddress']);
+  });
+
+  it('says whether a resolved name holds what would be written', async () => {
+    const resolved = await resolveExamName(name, {
+      lookup: lookup({
+        text: (_n, key) =>
+          Promise.resolve(
+            { [ens.records.tee]: values.teeUrl, [ens.records.storage]: values.storageUrl, [ens.records.bucket]: values.bucket, [ens.records.arkivWriters]: values.arkivWriters.toLowerCase() }[key] ?? null,
+          ),
+      }),
+    });
+    if (!resolved.ok) throw new Error(resolved.reason);
+    expect(examNameHolds(resolved.value, values)).toBe(true);
+    expect(examNameHolds(resolved.value, { registry })).toBe(true);
+    expect(examNameHolds(resolved.value, { ...values, registry: '0x00000000000000000000000000000000000000cC' })).toBe(false);
+    expect(examNameHolds(resolved.value, { ...values, teeUrl: 'https://other.example.org' })).toBe(false);
+    expect(examNameHolds(resolved.value, { ...values, arkivWriters: '0x00000000000000000000000000000000000000bb' })).toBe(false);
   });
 });

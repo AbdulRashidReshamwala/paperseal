@@ -342,6 +342,8 @@ A board may give an exam an ENS name `<name>.<parent>`, where `parent` is the bo
 | `text` `ens.records.bucket` | The storage bucket the TEE was started with |
 | `text` `ens.records.arkivWriters` | The Arkiv writers the board publishes, as addresses separated by commas (`arkiv.md`, "Writers") |
 
+The board app writes these right after `createExam`, in one `multicall` from the board's wallet on the resolver of `parent`, and shows the name only once every check below passes. An exam needs no name, so a write that is declined or fails leaves the exam as it is, and the board can try again. See `docs/ens-setup.md`.
+
 A reader checks a name with the viewer's own RPC, on-chain only (`ens.ccipRead` is `false`, so no offchain gateway is asked), and fails unless all of these hold:
 
 1. The whole name is normalised, its first label is a valid exam name, and that label's `labelhash` is the `examId` used for every other check.
