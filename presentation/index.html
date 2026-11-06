@@ -1,6 +1,19 @@
 <!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Paper Seal</title><link rel="stylesheet" href="style.css?v=3"></head>
 <body>
 <svg width="0" height="0" style="position:absolute"><filter id="rough"><feTurbulence type="fractalNoise" baseFrequency=".035" numOctaves="3" seed="4" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="7"/></filter></svg>
+<svg width="0" height="0" style="position:absolute"><defs>
+<symbol id="user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></symbol>
+<symbol id="lock" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></symbol>
+<symbol id="clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></symbol>
+<symbol id="key" viewBox="0 0 24 24"><circle cx="8" cy="12" r="4"/><path d="M12 12h9M18 12v4M21 12v3"/></symbol>
+<symbol id="touch" viewBox="0 0 24 24"><path d="M9 11V5a1.6 1.6 0 0 1 3.2 0v5l4.3.9a2 2 0 0 1 1.5 2.4l-1 5.6a2 2 0 0 1-2 1.6H10a2 2 0 0 1-1.6-.8L5 14.5a1.6 1.6 0 0 1 2.5-2Z"/></symbol>
+<symbol id="paper" viewBox="0 0 24 24"><path d="M6 2.5h8l5 5v14H6Z"/><path d="M14 2.5v5h5M9 12h7M9 16h7"/></symbol>
+<symbol id="split" viewBox="0 0 24 24"><path d="M12 3v7M12 10 5 21M12 10l7 11"/></symbol>
+<symbol id="share" viewBox="0 0 24 24"><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="5.5" r="2.6"/><circle cx="18" cy="18.5" r="2.6"/><path d="m8.3 10.8 7.4-4M8.3 13.2l7.4 4"/></symbol>
+<symbol id="open" viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 7.6-1.7"/></symbol>
+<symbol id="dice" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="3"/><circle cx="8.5" cy="8.5" r=".8"/><circle cx="15.5" cy="8.5" r=".8"/><circle cx="12" cy="12" r=".8"/><circle cx="8.5" cy="15.5" r=".8"/><circle cx="15.5" cy="15.5" r=".8"/></symbol>
+<symbol id="play" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m10 8.5 5.5 3.5-5.5 3.5Z" fill="currentColor"/></symbol>
+</defs></svg>
 <main id="deck">
 
 <!-- 1 · NEET, cancelled -->
@@ -15,11 +28,15 @@
   <div class="side anim-sub"><div class="n">22 lakh</div><p>students sat the same exam twice.</p></div>
 </section>
 
-<!-- 2 · what it did to them -->
+<!-- 2 · in their own words -->
 <section class="slide desk-ink p2">
-  <div class="sheet card drop" style="--fx:-600px;--fy:-300px;--r0:-18deg;--r1:-3deg;--d:.1s;left:110px;top:130px"><div class="lab">THEY LOST</div><p class="t">hope in the system.</p></div>
-  <div class="sheet card drop" style="--fx:0px;--fy:-900px;--r0:10deg;--r1:1.5deg;--d:1.1s;left:690px;top:230px"><div class="lab">FELT</div><p class="t">cheated by what was meant to protect them.</p></div>
-  <div class="sheet card drop last" style="--fx:600px;--fy:-300px;--r0:16deg;--r1:-2deg;--d:2.2s;left:1270px;top:330px"><div class="lab">ALL FOR</div><p class="t">the gain of a few.</p></div>
+  <div class="hd"><div class="tag rise" style="--d:.05s;color:#e49a8c">IN THEIR OWN WORDS</div></div>
+  <div class="sheet big drop" style="--fx:-700px;--fy:-200px;--r0:-12deg;--r1:-1.5deg;--d:.4s"><div class="tape" style="left:420px;top:-34px;transform:rotate(-3deg)"></div>
+    <p class="mq">“We can’t be mentally prepared again..... It’s so unfair..”</p><p class="by">An aspirant, after the cancellation</p></div>
+  <div class="sheet note drop" style="--fx:700px;--fy:-200px;--r0:14deg;--r1:3deg;--d:1.6s;top:180px"><p>“feeling bad for those students who scored 600plus.”</p></div>
+  <div class="sheet note drop" style="--fx:700px;--fy:200px;--r0:-14deg;--r1:-3deg;--d:2.4s;top:520px"><p>“Toughest neet paper is loading.”</p></div>
+  <p class="end rise" style="--d:3.4s">They trusted the system that was meant to protect them.<br><span>A few people sold it for their own gain.</span></p>
+  <p class="src rise" style="--d:3.8s">Comments from aspirants and viewers, as quoted by PW Live, 14 May 2026</p>
 </section>
 
 <!-- 3 · not a one-off -->
@@ -53,4 +70,79 @@
   <div class="seal press" style="--d:2s">PS</div>
 </section>
 
+<!-- 6 · overview -->
+<section class="slide desk-stone overview">
+  <div class="hd"><div class="tag rise" style="--d:.05s">HOW DO WE DO IT</div><h2 class="rise" style="--d:.15s">The life of a paper</h2></div>
+  <div class="sheet st drop" style="--fx:0px;--fy:-900px;--r0:-8deg;--r1:-2deg;--d:0.50s;left:130px;top:380px"><svg class="ic" viewBox="0 0 24 24"><use href="#paper"/></svg><h3>Setters</h3></div><div class="sheet st drop" style="--fx:0px;--fy:-900px;--r0:6deg;--r1:1.5deg;--d:0.95s;left:470px;top:420px"><svg class="ic" viewBox="0 0 24 24"><use href="#lock"/></svg><h3>Build</h3></div><div class="sheet st drop" style="--fx:0px;--fy:-900px;--r0:-5deg;--r1:-1deg;--d:1.40s;left:810px;top:380px"><svg class="ic" viewBox="0 0 24 24"><use href="#split"/></svg><h3>Split</h3></div><div class="sheet st drop" style="--fx:0px;--fy:-900px;--r0:7deg;--r1:2deg;--d:1.85s;left:1150px;top:420px"><svg class="ic" viewBox="0 0 24 24"><use href="#share"/></svg><h3>Share</h3></div><div class="sheet st drop" style="--fx:0px;--fy:-900px;--r0:-6deg;--r1:-1.5deg;--d:2.30s;left:1490px;top:380px"><svg class="ic" viewBox="0 0 24 24"><use href="#open"/></svg><h3>Unlock</h3></div>
+  <p class="cap rise" style="--d:3s">Five steps. Each one gets a diagram, then a demo.</p>
+</section>
+<!-- 7 · step 1 -->
+<section class="slide desk-stone s1">
+  <div class="hd"><div class="tag rise" style="--d:.05s">STEP 1 OF 5</div><h2 class="rise" style="--d:.15s">Many setters. <span class="hl">No one knows</span> which questions go in.</h2></div>
+  <div class="sheet setter drop" style="--fx:-700px;--fy:0px;--r0:-8deg;--r1:0deg;--d:0.3s;top:320px"><svg class="ic" viewBox="0 0 24 24"><use href="#user"/></svg><span>Setter A</span></div><div class="env" style="top:342px;--d:1.6s"></div><div class="sheet setter drop" style="--fx:-700px;--fy:0px;--r0:-8deg;--r1:0deg;--d:0.5s;top:450px"><svg class="ic" viewBox="0 0 24 24"><use href="#user"/></svg><span>Setter B</span></div><div class="env" style="top:472px;--d:2.3s"></div><div class="sheet setter drop" style="--fx:-700px;--fy:0px;--r0:-8deg;--r1:0deg;--d:0.7s;top:580px"><svg class="ic" viewBox="0 0 24 24"><use href="#user"/></svg><span>Setter C</span></div><div class="env" style="top:602px;--d:3.0s"></div><div class="sheet setter drop" style="--fx:-700px;--fy:0px;--r0:-8deg;--r1:0deg;--d:0.9s;top:710px"><svg class="ic" viewBox="0 0 24 24"><use href="#user"/></svg><span>Setter D</span></div><div class="env" style="top:732px;--d:3.7s"></div>
+  <div class="sheet machine drop" style="--fx:900px;--fy:0px;--r0:8deg;--r1:0deg;--d:.5s"><svg class="ic" viewBox="0 0 24 24"><use href="#lock"/></svg><h3>Sealed machine</h3><p>The question bank stays hidden inside.</p><div class="blur"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
+  <p class="cap rise" style="--d:2.2s">Questions go straight into a sealed machine. <b>No one sees the bank.</b></p>
+</section>
+<!-- video · step 1 -->
+<section class="slide desk-ink vid">
+  <div class="hd"><div class="tag rise" style="--d:.05s;color:#e49a8c">STEP 1 OF 5 · DEMO</div></div>
+  <div class="sheet screen drop" style="--fx:0px;--fy:-1100px;--r0:-5deg;--r1:-.6deg;--d:.2s"><div class="tape" style="left:600px;top:-34px;transform:rotate(-2deg)"></div>
+    <div class="vbox"><svg class="ic big pulse" viewBox="0 0 24 24"><use href="#play"/></svg><b>Setters send their questions</b><span>Demo video placeholder · setter app, “sealed ✓” receipt</span></div></div>
+</section>
+<!-- 9 · step 2 -->
+<section class="slide desk-stone s2">
+  <div class="hd"><div class="tag rise" style="--d:.05s">STEP 2 OF 5</div><h2 class="rise" style="--d:.15s">The machine picks at random. <span class="hl">One paper</span> for everyone.</h2></div>
+  <div class="bank"><i class="slip pop" style="--d:0.20s;--p:0.0s"></i><i class="slip pop" style="--d:0.22s;--p:0.0s"></i><i class="slip pop" style="--d:0.24s;--p:0.0s"></i><i class="slip pop" style="--d:0.26s;--p:0.0s"></i><i class="slip pop" style="--d:0.28s;--p:0.0s"></i><i class="slip pop pick" style="--d:0.30s;--p:2.2s"></i><i class="slip pop" style="--d:0.32s;--p:0.0s"></i><i class="slip pop" style="--d:0.34s;--p:0.0s"></i><i class="slip pop" style="--d:0.36s;--p:0.0s"></i><i class="slip pop" style="--d:0.38s;--p:0.0s"></i><i class="slip pop" style="--d:0.40s;--p:0.0s"></i><i class="slip pop pick" style="--d:0.42s;--p:2.5s"></i><i class="slip pop" style="--d:0.44s;--p:0.0s"></i><i class="slip pop" style="--d:0.46s;--p:0.0s"></i><i class="slip pop pick" style="--d:0.48s;--p:2.8s"></i><i class="slip pop" style="--d:0.50s;--p:0.0s"></i><i class="slip pop" style="--d:0.52s;--p:0.0s"></i><i class="slip pop" style="--d:0.54s;--p:0.0s"></i><i class="slip pop" style="--d:0.56s;--p:0.0s"></i><i class="slip pop" style="--d:0.58s;--p:0.0s"></i><i class="slip pop pick" style="--d:0.60s;--p:3.1s"></i><i class="slip pop" style="--d:0.62s;--p:0.0s"></i><i class="slip pop" style="--d:0.64s;--p:0.0s"></i><i class="slip pop pick" style="--d:0.66s;--p:3.4s"></i><i class="slip pop" style="--d:0.68s;--p:0.0s"></i><i class="slip pop" style="--d:0.70s;--p:0.0s"></i><i class="slip pop" style="--d:0.72s;--p:0.0s"></i><i class="slip pop" style="--d:0.74s;--p:0.0s"></i><i class="slip pop pick" style="--d:0.76s;--p:3.7s"></i><i class="slip pop" style="--d:0.78s;--p:0.0s"></i><i class="slip pop" style="--d:0.80s;--p:0.0s"></i><i class="slip pop" style="--d:0.82s;--p:0.0s"></i><i class="slip pop" style="--d:0.84s;--p:0.0s"></i><i class="slip pop pick" style="--d:0.86s;--p:4.0s"></i><i class="slip pop" style="--d:0.88s;--p:0.0s"></i><i class="slip pop" style="--d:0.90s;--p:0.0s"></i><i class="slip pop" style="--d:0.92s;--p:0.0s"></i><i class="slip pop pick" style="--d:0.94s;--p:4.3s"></i><i class="slip pop" style="--d:0.96s;--p:0.0s"></i><i class="slip pop" style="--d:0.98s;--p:0.0s"></i><i class="slip pop" style="--d:1.00s;--p:0.0s"></i><i class="slip pop pick" style="--d:1.02s;--p:4.6s"></i><i class="slip pop" style="--d:1.04s;--p:0.0s"></i><i class="slip pop" style="--d:1.06s;--p:0.0s"></i><i class="slip pop" style="--d:1.08s;--p:0.0s"></i><i class="slip pop pick" style="--d:1.10s;--p:4.9s"></i><i class="slip pop" style="--d:1.12s;--p:0.0s"></i><i class="slip pop" style="--d:1.14s;--p:0.0s"></i></div>
+  <div class="sheet seed pop" style="--d:1.4s"><svg class="ic" viewBox="0 0 24 24"><use href="#dice"/></svg><span>private random seed</span></div>
+  <div class="sheet fold paperout drop" style="--deskc:#dcd6c8;--fx:700px;--fy:0px;--r0:10deg;--r1:1.5deg;--d:.6s"><div class="k">THE PAPER</div><s class="ln" style="--d:4.20s"></s><s class="ln" style="--d:4.38s"></s><s class="ln" style="--d:4.56s"></s><s class="ln" style="--d:4.74s"></s><s class="ln" style="--d:4.92s"></s><s class="ln" style="--d:5.10s"></s><s class="ln" style="--d:5.28s"></s><s class="ln" style="--d:5.46s"></s></div>
+  <div class="seal sm press" style="--d:6s">PS</div>
+  <p class="cap rise" style="--d:2.6s">The seed is born <b>after</b> the bank locks, so no setter can steer the pick.</p>
+</section>
+<!-- video · step 2 -->
+<section class="slide desk-ink vid">
+  <div class="hd"><div class="tag rise" style="--d:.05s;color:#e49a8c">STEP 2 OF 5 · DEMO</div></div>
+  <div class="sheet screen drop" style="--fx:0px;--fy:-1100px;--r0:-5deg;--r1:-.6deg;--d:.2s"><div class="tape" style="left:600px;top:-34px;transform:rotate(-2deg)"></div>
+    <div class="vbox"><svg class="ic big pulse" viewBox="0 0 24 24"><use href="#play"/></svg><b>The paper is built</b><span>Demo video placeholder · bank locks, questions picked, paper encrypted</span></div></div>
+</section>
+<!-- 11 · step 3 -->
+<section class="slide desk-stone s3">
+  <div class="hd"><div class="tag rise" style="--d:.05s">STEP 3 OF 5</div><h2 class="rise" style="--d:.15s">The key is <span class="hl">split in two.</span></h2></div>
+  <div class="kk pop" style="--d:.5s">K<small>paper key</small></div>
+  <svg class="wires" viewBox="0 0 1920 1080"><path class="w" d="M440 600 C620 600 620 440 780 440"/><path class="w" d="M440 600 C620 600 620 730 780 730"/></svg>
+  <div class="sheet kc drop" style="--fx:700px;--fy:0px;--r0:6deg;--r1:0deg;--d:1.6s;top:330px"><svg class="ic" viewBox="0 0 24 24"><use href="#clock"/></svg><div><h3>K_pub</h3><p>Time lock. It opens at exam time.</p></div></div>
+  <div class="sheet kc drop" style="--fx:700px;--fy:0px;--r0:-6deg;--r1:0deg;--d:2.4s;top:600px"><div><h3>K_priv</h3><p>Cut into 10 shares.</p><div class="shares"><i class="share pop" style="--d:3.20s"></i><i class="share pop" style="--d:3.32s"></i><i class="share pop" style="--d:3.44s"></i><i class="share pop" style="--d:3.56s"></i><i class="share pop" style="--d:3.68s"></i><i class="share pop" style="--d:3.80s"></i><i class="share pop" style="--d:3.92s"></i><i class="share pop" style="--d:4.04s"></i><i class="share pop" style="--d:4.16s"></i><i class="share pop" style="--d:4.28s"></i></div></div></div>
+  <p class="cap rise" style="--d:3.4s">Neither half opens the paper alone. <b>You need both.</b></p>
+</section>
+<!-- video · step 3 -->
+<section class="slide desk-ink vid">
+  <div class="hd"><div class="tag rise" style="--d:.05s;color:#e49a8c">STEP 3 OF 5 · DEMO</div></div>
+  <div class="sheet screen drop" style="--fx:0px;--fy:-1100px;--r0:-5deg;--r1:-.6deg;--d:.2s"><div class="tape" style="left:600px;top:-34px;transform:rotate(-2deg)"></div>
+    <div class="vbox"><svg class="ic big pulse" viewBox="0 0 24 24"><use href="#play"/></svg><b>The key is split</b><span>Demo video placeholder · TEE splits K, time-locks K_pub, cuts K_priv</span></div></div>
+</section>
+<!-- 13 · step 4 -->
+<section class="slide desk-stone s4">
+  <div class="hd"><div class="tag rise" style="--d:.05s">STEP 4 OF 5</div><h2 class="rise" style="--d:.15s">Ten people hold the key. <span class="hl">No one holds it all.</span></h2></div>
+  <div class="keys"><div class="kn c pop" style="--d:0.4s"><svg class="ic" viewBox="0 0 24 24"><use href="#key"/></svg></div><div class="kn c pop" style="--d:0.6s"><svg class="ic" viewBox="0 0 24 24"><use href="#key"/></svg></div><div class="kn c pop" style="--d:0.8s"><svg class="ic" viewBox="0 0 24 24"><use href="#key"/></svg></div><div class="kn c pop" style="--d:1.0s"><svg class="ic" viewBox="0 0 24 24"><use href="#key"/></svg></div><div class="kn c pop" style="--d:1.2s"><svg class="ic" viewBox="0 0 24 24"><use href="#key"/></svg></div><div class="kn c pop" style="--d:1.4s"><svg class="ic" viewBox="0 0 24 24"><use href="#key"/></svg></div><div class="kn c pop" style="--d:1.6s"><svg class="ic" viewBox="0 0 24 24"><use href="#key"/></svg></div><div class="kn n pop" style="--d:1.8s"><svg class="ic" viewBox="0 0 24 24"><use href="#key"/></svg></div><div class="kn n pop" style="--d:2.0s"><svg class="ic" viewBox="0 0 24 24"><use href="#key"/></svg></div><div class="kn n pop" style="--d:2.2s"><svg class="ic" viewBox="0 0 24 24"><use href="#key"/></svg></div></div>
+  <div class="legend rise" style="--d:2.6s"><span class="c">7 exam centres</span><span class="n">3 neutral parties</span></div>
+  <div class="eight rise" style="--d:3.2s"><b>8 of 10</b> shares rebuild the key.</div>
+  <p class="cap rise" style="--d:4s">Centres alone can’t reach 8. <b>A neutral party must join.</b></p>
+</section>
+<!-- video · step 4 -->
+<section class="slide desk-ink vid">
+  <div class="hd"><div class="tag rise" style="--d:.05s;color:#e49a8c">STEP 4 OF 5 · DEMO</div></div>
+  <div class="sheet screen drop" style="--fx:0px;--fy:-1100px;--r0:-5deg;--r1:-.6deg;--d:.2s"><div class="tape" style="left:600px;top:-34px;transform:rotate(-2deg)"></div>
+    <div class="vbox"><svg class="ic big pulse" viewBox="0 0 24 24"><use href="#play"/></svg><b>Keys are handed out</b><span>Demo video placeholder · hardware keys register, shares are encrypted to each holder</span></div></div>
+</section>
+<!-- 15 · step 5 -->
+<section class="slide desk-stone s5">
+  <div class="hd"><div class="tag rise" style="--d:.05s">STEP 5 OF 5</div><h2 class="rise" style="--d:.15s">Shortly before the exam, <span class="hl">it opens.</span></h2></div>
+  <div class="sheet tl drop" style="--fx:0px;--fy:-900px;--r0:-7deg;--r1:-1.5deg;--d:0.5s;left:130px"><svg class="ic" viewBox="0 0 24 24"><use href="#clock"/></svg><small>T−Δ</small><p>The clock releases K_pub</p></div><div class="sheet tl drop" style="--fx:0px;--fy:-900px;--r0:5deg;--r1:1deg;--d:1.3s;left:560px"><svg class="ic" viewBox="0 0 24 24"><use href="#touch"/></svg><small>&nbsp;</small><p>8 holders touch their keys</p></div><div class="sheet tl drop" style="--fx:0px;--fy:-900px;--r0:-5deg;--r1:-1deg;--d:2.1s;left:990px"><svg class="ic" viewBox="0 0 24 24"><use href="#lock"/></svg><small>&nbsp;</small><p>The machine rebuilds K_priv</p></div><div class="sheet tl drop" style="--fx:0px;--fy:-900px;--r0:7deg;--r1:1.5deg;--d:2.9s;left:1420px"><svg class="ic" viewBox="0 0 24 24"><use href="#paper"/></svg><small>&nbsp;</small><p>Centres open the paper</p></div>
+  <p class="cap rise" style="--d:4.2s">Only approved centres receive the key, and every release is <b>logged in public.</b></p>
+</section>
+<!-- video · step 5 -->
+<section class="slide desk-ink vid">
+  <div class="hd"><div class="tag rise" style="--d:.05s;color:#e49a8c">STEP 5 OF 5 · DEMO</div></div>
+  <div class="sheet screen drop" style="--fx:0px;--fy:-1100px;--r0:-5deg;--r1:-.6deg;--d:.2s"><div class="tape" style="left:600px;top:-34px;transform:rotate(-2deg)"></div>
+    <div class="vbox"><svg class="ic big pulse" viewBox="0 0 24 24"><use href="#play"/></svg><b>Exam time</b><span>Demo video placeholder · countdown, key-holder release, centre decrypts</span></div></div>
+</section>
 </main><div id="count"></div><script src="deck.js?v=3"></script></body></html>
