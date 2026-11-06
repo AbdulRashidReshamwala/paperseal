@@ -10,6 +10,9 @@ export type Polled<T> =
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
+/** A read that never answers must not leave a section on "Reading". It counts as failed, and is tried again. */
+export const READ_TIMEOUT_MS = 30_000;
+
 /** The longest wait after failed reads. A source that is limiting this page gets room to recover. */
 export const MAX_BACKOFF_MS = 5 * 60_000;
 

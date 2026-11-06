@@ -286,9 +286,13 @@ describe('the exam history', () => {
     arrange({ exams: [] });
     reader?.examRows.mockImplementation(() => Promise.reject(new Error('Arkiv is down')));
     open();
-    expect(await screen.findByText(/The exam history could not be read/)).toBeTruthy();
+    // It stays on "Reading" while it tries again, and only then says so.
+    expect(await screen.findByText(/Reading the exam history/)).toBeTruthy();
+    expect(screen.queryByText(/The exam history could not be read/)).toBeNull();
+    expect(await screen.findByText(/The exam history could not be read/, {}, { timeout: 8000 })).toBeTruthy();
     expect(screen.getByText('Arkiv is down')).toBeTruthy();
-  });
+    expect(screen.getByRole('button', { name: 'Read again' })).toBeTruthy();
+  }, 10_000);
 
   it('reads nothing without writers, and says how to add them', () => {
     arrange({ exams: [examRow(1)] });

@@ -30,7 +30,7 @@ import { useExamLink, useShareAddress } from './link';
 import { useLatestRound, useNow } from './live';
 import { loadArkiv, loadLive, loadRecords, releaseRecorded, roundReached, signedKeyPriv, useProof, withinTime, type Records } from './load';
 import { eachLimited } from './history';
-import { usePoll, type Polled } from './poll';
+import { READ_TIMEOUT_MS, usePoll, type Polled } from './poll';
 import { CopiesSection, Glance, IdentitySection, PeopleSection, TimelineSection } from './sections';
 import { loadSwarm } from './swarm';
 import {
@@ -56,8 +56,6 @@ const CLOCK_POLL_MS = 6000;
 const NAME_READS_AT_ONCE = 4;
 /** The exam's names and its Swarm backups change rarely, so they are looked at now and then. */
 const SLOW_POLL_MS = 5 * 60_000;
-/** A read that never answers must not leave a section on "Reading". It counts as failed, and is tried again. */
-const READ_TIMEOUT_MS = 30_000;
 /** A Swarm read fetches each file of a backup, so it gets longer. */
 const SWARM_TIMEOUT_MS = 60_000;
 
