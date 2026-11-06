@@ -67,7 +67,7 @@ describe('reading the Arkiv mirror', () => {
     const report = await read(world, readerOf({ tokens: [tokenRow(world, 1)], logs: [logRow(world.releaseLog, 2, 9_940n)] }));
     expect(report.log).toMatchObject({ entityKey: keyOf(2), creator: writer, entries: 8 });
     expect(report.log?.progress?.count).toBe(8);
-    expect(report.log?.verdict).toEqual({ examId: 'pass', entriesHash: 'pass', signature: 'pass' });
+    expect(report.log?.verdict).toEqual({ examId: 'pass', entriesHash: 'pass', filesHash: 'pass', signature: 'pass' });
     expect(report.log?.writtenAt).toBe(LATEST.time - 60 * ARKIV_BLOCK_SECONDS);
     expect(report.ignored).toEqual({ tokens: 0, unreadable: 0, unattested: 0, failed: 0 });
     // Tokens are not a sign of life, so the log row is the newest that counts.

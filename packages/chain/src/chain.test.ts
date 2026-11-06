@@ -555,6 +555,7 @@ describe('scanEvents', () => {
         saltedPaperHash: `0x${'77'.repeat(32)}`,
         selected: 30,
         bankSize: 300,
+        builtRound: 900n,
         criteriaHash: criteriaHashOf(criteria),
         teeSignature: '0xaa',
         instancePublicKey: `0x04${'05'.repeat(64)}`,
