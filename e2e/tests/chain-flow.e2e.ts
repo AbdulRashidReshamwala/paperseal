@@ -68,6 +68,7 @@ describe('exam on a local anvil chain', () => {
     const client = publicClientFor(chain);
     try {
       await page.goto(`${web.url}/#/board/blueprint`);
+      await page.getByRole('button', { name: 'Connect your wallet' }).click({ timeout: 15_000 });
       await rec.say('Real apps/web, the guided board flow. ExamRegistry deployed from contracts/out, board = anvil account 0');
       await page.getByRole('heading', { name: 'Create the exam' }).waitFor({ timeout: 15_000 });
       await rec.pause(2500);

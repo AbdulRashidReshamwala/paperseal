@@ -34,6 +34,7 @@ export function boardTests(lab: () => Lab): void {
       await proxyGithubIfLimited(board.person.context);
       await board.flow('create the exam', async () => {
         await page.goto(`${web.url}/#/board/blueprint`);
+        await page.getByRole('button', { name: button.connectWallet }).click({ timeout: 60_000 });
         await board.seeHeading(text.createHeading);
         await board.shot('01-create-empty');
         await board.type(page.getByLabel(field.examName).first(), NAME);
