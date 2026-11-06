@@ -200,6 +200,10 @@ async function readLog(
 export const isValidLog = (verdict: LogVerdict, token: RecordVerdict | null) =>
   token?.verified === true && verdict.signature === 'pass' && verdict.examId === 'pass' && verdict.filesHash === 'pass';
 
+/** Whether a valid log already records enough releases, so the live machine has nothing left to add. */
+export const releaseRecorded = (log: Records['log']): boolean =>
+  log.kind === 'ready' && isValidLog(log.verdict, log.token) && log.progress !== null && log.progress.count >= log.progress.required;
+
 /** The hash of `key-priv.tlock` in a valid log, for the proof. Null if there is none. */
 export function signedKeyPriv(log: Records['log']): Hex | null {
   if (log.kind !== 'ready' || !log.files) return null;
@@ -481,6 +485,22 @@ export const roundReached = (round: number, latest: number | null, now: number) 
 /** How long to wait before trying again a proof that did not open the paper. */
 export const PROOF_RETRY_MS = 60_000;
 
+/** How long one try at opening the paper may take. A read that never answers must not hold the step for good. */
+export const PROOF_TIMEOUT_MS = 60_000;
+
+/** `read`, or a rejection after `ms`. The read is not cancelled, but nothing waits on it any more. */
+export function withinTime<T>(read: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(message));
+    }, ms);
+  });
+  return Promise.race([read, late]).finally(() => {
+    clearTimeout(timer);
+  });
+}
+
 /**
  * Waits for the end round, then runs the proof. Polling must not restart it: a run starts when the
  * round is reached or the Build first appears, and is only retried while the paper has not opened.
@@ -495,10 +515,11 @@ export function useProof(args: {
   latest: LatestRound;
   now: number;
   retryMs?: number;
+  timeoutMs?: number;
   /** Where to find a Swarm backup of the files, or null with backups off. */
   backup?: BackupSource | null;
 }): ProofRun | null {
-  const { storage, examId, client, chain, keyPrivSha256, latest, now, retryMs = PROOF_RETRY_MS, backup = null } = args;
+  const { storage, examId, client, chain, keyPrivSha256, latest, now, retryMs = PROOF_RETRY_MS, timeoutMs = PROOF_TIMEOUT_MS, backup = null } = args;
   const endRound = chain?.exam ? Number(chain.exam.settings.endRound) : null;
   const reached = endRound !== null && roundReached(endRound, latest.round, now);
   const key = `${String(reached)}|${String(latest.round !== null)}|${String(chain?.build?.postedAt)}`;
@@ -517,17 +538,21 @@ export function useProof(args: {
     const { chain: data, keyPrivSha256: signed, currentRound } = inputs.current;
     const backed = storage ? withBackup(storage, backup, data?.build ?? null) : null;
     const used = () => (backed && backup ? { backup: backed.use() } : {});
-    runProof({
-      storage: backed,
-      examId,
-      exam: data?.exam ?? null,
-      build: data?.build ?? null,
-      criteria: data?.criteria ?? null,
-      currentRound,
-      keyPrivSha256: signed,
-      now: Math.floor(Date.now() / 1000),
-      client,
-    }).then(
+    withinTime(
+      runProof({
+        storage: backed,
+        examId,
+        exam: data?.exam ?? null,
+        build: data?.build ?? null,
+        criteria: data?.criteria ?? null,
+        currentRound,
+        keyPrivSha256: signed,
+        now: Math.floor(Date.now() / 1000),
+        client,
+      }),
+      timeoutMs,
+      'The files or the public clock took too long to answer.',
+    ).then(
       (result) => {
         if (live) setRun({ key, storage, value: { ok: true, result, ...used() } });
       },
@@ -539,7 +564,7 @@ export function useProof(args: {
     return () => {
       live = false;
     };
-  }, [key, reached, attempts, storage, examId, client, backup]);
+  }, [key, reached, attempts, storage, examId, client, backup, timeoutMs]);
 
   const current = run?.key === key && run.storage === storage ? run.value : null;
   const opened = current?.ok === true && current.result.state === 'opened';

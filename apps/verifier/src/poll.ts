@@ -10,10 +10,15 @@ export type Polled<T> =
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
+/** The longest wait after failed reads. A source that is limiting this page gets room to recover. */
+export const MAX_BACKOFF_MS = 5 * 60_000;
+
 /**
  * Reads `load` now and again `everyMs` after each read finishes, so a slow source is never read
  * twice at once. Pass a stable function, and a new one to start over: nothing read from the old
- * source is ever shown for the new one. A null `everyMs` reads once per `load`.
+ * source is ever shown for the new one. A null `everyMs` reads once per `load`. Each failed read in
+ * a row doubles the wait, up to `MAX_BACKOFF_MS`, so a public source that is limiting requests is not
+ * asked harder.
  */
 export function usePoll<T>(load: (() => Promise<T>) | null, everyMs: number | null): Polled<T> {
   const [seen, setSeen] = useState<{ source: () => Promise<T>; polled: Polled<T> } | null>(null);
@@ -22,13 +27,16 @@ export function usePoll<T>(load: (() => Promise<T>) | null, everyMs: number | nu
     if (!load) return;
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let failures = 0;
     const read = () => {
       load()
         .then(
           (value) => {
+            failures = 0;
             if (live) setSeen({ source: load, polled: { state: 'ready', value, readAt: Date.now() } });
           },
           (error: unknown) => {
+            failures += 1;
             if (!live) return;
             setSeen((old) =>
               old?.source === load && old.polled.state === 'ready'
@@ -38,7 +46,7 @@ export function usePoll<T>(load: (() => Promise<T>) | null, everyMs: number | nu
           },
         )
         .finally(() => {
-          if (live && everyMs !== null) timer = setTimeout(read, everyMs);
+          if (live && everyMs !== null) timer = setTimeout(read, Math.min(everyMs * 2 ** failures, Math.max(everyMs, MAX_BACKOFF_MS)));
         });
     };
     read();

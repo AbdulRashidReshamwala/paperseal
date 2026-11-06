@@ -439,6 +439,28 @@ describe('step 6, unlock', () => {
     await within(step).findByText('Not checked until the log and its proof pass', {}, { timeout: 5000 });
   });
 
+  it('asks the live machine nothing about a finished exam, and judges it from its records', async () => {
+    const world = await buildWorld();
+    arrange(world);
+    const storageFetch = vi.mocked(fetch).getMockImplementation() as (i: string | URL | Request) => Promise<Response>;
+    const urls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request) => {
+        urls.push(String(input));
+        return storageFetch(input);
+      }),
+    );
+    open(1000, { teeUrl: 'https://tee.example' });
+    await findStep(/^7\. Paper opens to everyone$/);
+    await waitFor(() => {
+      expect(urls.length).toBeGreaterThan(0);
+    });
+    await act(() => new Promise((done) => setTimeout(done, 50)));
+    expect(urls.filter((url) => url.startsWith('https://tee.example/'))).toEqual([]);
+    expect(screen.queryByText(/live machine/i, { selector: '[role=alert] *' })).toBeNull();
+  });
+
   describe('with the live TEE', () => {
     async function openLive(trusted: boolean) {
       freshTrusted = trusted;
@@ -910,7 +932,7 @@ describe('verify by name', () => {
   });
 
   it("reads the name's TEE, storage and bucket in place of the viewer's own", async () => {
-    const world = await buildWorld();
+    const world = await buildWorld({ endRound: 2000 });
     arrange(world);
     const storageFetch = vi.mocked(fetch).getMockImplementation() as (i: string | URL | Request) => Promise<Response>;
     const urls: string[] = [];

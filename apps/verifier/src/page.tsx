@@ -25,7 +25,8 @@ import { clockTime, custody, dayTime, REPOSITORY, type Custody, type CustodyStep
 import { Evidence } from './evidence';
 import { useExamLink } from './link';
 import { useLatestRound, useNow } from './live';
-import { loadArkiv, loadLive, loadRecords, signedKeyPriv, useProof, type Records } from './load';
+import { loadArkiv, loadLive, loadRecords, releaseRecorded, roundReached, signedKeyPriv, useProof, type Records } from './load';
+import { eachLimited } from './history';
 import { usePoll, type Polled } from './poll';
 import { approvedEntries } from './commitments';
 import { createStorage } from './storage';
@@ -44,6 +45,12 @@ import {
 export const RECORDS_POLL_MS = 15_000;
 /** Each read of the live TEE also checks a fresh attestation, so it is not read more often than this. */
 export const LIVE_POLL_MS = 10_000;
+/** Once an exam is over and opened nothing changes, so its records are only looked at now and then. */
+export const FINISHED_POLL_MS = 10 * 60_000;
+/** How often the public clock is read while an exam still has something ahead of it. */
+const CLOCK_POLL_MS = 6000;
+/** How many party names are read at once. */
+const NAME_READS_AT_ONCE = 4;
 
 /**
  * Reads the exam name on a `#/name/` route, with the viewer's own RPC and nothing else. An RPC that
@@ -76,13 +83,19 @@ function usePartyNames(entries: Hex | null, rpcUrl: string, everyMs: number): Po
       return name ? [{ name, key: toHex(entry.passkeyPublicKey) }] : [];
     });
     if (named.length === 0 || !rpcUrl) return null;
-    return async () =>
-      Object.fromEntries(await Promise.all(named.map(async ({ name, key }) => [key, await checkPasskeyName(name, key, { rpcUrl })] as const)));
+    // A name that answered is kept for the visit. Only one the RPC could not answer is read again.
+    const known = new Map<string, PasskeyNameResult>();
+    return async () => {
+      const left = named.filter(({ key }) => !known.has(key));
+      const read = await eachLimited(left, NAME_READS_AT_ONCE, async ({ name, key }) => [key, await checkPasskeyName(name, key, { rpcUrl })] as const);
+      for (const [key, result] of read) if (result.state !== 'unreadable') known.set(key, result);
+      return { ...Object.fromEntries(read), ...Object.fromEntries(known) };
+    };
   }, [entries, rpcUrl]);
   return usePoll(load, everyMs);
 }
 
-function useExamView(pollMs: { records: number; live: number; proofRetry?: number }) {
+function useExamView(pollMs: { records: number; live: number; proofRetry?: number; finished?: number }) {
   const connections = useConnections();
   const { drand, settings, examId: savedExam, arkiv } = connections;
   const link = useExamLink();
@@ -111,7 +124,10 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
   const registry = named ? named.registry : connections.registry;
   const storage = useMemo(() => (storageUrl && examId ? createStorage(storageUrl, examId) : null), [storageUrl, examId]);
 
-  const latest = useLatestRound(drand);
+  // Set further down, once the record says so: this page then reads far less, because nothing changes.
+  const [finished, setFinished] = useState(false);
+  const recordsEvery = finished ? (pollMs.finished ?? FINISHED_POLL_MS) : pollMs.records;
+  const latest = useLatestRound(drand, finished ? recordsEvery : CLOCK_POLL_MS);
   const now = useNow();
 
   // The Arkiv mirror is read only from published writers: on a name route the ones the name lists
@@ -149,30 +165,35 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
     if (!chain || !registry || !examId) return null;
     return () => loadRecords({ chain, storage, examId, registry: registry.address as Hex, bucket, backup });
   }, [registry, examId, storage, bucket, backup]);
-  const records = usePoll(loadRecordsNow, pollMs.records);
+  const records = usePoll(loadRecordsNow, recordsEvery);
 
   const chain = records.state === 'ready' ? records.value.chain : null;
-  const partyNames = usePartyNames(chain?.entries ?? null, settings.rpcUrl, pollMs.records);
+  const partyNames = usePartyNames(chain?.entries ?? null, settings.rpcUrl, recordsEvery);
   const chainRef = useRef<ChainData | null>(chain);
   useEffect(() => {
     chainRef.current = chain;
   }, [chain]);
 
   const examPublished = chain?.exam != null;
+  const endRound = chain?.exam?.settings.endRound;
+  const ended = endRound !== undefined && roundReached(Number(endRound), latest.round, now);
+  // The live machine only gives progress for an exam under way. Once the release is recorded, or
+  // the exam is over, nothing here asks it anything.
+  const released = records.state === 'ready' && releaseRecorded(records.value.log);
+  const wantsLive = examPublished && !ended && !released;
   const loadLiveNow = useMemo(() => {
-    if (!tee || !registry || !examId || !examPublished) return null;
+    if (!tee || !registry || !examId || !wantsLive) return null;
     return () => loadLive({ tee, chain: () => chainRef.current, examId, registry: registry.address as Hex, bucket });
-  }, [tee, registry, examId, examPublished, bucket]);
+  }, [tee, registry, examId, wantsLive, bucket]);
   const live = usePoll(loadLiveNow, pollMs.live);
 
-  // The Arkiv mirror is read as often as the live TEE.
   const loadArkivNow = useMemo(() => {
     if (!arkivReader || !registry || !examId || !examPublished) return null;
     const addresses = writers.map((writer) => writer.address);
     return () =>
       loadArkiv({ reader: arkivReader, writers: addresses, chain: () => chainRef.current, examId, registry: registry.address as Hex, bucket });
   }, [arkivReader, writers, registry, examId, examPublished, bucket]);
-  const arkivRead = usePoll(loadArkivNow, pollMs.live);
+  const arkivRead = usePoll(loadArkivNow, finished ? recordsEvery : pollMs.live * 3);
 
   const proof = useProof({
     storage,
@@ -185,6 +206,11 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
     backup,
     ...(pollMs.proofRetry === undefined ? {} : { retryMs: pollMs.proofRetry }),
   });
+
+  const noPaper = chain !== null && chain.build === null;
+  const opened = proof?.ok === true && proof.result.state === 'opened';
+  const over = ended && (noPaper || opened);
+  if (over !== finished) setFinished(over);
 
   return {
     examId,
@@ -498,7 +524,7 @@ const zoneName = () =>
   'local time';
 
 /** The public verifier: one chain of custody for one exam, and no sign-in. */
-export function VerifierPage(props: { pollMs?: { records: number; live: number; proofRetry?: number } }) {
+export function VerifierPage(props: { pollMs?: { records: number; live: number; proofRetry?: number; finished?: number } }) {
   const view = useExamView(props.pollMs ?? { records: RECORDS_POLL_MS, live: LIVE_POLL_MS });
   const result = custody(view);
   const start = view.records.state === 'ready' ? view.records.value.chain.exam?.settings.examStart : undefined;
