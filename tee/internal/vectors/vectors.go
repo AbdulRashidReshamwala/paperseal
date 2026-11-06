@@ -433,7 +433,10 @@ func Build() (File, error) {
 	}
 	add(hashing.InstanceKey(examID, pubKey(2)))
 	add(sampleSetterOwner())
+	add(hashing.PRFInput(examID))
+	add(hashing.PRFInput(fill(0x12)))
 	add(hashing.Registration(pubKey(1), []byte("centre-01"), challenge[:], fill(0x77)))
+	add(hashing.Registration(pubKey(1), []byte("centre-1.paperseal-demo.eth"), challenge[:], [32]byte{}))
 	add(criteriaMessage, nil)
 	add(list, nil)
 	add(hashing.QuestionSubmission(examID, challenge[:], first))

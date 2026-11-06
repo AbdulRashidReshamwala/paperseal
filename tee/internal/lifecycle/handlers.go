@@ -108,10 +108,13 @@ func (m *Machine) RegisterChallenge(context.Context) (api.ChallengeResponse, err
 }
 
 // Register implements api.Backend. The passkey signature covers the
-// registration message. The attestation chain check is skipped while
-// webauthn.requireHardwareAttestation is false, and refuses when it is true.
-// inviteTag is only checked for shape. The TEE never sees the invite secret, so
-// the board's app is what matches a tag to an invite.
+// registration message in a get ceremony, so it proves the key whether it was
+// created just now, as a setter's is, or at enrolment, as a party's is. The
+// attestation check is skipped while webauthn.requireHardwareAttestation is
+// false. inviteTag is only checked for shape. The TEE never sees the invite
+// secret, so the board's app is what matches a tag to an invite or a name's
+// record. A zero tag means a registration by name, which always has a derived
+// key, so a setter can't register without an invite's tag.
 func (m *Machine) Register(_ context.Context, req api.RegisterRequest) error {
 	if s := m.Stage(); s != StageOnboard {
 		return wrongStage(StageOnboard, s)
@@ -127,6 +130,9 @@ func (m *Machine) Register(_ context.Context, req api.RegisterRequest) error {
 		return badRequest("invalid_invite_tag", "inviteTag must be 32 bytes")
 	}
 	inviteTag := [32]byte(req.InviteTag)
+	if inviteTag == ([32]byte{}) && len(req.DerivedPublicKey) == 0 {
+		return badRequest("invalid_invite_tag", "a zero inviteTag is a registration by name, which needs a derived key")
+	}
 	msg, err := hashing.Registration(req.DerivedPublicKey, []byte(req.Owner), req.Challenge, inviteTag)
 	if err != nil {
 		return badRequest("invalid_key", "derivedPublicKey: "+err.Error())
@@ -145,7 +151,10 @@ func (m *Machine) Register(_ context.Context, req api.RegisterRequest) error {
 	if err := m.registerChallenges.Consume(req.Challenge); err != nil {
 		return challengeError(err)
 	}
-	if _, err := webauthn.CheckAttestation(req.AttestationObject); err != nil {
+	if _, err := webauthn.CheckAttestation(req.AttestationObject, req.PasskeyPublicKey); err != nil {
+		if errors.Is(err, webauthn.ErrAttestation) {
+			return badRequest("invalid_attestation", err.Error())
+		}
 		return err
 	}
 	err = m.registrations.Add(registration.Record{

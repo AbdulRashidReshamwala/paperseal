@@ -139,10 +139,19 @@ func SetterOwner(passkeyPublicKey []byte) (Message, error) {
 		Bytes("passkeyPublicKey", passkeyPublicKey))
 }
 
+// PRFInput is the WebAuthn PRF input for one exam. Only apps use it, because the
+// TEE never derives a key. It is here so the Go vectors pin the bytes.
+func PRFInput(examID [32]byte) (Message, error) {
+	return New("prfInput", spec.C.DomainTags.PRFInput,
+		Bytes("prfSalt", []byte(spec.C.WebAuthn.PRFSalt)),
+		Bytes32("examId", examID))
+}
+
 // Registration is the message a passkey signs at registration. A setter
 // registers a passkey only, so derivedPublicKey is empty for setters and a
 // valid public key for everyone else. inviteTag is opaque here: only the board
-// can recompute it, as in "Invites" in spec/api.md.
+// can recompute it, as in "Invites" in spec/api.md, and it is zero for a
+// registration by name.
 func Registration(derivedPublicKey, holderID, challenge []byte, inviteTag [32]byte) (Message, error) {
 	if len(derivedPublicKey) != 0 {
 		if err := checkKeys("registration", derivedPublicKey); err != nil {

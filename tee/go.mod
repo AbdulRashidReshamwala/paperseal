@@ -9,6 +9,7 @@ require (
 	github.com/drand/kyber v1.3.1
 	github.com/drand/tlock v1.2.0
 	github.com/ethereum/go-ethereum v1.17.10
+	github.com/fxamacker/cbor/v2 v2.9.2
 	github.com/hashicorp/vault v1.14.0
 )
 
@@ -18,6 +19,7 @@ require (
 	github.com/drand/kyber-bls12381 v0.3.1 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect
 	github.com/kilic/bls12-381 v0.1.0 // indirect
+	github.com/x448/float16 v0.8.4 // indirect
 	go.dedis.ch/fixbuf v1.0.3 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/net v0.58.0 // indirect
