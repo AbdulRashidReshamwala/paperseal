@@ -13,9 +13,10 @@ const listeners = new Set<() => void>();
 
 /** Says the machine test passed for this exam, so the rail can move past it. */
 export function noteMachineChecked(examId: Hex, ok: boolean): void {
-  if (ok === checked.has(examId)) return;
-  if (ok) checked.add(examId);
-  else checked.delete(examId);
+  const id = examId.toLowerCase();
+  if (ok === checked.has(id)) return;
+  if (ok) checked.add(id);
+  else checked.delete(id);
   for (const listener of listeners) listener();
 }
 
@@ -25,7 +26,7 @@ function useMachineChecked(examId: Hex | undefined): boolean {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    () => examId !== undefined && checked.has(examId),
+    () => examId !== undefined && checked.has(examId.toLowerCase()),
   );
 }
 
