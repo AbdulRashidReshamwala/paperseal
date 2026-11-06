@@ -1,7 +1,8 @@
 import { directoryName } from '../shared/names';
 
 /*
- * The people a tab can act as: e2e/live/roster.ts, plus the exam board. Each tab has its own person, held
+ * The people a tab can act as: e2e/live/roster.ts, plus the exam board and three more setters, because
+ * a low `maxSetterPercent` can call for five. Each tab has its own person, held
  * in sessionStorage. Everything the app keeps in this browser sits under `paperseal.`, so `scopeStorage`
  * files those keys under the tab's person. Switching changes the person and reloads, which also clears
  * everything held in memory. The app's own storage code stays as it is, and never knows.
@@ -23,7 +24,7 @@ const party = (id: string, label: string, path: string): Persona => ({ id, label
 
 export const personas: readonly Persona[] = [
   { id: 'board', label: 'Exam board', path: '/board', keyed: false },
-  ...count(2).map((n) => ({ id: `setter-${String(n)}`, label: `Setter ${String(n)}`, path: '/setter', keyed: true })),
+  ...count(5).map((n) => ({ id: `setter-${String(n)}`, label: `Setter ${String(n)}`, path: '/setter', keyed: true })),
   ...count(3).map((n) => party(`neutral-${String(n)}`, `Key holder ${String(n)}`, '/keyholder')),
   ...count(8).map((n) => party(`centre-${String(n)}`, `Centre ${String(n)}`, '/centre')),
 ];
@@ -41,6 +42,9 @@ const shared = new Set(['paperseal.examId']);
 const byId = (id: string | null) => personas.find((persona) => persona.id === id);
 const scopedKey = (persona: Persona, key: string) =>
   key.startsWith(prefix) && !shared.has(key) ? `paperseal-demo.of.${persona.id}.${key}` : key;
+
+/** Set only inside `withStorageOf`, which never waits, so nothing else can run while it is set. */
+let borrowed: Persona | null = null;
 
 export function activePersona(tab: Storage = globalThis.sessionStorage): Persona {
   return byId(tab.getItem(activeKey)) ?? defaultPersona;
@@ -75,7 +79,7 @@ export function scopeStorage(): void {
   const local = globalThis.localStorage;
   const { getItem, setItem, removeItem } = Storage.prototype;
   adoptOldStorage(local, setItem, getItem, removeItem);
-  const key = (store: Storage, name: string) => (store === local ? scopedKey(activePersona(), name) : name);
+  const key = (store: Storage, name: string) => (store === local ? scopedKey(borrowed ?? activePersona(), name) : name);
   Storage.prototype.getItem = function (name) {
     return getItem.call(this, key(this, name));
   };
@@ -86,6 +90,20 @@ export function scopeStorage(): void {
     removeItem.call(this, key(this, name));
   };
   seedPerson(activePersona(), local);
+}
+
+/**
+ * Runs `act` against `persona`'s storage, without becoming them, so the board can act for someone and
+ * leave what they need where their own page finds it. `act` must be synchronous: the page's own storage
+ * reads go on between awaits, and they must keep seeing this tab's person.
+ */
+export function withStorageOf<T>(persona: Persona, act: () => T): T {
+  borrowed = persona;
+  try {
+    return act();
+  } finally {
+    borrowed = null;
+  }
 }
 
 /** A person starts with their name filled in, as if they had used it here before. */

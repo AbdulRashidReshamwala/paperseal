@@ -37,9 +37,12 @@ afterEach(() => {
 });
 
 describe('personas', () => {
-  it('are the roster, plus the exam board', () => {
-    expect(personas.map(({ id }) => id)).toEqual(['board', ...roster.map(({ name }) => name)]);
+  it('are the roster, plus the exam board and enough setters for a limit of 20 percent', () => {
+    const others = roster.filter(({ kind }) => kind !== 'setter').map(({ name }) => name);
+    expect(personas.map(({ id }) => id)).toEqual(['board', 'setter-1', 'setter-2', 'setter-3', 'setter-4', 'setter-5', ...others]);
     for (const entry of roster) expect(person(entry.name).owner).toBe(ownerNameOf(entry));
+    expect(person('setter-5').keyed).toBe(true);
+    expect(person('setter-5').path).toBe('/setter');
   });
 
   it('start on a page for their role', () => {
