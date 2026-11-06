@@ -87,7 +87,7 @@ export async function dryCheck(): Promise<void> {
 
   // Written out here, so a change to config.ts has to be made twice to pass.
   const expected = {
-    latest: { lock: 660, unlock: 690, examStart: 705, end: 790, delta: 15, lead: 480 },
+    latest: { lock: 330, unlock: 360, examStart: 375, end: 460, delta: 15, lead: 200 },
     finalized: { lock: 1680, unlock: 1860, examStart: 1920, end: 2160, delta: 60, lead: 1200 },
   };
   for (const mode of ['latest', 'finalized'] as const) {
@@ -106,7 +106,7 @@ export async function dryCheck(): Promise<void> {
       expect(near(s.endAtUnix, NOW + want.end), 'end round');
       expect(BigInt(s.lockRound) < BigInt(s.unlockRound) && BigInt(s.unlockRound) < BigInt(s.endRound), 'round order');
       expect(s.endAtUnix > s.examStart, 'the end round must be after T');
-      expect(mode !== 'latest' || s.endAtUnix - NOW < 840, 'a dev exam must finish in under 14 minutes');
+      expect(mode !== 'latest' || s.endAtUnix - NOW < 480, 'a dev exam must finish in under 8 minutes');
       checkSchedule(plan(DRY_NAME, s).settings);
       return `lock ${s.lockRound}, unlock ${s.unlockRound}, end ${s.endRound}, delta ${String(s.delta)}s, run needs ${String(want.lead)}s before Lock`;
     });

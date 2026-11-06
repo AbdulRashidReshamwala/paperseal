@@ -50,7 +50,7 @@ export interface LiveGaps {
 export function gapsFor(readBlock: string): LiveGaps {
   switch (readBlock) {
     case 'latest':
-      return { lock: 660, unlock: 690, examStart: 705, end: 790, minLeadBeforeLock: 480, listDelay: 'within seconds, at the latest block' };
+      return { lock: 330, unlock: 360, examStart: 375, end: 460, minLeadBeforeLock: 200, listDelay: 'within seconds, at the latest block' };
     case 'finalized':
       return { lock: 28 * 60, unlock: 31 * 60, examStart: 32 * 60, end: 36 * 60, minLeadBeforeLock: 20 * 60, listDelay: 'at the finalized block, in about 13 to 15 minutes' };
     default:

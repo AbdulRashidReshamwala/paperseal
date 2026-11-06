@@ -1,4 +1,5 @@
 import type { KeyCard } from '@paperseal/protocol';
+import { examRegistryAbi } from '@paperseal/chain';
 import { createPublicClient, http, type Address, type Hex } from 'viem';
 import { sepolia } from 'viem/chains';
 
@@ -18,26 +19,22 @@ export function nameRecordCalls(cards: readonly { name: string; card: Pick<KeyCa
   return [...cards.flatMap(({ name, card }) => partyCalls(name, card)), directoryCall(partyParent, cards.map(({ name }) => name))];
 }
 
-/** Sends every record, one transaction at a time, because they share one nonce. */
+/** Sends every record at once with consecutive nonces, so they land in a block or two, then waits for them all. */
 export async function writeNameRecords(cards: readonly { name: string; card: KeyCard }[], say: (line: string) => void): Promise<void> {
   const client = createPublicClient({ chain: sepolia, transport: http(deployed.rpcUrl), ccipRead: false });
   const resolver = (await client.getEnsResolver({ name: partyParent })) as Address;
-  for (const { what, data } of nameRecordCalls(cards)) {
-    say(`writing ${what}`);
-    await sendRecord(data, resolver);
+  const board = await client.readContract({ address: deployed.registry, abi: examRegistryAbi, functionName: 'board' });
+  const calls = nameRecordCalls(cards);
+  let nonce = await client.getTransactionCount({ address: board, blockTag: 'pending' });
+  say(`sending ${String(calls.length)} records from nonce ${String(nonce)}`);
+  const hashes: Hex[] = [];
+  for (const { data } of calls) {
+    hashes.push(await castSend(data, resolver, 60_000, ['--async', '--nonce', String(nonce)]));
+    nonce += 1;
   }
-}
-
-/** A public RPC is several nodes, and the next one asked can be a block behind. A record is safe to write twice. */
-async function sendRecord(data: Hex, resolver: Address): Promise<void> {
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      await castSend(data, resolver);
-      return;
-    } catch (error) {
-      const stale = /nonce too low|already known|underpriced/i.test(String(error));
-      if (!stale || attempt >= 8) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 6000));
-    }
-  }
+  const receipts = await Promise.all(hashes.map((hash) => client.waitForTransactionReceipt({ hash, timeout: 180_000 })));
+  const reverted = receipts.findIndex((r) => r.status !== 'success');
+  if (reverted >= 0) throw new Error(`${calls[reverted]?.what ?? 'a record'} reverted`);
+  const blocks = new Set(receipts.map((r) => r.blockNumber));
+  say(`${String(receipts.length)} records mined in ${String(blocks.size)} block(s)`);
 }
