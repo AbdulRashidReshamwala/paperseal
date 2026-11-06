@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "checkedAt": "2026-11-06T12:00:00Z",
+  "method": "checker",
+  "checker": {
+    "version": "v0.6.0",
+    "sha256": "0x1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "exam": {
+    "examId": "0x2222222222222222222222222222222222222222222222222222222222222222",
+    "registry": "0x00000000000000000000000000000000000000aa",
+    "chainId": 11155111,
+    "mode": "unknown"
+  },
+  "assumed": {
+    "repository": "AbdulRashidReshamwala/paperseal",
+    "registry": "0x00000000000000000000000000000000000000aa"
+  },
+  "overall": "partial",
+  "claims": [
+    {
+      "id": "published",
+      "status": "pass",
+      "summary": "The settings are on-chain and follow the exam settings rules.",
+      "evidence": [
+        {
+          "source": "chain",
+          "name": "imageDigest",
+          "value": "0x3333333333333333333333333333333333333333333333333333333333333333",
+          "untrusted": false
+        }
+      ]
+    },
+    {
+      "id": "people",
+      "status": "pass",
+      "summary": "The emitted entries hash to the on-chain list hash.",
+      "evidence": [
+        {
+          "source": "chain",
+          "name": "owner",
+          "value": "Example Centre 1",
+          "untrusted": true
+        }
+      ]
+    },
+    {
+      "id": "attested",
+      "status": "not-checked",
+      "summary": "The token passed, but no expected bucket was given.",
+      "evidence": []
+    },
+    {
+      "id": "locked",
+      "status": "not-yet",
+      "summary": "No Build is posted, and it isn't due until the unlock round.",
+      "evidence": []
+    },
+    {
+      "id": "sealed",
+      "status": "not-yet",
+      "summary": "No Build is posted, and it isn't due until the unlock round.",
+      "evidence": []
+    },
+    {
+      "id": "unlock",
+      "status": "not-yet",
+      "summary": "The unlock hasn't happened.",
+      "evidence": []
+    },
+    {
+      "id": "open",
+      "status": "not-yet",
+      "summary": "The end round hasn't been reached.",
+      "evidence": []
+    }
+  ]
+}

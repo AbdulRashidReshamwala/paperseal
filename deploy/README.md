@@ -26,6 +26,17 @@ forge script script/Deploy.s.sol --rpc-url sepolia --broadcast --account <keysto
 
 Keep the printed address as `REGISTRY`. A new board address needs a new deployment.
 
+### Verify the source on Etherscan
+
+Needs `ETHERSCAN_API_KEY` and `REGISTRY_ADDRESS` in `contracts/.env` (gitignored). Check out the commit that was deployed first; the compiler settings come from `foundry.toml` (solc 0.8.30, optimizer 200 runs, `prague`, no via-ir), and the constructor argument is `BOARD_ADDRESS`.
+
+```sh
+contracts/script/verify.sh              # uses REGISTRY_ADDRESS
+contracts/script/verify.sh 0x...        # or pass the address
+```
+
+It uses the Etherscan V2 API with chain id 11155111, waits for the result and never prints the key. It is safe to run again: an already verified contract is skipped. The current Sepolia deployment (`0x6a9f017F374630EcB84e8E3816B1eE9F8Fa2dBE8`) was built from commit `2ae6cf3`.
+
 ## 2. Tag a version
 
 ```sh

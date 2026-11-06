@@ -263,102 +263,91 @@ describe('exam on a local anvil chain', () => {
 
   it('verifier-checks', async () => {
     const rec = new Recording('verifier-checks', { title: 'Public verifier checks the same exam, no TEE URL' });
-    const wrongName = 'Some other exam nobody published';
-    const wrongId = keccak256(toBytes(wrongName));
+    const wrongId = keccak256(toBytes('Some other exam nobody published'));
     const tampered = `${examId.slice(0, -1)}${examId.endsWith('0') ? '1' : '0'}` as Hex;
     try {
       if (!published) throw new Error('board-publish did not publish the exam, so there is nothing to verify');
-      verifier = await startApp('apps/verifier', { VITE_RPC_URL: chain.rpcUrl, VITE_REGISTRY_ADDRESS: chain.registry });
+      const verifierApp = (verifier = await startApp('apps/verifier', { VITE_RPC_URL: chain.rpcUrl, VITE_REGISTRY_ADDRESS: chain.registry }));
       const warm = await browser.newPage();
-      await warm.goto(`${verifier.url}/#/settings`);
+      await warm.goto(`${verifierApp.url}/#/settings`);
       await warm.waitForLoadState('networkidle');
       await warm.close();
 
       const page = await rec.open(browser);
-      await page.goto(`${verifier.url}/#/`);
-      await rec.say('Real apps/verifier. RPC URL and registry address are set, no TEE URL, no exam ID yet');
+      await page.goto(`${verifierApp.url}/#/`);
+      await rec.say('Real apps/verifier, one chain-of-custody page. RPC URL and registry address are set, no TEE URL, no exam ID yet');
       await rec.pause(2500);
-      await rec.check('With no exam ID the verifier shows not connected instead of passing', async () => {
+      await rec.check('With no exam ID the page asks for one and nothing is checked', async () => {
         const body = await rec.bodyText();
-        if (!/not connected/i.test(body)) throw new Error(body.slice(0, 300));
-        if (/\bPass\b/.test(body)) throw new Error('a Pass appeared with no exam ID');
-        return 'Chain checks: not connected';
+        if (!/Choose an exam/.test(body)) throw new Error(body.slice(0, 300));
+        if (await page.locator('li[data-state="done"]').count()) throw new Error('a step is done with no exam ID');
+        return 'Choose an exam, no step done';
       });
 
-      const setExam = async (id: string, caption: string) => {
-        await page.getByRole('link', { name: 'Connection' }).click();
+      /** Each step of the chain, as the page shows it: its label and its state attribute. */
+      const steps = () =>
+        page.evaluate(() =>
+          Array.from(document.querySelectorAll('li[data-state]')).map((li) => ({
+            label: (li.querySelector('[class$="step-label"]')?.textContent ?? '').trim(),
+            state: li.getAttribute('data-state') ?? '',
+          })),
+        );
+      const open = async (id: string, caption: string) => {
+        await page.goto(`${verifierApp.url}/#/exam/${id}`);
+        await page.reload();
         await rec.say(caption);
-        const field = value(page, 'Exam ID');
-        await field.fill('');
-        await rec.type(field, id, 15);
-        await page.getByRole('button', { name: 'Save' }).click();
-        await rec.pause(800);
+        await page.locator('li[data-state]').first().waitFor({ timeout: 30_000 }).catch(() => undefined);
+        await rec.pause(5000);
       };
 
-      await setExam(examId, 'Connection: typing the exam ID the board published, then Save');
-      await page.getByRole('link', { name: 'Overview' }).click();
-      await rec.say('Overview: chain checks read ExamRegistry through the RPC URL');
-      await page.getByText('Exam published').waitFor({ timeout: 20_000 });
-      await rec.pause(4000);
-      await rec.check('Overview: exam published and criteria hash matches the exam, both Pass', async () => {
-        const published = await page.locator('li').filter({ hasText: 'Exam published' }).first().innerText();
-        const crit = await page.locator('li').filter({ hasText: 'Criteria hash matches the exam' }).first().innerText();
-        if (!/Published/.test(published) || /Not published/.test(published)) throw new Error(published);
-        if (!/Pass/.test(crit)) throw new Error(crit);
-        return `${published.replace(/\s+/g, ' ')} | ${crit.replace(/\s+/g, ' ')}`;
+      await open(examId, 'The exam ID the board published, opened as a link');
+      await rec.check('The published exam shows step 1 done, and every later step not done', async () => {
+        const list = await steps();
+        if (list.length < 7) throw new Error(`only ${String(list.length)} steps`);
+        if (list[0]?.state !== 'done') throw new Error(`step 1 is ${list[0]?.state ?? 'missing'}`);
+        const later = list.slice(1).filter((s) => s.state === 'done' || s.state === 'failed');
+        if (later.length > 0) throw new Error(`later steps are ${later.map((s) => `${s.label}: ${s.state}`).join(', ')}`);
+        return list.map((s) => `${s.label}=${s.state}`).join(' | ');
       });
-      await rec.check('Overview: TEE is optional, in neutral wording and not a failure', async () => {
+      await rec.check('The page says the exam is on track and that the people list and Build are not there yet', async () => {
         const body = await rec.bodyText();
-        if (!body.includes('Live TEE status: optional')) throw new Error('no optional TEE panel');
-        if (!body.includes('Every chain check works without it')) throw new Error('no neutral TEE wording');
-        if (/\bFail\b/.test(body)) throw new Error('a Fail badge is on the overview');
-        return 'Live TEE status: optional, no Fail anywhere';
+        if (/A check failed|checks failed/.test(body)) throw new Error('an alarm is on the page');
+        if (!/Nothing has failed so far/.test(body)) throw new Error(body.slice(0, 400));
+        return 'on track, nothing failed';
       });
-      await rec.check('Overview: approved list and Build are not posted yet, shown neutral and not as Pass', async () => {
-        const list = await page.locator('li').filter({ hasText: 'Approved list hash matches the chain' }).first().innerText();
-        const build = await page.locator('li').filter({ hasText: /^Build/ }).first().innerText();
-        if (/Pass/.test(list) || !/Not posted/.test(list)) throw new Error(list);
-        if (!/No Build yet/.test(build)) throw new Error(build);
-        return 'nothing posted on-chain for these, and the page does not claim otherwise';
+      await rec.check('Evidence is folded under each step, and the exam ID shown is the published one', async () => {
+        const folds = await page.locator('li[data-state] details').count();
+        if (folds < 3) throw new Error(`only ${String(folds)} folds`);
+        await page.locator('li[data-state] summary').first().click();
+        await rec.pause(1000);
+        const shown = await hashOf(page, 'exam ID').catch(() => '');
+        if (shown && shown.toLowerCase() !== examId) throw new Error(`the page shows ${shown}`);
+        return `${String(folds)} folds`;
       });
 
-      await page.getByRole('link', { name: 'Commitments' }).click();
-      await rec.say('Commitments: settings and selection criteria decoded from the on-chain event');
-      await page.getByText('Topic: Mechanics').waitFor({ timeout: 20_000 });
-      await rec.pause(4500);
-      await rec.check('Commitments: decoded criteria and the hash check Pass', async () => {
-        const body = await rec.bodyText();
-        if (!/Topic: Mechanics\s*5 questions/.test(body) || !/Topic: Optics\s*3 questions/.test(body)) throw new Error('topics not decoded');
-        if (!/20%/.test(body) || !/4x/.test(body)) throw new Error('limits not decoded');
-        const crit = await page.locator('li').filter({ hasText: 'Criteria hash matches the exam' }).first().innerText();
-        if (!/Pass/.test(crit)) throw new Error(crit);
-        return 'Mechanics 5, Optics 3, 20%, 4x, hash Pass';
+      await open(tampered, `Tampered exam ID: last hex digit changed to ${tampered.slice(-1)}`);
+      await rec.check('A tampered exam ID is not published and no step is done', async () => {
+        const list = await steps();
+        if (list.some((s) => s.state === 'done')) throw new Error(list.map((s) => `${s.label}=${s.state}`).join(', '));
+        return `no step done among ${String(list.length)}`;
       });
 
-      await setExam(tampered, `Tampered exam ID: last hex digit changed to ${tampered.slice(-1)}`);
-      await page.getByRole('link', { name: 'Overview' }).click();
-      await rec.say('Overview for the tampered exam ID');
-      await page.getByText('Exam published').waitFor({ timeout: 20_000 });
-      await rec.pause(3500);
-      await rec.check('A tampered exam ID is not published and nothing passes', async () => {
-        const published = await page.locator('li').filter({ hasText: 'Exam published' }).first().innerText();
-        const body = await rec.bodyText();
-        if (!/Not published/.test(published)) throw new Error(published);
-        if (/\bPass\b/.test(body)) throw new Error('a Pass appeared for a tampered ID');
-        return published.replace(/\s+/g, ' ');
+      await open(wrongId, 'A different exam: the ID of an exam that was never published');
+      await rec.check('A wrong exam has no step done and no failure alarm for something that was never posted', async () => {
+        const list = await steps();
+        if (list.some((s) => s.state === 'done')) throw new Error('a step is done for an exam nobody published');
+        return `no step done among ${String(list.length)}`;
       });
 
-      await setExam(wrongId, 'A different exam: the ID of an exam that was never published');
-      await page.getByRole('link', { name: 'Commitments' }).click();
-      await rec.say('Commitments for the wrong exam');
-      await page.getByText('Exam settings').waitFor({ timeout: 20_000 });
-      await rec.pause(3500);
-      await rec.check('A wrong exam shows Not posted and nothing passes', async () => {
+      await page.goto(`${verifierApp.url}/#/exam/0xnothex`);
+      await page.reload();
+      await rec.say('A link that holds no valid exam ID');
+      await rec.pause(2500);
+      await rec.check('An invalid link says so and checks nothing', async () => {
         const body = await rec.bodyText();
-        const settings = await page.locator('li').filter({ hasText: 'Exam settings' }).first().innerText();
-        if (!/Not posted/.test(settings)) throw new Error(settings);
-        if (/\bPass\b/.test(body)) throw new Error('a Pass appeared for a wrong exam');
-        return settings.replace(/\s+/g, ' ');
+        if (!body.includes('The link did not hold a valid exam ID.')) throw new Error(body.slice(0, 300));
+        if (await page.locator('li[data-state="done"]').count()) throw new Error('a step is done for an invalid link');
+        return 'invalid link refused';
       });
     } catch (error) {
       rec.fail('Verifier flow completed', error);

@@ -13,3 +13,6 @@ fs_permissions = [{ access = "read", path = "../spec/constants.json" }]
 
 [rpc_endpoints]
 sepolia = "${SEPOLIA_RPC_URL}"
+
+[etherscan]
+sepolia = { key = "${ETHERSCAN_API_KEY}", chain = 11155111 }

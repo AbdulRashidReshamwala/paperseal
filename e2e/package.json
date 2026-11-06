@@ -8,7 +8,9 @@
     "record": "node scripts/record.mjs",
     "typecheck": "tsc --noEmit",
     "demo": "node demo/cli.mjs main",
-    "demo:check": "node demo/cli.mjs check"
+    "demo:check": "node demo/cli.mjs check",
+    "ui": "vitest run --config vitest.ui.config.ts",
+    "ui:live": "UI_LIVE=1 vitest run --config vitest.ui.config.ts"
   },
   "dependencies": {
     "@paperseal/crypto": "workspace:*",

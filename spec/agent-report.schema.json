@@ -1,0 +1,105 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Paper Seal agent report",
+  "description": "See spec/agent-verification.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "checkedAt", "method", "checker", "exam", "assumed", "overall", "claims"],
+  "properties": {
+    "version": { "const": 1 },
+    "checkedAt": { "type": "string", "format": "date-time" },
+    "method": { "enum": ["checker", "manual"] },
+    "checker": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "sha256"],
+          "properties": {
+            "version": { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$" },
+            "sha256": { "$ref": "#/definitions/hex32" }
+          }
+        }
+      ]
+    },
+    "exam": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["examId", "registry", "chainId", "mode"],
+      "properties": {
+        "examId": { "$ref": "#/definitions/hex32" },
+        "registry": { "$ref": "#/definitions/address" },
+        "chainId": { "type": "integer", "minimum": 1 },
+        "mode": { "enum": ["production", "dev", "unknown"] }
+      }
+    },
+    "assumed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "registry"],
+      "properties": {
+        "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+        "registry": { "$ref": "#/definitions/address" }
+      }
+    },
+    "overall": { "enum": ["verified", "partial", "failed"] },
+    "claims": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "items": [
+        { "allOf": [{ "$ref": "#/definitions/claim" }, { "properties": { "id": { "const": "published" } } }] },
+        { "allOf": [{ "$ref": "#/definitions/claim" }, { "properties": { "id": { "const": "people" } } }] },
+        { "allOf": [{ "$ref": "#/definitions/claim" }, { "properties": { "id": { "const": "attested" } } }] },
+        { "allOf": [{ "$ref": "#/definitions/claim" }, { "properties": { "id": { "const": "locked" } } }] },
+        { "allOf": [{ "$ref": "#/definitions/claim" }, { "properties": { "id": { "const": "sealed" } } }] },
+        { "allOf": [{ "$ref": "#/definitions/claim" }, { "properties": { "id": { "const": "unlock" } } }] },
+        { "allOf": [{ "$ref": "#/definitions/claim" }, { "properties": { "id": { "const": "open" } } }] }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "method": { "const": "manual" } } },
+      "then": { "properties": { "checker": { "type": "null" }, "overall": { "enum": ["partial", "failed"] } } },
+      "else": { "properties": { "checker": { "type": "object" } } }
+    },
+    {
+      "if": { "properties": { "exam": { "properties": { "mode": { "enum": ["dev", "unknown"] } } } } },
+      "then": { "properties": { "overall": { "enum": ["partial", "failed"] } } }
+    },
+    {
+      "if": { "properties": { "overall": { "const": "failed" } } },
+      "then": { "properties": { "claims": { "contains": { "properties": { "status": { "const": "fail" } }, "required": ["status"] } } } },
+      "else": { "properties": { "claims": { "not": { "contains": { "properties": { "status": { "const": "fail" } }, "required": ["status"] } } } } }
+    }
+  ],
+  "definitions": {
+    "hex32": { "type": "string", "pattern": "^0x[0-9a-f]{64}$" },
+    "address": { "type": "string", "pattern": "^0x[0-9a-f]{40}$" },
+    "claim": {
+      "type": "object",
+      "required": ["id", "status", "summary", "evidence"],
+      "properties": {
+        "id": { "type": "string" },
+        "status": { "enum": ["pass", "fail", "not-yet", "not-checked"] },
+        "summary": { "type": "string" },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source", "name", "value", "untrusted"],
+            "properties": {
+              "source": { "enum": ["chain", "token", "storage", "drand", "tee"] },
+              "name": { "type": "string" },
+              "value": { "type": "string" },
+              "untrusted": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    }
+  }
+}
