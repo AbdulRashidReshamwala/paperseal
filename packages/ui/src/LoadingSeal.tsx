@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 
 import sealUrl from './assets/seal.svg';
 
@@ -14,8 +14,30 @@ function firstPaintSeal() {
   return { src: seal.currentSrc, ran: typeof ran === 'number' ? ran : 0 };
 }
 
+/** How long a page waits for its first reads before it shows what it has. */
+export const LOADING_DEADLINE_MS = 8_000;
+
 /**
- * Shown while a page's code loads: the seal pressed onto the paper, then a thin line drawn around it and
+ * Whether a page can show: its first reads are `done`, or `ms` have passed so a stuck read never holds
+ * it. Once true it stays true, so a later poll never brings the loader back.
+ */
+export function useLoaded(done: boolean, ms = LOADING_DEADLINE_MS): boolean {
+  const [loaded, setLoaded] = useState(done);
+  if (done && !loaded) setLoaded(true);
+  useEffect(() => {
+    if (loaded) return;
+    const timer = setTimeout(() => {
+      setLoaded(true);
+    }, ms);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [loaded, ms]);
+  return loaded;
+}
+
+/**
+ * Shown while a page's code or first data loads: the seal pressed onto the paper, then a thin line drawn around it and
  * lifted off, for as long as the wait lasts. The line is not progress: it says nothing about how far along
  * the load is. Nothing appears for the first 150ms, so a fast load shows no seal at all.
  */

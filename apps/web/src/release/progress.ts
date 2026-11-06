@@ -127,7 +127,7 @@ function useRoundReached(round: number | null): boolean {
 }
 
 /** Reads the exam for this browser's key, and keeps reading it, so the page moves on by itself. */
-export function useHolderProgress(role: HolderRole): { progress: HolderProgress; actions: ProgressActions } {
+export function useHolderProgress(role: HolderRole): { progress: HolderProgress; actions: ProgressActions; settled: boolean } {
   const examId = useCurrentExamId();
   const stored = useHolderCredential(role);
   const [fresh, setFresh] = useState<StoredCredential | null>(null);
@@ -160,5 +160,7 @@ export function useHolderProgress(role: HolderRole): { progress: HolderProgress;
     [refreshChain, refreshStatus],
   );
 
-  return { progress: { missing, examId, credential, chain, status, reached, ended }, actions };
+  // Both first reads are back, so the page can pick its screen without changing it a moment later.
+  const settled = missing.length > 0 || (chain.settled && status.settled);
+  return { progress: { missing, examId, credential, chain, status, reached, ended }, actions, settled };
 }

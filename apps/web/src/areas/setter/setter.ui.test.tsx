@@ -129,12 +129,12 @@ describe('a first visit', () => {
 describe('the automatic check', () => {
   beforeEach(registered);
 
-  it('shows one calm line while it runs, and sealing stays shut', async () => {
+  it('shows the loader while it runs, and sealing stays shut', async () => {
     const world = await makeWorld();
     let finish: (value: unknown) => void = () => undefined;
     world.verifyToken.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)));
     mount(world);
-    expect(await screen.findByRole('heading', { name: /Getting ready for your questions/ })).toBeTruthy();
+    expect(await screen.findByText('Loading')).toBeTruthy();
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(sealButton()).toBeNull();
     finish({ trusted: true, signature: { ok: true }, instanceKey: { ok: true }, claims: [] });

@@ -1,5 +1,5 @@
 import type { TeeClient } from '@paperseal/tee-client';
-import { Page, RoleHeader, Stage } from '@paperseal/ui';
+import { LoadingSeal, Page, RoleHeader, Stage } from '@paperseal/ui';
 import { useEffect, useMemo, type ReactNode } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { Hex } from '@paperseal/protocol';
@@ -188,7 +188,7 @@ function BoardFlow(props: { mode: Mode }) {
   if (!value) {
     return withLink(
       pending ? (
-        <Waiting title="Loading your exam" next="The next step appears here by itself. It is safe to close this page." />
+        <LoadingSeal />
       ) : (
         <Waiting
           title="Your exam cannot be loaded right now"

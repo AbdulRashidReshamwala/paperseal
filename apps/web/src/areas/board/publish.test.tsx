@@ -260,11 +260,16 @@ function toPreview() {
 }
 
 /** Step 1 done and the review open, before the version has been checked. */
-async function toVersion(env: PublishEnvironment) {
+function toVersionChecks(env: PublishEnvironment) {
   renderBoard(env);
   fillCreate();
   fillTopics();
   toPreview();
+}
+
+/** The preview, once the version check has an answer. */
+async function toVersion(env: PublishEnvironment) {
+  toVersionChecks(env);
   await screen.findByRole('heading', { name: 'Preview and submit' });
 }
 
@@ -448,9 +453,10 @@ describe('the version, in the review', () => {
   it('shows a loading state, and explains that a version must be tagged when there are none', async () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
     const { env: pending } = environment();
-    await toVersion(pending);
-    expect(screen.getByText(/Finding the latest release/)).toBeTruthy();
-    expect(button('Publish the exam').disabled).toBe(true);
+    toVersionChecks(pending);
+    expect(await screen.findByText('Loading')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Preview and submit' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Publish the exam' })).toBeNull();
     cleanup();
     localStorage.clear();
 
@@ -591,7 +597,7 @@ describe('step 2, review and publish', () => {
     expect(button(/Preview and submit/).disabled).toBe(true);
   });
 
-  it('holds each people page until it has everyone the list needs, and keeps them in the draft', () => {
+  it('holds each people page until it has everyone the list needs, and keeps them in the draft', async () => {
     const { env } = environment();
     renderBoard(env);
     fillCreate();
@@ -614,7 +620,7 @@ describe('step 2, review and publish', () => {
     for (let n = 1; n <= 3; n += 1) addName(`neutral-${String(n)}.paperseal-demo.eth`);
     expect(screen.getByText('3 of 3')).toBeTruthy();
     fireEvent.click(button('Continue'));
-    expect(screen.getByRole('heading', { name: 'Preview and submit' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Preview and submit' })).toBeTruthy();
     expect(screen.getByText('centre-1.paperseal-demo.eth')).toBeTruthy();
     expect(screen.getByText('neutral-3.paperseal-demo.eth')).toBeTruthy();
     const saved = JSON.parse(localStorage.getItem('paperseal.board.drafts') ?? '[]') as { plan: { parties: unknown[] } }[];

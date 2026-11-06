@@ -56,8 +56,8 @@ const noList = { getApprovedListEntries: () => Promise.resolve(null) };
 const mount = (over: Partial<Parameters<typeof RegisterByName>[0]> = {}) =>
   render(<RegisterByName examId={examId} keys={makeKeys()} tee={makeTee()} lookup={lookupOf()} registry={noList} {...over} />);
 
-const typeName = (name = owner) => {
-  fireEvent.change(screen.getByLabelText(/^Your name/), { target: { value: name } });
+const typeName = async (name = owner) => {
+  fireEvent.change(await screen.findByLabelText(/^Your name/), { target: { value: name } });
 };
 const go = () => {
   fireEvent.click(screen.getByRole('button', { name: 'Register with your security key' }));
@@ -74,7 +74,7 @@ describe('RegisterByName', () => {
     const tee = makeTee();
     const onRegistered = vi.fn();
     mount({ keys, tee, onRegistered });
-    typeName();
+    await typeName();
     go();
     await waitFor(() => {
       expect(onRegistered).toHaveBeenCalledTimes(1);
@@ -91,7 +91,7 @@ describe('RegisterByName', () => {
   it('keeps the key for both holder pages, because the role is the board’s choice', async () => {
     const onRegistered = vi.fn();
     mount({ onRegistered });
-    typeName();
+    await typeName();
     go();
     await waitFor(() => {
       expect(onRegistered).toHaveBeenCalled();
@@ -118,7 +118,7 @@ describe('RegisterByName', () => {
   it('refuses a plain name before any touch', async () => {
     const keys = makeKeys();
     mount({ keys });
-    typeName('Centre One');
+    await typeName('Centre One');
     go();
     expect(await screen.findByText('Use an ENS name, like iit-delhi.eth.')).toBeTruthy();
     expect(keys.registerByName).not.toHaveBeenCalled();
@@ -127,7 +127,7 @@ describe('RegisterByName', () => {
   it('says a name with no key on it needs a card first', async () => {
     const keys = makeKeys();
     mount({ keys, lookup: lookupOf({}) });
-    typeName();
+    await typeName();
     go();
     expect((await screen.findAllByText(/has no security key on it yet\. Send your key card to whoever runs paperseal-demo\.eth/)).length).toBeGreaterThan(0);
     expect(keys.registerByName).not.toHaveBeenCalled();
@@ -138,7 +138,7 @@ describe('RegisterByName', () => {
     keys.registerByName.mockRejectedValueOnce(new KeyError('wrong_key', 'no'));
     const tee = makeTee();
     mount({ keys, tee });
-    typeName();
+    await typeName();
     go();
     expect(await screen.findByText(/not the security key on that name/)).toBeTruthy();
     expect(tee.register).not.toHaveBeenCalled();
@@ -148,7 +148,7 @@ describe('RegisterByName', () => {
     const keys = makeKeys();
     const onRegistered = vi.fn();
     mount({ keys, tee: makeTee([{ owner, passkeyPublicKey: passkey, derivedPublicKey: derived, inviteTag: toHex(noInviteTag) }]), onRegistered });
-    typeName();
+    await typeName();
     go();
     await waitFor(() => {
       expect(onRegistered).toHaveBeenCalled();
@@ -161,7 +161,7 @@ describe('RegisterByName', () => {
     const onRegistered = vi.fn();
     const other = `0x04${'09'.repeat(64)}` as Hex;
     mount({ keys, tee: makeTee([{ owner, passkeyPublicKey: other, derivedPublicKey: derived, inviteTag: toHex(noInviteTag) }]), onRegistered });
-    typeName();
+    await typeName();
     go();
     await waitFor(() => {
       expect(keys.registerByName).toHaveBeenCalled();
@@ -181,7 +181,7 @@ describe('RegisterByName', () => {
     const tee = makeTee();
     const onRegistered = vi.fn();
     mount({ keys, tee, onRegistered, registry: { getApprovedListEntries: () => Promise.resolve(toHex(encoded)) } });
-    typeName();
+    await typeName();
     go();
     await waitFor(() => {
       expect(onRegistered).toHaveBeenCalled();
@@ -197,7 +197,7 @@ describe('RegisterByName', () => {
     tee.registrations.mockResolvedValueOnce({ registrations: [] }).mockResolvedValueOnce({ registrations: [entry] });
     const onRegistered = vi.fn();
     mount({ tee, onRegistered });
-    typeName();
+    await typeName();
     go();
     await waitFor(() => {
       expect(onRegistered).toHaveBeenCalled();
@@ -208,7 +208,7 @@ describe('RegisterByName', () => {
     const tee = makeTee();
     tee.register.mockRejectedValueOnce(new TeeApiError(409, 'wrong_stage', 'closed'));
     mount({ tee });
-    typeName();
+    await typeName();
     go();
     expect(await screen.findByText(/Registration for this exam has closed/)).toBeTruthy();
     expect(holderCredential('centre', examId)).toBeNull();

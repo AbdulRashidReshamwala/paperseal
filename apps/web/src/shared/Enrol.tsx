@@ -1,11 +1,11 @@
 import { KeyError, type Keys } from '@paperseal/keys';
 import { fromHex, keyCardText, requireHardwareAttestation, toHex, type KeyCard } from '@paperseal/protocol';
-import { Button, KeyTouch, Page, RoleHeader, Row, Rows, Stage, type KeyTouchState } from '@paperseal/ui';
+import { Button, KeyTouch, LoadingSeal, Page, RoleHeader, Row, Rows, Stage, type KeyTouchState, useLoaded } from '@paperseal/ui';
 import { useState } from 'react';
 
 import '../release/holder.css';
 import { keyCardOf, loadEnrolments, saveEnrolment, type Enrolment } from './enrolment';
-import { directoryName, useDirectory, type DirectoryRead } from './names';
+import { directoryName, nameLookup, useDirectory, type DirectoryRead } from './names';
 import { browserKeys, describeError, isSecurityKeyError, plainFailure, Trouble } from './Register';
 
 /*
@@ -191,9 +191,10 @@ export default function Enrol() {
   const { read } = useDirectory();
   const known = publishedCredentials(read);
   const unread = read !== null && ['refused', 'unreadable', 'invalid'].includes(read.directory.state);
+  const loaded = useLoaded(!nameLookup || read !== null);
   return (
     <Page header={<RoleHeader role="Your security key" />}>
-      <EnrolView known={known} directoryUnread={unread} />
+      {loaded ? <EnrolView known={known} directoryUnread={unread} /> : <LoadingSeal />}
     </Page>
   );
 }

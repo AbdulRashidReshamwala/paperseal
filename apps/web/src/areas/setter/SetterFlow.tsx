@@ -1,5 +1,5 @@
 import type { Criteria, Hex, Stage as ExamStage } from '@paperseal/protocol';
-import { Button, Page, RoleHeader, Stage } from '@paperseal/ui';
+import { Button, LoadingSeal, Page, RoleHeader, Stage, useLoaded } from '@paperseal/ui';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { credentialIsForInvite, useInvite } from '../../shared/invite';
@@ -160,6 +160,9 @@ export function SetterFlow() {
     if (screen === 'write' && outcome === null && !checking) void runConfirm();
   }, [screen, outcome, checking, runConfirm]);
 
+  // The stage picks the screen, so nothing shows until the first read of it is back.
+  const loaded = useLoaded(!session.configured || stage !== null || statusError !== null);
+
   const body = (): ReactNode => {
     switch (screen) {
       case 'not-set-up':
@@ -219,14 +222,7 @@ export function SetterFlow() {
           if (failed) {
             return <Stage title={BLOCKED_TITLE} lede={blockedWhy[failed.step]} action={<Blocked outcome={failed} />} next="Press “Check again” in a minute. If it still fails, your exam board can tell you when to try again." />;
           }
-          return (
-            <>
-              <Stage title="Getting ready for your questions…" next="Then you can start writing. This takes a moment." />
-              <span className="ps-sr" role="status">
-                Getting ready for your questions.
-              </span>
-            </>
-          );
+          return <LoadingSeal />;
         }
         return (
           <Composer
@@ -247,5 +243,5 @@ export function SetterFlow() {
     }
   };
 
-  return <Page header={<RoleHeader role="Setter" />}>{body()}</Page>;
+  return <Page header={<RoleHeader role="Setter" />}>{loaded ? body() : <LoadingSeal />}</Page>;
 }

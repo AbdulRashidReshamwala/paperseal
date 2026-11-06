@@ -2,10 +2,10 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, renderHook, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { LoadingSeal } from './index';
+import { LOADING_DEADLINE_MS, LoadingSeal, useLoaded } from './index';
 
 const here = import.meta.dirname;
 const web = join(here, '..', '..', '..', 'apps', 'web');
@@ -57,5 +57,33 @@ describe('the first paint in apps/web/index.html', () => {
 
   it('honours reduced motion', () => {
     expect(html).toContain('@media (prefers-reduced-motion: reduce)');
+  });
+});
+
+describe('useLoaded', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('waits for the first reads, then stays loaded', () => {
+    const { result, rerender } = renderHook(({ done }) => useLoaded(done), { initialProps: { done: false } });
+    expect(result.current).toBe(false);
+    rerender({ done: true });
+    expect(result.current).toBe(true);
+    rerender({ done: false });
+    expect(result.current).toBe(true);
+  });
+
+  it('never holds a page past the deadline when a read is stuck', () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useLoaded(false));
+    act(() => {
+      vi.advanceTimersByTime(LOADING_DEADLINE_MS - 1);
+    });
+    expect(result.current).toBe(false);
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(result.current).toBe(true);
   });
 });

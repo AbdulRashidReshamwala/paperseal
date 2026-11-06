@@ -564,7 +564,7 @@ describe('step 6, the copy on Arkiv', () => {
     const world = await buildWorld({ endRound: 99_999_999 });
     arrange(world);
     open(1000);
-    fireEvent.change(screen.getByLabelText(/^Who may write the copy on Arkiv/), { target: { value: '0x1234' } });
+    fireEvent.change(await screen.findByLabelText(/^Who may write the copy on Arkiv/), { target: { value: '0x1234' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(await screen.findByText(/Enter each address as 0x followed by 40 letters or digits/)).toBeTruthy();
     expect(arkivReaders).toEqual([]);
@@ -720,7 +720,7 @@ describe('the backup on Swarm', () => {
     const world = await buildWorld();
     arrange(world);
     open(1000);
-    const field = screen.getByLabelText(/^Where to read the backup on Swarm/);
+    const field = await screen.findByLabelText(/^Where to read the backup on Swarm/);
     expect((field as HTMLInputElement).value).toBe(bee);
     fireEvent.change(field, { target: { value: 'bzz://nope' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));

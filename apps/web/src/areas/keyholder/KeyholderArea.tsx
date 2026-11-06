@@ -1,5 +1,5 @@
 import { toHex, roundTimeSeconds } from '@paperseal/protocol';
-import { Countdown, Page, RoleHeader, Stage, Stamp } from '@paperseal/ui';
+import { Countdown, LoadingSeal, Page, RoleHeader, Stage, Stamp, useLoaded } from '@paperseal/ui';
 import { useMemo, useState } from 'react';
 
 import type { ReleaseContext } from '../../release/flow';
@@ -99,7 +99,8 @@ export function KeyholderView(props: {
 }
 
 export default function KeyholderArea() {
-  const { progress, actions } = useHolderProgress('keyholder');
+  const { progress, actions, settled } = useHolderProgress('keyholder');
+  const loaded = useLoaded(settled);
   const [justReleased, setJustReleased] = useState(false);
   const entry = progress.chain.value?.entry;
   const derivedPublicKey = entry && entry.derivedPublicKey.length > 0 ? toHex(entry.derivedPublicKey) : null;
@@ -107,6 +108,13 @@ export default function KeyholderArea() {
     () => releaseContext(progress.examId, progress.credential, derivedPublicKey),
     [progress.examId, progress.credential, derivedPublicKey],
   );
+  if (!loaded) {
+    return (
+      <Page header={<RoleHeader role="Key holder" />}>
+        <LoadingSeal />
+      </Page>
+    );
+  }
   return (
     <KeyholderView
       progress={progress}

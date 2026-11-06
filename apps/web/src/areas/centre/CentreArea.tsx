@@ -1,5 +1,5 @@
 import { roles, roundTimeSeconds, toHex, requireHardwareAttestation } from '@paperseal/protocol';
-import { Button, Check, Countdown, KeyTouch, Page, PrimaryAction, RoleHeader, Seal, Stage } from '@paperseal/ui';
+import { Button, Check, Countdown, KeyTouch, LoadingSeal, Page, PrimaryAction, RoleHeader, Seal, Stage, useLoaded } from '@paperseal/ui';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import type { ReleaseContext } from '../../release/flow';
@@ -245,7 +245,8 @@ export function CentreView(props: {
 }
 
 export default function CentreArea() {
-  const { progress, actions } = useHolderProgress('centre');
+  const { progress, actions, settled } = useHolderProgress('centre');
+  const loaded = useLoaded(settled);
   const { files, retry } = useDownload(progress.chain.value?.buildPosted ?? false);
   const open = useOpenPaper(files.state === 'ready' ? files.downloaded : null, progress.credential);
   const [justReleased, setJustReleased] = useState(false);
@@ -255,6 +256,13 @@ export default function CentreArea() {
     () => releaseContext(progress.examId, progress.credential, derivedPublicKey),
     [progress.examId, progress.credential, derivedPublicKey],
   );
+  if (!loaded) {
+    return (
+      <Page header={<RoleHeader role="Exam centre" />}>
+        <LoadingSeal />
+      </Page>
+    );
+  }
   return (
     <CentreView
       progress={progress}

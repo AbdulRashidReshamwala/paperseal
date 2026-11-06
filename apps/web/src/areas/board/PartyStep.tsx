@@ -1,9 +1,9 @@
 import { roles, threshold } from '@paperseal/protocol';
-import { Button, Field } from '@paperseal/ui';
+import { Button, Field, LoadingSeal, useLoaded } from '@paperseal/ui';
 import { useMemo, useState } from 'react';
 
 import { useBoardForm } from './BoardForm';
-import { DraftPage, type DraftRail } from './DraftFrame';
+import { DraftPage, DraftShell, type DraftRail } from './DraftFrame';
 import { useDirectoryNames, type ChosenParty } from './parties';
 import { AddName } from './PeopleStep';
 import { centresProblem, neutralsProblem } from './plan';
@@ -67,6 +67,14 @@ export function PartyStep(props: { kind: 'centres' | 'neutrals'; rail: DraftRail
   };
 
   const unread = environment.ensLookup && directory.read && directory.read.state !== 'found';
+  const loaded = useLoaded(!environment.ensLookup || directory.read !== null);
+  if (!loaded) {
+    return (
+      <DraftShell {...props.rail}>
+        <LoadingSeal />
+      </DraftShell>
+    );
+  }
   return (
     <DraftPage
       rail={props.rail}

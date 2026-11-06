@@ -6,12 +6,14 @@ import {
   Button,
   Check,
   Field,
+  LoadingSeal,
   Panel,
   RoleHeader,
   Seal,
   Stepper,
   type SealState,
   type Step,
+  useLoaded,
 } from '@paperseal/ui';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
@@ -507,6 +509,16 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
   const chosen = view.examId !== null || view.name !== undefined;
   // A name that failed a check needs no other connection, only one that could not be read does.
   const needsConnection = view.name ? ['off', 'error'].includes(view.name.result.state) : !view.sources.chain;
+  // The record decides every step, so the page waits for its first read.
+  const loaded = useLoaded(!view.sources.chain || !view.examId || view.records.state !== 'loading');
+  if (!loaded) {
+    return (
+      <div className="ps-shell vf-page">
+        <RoleHeader role="Public record" note="Anyone can check this" />
+        <LoadingSeal />
+      </div>
+    );
+  }
   return (
     <div className="ps-shell vf-page">
       <RoleHeader role="Public record" {...(exam ? { exam } : {})} note="Anyone can check this" />

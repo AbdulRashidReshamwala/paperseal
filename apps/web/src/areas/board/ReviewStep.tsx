@@ -1,5 +1,5 @@
 import { chain, roles } from '@paperseal/protocol';
-import { Button, Hash, PrimaryAction, Row, Rows } from '@paperseal/ui';
+import { Button, Hash, LoadingSeal, PrimaryAction, Row, Rows, useLoaded } from '@paperseal/ui';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -87,6 +87,9 @@ export function ReviewStep(props: { releases: Releases; onBack: () => void }) {
   const { criteria } = blueprint;
   const needs = criteria ? bankNeeded(criteria) : null;
   const running = progress.state === 'running';
+  // The version shapes the page: its row, the picker and any problem with it.
+  const loaded = useLoaded(props.releases.list.state !== 'loading' && props.releases.status?.state !== 'checking');
+  if (!loaded) return <LoadingSeal />;
   return (
     <>
       <h1 className="board-draft-title">Preview and submit</h1>

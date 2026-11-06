@@ -1,7 +1,7 @@
 import type { Directory } from '@paperseal/chain';
 import { matchInvites, ownerProblem, partyNameProblem, roles, setterEntries, threshold, type Hex, type InviteState } from '@paperseal/protocol';
 import type { RegistrationEntry, TeeClient } from '@paperseal/tee-client';
-import { Button, Check, Field, Hash, Row, Rows, Stamp } from '@paperseal/ui';
+import { Button, Check, Field, Hash, LoadingSeal, Row, Rows, Stamp, useLoaded } from '@paperseal/ui';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 
 import { directoryName } from '../../shared/names';
@@ -347,9 +347,12 @@ export function PeopleStep(props: { examId: Hex; snapshot: Snapshot; onPosted: (
               ? gate.reason
               : null;
 
+  // Who has registered and the directory shape the whole page, so it waits for both.
+  const loaded = useLoaded((!tee || value !== null || problem !== null) && (!environment.ensLookup || directory.read !== null));
   const base = 'location' in globalThis ? `${location.origin}${location.pathname}` : '';
   const needs = props.snapshot.found?.criteria ? bankNeeded(props.snapshot.found.criteria) : null;
 
+  if (!loaded) return <LoadingSeal />;
   return (
     <>
       <h1 className="board-draft-title">Bring everyone in</h1>

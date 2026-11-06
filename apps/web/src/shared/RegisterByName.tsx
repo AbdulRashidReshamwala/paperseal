@@ -2,7 +2,7 @@ import { readPartyRecords, type EnsLookup, type ExamRegistry, type PartyRecords 
 import { KeyError, type Keys } from '@paperseal/keys';
 import { fromHex, partyNameProblem, passkeyRecordMatches, passkeyRecordValue, requireHardwareAttestation, toHex, type Hex } from '@paperseal/protocol';
 import { TeeApiError, type TeeClient } from '@paperseal/tee-client';
-import { Field, KeyTouch, Stage, type KeyTouchState } from '@paperseal/ui';
+import { Field, KeyTouch, LoadingSeal, Stage, type KeyTouchState, useLoaded } from '@paperseal/ui';
 import { useState } from 'react';
 
 import { useCurrentExamId } from './currentExam';
@@ -130,6 +130,7 @@ export function RegisterByName(props: RegisterByNameProps) {
   const lookup = props.lookup === undefined ? nameLookup : props.lookup;
   const reader = props.registry === undefined ? defaultRegistry : props.registry;
   const { read } = useDirectory(lookup);
+  const loaded = useLoaded(!lookup || read !== null);
 
   const [typed, setTyped] = useState<string | null>(null);
   const [nameError, setNameError] = useState<string | undefined>();
@@ -190,6 +191,8 @@ export function RegisterByName(props: RegisterByNameProps) {
       </Stage>
     );
   }
+
+  if (!loaded) return <LoadingSeal />;
 
   return (
     <Stage
