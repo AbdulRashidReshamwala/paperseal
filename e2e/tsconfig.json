@@ -2,10 +2,25 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "paths": {
-      "@paperseal/chain": ["../packages/chain/src/index.ts"],
-      "@paperseal/attestation": ["../packages/attestation/src/index.ts"],
-      "@paperseal/tee-client": ["../packages/tee-client/src/index.ts"]
+      "@paperseal/chain": [
+        "../packages/chain/src/index.ts"
+      ],
+      "@paperseal/attestation": [
+        "../packages/attestation/src/index.ts"
+      ],
+      "@paperseal/tee-client": [
+        "../packages/tee-client/src/index.ts"
+      ]
     }
   },
-  "include": ["src", "tests", "keys-page", "live", "demo", "vitest.config.ts"]
+  "include": [
+    "src",
+    "tests",
+    "keys-page",
+    "live",
+    "demo",
+    "vitest.config.ts",
+    "ui",
+    "vitest.ui.config.ts"
+  ]
 }

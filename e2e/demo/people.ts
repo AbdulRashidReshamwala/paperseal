@@ -88,16 +88,31 @@ function labelScript(name: string): string {
 })();`;
 }
 
+export interface OpenOptions {
+  /** A fixed page size, for automated runs. Without it the window sets its own size (the visible demo). */
+  viewport?: { width: number; height: number };
+  /** Context permissions, such as the clipboard. */
+  permissions?: string[];
+  /** Runs after the key exists and before the first page load, so a counter or a wallet sees every load. */
+  setup?: (person: Person) => Promise<void> | void;
+  /** Hide the corner label. Screenshots then show the app and nothing else. */
+  noLabel?: boolean;
+}
+
 export async function openPerson(
   browser: Browser,
   name: string,
-  url: string,
+  url: string | null,
   index: number,
   onNote: (message: string) => void,
+  options: OpenOptions = {},
 ): Promise<Person> {
   // viewport null lets the window itself set the size; each person is a separate window.
-  const context = await browser.newContext({ viewport: null });
-  await context.addInitScript(labelScript(name));
+  const context = await browser.newContext({
+    viewport: options.viewport ?? null,
+    ...(options.permissions ? { permissions: options.permissions } : {}),
+  });
+  if (!options.noLabel) await context.addInitScript(labelScript(name));
 
   let ready = false;
   const page = await context.newPage();
@@ -107,7 +122,7 @@ export async function openPerson(
   const person: Person = { name, context, page, cdp, authenticatorId, lost: false };
 
   // A cascade of windows, so they do not all sit on top of one another.
-  try {
+  if (!options.viewport) try {
     const { windowId } = await cdp.send('Browser.getWindowForTarget' as never) as { windowId: number };
     await cdp.send('Browser.setWindowBounds' as never, { windowId, bounds: { left: 30 + index * 40, top: 40 + index * 32, width: 1100, height: 780, windowState: 'normal' } } as never);
   } catch {
@@ -124,7 +139,8 @@ export async function openPerson(
     onNote(`${name}: the window was closed, so ${name}'s key is gone. Restart \`pnpm demo\` to get it back (a new key, not the old one).`);
   });
 
-  await page.goto(url);
+  await options.setup?.(person);
+  if (url !== null) await page.goto(url);
   ready = true;
   return person;
 }

@@ -81,16 +81,22 @@ export function cast(chain: Chain, signature: string, ...args: string[]): string
 }
 
 /** Starts a Vite dev server of one app on its own port, with the given VITE_ variables. */
-export async function startApp(dir: string, env: Record<string, string>): Promise<{ url: string; stop: () => Promise<void> }> {
+export async function startApp(
+  dir: string,
+  env: Record<string, string>,
+  options: { host?: string } = {},
+): Promise<{ url: string; stop: () => Promise<void> }> {
+  // WebAuthn refuses an IP address as its relying party, so a run that uses security keys passes host "localhost".
+  const host = options.host ?? '127.0.0.1';
   const port = await freePort();
   const cwd = resolve(repoRoot, dir);
   // vite.config.ts sets strictPort on 5171/5172, which may be taken, so the CLI overrides the port.
-  const server = spawnManaged('pnpm', ['exec', 'vite', '--host', '127.0.0.1', '--port', String(port), '--strictPort'], {
+  const server = spawnManaged('pnpm', ['exec', 'vite', '--host', host, '--port', String(port), '--strictPort'], {
     cwd,
     env,
     label: `vite ${dir}`,
   });
-  const url = `http://127.0.0.1:${String(port)}`;
+  const url = `http://${host}:${String(port)}`;
   await waitFor(`${dir} dev server`, httpOk(url), 90_000, server);
   return {
     url,
