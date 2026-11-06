@@ -210,7 +210,7 @@ describe('publishExam with a stub wallet', () => {
   });
 });
 
-function renderBoard(env: PublishEnvironment, path = '/board') {
+function renderBoard(env: PublishEnvironment, path = '/board/new') {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
@@ -453,7 +453,7 @@ describe('step 2, review and publish', () => {
     expect(JSON.parse(localStorage.getItem('paperseal.board.drafts') ?? '[]')).toEqual([]);
     expect(localStorage.getItem('paperseal.board.draft')).toBeNull();
     // The exam is kept with its name, so the board can open it again later.
-    expect(JSON.parse(localStorage.getItem('paperseal.board.exams') ?? '[]')).toEqual([{ id: examId, name }]);
+    expect(JSON.parse(localStorage.getItem('paperseal.board.exams') ?? '[]')).toEqual([{ id: examId, name, addedAt: expect.any(Number) as number }]);
   });
 
   it('asks the wallet for an account as part of the same action', async () => {

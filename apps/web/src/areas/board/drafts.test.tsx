@@ -135,18 +135,19 @@ describe('the exams this browser knows', () => {
     rememberExam({ id: a, name: 'maths-2027' });
     rememberExam({ id: b, name: 'physics-2027' });
     rememberExam({ id: a, name: 'maths-2027' });
-    expect(listKnownExams()).toEqual([
+    expect(listKnownExams().map(({ id, name }) => ({ id, name }))).toEqual([
       { id: a, name: 'maths-2027' },
       { id: b, name: 'physics-2027' },
     ]);
+    expect(listKnownExams().every((exam) => typeof exam.addedAt === 'number')).toBe(true);
   });
 
   it('still finds an exam from before names were kept, from the pointer and from its invites', () => {
     setCurrentExamId(a);
     localStorage.setItem(`paperseal.invites.${b}`, '[]');
     expect(listKnownExams()).toEqual([
-      { id: a, name: null },
-      { id: b, name: null },
+      { id: a, name: null, addedAt: null },
+      { id: b, name: null, addedAt: null },
     ]);
     localStorage.setItem('paperseal.board.exams', 'damaged');
     expect(listKnownExams()).toHaveLength(2);
@@ -157,7 +158,7 @@ function Where() {
   return <p data-testid="where">{useLocation().pathname}</p>;
 }
 const environment = { createRegistry: null } as unknown as PublishEnvironment;
-function renderBoard(path = '/board') {
+function renderBoard(path = '/board/new') {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
@@ -173,12 +174,11 @@ const type = (value: string) => {
   fireEvent.change(nameField(), { target: { value } });
 };
 
-describe('/board and its drafts', () => {
-  it('opens the create page with an empty form and no lists when nothing is saved', () => {
+describe('/board/new and its drafts', () => {
+  it('opens the create page with an empty form when nothing is saved', () => {
     renderBoard();
     expect(screen.getByText('Create the exam')).toBeTruthy();
     expect(nameField().value).toBe('');
-    expect(screen.queryByText('Your drafts')).toBeNull();
     expect(screen.queryByText('Your exams')).toBeNull();
     expect(listDrafts()).toEqual([]);
   });
@@ -208,29 +208,6 @@ describe('/board and its drafts', () => {
     expect(stored()).toHaveLength(1);
   });
 
-  it('never restores a draft into the form unless the route names it', () => {
-    saveDraft('abc', content('maths-2027'));
-    renderBoard();
-    expect(nameField().value).toBe('');
-    expect(screen.getByText('Your drafts')).toBeTruthy();
-    expect(screen.getByText('maths-2027')).toBeTruthy();
-    expect(screen.getByText('Drafts are saved only in this browser.')).toBeTruthy();
-  });
-
-  it('continues a draft, with its form, and a reload stays on it', () => {
-    saveDraft('abc', content('maths-2027'));
-    saveDraft('def', content('physics-2027'));
-    renderBoard();
-    fireEvent.click(screen.getByRole('button', { name: 'Continue maths-2027' }));
-    expect(where()).toBe('/board/draft/abc');
-    expect(nameField().value).toBe('maths-2027');
-    expect(screen.getByText('physics-2027')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Continue maths-2027' })).toBeNull();
-    cleanup();
-    renderBoard('/board/draft/abc');
-    expect(nameField().value).toBe('maths-2027');
-  });
-
   it('continues a draft at the step it reached', () => {
     saveDraft('abc', { ...content('maths-2027'), draftStep: 'review' });
     renderBoard('/board/draft/abc');
@@ -244,57 +221,10 @@ describe('/board and its drafts', () => {
     expect(stored()[0]?.updatedAt).toBe(1_000);
   });
 
-  it('goes to the create page when the route names a draft that is not here', () => {
+  it('goes to the list when the route names a draft that is not here', () => {
     renderBoard('/board/draft/gone');
     expect(where()).toBe('/board');
-    expect(screen.getByText('Create the exam')).toBeTruthy();
-    expect(listDrafts()).toEqual([]);
-  });
-
-  it('deletes a draft after one confirm, and Keep it changes nothing', () => {
-    saveDraft('abc', content('maths-2027'));
-    saveDraft('def', content('physics-2027'));
-    renderBoard();
-    fireEvent.click(screen.getByRole('button', { name: 'Delete maths-2027' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Keep it' }));
-    expect(listDrafts()).toHaveLength(2);
-    fireEvent.click(screen.getByRole('button', { name: 'Delete maths-2027' }));
-    expect(listDrafts()).toHaveLength(2);
-    fireEvent.click(screen.getByRole('button', { name: 'Yes, delete maths-2027' }));
-    expect(listDrafts().map((draft) => draft.id)).toEqual(['def']);
-    expect(screen.queryByText('maths-2027')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Delete physics-2027' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Yes, delete physics-2027' }));
-    expect(screen.queryByText('Your drafts')).toBeNull();
-  });
-
-  it('shows a draft without a name as Untitled exam', () => {
-    saveDraft('abc', { ...content(''), plan: { ...defaultPlan, topics: [{ name: 'Mechanics', questions: '5' }] } });
-    renderBoard();
-    expect(screen.getByText('Untitled exam')).toBeTruthy();
-  });
-
-  it('lists the exams this browser published, separately, and opens one', () => {
-    const id = examIdFromName('maths-2027');
-    rememberExam({ id, name: 'maths-2027' });
-    renderBoard();
     expect(screen.getByText('Your exams')).toBeTruthy();
-    expect(screen.queryByText('Your drafts')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Open maths-2027' }));
-    expect(where()).toBe(`/board/exam/${id}`);
-  });
-
-  it('moves a draft from an older version into the list the first time /board opens', () => {
-    localStorage.setItem(OLD, JSON.stringify(content('old-draft')));
-    renderBoard();
-    expect(screen.getByText('old-draft')).toBeTruthy();
-    expect(nameField().value).toBe('');
-  });
-
-  it('opens with an empty form and no list when the saved drafts are damaged', () => {
-    localStorage.setItem(DRAFTS, '{{{');
-    renderBoard();
-    expect(nameField().value).toBe('');
-    expect(screen.queryByText('Your drafts')).toBeNull();
+    expect(listDrafts()).toEqual([]);
   });
 });

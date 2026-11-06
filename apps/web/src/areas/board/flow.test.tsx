@@ -633,7 +633,7 @@ describe('step 7, exam status', () => {
 });
 
 describe('deep links', () => {
-  it.each(['', '/blueprint', '/schedule', '/publish'])('/board%s starts a new exam when there is none', (path) => {
+  it.each(['/new', '/blueprint', '/schedule', '/publish'])('/board%s starts a new exam when there is none', (path) => {
     renderBoard(environment().env, null, `/board${path}`);
     expect(screen.getByText('Create the exam')).toBeTruthy();
     expect(screen.queryByRole('navigation')).toBeNull();
@@ -645,10 +645,11 @@ describe('deep links', () => {
     expect(await screen.findByText(/Setters can start sending questions in about 20 minutes/)).toBeTruthy();
   });
 
-  it('opens the create page at /board even when this browser has an exam, and /board/exam/<id> opens the exam', async () => {
+  it('opens the list at /board even when this browser has an exam, and /board/exam/<id> opens the exam', async () => {
     const { env } = await seeded('list');
     renderBoard(env, fakeTee(), '/board');
-    expect(await screen.findByText('Create the exam')).toBeTruthy();
+    expect(await screen.findByText('Your exams')).toBeTruthy();
+    expect(screen.queryByText('Create the exam')).toBeNull();
     cleanup();
     renderBoard(env, fakeTee(), `/board/exam/${examId}`);
     expect(await screen.findByText(/Setters can start sending questions in about 20 minutes/)).toBeTruthy();
@@ -667,12 +668,12 @@ describe('deep links', () => {
     expect(screen.getByText('All your exams and drafts')).toBeTruthy();
   });
 
-  it('goes to the create page for an exam id that is not one, or an old link with no exam', () => {
+  it('goes to the list for an exam id that is not one, or an old link with no exam', () => {
     renderBoard(environment().env, null, '/board/exam/nonsense');
-    expect(screen.getByText('Create the exam')).toBeTruthy();
+    expect(screen.getByText('Your exams')).toBeTruthy();
     cleanup();
     renderBoard(environment().env, null, '/board/list');
-    expect(screen.getByText('Create the exam')).toBeTruthy();
+    expect(screen.getByText('Your exams')).toBeTruthy();
   });
 });
 

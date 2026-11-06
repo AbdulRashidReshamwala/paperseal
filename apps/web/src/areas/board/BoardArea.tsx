@@ -9,7 +9,7 @@ import { useCurrentExamId } from '../../shared/currentExam';
 import { TEE_STATUS_POLL_MS } from '../../shared/TeeStatus';
 import './board.css';
 import { BoardFormProvider, useBoardForm, useEvaluated, useReader } from './BoardForm';
-import { BoardLists } from './BoardLists';
+import { BoardHome } from './BoardHome';
 import { BuildStep } from './BuildStep';
 import { CreateStep } from './CreateStep';
 import { decideStep, readSnapshot, type Snapshot } from './examState';
@@ -29,7 +29,6 @@ const step = (n: number) => `Step ${String(n)} of 6`;
 
 /** Steps 1 and 2, before there is an exam. They live in the browser until the exam is published. */
 function Draft(props: { review: boolean }) {
-  const { draftId } = useBoardForm();
   const { publish, draftStep, setDraftStep } = useBoardForm();
   const { blueprint, schedule } = useEvaluated();
   const releases = useReleases(publish.version);
@@ -54,7 +53,6 @@ function Draft(props: { review: boolean }) {
               setDraftStep('review');
             }}
           />
-          <BoardLists key={draftId ?? 'new'} exceptDraftId={draftId} />
         </>
       ) : null}
       {screen === 'review' ? (
@@ -96,7 +94,7 @@ function Waiting(props: { title: string; lede?: string; next: string; details?: 
 const asExamId = (text: string | null | undefined): Hex | null => (text && /^0x[0-9a-fA-F]{64}$/.test(text) ? (text.toLowerCase() as Hex) : null);
 
 /*
- * What a route asks for. `new` is the create page with an empty form, `review` its review, `draft`
+ * What a route asks for. `new` is the create page with an empty form (and an exam named in `?exam=`), `review` its review, `draft`
  * a saved draft named in the route, `exam` the exam named in the route and `current` an old link to
  * the exam this browser last published.
  */
@@ -184,17 +182,25 @@ function BoardFlow(props: { mode: Mode }) {
   return withLink(<StatusStep eyebrow={step(6)} snapshot={value} />);
 }
 
+/** `/board` is the home list, unless `?exam=` names an exam, which an older link still opens. */
+function BoardIndex() {
+  const [search] = useSearchParams();
+  return asExamId(search.get('exam')) ? <BoardFlow mode="new" /> : <BoardHome />;
+}
+
 /*
- * `/board` is always the create page, and an exam or draft is reached by its own route. The old
- * `blueprint`, `schedule` and `publish` links still start a new exam or open its review, and the old
- * `onboarding`, `list` and `outbox` links open the exam this browser last published.
+ * `/board` is the list of exams and drafts, `/board/new` the create page, and an exam or draft is
+ * reached by its own route. The old `blueprint` and `schedule` links go to the create page and
+ * `publish` opens its review, and the old `onboarding`, `list` and `outbox` links open the exam this
+ * browser last published.
  */
 export const screens: AreaScreen[] = [
-  { path: '', element: <BoardFlow mode="new" /> },
+  { path: '', element: <BoardIndex /> },
+  { path: 'new', element: <BoardFlow mode="new" /> },
   { path: 'draft/:draftId', element: <BoardFlow mode="draft" /> },
   { path: 'exam/:examId', element: <BoardFlow mode="exam" /> },
-  { path: 'blueprint', element: <BoardFlow mode="new" /> },
-  { path: 'schedule', element: <BoardFlow mode="new" /> },
+  { path: 'blueprint', element: <Navigate to="/board/new" replace /> },
+  { path: 'schedule', element: <Navigate to="/board/new" replace /> },
   { path: 'publish', element: <BoardFlow mode="review" /> },
   { path: 'onboarding', element: <BoardFlow mode="current" /> },
   { path: 'list', element: <BoardFlow mode="current" /> },

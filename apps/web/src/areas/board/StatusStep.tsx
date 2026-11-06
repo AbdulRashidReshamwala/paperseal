@@ -141,7 +141,7 @@ export function StatusStep(props: { eyebrow: string; snapshot: Snapshot }) {
       <EnsName examName={named} registryAddress={environment.registryAddress} verifier={verifierUrl()} />
       <ExamRecord snapshot={snapshot} />
       <p className="board-quiet">
-        <Link to="/board/blueprint">Set up another exam</Link>
+        <Link to="/board/new">Set up another exam</Link>
       </p>
     </Stage>
   );

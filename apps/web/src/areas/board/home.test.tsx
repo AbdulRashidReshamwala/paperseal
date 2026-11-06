@@ -1,0 +1,352 @@
+// @vitest-environment jsdom
+import { examIdFromName, firstRoundAtOrAfter, type Hex } from '@paperseal/protocol';
+import type { TeeClient } from '@paperseal/tee-client';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { setCurrentExamId } from '../../shared/currentExam';
+import BoardArea from './BoardArea';
+import { saveDraft, type DraftContent } from './draftStore';
+import { rememberExam } from './examsStore';
+import { HOME_READ_LIMIT, useRowReads } from './homeReads';
+import { defaultPlan } from './plan';
+import type { PublishEnvironment } from './publishFlow';
+
+const DAY = 86_400;
+const nowSeconds = () => Math.floor(Date.now() / 1000);
+const draft = (name: string): DraftContent => ({
+  plan: { ...defaultPlan, name },
+  publish: { version: '', rpcHost: 'rpc.example.org' },
+  draftStep: 'create',
+});
+
+interface Chain {
+  /** Seconds from now to the exam. Negative once it has been held. */
+  start: number;
+  list?: boolean;
+  build?: boolean;
+  /** Reading this exam fails. */
+  broken?: boolean;
+  /** Reading this exam never finishes. */
+  hang?: boolean;
+}
+
+/** A registry that knows these exams. `reading` counts reads in flight, and `peak` the most at once. */
+function chainOf(exams: Record<string, Chain>) {
+  const stats = { reading: 0, peak: 0 };
+  const registry = {
+    getExam: async (id: Hex) => {
+      const known = Object.entries(exams).find(([name]) => examIdFromName(name) === id)?.[1];
+      stats.reading += 1;
+      stats.peak = Math.max(stats.peak, stats.reading);
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        if (known?.hang) await new Promise(() => undefined);
+        if (known?.broken) throw new Error('rpc down');
+        if (!known) return null;
+        const start = nowSeconds() + known.start;
+        const round = (seconds: number) => BigInt(firstRoundAtOrAfter(seconds));
+        return {
+          settings: {
+            examId: id,
+            examStart: BigInt(start),
+            delta: 600n,
+            lockRound: round(start - 7200),
+            unlockRound: round(start - 600),
+            endRound: round(start + 14_400),
+            criteriaHash: `0x${'0'.repeat(64)}`,
+            rpcHost: 'rpc.example.org',
+          },
+          commitHash: `0x${'aa'.repeat(20)}`,
+          imageDigest: `0x${'bb'.repeat(32)}`,
+          createdAt: 1n,
+          createdBlock: 1n,
+        };
+      } finally {
+        stats.reading -= 1;
+      }
+    },
+    getCriteria: () => Promise.resolve(null),
+    getApprovedList: (id: Hex) =>
+      Promise.resolve(Object.entries(exams).find(([name]) => examIdFromName(name) === id)?.[1].list ? { listHash: `0x${'11'.repeat(32)}`, postedAt: 1n, postedBlock: 1n } : null),
+    getApprovedListEntries: () => Promise.resolve(null),
+    getBuild: (id: Hex) => Promise.resolve(Object.entries(exams).find(([name]) => examIdFromName(name) === id)?.[1].build ? { buildHash: `0x${'22'.repeat(32)}` } : null),
+  };
+  return { stats, environment: { createRegistry: () => registry } as unknown as PublishEnvironment };
+}
+
+const tee = (stage: string, outbox: unknown[] = []) =>
+  ({
+    status: () => Promise.resolve({ stage, questionCount: 0, release: { released: [], required: 8 } }),
+    outbox: () => Promise.resolve({ messages: outbox }),
+  }) as unknown as TeeClient;
+
+function Where() {
+  const { pathname, search } = useLocation();
+  return <p data-testid="where">{pathname + search}</p>;
+}
+function renderBoard(path: string, environment: PublishEnvironment, teeClient: TeeClient | null = null) {
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <Routes>
+        <Route path="/board/*" element={<BoardArea environment={environment} tee={teeClient} />} />
+      </Routes>
+      <Where />
+    </MemoryRouter>,
+  );
+}
+const where = () => screen.getByTestId('where').textContent;
+const row = (title: string) => screen.getByText(title).closest('li') as HTMLElement;
+const titles = () => screen.getAllByRole('listitem').map((item) => item.querySelector('strong')?.textContent);
+
+beforeEach(() => {
+  localStorage.clear();
+});
+afterEach(() => {
+  cleanup();
+});
+
+describe('/board, the home page', () => {
+  it('has one primary action, no create form, and one line when the list is empty', () => {
+    renderBoard('/board', chainOf({}).environment);
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Your exams');
+    expect(screen.getByText('You have no exams yet.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Create an exam' })).toBeTruthy();
+    expect(screen.queryByLabelText(/^Exam name/)).toBeNull();
+    expect(screen.queryByRole('list')).toBeNull();
+    expect(document.querySelectorAll('.ps-stage-action button')).toHaveLength(1);
+  });
+
+  it('goes to /board/new from Create an exam, which is step 1 of 6 on an empty form, and a reload stays there', () => {
+    const { environment } = chainOf({});
+    renderBoard('/board', environment);
+    fireEvent.click(screen.getByRole('button', { name: 'Create an exam' }));
+    expect(where()).toBe('/board/new');
+    expect(screen.getByText('Create the exam')).toBeTruthy();
+    expect(screen.getByText('Step 1 of 6')).toBeTruthy();
+    expect((screen.getByLabelText(/^Exam name/) as HTMLInputElement).value).toBe('');
+    cleanup();
+    renderBoard('/board/new', environment);
+    expect(screen.getByText('Create the exam')).toBeTruthy();
+    expect(screen.queryByText('Your exams')).toBeNull();
+  });
+
+  it('lists drafts and published exams together, newest first, with ones of unknown age last', () => {
+    rememberExam({ id: examIdFromName('old-exam'), name: 'old-exam' }, 1_000);
+    rememberExam({ id: examIdFromName('new-exam'), name: 'new-exam' }, 4_000);
+    saveDraft('a', draft('middle-draft'), 3_000);
+    saveDraft('b', draft('oldest-draft'), 500);
+    localStorage.setItem(`paperseal.invites.${examIdFromName('legacy')}`, '[]');
+    renderBoard('/board', chainOf({}).environment);
+    expect(titles()).toEqual(['new-exam', 'middle-draft', 'old-exam', 'oldest-draft', 'An exam without a saved name']);
+    expect(screen.getByText('Reference ' + examIdFromName('legacy').slice(2, 10))).toBeTruthy();
+  });
+
+  it('says what a draft is, when it was edited, and offers Continue and Delete', () => {
+    saveDraft('a', { ...draft(''), plan: { ...defaultPlan, topics: [{ name: 'Mechanics', questions: '5' }] } }, Date.now() - 12 * 60_000);
+    renderBoard('/board', chainOf({}).environment);
+    const item = row('Untitled exam');
+    expect(within(item).getByText('Draft')).toBeTruthy();
+    expect(within(item).getByText(/Edited 12 minutes ago/)).toBeTruthy();
+    expect(within(item).getByRole('button', { name: 'Continue Untitled exam' })).toBeTruthy();
+  });
+
+  it('continues a draft with its form, and a reload on its route stays there', () => {
+    saveDraft('abc', draft('maths-2027'));
+    renderBoard('/board', chainOf({}).environment);
+    fireEvent.click(screen.getByRole('button', { name: 'Continue maths-2027' }));
+    expect(where()).toBe('/board/draft/abc');
+    expect((screen.getByLabelText(/^Exam name/) as HTMLInputElement).value).toBe('maths-2027');
+    expect(screen.getByText('Step 1 of 6')).toBeTruthy();
+  });
+
+  it('deletes a draft after one confirm, and keeping it changes nothing', () => {
+    saveDraft('a', draft('maths-2027'));
+    saveDraft('b', draft('physics-2027'));
+    renderBoard('/board', chainOf({}).environment);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete maths-2027' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Keep it' }));
+    expect(titles()).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Delete maths-2027' }));
+    expect(titles()).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, delete maths-2027' }));
+    expect(titles()).toEqual(['physics-2027']);
+    expect(JSON.parse(localStorage.getItem('paperseal.board.drafts') ?? '[]')).toHaveLength(1);
+  });
+
+  it('says drafts stay in this browser, and that exams from another browser are not listed', () => {
+    renderBoard('/board', chainOf({}).environment);
+    expect(screen.getByText(/saved only in this browser. Exams published from another browser are not listed here/)).toBeTruthy();
+  });
+
+  it('opens an exam by its ID, and refuses text that is not one', () => {
+    const id = examIdFromName('elsewhere-2027');
+    renderBoard('/board', chainOf({}).environment);
+    const field = screen.getByLabelText('Exam ID');
+    fireEvent.change(field, { target: { value: '0x12' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    expect(screen.getByText(/That is not an exam ID/)).toBeTruthy();
+    expect(where()).toBe('/board');
+    fireEvent.change(field, { target: { value: ` ${id.toUpperCase().replace('0X', '0x')} ` } });
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    expect(where()).toBe(`/board/exam/${id}`);
+  });
+});
+
+describe('the status on each published exam', () => {
+  const names = {
+    nobody: { start: 30 * DAY },
+    waiting: { start: 30 * DAY, list: true },
+    posted: { start: 30 * DAY, list: true, build: true },
+    finished: { start: -30 * DAY, list: true, build: true },
+    unposted: { start: -30 * DAY, list: true },
+  } satisfies Record<string, Chain>;
+  const remember = (all: string[]) => {
+    all.forEach((name, index) => {
+      rememberExam({ id: examIdFromName(name), name }, 1_000 + index);
+    });
+  };
+
+  it('uses the words of each stage, and shows Checking… until a row is read', async () => {
+    remember(['nobody', 'waiting', 'posted', 'finished', 'unposted', 'slow']);
+    renderBoard('/board', chainOf({ ...names, slow: { start: DAY, hang: true } }).environment);
+    expect(screen.getAllByText('Checking…').length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(within(row('nobody')).getByText('Choose who takes part')).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(within(row('waiting')).getByText('Waiting for questions')).toBeTruthy();
+      expect(within(row('posted')).getByText('Paper posted')).toBeTruthy();
+      expect(within(row('finished')).getByText('Exam finished')).toBeTruthy();
+      expect(within(row('unposted')).getByText('Exam failed')).toBeTruthy();
+    });
+    expect(within(row('slow')).getByText('Checking…')).toBeTruthy();
+    // The exam date is shown as a real date and time.
+    expect(within(row('waiting')).getByText(/^Exam on .*\d{4}/)).toBeTruthy();
+  });
+
+  it('shows the row that needs the board more strongly than the others', async () => {
+    remember(['nobody', 'waiting']);
+    renderBoard('/board', chainOf(names).environment);
+    await waitFor(() => {
+      expect(within(row('nobody')).getByText('Choose who takes part')).toBeTruthy();
+      expect(within(row('waiting')).getByText('Waiting for questions')).toBeTruthy();
+    });
+    expect(row('nobody').classList.contains('board-row-act')).toBe(true);
+    expect(row('waiting').classList.contains('board-row-act')).toBe(false);
+  });
+
+  it('asks Paper Seal only about the current exam: ready to post, or failed', async () => {
+    remember(['waiting', 'posted']);
+    setCurrentExamId(examIdFromName('waiting'));
+    renderBoard('/board', chainOf(names).environment, tee('submit', [{ kind: 'build' }]));
+    await waitFor(() => {
+      expect(within(row('waiting')).getByText('Paper ready to post')).toBeTruthy();
+    });
+    expect(row('waiting').classList.contains('board-row-act')).toBe(true);
+    expect(within(row('posted')).getByText('Paper posted')).toBeTruthy();
+    cleanup();
+    renderBoard('/board', chainOf(names).environment, tee('failed'));
+    await waitFor(() => {
+      expect(within(row('waiting')).getByText('Exam failed')).toBeTruthy();
+    });
+  });
+
+  it('says Status not available right now for a read that failed, and the other rows still show', async () => {
+    remember(['waiting', 'broken']);
+    renderBoard('/board', chainOf({ ...names, broken: { start: DAY, broken: true } }).environment);
+    await waitFor(() => {
+      expect(within(row('broken')).getByText('Status not available right now')).toBeTruthy();
+      expect(within(row('waiting')).getByText('Waiting for questions')).toBeTruthy();
+    });
+    expect(within(row('broken')).getByRole('button', { name: 'Open broken' })).toBeTruthy();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('says the same when the page has no registry to read', () => {
+    remember(['waiting']);
+    renderBoard('/board', { createRegistry: null } as unknown as PublishEnvironment);
+    expect(within(row('waiting')).getByText('Status not available right now')).toBeTruthy();
+  });
+
+  it('opens a published exam from its row', async () => {
+    remember(['waiting']);
+    renderBoard('/board', chainOf(names).environment);
+    fireEvent.click(screen.getByRole('button', { name: 'Open waiting' }));
+    expect(where()).toBe(`/board/exam/${examIdFromName('waiting')}`);
+  });
+
+  it('reads at most a few exams at once', async () => {
+    const many = Object.fromEntries(Array.from({ length: 9 }, (_, n) => [`exam-${String(n)}`, { start: 30 * DAY, list: true }]));
+    remember(Object.keys(many));
+    const { environment, stats } = chainOf(many);
+    renderBoard('/board', environment);
+    await waitFor(() => {
+      expect(screen.getAllByText('Waiting for questions')).toHaveLength(9);
+    });
+    expect(stats.peak).toBeLessThanOrEqual(HOME_READ_LIMIT);
+    expect(stats.peak).toBeGreaterThan(1);
+  });
+});
+
+describe('reading the list again', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('waits the full interval after a pass, and keeps the last good value when a read fails', async () => {
+    vi.useFakeTimers();
+    const ids = [examIdFromName('a'), examIdFromName('b')];
+    const snapshot = { found: null } as never;
+    let fail = false;
+    const load = vi.fn(() => (fail ? Promise.reject(new Error('down')) : Promise.resolve(snapshot)));
+    const { result } = renderHook(() => useRowReads(ids, load, 5000));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(load).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4999);
+    });
+    expect(load).toHaveBeenCalledTimes(2);
+    fail = true;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(load).toHaveBeenCalledTimes(4);
+    expect(result.current.get(ids[0] as Hex)?.state).toBe('ready');
+  });
+});
+
+describe('old routes', () => {
+  it('/board/blueprint and /board/schedule go to /board/new', () => {
+    for (const path of ['/board/blueprint', '/board/schedule']) {
+      renderBoard(path, chainOf({}).environment);
+      expect(where()).toBe('/board/new');
+      expect(screen.getByText('Create the exam')).toBeTruthy();
+      cleanup();
+    }
+  });
+
+  it('/board?exam=<id> and /board/exam/<id> still open the exam, with a link back to the list', async () => {
+    const id = examIdFromName('waiting');
+    const { environment } = chainOf({ waiting: { start: 30 * DAY, list: true } });
+    for (const path of [`/board?exam=${id}`, `/board/exam/${id}`]) {
+      renderBoard(path, environment, tee('onboard'));
+      expect(await screen.findByText(/Nothing to do until/)).toBeTruthy();
+      expect(screen.queryByText('Your exams')).toBeNull();
+      cleanup();
+    }
+    renderBoard(`/board/exam/${id}`, environment, tee('onboard'));
+    fireEvent.click(await screen.findByText('All your exams and drafts'));
+    expect(where()).toBe('/board');
+    expect(screen.getByText('Your exams')).toBeTruthy();
+  });
+
+  it('goes to the list for a draft that is not here', () => {
+    renderBoard('/board/draft/gone', chainOf({}).environment);
+    expect(where()).toBe('/board');
+    expect(screen.getByText('Your exams')).toBeTruthy();
+  });
+});
