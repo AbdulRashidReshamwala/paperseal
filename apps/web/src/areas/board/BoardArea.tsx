@@ -29,6 +29,7 @@ import { PartyStep } from './PartyStep';
 import { centresProblem, draftScreen, furthestStep, neutralsProblem, plainWords } from './plan';
 import type { PublishEnvironment } from './publishFlow';
 import { evaluatePublish } from './form';
+import { useNameSettled } from './ExamJourney';
 import { ReceiptStep } from './ReceiptStep';
 import { useReleases } from './releases';
 import { ReviewStep } from './ReviewStep';
@@ -286,14 +287,21 @@ function BoardFlow(props: { mode: Mode }) {
     );
   if (decided === 'people') {
     return onExam(
-      <OnboardCheck examId={examId} snapshot={value}>
-        <PeopleStep examId={examId} snapshot={value} onPosted={reload} />
-      </OnboardCheck>,
+      <AfterName examId={examId}>
+        <OnboardCheck examId={examId} snapshot={value}>
+          <PeopleStep examId={examId} snapshot={value} onPosted={reload} />
+        </OnboardCheck>
+      </AfterName>,
     );
   }
   if (decided === 'wait') return onExam(<WaitStep snapshot={value} />);
   if (decided === 'post-build') return onExam(<BuildStep examId={examId} snapshot={value} onPosted={reload} />);
   return onExam(<StatusStep examId={examId} snapshot={value} />);
+}
+
+/** The steps after the exam's name wait until it is set or skipped. */
+function AfterName(props: { examId: Hex; children: ReactNode }) {
+  return useNameSettled(props.examId) ? props.children : null;
 }
 
 /** `/board` is the home list, unless `?exam=` names an exam, which an older link still opens. */

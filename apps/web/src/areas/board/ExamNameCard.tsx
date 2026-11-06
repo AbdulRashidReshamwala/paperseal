@@ -3,6 +3,7 @@ import { Button, Check, CopyButton, PrimaryAction } from '@paperseal/ui';
 import { useCallback, useEffect, useState } from 'react';
 
 import { useBoardForm } from './BoardForm';
+import { noteNameSettled, useNameSettled } from './ExamJourney';
 import { listKnownExams } from './examsStore';
 import { useBoardWallet, walletStageLabels, type WalletStage } from './hooks';
 import { readExamName, setExamName, type ExamName } from './nameFlow';
@@ -25,6 +26,9 @@ function useExamLabel(examId: Hex, routeName: string | null): string | null {
  */
 export function ExamNameCard(props: { examId: Hex; routeName?: string | null; onVerified?: (name: string) => void }) {
   const label = useExamLabel(props.examId, props.routeName ?? null);
+  useEffect(() => {
+    if (!label) noteNameSettled(props.examId, true);
+  }, [label, props.examId]);
   return label ? <NameOf examId={props.examId} label={label} {...(props.onVerified ? { onVerified: props.onVerified } : {})} /> : null;
 }
 
@@ -70,7 +74,15 @@ function NameOf(props: { examId: Hex; label: string; onVerified?: (name: string)
     if (verified) onVerified?.(verified);
   }, [onVerified, verified]);
 
+  const passed = useNameSettled(props.examId);
+  const settled = view.state === 'off' || view.state === 'set' || view.state === 'no-primary-name';
+  useEffect(() => {
+    if (settled) noteNameSettled(props.examId, true);
+  }, [settled, props.examId]);
+
   if (view.state === 'off' || view.state === 'checking') return null;
+  // Skipped: the page has moved on, and the name can be set by reopening the exam.
+  if (passed && view.state !== 'set' && view.state !== 'running') return null;
 
   if (view.state === 'set') {
     const verifier = verifierUrl();
@@ -93,7 +105,7 @@ function NameOf(props: { examId: Hex; label: string; onVerified?: (name: string)
   const running = view.state === 'running';
   return (
     <section className="board-draft-card board-people-job" aria-label="Exam name">
-      <h2>Give this exam its name</h2>
+      <h2>Exam Name</h2>
       {view.state === 'failed' || view.state === 'unconfirmed' ? <Problem>{view.message}</Problem> : null}
       {view.state === 'no-primary-name' ? (
         <p className="board-note">
@@ -117,6 +129,15 @@ function NameOf(props: { examId: Hex; label: string; onVerified?: (name: string)
       ) : (
         <Button aria-label="Try again to set the exam name" onClick={() => void (view.state === 'unconfirmed' ? read() : send())}>
           Try again
+        </Button>
+      )}
+      {running ? null : (
+        <Button
+          onClick={() => {
+            noteNameSettled(props.examId, true);
+          }}
+        >
+          Skip for now
         </Button>
       )}
     </section>
