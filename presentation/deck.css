@@ -43,10 +43,12 @@ h1 em{font-style:normal;color:var(--wax)}
 .quote figure{flex:none;width:700px;background:#14151c}
 .quote figure img{width:100%;height:100%;object-fit:cover;object-position:center 20%;display:block}
 .quote .q{flex:1;display:flex;flex-direction:column;justify-content:center;padding:0 128px 0 100px}
+.quote .q1{font-family:var(--serif);font-size:44px;line-height:1.3;color:#cfc8b8;margin-bottom:44px}
+.quote .q1 b{color:var(--paper);font-weight:700}
 .quote blockquote{font-family:var(--serif);font-weight:700;font-size:78px;line-height:1.12}
 .quote blockquote em{font-style:normal;color:#e5857c}
-.quote .q2{font-family:var(--serif);font-size:38px;line-height:1.35;margin-top:48px;color:#cfc8b8;border-left:4px solid #e5857c;padding-left:28px}
-.quote cite{display:block;margin-top:56px;font-style:normal;font-size:28px;color:#aea897}
+.quote .q2{font-family:var(--serif);font-size:34px;line-height:1.35;margin-top:40px;color:#cfc8b8;border-left:4px solid #e5857c;padding-left:28px}
+.quote cite{display:block;margin-top:44px;font-style:normal;font-size:28px;color:#aea897}
 .quote cite b{display:block;color:var(--paper);font-weight:600;font-size:32px}
 
 /* chain */
