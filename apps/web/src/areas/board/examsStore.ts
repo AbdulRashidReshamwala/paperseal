@@ -10,6 +10,7 @@ import { getStoredExamId } from '../../shared/currentExam';
  */
 
 const KEY = 'paperseal.board.exams';
+const REMOVED = 'paperseal.board.exams.removed';
 const INVITES = 'paperseal.invites.';
 const isExamId = (value: unknown): value is Hex => typeof value === 'string' && /^0x[0-9a-f]{64}$/.test(value);
 
@@ -52,11 +53,38 @@ function readStored(): KnownExam[] {
   }
 }
 
+function readRemoved(): Hex[] {
+  try {
+    const list: unknown = JSON.parse(storage()?.getItem(REMOVED) ?? '[]');
+    return Array.isArray(list) ? (list as unknown[]).filter(isExamId) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Takes an exam off this browser's list, and nothing else: the exam is untouched on the public record,
+ * and it still opens by its ID. Remembered, so the pointer to the current exam and the kept invites
+ * don't bring it back.
+ */
+export function forgetExam(id: Hex): void {
+  try {
+    const lower = id.toLowerCase() as Hex;
+    const store = storage();
+    store?.setItem(KEY, JSON.stringify(readStored().filter((known) => known.id !== lower)));
+    store?.setItem(REMOVED, JSON.stringify([...new Set([...readRemoved(), lower])]));
+  } catch {
+    // Not stored: the row comes back on the next visit.
+  }
+}
+
 /** Called once an exam is published and read back correctly. The newest comes first. */
 export function rememberExam(exam: { id: Hex; name: string }, now = Date.now()): void {
   try {
     const id = exam.id.toLowerCase() as Hex;
-    storage()?.setItem(KEY, JSON.stringify([{ id, name: exam.name, addedAt: now }, ...readStored().filter((known) => known.id !== id)]));
+    const store = storage();
+    store?.setItem(KEY, JSON.stringify([{ id, name: exam.name, addedAt: now }, ...readStored().filter((known) => known.id !== id)]));
+    if (readRemoved().includes(id)) store?.setItem(REMOVED, JSON.stringify(readRemoved().filter((removed) => removed !== id)));
   } catch {
     // Not stored: the exam is still reachable from the board's current exam.
   }
@@ -77,5 +105,6 @@ export function listKnownExams(): KnownExam[] {
   } catch {
     // The list stays as far as it got.
   }
-  return exams;
+  const removed = readRemoved();
+  return exams.filter((exam) => !removed.includes(exam.id));
 }
