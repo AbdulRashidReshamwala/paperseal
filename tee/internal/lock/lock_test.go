@@ -109,7 +109,7 @@ func TestCheckRefusesABankWhoseWorstPaperDoesNotFit(t *testing.T) {
 	if err := c.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	long := strings.Repeat("\u2028", 1300) // 3 bytes sent, 6 in the paper.
+	long := strings.Repeat("\x01", 1300) // 1 byte sent, 6 (\u0001) in the paper.
 	var qs []bank.Question
 	for i := range 510 {
 		qs = append(qs, bank.Question{Passkey: []byte{byte(i)}, Topic: "a", Text: fmt.Sprint(i, long)})

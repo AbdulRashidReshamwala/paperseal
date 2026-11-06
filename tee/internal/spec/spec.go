@@ -71,6 +71,9 @@ type Constants struct {
 		Topics         int `json:"topics"`
 		OwnerBytes     int `json:"ownerBytes"`
 		TopicNameBytes int `json:"topicNameBytes"`
+		// QuestionOptionsMin and Max bound a multiple choice question's options.
+		QuestionOptionsMin int `json:"questionOptionsMin"`
+		QuestionOptionsMax int `json:"questionOptionsMax"`
 	} `json:"limits"`
 	Padding struct {
 		QuestionBytes int `json:"questionBytes"`

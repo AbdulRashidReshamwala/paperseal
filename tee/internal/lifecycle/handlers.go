@@ -257,14 +257,14 @@ func (m *Machine) Questions(ctx context.Context, req api.QuestionRequest) (api.Q
 		return api.QuestionResponse{}, badRequest("decryption_failed", "the question did not decrypt")
 	}
 	defer wipe(padded) // The text below is a copy.
-	topic, text, err := bank.Parse(padded, *c)
+	topic, text, options, err := bank.Parse(padded, *c)
 	switch {
 	case errors.Is(err, bank.ErrUnknownTopic):
 		return api.QuestionResponse{}, badRequest("unknown_topic", err.Error())
 	case err != nil:
 		return api.QuestionResponse{}, badRequest("invalid_question", err.Error())
 	}
-	err = m.bank.Add(bank.Question{Passkey: req.PasskeyPublicKey, Topic: topic, Text: text, Hash: hash})
+	err = m.bank.Add(bank.Question{Passkey: req.PasskeyPublicKey, Topic: topic, Text: text, Options: options, Hash: hash})
 	switch {
 	case errors.Is(err, bank.ErrDuplicate):
 		return api.QuestionResponse{}, api.Errorf(http.StatusConflict, "duplicate_question", "this question is already in the bank")

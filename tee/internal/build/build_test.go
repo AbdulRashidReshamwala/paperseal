@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"reflect"
+	"slices"
 	"testing"
 
 	"paperseal/tee/internal/bank"
@@ -138,6 +140,7 @@ func TestBuildProducesTheCommittedPaper(t *testing.T) {
 func TestEntrySizesAddUpToThePaper(t *testing.T) {
 	qs := questions()
 	qs[0].Text = "tab\t quote\" slash\\ line\u2028 \u00e9 <&>"
+	qs[1].Options = []string{"<a>", "b & c\u2029", "d\n"}
 	p, err := Build([32]byte{9}, crit, qs)
 	if err != nil {
 		t.Fatal(err)
@@ -148,7 +151,7 @@ func TestEntrySizesAddUpToThePaper(t *testing.T) {
 	}
 	var sizes []int
 	for _, q := range doc.Questions {
-		n, err := EntrySize(bank.Question{Topic: q.Topic, Text: q.Text})
+		n, err := EntrySize(bank.Question{Topic: q.Topic, Text: q.Text, Options: q.Options})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -177,5 +180,113 @@ func TestPaperWipeZeroesWhatMustNotOutliveTheBuild(t *testing.T) {
 	}
 	if bytes.Equal(enc, make([]byte, len(enc))) {
 		t.Error("the published encrypted paper was wiped")
+	}
+}
+
+// want is what JSON.stringify gives for the same value, checked with node. The
+// characters Go's encoder would write differently are U+2028 and U+2029, so
+// they are spelled out in the Go source and sit raw in the bytes.
+func TestPaperBytesEqualJSONStringify(t *testing.T) {
+	doc := PaperDoc{
+		ExamID: "0x0900000000000000000000000000000000000000000000000000000000000000",
+		Questions: []PaperQuestion{
+			{Topic: "algebra", Text: "a\u2028b\u2029 <&> \"q\" \\ \b\f\n\r\t\x01\x1f \x7f \u00e9 \U0001F600",
+				Options: []string{"<x>", "A & B", "\u2028", `\u2028`}},
+			{Topic: "geometry", Text: "w"},
+		},
+	}
+	want := `{"examId":"0x0900000000000000000000000000000000000000000000000000000000000000","questions":[` +
+		`{"topic":"algebra","text":"a` + "\u2028" + `b` + "\u2029" + ` <&> \"q\" \\ \b\f\n\r\t\u0001\u001f ` + "\x7f" + ` é ` + "\U0001F600" + `",` +
+		`"options":["<x>","A & B","` + "\u2028" + `","\\u2028"]},` +
+		`{"topic":"geometry","text":"w"}]}`
+	got, err := encodeDoc(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Fatalf("got  %q\nwant %q", got, want)
+	}
+	// It is still valid JSON that reads back to the same value.
+	var back PaperDoc
+	if err := json.Unmarshal(got, &back); err != nil || !reflect.DeepEqual(back, doc) {
+		t.Fatalf("round trip: %v", err)
+	}
+}
+
+func TestMultipleChoiceReachesThePaperInTheSettersOrder(t *testing.T) {
+	qs := questions()
+	opts := []string{"zeta", "alpha", "<mid>", "beta"}
+	for i := range qs {
+		if qs[i].Topic == "algebra" {
+			qs[i].Options = slices.Clone(opts) // Every algebra question is multiple choice.
+		}
+	}
+	p, err := Build([32]byte{9}, crit, qs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc PaperDoc
+	if err := json.Unmarshal(p.PaperJSON, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range doc.Questions {
+		switch q.Topic {
+		case "algebra":
+			if !slices.Equal(q.Options, opts) {
+				t.Errorf("options %v", q.Options)
+			}
+		default:
+			if q.Options != nil {
+				t.Errorf("written question has options %v", q.Options)
+			}
+		}
+	}
+	// Keys are topic, text, options in that order, and a written question has no options key.
+	var raw struct {
+		Questions []json.RawMessage `json:"questions"`
+	}
+	if err := json.Unmarshal(p.PaperJSON, &raw); err != nil {
+		t.Fatal(err)
+	}
+	for i, r := range raw.Questions {
+		dec := json.NewDecoder(bytes.NewReader(r))
+		var keys []string
+		dec.Token() // {
+		for dec.More() {
+			k, _ := dec.Token()
+			keys = append(keys, k.(string))
+			var skip json.RawMessage
+			if err := dec.Decode(&skip); err != nil {
+				t.Fatal(err)
+			}
+		}
+		want := []string{"topic", "text"}
+		if doc.Questions[i].Topic == "algebra" {
+			want = append(want, "options")
+		}
+		if !slices.Equal(keys, want) {
+			t.Errorf("question %d keys %v, want %v", i, keys, want)
+		}
+	}
+	// Selection keeps options with their question.
+	var seed [32]byte
+	picked, err := Select(seed, crit, qs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range picked {
+		if (q.Topic == "algebra") != slices.Equal(q.Options, opts) {
+			t.Errorf("selected %s with options %v", q.Topic, q.Options)
+		}
+	}
+}
+
+func TestWrittenPaperHasNoOptionsKey(t *testing.T) {
+	p, err := Build([32]byte{9}, crit, questions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(p.PaperJSON, []byte("options")) {
+		t.Fatalf("written paper mentions options: %s", p.PaperJSON)
 	}
 }

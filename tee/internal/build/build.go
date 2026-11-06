@@ -5,11 +5,11 @@ import (
 	"bytes"
 	crand "crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
+	"slices"
 	"sort"
 
 	"paperseal/tee/internal/bank"
@@ -36,8 +36,9 @@ type Paper struct {
 
 // PaperQuestion is a question as the paper carries it.
 type PaperQuestion struct {
-	Topic string `json:"topic"`
-	Text  string `json:"text"`
+	Topic   string   `json:"topic"`
+	Text    string   `json:"text"`
+	Options []string `json:"options,omitempty"` // The setter's order. Absent for a written question.
 }
 
 // PaperDoc is the paper's JSON, from spec/api.md "Paper Format".
@@ -70,15 +71,72 @@ func Select(seed [32]byte, c criteria.Criteria, questions []bank.Question) ([]ba
 }
 
 // encodeDoc is the paper's JSON, written the one way Build and EntrySize share.
+// The bytes equal what JSON.stringify gives for the same value, because the
+// TypeScript side re-encodes papers that way and saltedPaperHash covers the
+// bytes. encoding/json differs even with HTML escaping off: it writes U+2028
+// and U+2029 as \u2028 and \u2029, which JSON.stringify leaves as they are.
+// So strings are written by jsonString and the encoder is not used. A question is topic, text, then options when it has any.
 func encodeDoc(doc PaperDoc) ([]byte, error) {
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(doc); err != nil {
-		return nil, err
+	b := []byte(`{"examId":`)
+	b = jsonString(b, doc.ExamID)
+	b = append(b, `,"questions":[`...)
+	for i, q := range doc.Questions {
+		if i > 0 {
+			b = append(b, ',')
+		}
+		b = append(b, `{"topic":`...)
+		b = jsonString(b, q.Topic)
+		b = append(b, `,"text":`...)
+		b = jsonString(b, q.Text)
+		if len(q.Options) > 0 {
+			b = append(b, `,"options":[`...)
+			for j, o := range q.Options {
+				if j > 0 {
+					b = append(b, ',')
+				}
+				b = jsonString(b, o)
+			}
+			b = append(b, ']')
+		}
+		b = append(b, '}')
 	}
-	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+	return append(b, `]}`...), nil
 }
+
+// jsonString appends s as JSON.stringify writes it: quote, backslash, \b \f
+// \n \r \t and the other control characters below U+0020 as lowercase \u00xx
+// are escaped, and everything else, including <, >, & and U+2028, is literal.
+// s is valid UTF-8, because bank.Parse refuses anything else. Lone surrogates,
+// which JSON.stringify escapes, can't occur in UTF-8.
+func jsonString(b []byte, s string) []byte {
+	const hexDigits = "0123456789abcdef"
+	b = append(b, '"')
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '"' || c == '\\':
+			b = append(b, '\\', c)
+		case c == '\b':
+			b = append(b, '\\', 'b')
+		case c == '\f':
+			b = append(b, '\\', 'f')
+		case c == '\n':
+			b = append(b, '\\', 'n')
+		case c == '\r':
+			b = append(b, '\\', 'r')
+		case c == '\t':
+			b = append(b, '\\', 't')
+		case c < 0x20:
+			b = append(b, '\\', 'u', '0', '0', hexDigits[c>>4], hexDigits[c&15])
+		default:
+			b = append(b, c)
+		}
+	}
+	return append(b, '"')
+}
+
+// EncodeDoc returns the paper's JSON, the bytes saltedPaperHash covers, for
+// vectors and for readers that must reproduce them.
+func EncodeDoc(doc PaperDoc) ([]byte, error) { return encodeDoc(doc) }
 
 // MaxPaperJSONBytes is the most the paper's JSON can take when it holds
 // questions of the given encoded sizes: the envelope, then each question's
@@ -102,7 +160,7 @@ func MaxPaperJSONBytes(entrySizes []int) (int, error) {
 
 // EntrySize is how many bytes a question takes in the paper's JSON.
 func EntrySize(q bank.Question) (int, error) {
-	b, err := encodeDoc(PaperDoc{Questions: []PaperQuestion{{q.Topic, q.Text}}})
+	b, err := encodeDoc(PaperDoc{Questions: []PaperQuestion{{q.Topic, q.Text, q.Options}}})
 	if err != nil {
 		return 0, err
 	}
@@ -147,7 +205,7 @@ func buildFrom(rnd io.Reader, examID [32]byte, c criteria.Criteria, questions []
 	}
 	doc := PaperDoc{ExamID: "0x" + hex.EncodeToString(examID[:])}
 	for _, q := range picked {
-		doc.Questions = append(doc.Questions, PaperQuestion{q.Topic, q.Text})
+		doc.Questions = append(doc.Questions, PaperQuestion{q.Topic, q.Text, slices.Clone(q.Options)})
 	}
 	if uint32(len(doc.Questions)) != selected {
 		return Paper{}, errors.New("build: selected count differs from the criteria")

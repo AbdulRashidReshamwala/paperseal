@@ -16,6 +16,7 @@ import (
 
 	"paperseal/tee/internal/approvedlist"
 	"paperseal/tee/internal/attestation"
+	"paperseal/tee/internal/build"
 	"paperseal/tee/internal/criteria"
 	"paperseal/tee/internal/encryption"
 	"paperseal/tee/internal/hashing"
@@ -37,6 +38,7 @@ type File struct {
 	HPKE             []HPKEVector   `json:"hpke"`
 	AES              AESVector      `json:"aes"`
 	Padding          []PadVector    `json:"padding"`
+	Paper            []PaperVector  `json:"paper"`
 	Release          ReleaseVector  `json:"release"`
 	ReleaseEntries   EntriesVector  `json:"releaseEntries"`
 	Manifest         ManifestVector `json:"manifest"`
@@ -163,6 +165,53 @@ type PadVector struct {
 	Data   string `json:"data"`
 	Size   int    `json:"size"`
 	Padded string `json:"padded"`
+}
+
+// PaperVector is a paper and the bytes it must encode to. Bytes is the hex of
+// exactly what JSON.stringify gives for {examId, questions}, with each
+// question's keys in the order topic, text, options and no options key for a
+// written question, so encodePaper must reproduce it. It includes <, >, & and
+// U+2028 raw, which Go's default encoder would escape. SaltedPaperHash is
+// hashing.SaltedPaper over Seed and Bytes.
+type PaperVector struct {
+	Name            string                `json:"name"`
+	ExamID          string                `json:"examId"`
+	Questions       []build.PaperQuestion `json:"questions"`
+	Bytes           string                `json:"bytes"`
+	Seed            string                `json:"seed"`
+	SaltedPaperHash string                `json:"saltedPaperHash"`
+}
+
+func paperVectors(seed [32]byte) ([]PaperVector, error) {
+	examID := fill(0x11)
+	cases := []struct {
+		name string
+		qs   []build.PaperQuestion
+	}{
+		{"written only", []build.PaperQuestion{{Topic: "algebra", Text: "Solve x."}}},
+		{"multiple choice and written", []build.PaperQuestion{
+			{Topic: "algebra", Text: "Which is larger, 1 < 2 & 3 > 2?", Options: []string{"zeta", "<alpha>", "A & B", "d"}},
+			{Topic: "geometry", Text: "Name a triangle."},
+		}},
+		{"characters that encode differently", []build.PaperQuestion{
+			{Topic: "algebra", Text: "q\" \\ \b\f\n\r\t\u0001\u001f \u007f \u00e9 \u2028 \u2029 \U0001F600", Options: []string{"\u2028", `\u2028`, "</script>"}},
+		}},
+	}
+	var out []PaperVector
+	for _, c := range cases {
+		doc := build.PaperDoc{ExamID: x(examID[:]), Questions: c.qs}
+		b, err := build.EncodeDoc(doc)
+		if err != nil {
+			return nil, err
+		}
+		m, err := hashing.SaltedPaper(seed, b)
+		if err != nil {
+			return nil, err
+		}
+		h := m.Sum()
+		out = append(out, PaperVector{c.name, doc.ExamID, c.qs, x(b), x(seed[:]), x(h[:])})
+	}
+	return out, nil
 }
 
 // ReleaseVector is the `release` plaintext, abi.encode(bytes share, bytes
@@ -502,7 +551,8 @@ func addEncryption(f *File, examID [32]byte) error {
 	}
 	// Data that doesn't fit has no padded form.
 	f.Padding = append(f.Padding, PadVector{x([]byte("thirteen byte")), 16, ""})
-	return nil
+	f.Paper, err = paperVectors(fill(0x33))
+	return err
 }
 
 func addRelease(f *File) error {

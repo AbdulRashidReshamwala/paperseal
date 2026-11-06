@@ -47,7 +47,9 @@
     "entries": 512,
     "topics": 64,
     "ownerBytes": 128,
-    "topicNameBytes": 64
+    "topicNameBytes": 64,
+    "questionOptionsMin": 2,
+    "questionOptionsMax": 6
   },
   "padding": {
     "questionBytes": 4096,

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -37,6 +38,7 @@ type Question struct {
 	Passkey []byte   // The setter's passkey public key.
 	Topic   string   // A criteria topic.
 	Text    string   // Non-empty.
+	Options []string // The choices in the setter's order, or nil for a written question.
 	Hash    [32]byte // Plain SHA-256 of the ciphertext, the questionHash.
 }
 
@@ -44,41 +46,80 @@ type Question struct {
 type wire struct {
 	Topic *string `json:"topic"`
 	Text  *string `json:"text"`
+	// Options is a RawMessage so an explicit null can be told from a missing key.
+	Options json.RawMessage `json:"options"`
 }
 
 // Parse removes the padding from a decrypted question and checks its format:
-// exactly {"topic": string, "text": string}, with a topic from the criteria and
-// non-empty text.
-func Parse(padded []byte, c criteria.Criteria) (topic, text string, err error) {
+// exactly {"topic": string, "text": string} with an optional "options" list of
+// strings, a topic from the criteria and non-empty text. options is nil for a
+// written question. A multiple choice question has between
+// limits.questionOptionsMin and questionOptionsMax options, none blank after
+// trimming and no two equal. The options keep the setter's order.
+func Parse(padded []byte, c criteria.Criteria) (topic, text string, options []string, err error) {
 	raw, err := encryption.Unpad(padded, spec.C.Padding.QuestionBytes)
 	if err != nil {
-		return "", "", fmt.Errorf("%w: %v", ErrFormat, err)
+		return "", "", nil, fmt.Errorf("%w: %v", ErrFormat, err)
 	}
 	// encoding/json turns invalid UTF-8 into U+FFFD, so check the bytes first.
 	if !utf8.Valid(raw) {
-		return "", "", fmt.Errorf("%w: not UTF-8", ErrFormat)
+		return "", "", nil, fmt.Errorf("%w: not UTF-8", ErrFormat)
 	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	var w wire
 	if err := dec.Decode(&w); err != nil {
-		return "", "", fmt.Errorf("%w: %v", ErrFormat, err)
+		return "", "", nil, fmt.Errorf("%w: %v", ErrFormat, err)
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return "", "", fmt.Errorf("%w: trailing data", ErrFormat)
+		return "", "", nil, fmt.Errorf("%w: trailing data", ErrFormat)
 	}
 	if w.Topic == nil || w.Text == nil {
-		return "", "", fmt.Errorf("%w: topic and text are required", ErrFormat)
+		return "", "", nil, fmt.Errorf("%w: topic and text are required", ErrFormat)
 	}
 	if strings.TrimSpace(*w.Text) == "" {
-		return "", "", fmt.Errorf("%w: text is empty", ErrFormat)
+		return "", "", nil, fmt.Errorf("%w: text is empty", ErrFormat)
+	}
+	if w.Options != nil {
+		if options, err = parseOptions(w.Options); err != nil {
+			return "", "", nil, err
+		}
 	}
 	for _, t := range c.Topics {
 		if t.Name == *w.Topic {
-			return *w.Topic, *w.Text, nil
+			return *w.Topic, *w.Text, options, nil
 		}
 	}
-	return "", "", fmt.Errorf("%w: %q", ErrUnknownTopic, *w.Topic)
+	return "", "", nil, fmt.Errorf("%w: %q", ErrUnknownTopic, *w.Topic)
+}
+
+// parseOptions checks the value of an "options" key that is present.
+func parseOptions(raw json.RawMessage) ([]string, error) {
+	var list []string
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil, fmt.Errorf("%w: options is null, a written question has no options key", ErrFormat)
+	}
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return nil, fmt.Errorf("%w: options: %v", ErrFormat, err)
+	}
+	lim := spec.C.Limits
+	if len(list) == 0 {
+		return nil, fmt.Errorf("%w: options is empty, a written question has no options key", ErrFormat)
+	}
+	if len(list) < lim.QuestionOptionsMin || len(list) > lim.QuestionOptionsMax {
+		return nil, fmt.Errorf("%w: %d options, need %d to %d", ErrFormat, len(list), lim.QuestionOptionsMin, lim.QuestionOptionsMax)
+	}
+	seen := make(map[string]bool, len(list))
+	for _, o := range list {
+		if strings.TrimSpace(o) == "" {
+			return nil, fmt.Errorf("%w: an option is blank", ErrFormat)
+		}
+		if seen[o] {
+			return nil, fmt.Errorf("%w: duplicate option", ErrFormat)
+		}
+		seen[o] = true
+	}
+	return list, nil
 }
 
 // Bank holds accepted questions until Lock.
@@ -131,7 +172,7 @@ func (b *Bank) Add(q Question) error {
 	}
 	b.seen[tk], b.seen[hk] = true, true
 	b.list = append(b.list, Question{
-		Passkey: bytes.Clone(q.Passkey), Topic: q.Topic, Text: q.Text, Hash: q.Hash,
+		Passkey: bytes.Clone(q.Passkey), Topic: q.Topic, Text: q.Text, Options: slices.Clone(q.Options), Hash: q.Hash,
 	})
 	return nil
 }
