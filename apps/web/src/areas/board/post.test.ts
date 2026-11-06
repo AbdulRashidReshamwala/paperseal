@@ -16,6 +16,7 @@ import { sepolia } from 'viem/chains';
 import { describe, expect, it } from 'vitest';
 
 import { fakeChain, type FakeChainOptions } from '../../test/fakeChain';
+import { splitDetails } from './details';
 import { OutboxError, verifyOutboxBuild } from './outbox';
 import { explainPostError, postApprovedListFlow, postBuildFlow, type BuildPost } from './postFlow';
 import { PublishBlockedError, type PublishEnvironment } from './publishFlow';
@@ -96,13 +97,13 @@ describe('postApprovedListFlow', () => {
     const { node, env } = environment();
     const { encoded } = composeApprovedList(examId, entries());
     await postApprovedListFlow(env, { examId, entries: encoded }, undefined, noWait);
-    await expect(postApprovedListFlow(env, { examId, entries: encoded }, undefined, noWait)).rejects.toThrow('write-once');
+    await expect(postApprovedListFlow(env, { examId, entries: encoded }, undefined, noWait)).rejects.toThrow('already posted');
     expect(node.sent).toHaveLength(1);
   });
 
   it('blocks an account that is not the board', async () => {
     const { node, env } = environment({ account: stranger });
-    await expect(postApprovedListFlow(env, { examId, entries: '0x01' }, undefined, noWait)).rejects.toThrow('not the board address');
+    await expect(postApprovedListFlow(env, { examId, entries: '0x01' }, undefined, noWait)).rejects.toThrow('not the exam board’s account');
     expect(node.sent).toHaveLength(0);
   });
 
@@ -110,13 +111,13 @@ describe('postApprovedListFlow', () => {
     const { node, env } = environment({ revertWith: { errorName: 'ApprovedListNotPosted', args: [examId], on: 'postApprovedList' } });
     const error = await postApprovedListFlow(env, { examId, entries: '0x01' }, undefined, noWait).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(PublishBlockedError);
-    expect((error as Error).message).toBe('The approved list has not been posted yet, and a Build needs it.');
+    expect((error as Error).message).toBe('The list of people has not been posted yet. Post the list first.');
     expect(node.sent).toHaveLength(0);
   });
 
   it('reports a wallet rejection', async () => {
     const { env } = environment({ rejectSend: true });
-    await expect(postApprovedListFlow(env, { examId, entries: '0x01' }, undefined, noWait)).rejects.toThrow('You rejected the request');
+    await expect(postApprovedListFlow(env, { examId, entries: '0x01' }, undefined, noWait)).rejects.toThrow('You declined in your wallet');
   });
 });
 
@@ -211,19 +212,22 @@ describe('postBuildFlow', () => {
     const { node, env } = environment();
     const post = await build();
     await postBuildFlow(env, post, undefined, noWait);
-    await expect(postBuildFlow(env, post, undefined, noWait)).rejects.toThrow('only one');
+    await expect(postBuildFlow(env, post, undefined, noWait)).rejects.toThrow('cannot be recorded twice');
     expect(node.sent).toHaveLength(1);
   });
 
   it('explains a list hash mismatch in plain words', async () => {
     const { node, env } = environment({ revertWith: { errorName: 'ApprovedListHashMismatch', args: [`0x${'01'.repeat(32)}`, `0x${'02'.repeat(32)}`], on: 'postBuild' } });
-    await expect(postBuildFlow(env, await build(), undefined, noWait)).rejects.toThrow('different approved list');
+    await expect(postBuildFlow(env, await build(), undefined, noWait)).rejects.toThrow('different list of people');
     expect(node.sent).toHaveLength(0);
   });
 });
 
 describe('explainPostError', () => {
   it('passes plain errors through', () => {
-    expect(explainPostError(new Error('boom'))).toBe('boom');
+    expect(splitDetails(explainPostError(new Error('boom')))).toEqual({
+      say: expect.stringContaining('Try again'),
+      detail: 'boom',
+    });
   });
 });

@@ -9,6 +9,8 @@ import {
 } from '@paperseal/protocol';
 import type { OutboxMessage, StatusResponse, TeeClient } from '@paperseal/tee-client';
 
+import { withDetails } from './details';
+
 /*
  * What the board's screen is decided from: the exam, list and Build on ExamRegistry, then the
  * TEE's status and outbox. ExamRegistry is write-once, so a value read successfully isn't read again.
@@ -27,7 +29,7 @@ export async function readApprovedList(registry: ExamRegistry, id: Hex) {
   try {
     const encoded = await registry.getApprovedListEntries(id);
     if (!encoded) {
-      problem = 'The list is posted on-chain, but its entries could not be read.';
+      problem = 'The list of people is posted, but this page could not read it. Reload the page in a minute.';
     } else {
       entries = decodeApprovedList(fromHex(encoded));
     }
@@ -35,9 +37,9 @@ export async function readApprovedList(registry: ExamRegistry, id: Hex) {
     problem =
       error instanceof OnChainBytesError
         ? error.kind === 'missing'
-          ? `The list hash is on-chain, but the list's bytes could not be read from the RPC. This is not an empty list: ${error.message} Try another RPC.`
-          : `The list's bytes read from the RPC do not match the hash on-chain, so they are not shown. ${error.message}`
-        : `The posted entries are malformed: ${(error as Error).message}`;
+          ? withDetails('The list of people is posted, but this page could not read it. It is not empty. Reload the page in a minute.', error.message)
+          : withDetails('The list of people could not be checked against what was posted, so it is not shown.', error.message)
+        : withDetails('The posted list could not be read.', (error as Error).message);
   }
   return { list, entries, problem };
 }
@@ -54,8 +56,8 @@ export async function readExam(registry: ExamRegistry, id: Hex) {
   } catch (error) {
     criteriaProblem =
       error instanceof OnChainBytesError
-        ? `The criteria could not be shown: ${error.message}`
-        : `The criteria on-chain are malformed: ${(error as Error).message}`;
+        ? withDetails('The topics could not be shown. Reload the page in a minute.', error.message)
+        : withDetails('The topics could not be read.', (error as Error).message);
   }
   return { exam, criteria, criteriaProblem };
 }
@@ -84,13 +86,13 @@ export async function readSnapshot(
   if (!found) return empty;
   const list = previous?.list && !previous.list.problem ? previous.list : await readApprovedList(registry, examId);
   const build = previous?.build ?? (list ? await registry.getBuild(examId) : null);
-  if (!tee) return { ...empty, list, build, teeProblem: 'The sealed machine is not connected.' };
+  if (!tee) return { ...empty, list, build, teeProblem: 'Paper Seal is not connected. Reload this page. If it stays like this, contact whoever runs Paper Seal.' };
   try {
     const status = await tee.status();
     const outbox = list && !build ? (await tee.outbox()).messages : [];
     return { ...empty, list, build, status, outbox };
   } catch (error) {
-    return { ...empty, list, build, teeProblem: error instanceof Error ? error.message : String(error) };
+    return { ...empty, list, build, teeProblem: withDetails('Paper Seal did not answer. This page keeps trying. If it stays like this, contact whoever runs Paper Seal.', error instanceof Error ? error.message : String(error)) };
   }
 }
 

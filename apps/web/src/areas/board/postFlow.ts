@@ -3,6 +3,7 @@ import { approvedListHash, chain, fromHex, toHex, type Hex } from '@paperseal/pr
 import { BaseError, ContractFunctionRevertedError, UserRejectedRequestError, type Address } from 'viem';
 
 import { currentAccount, walletChainId, walletClientFor } from '../../shared/wallet';
+import { withDetails } from './details';
 import { PublishBlockedError, type PublishEnvironment } from './publishFlow';
 
 /*
@@ -14,11 +15,11 @@ import { PublishBlockedError, type PublishEnvironment } from './publishFlow';
 export type PostStage = 'checking' | 'simulating' | 'wallet' | 'mining' | 'reading';
 
 export const postStageLabels: Record<PostStage, string> = {
-  checking: 'Checking the wallet, chain and board address.',
-  simulating: 'Dry-running the call.',
-  wallet: 'Waiting for you to confirm in your wallet.',
-  mining: 'Waiting for the transaction to be mined.',
-  reading: 'Reading the result back from ExamRegistry.',
+  checking: 'Checking your wallet.',
+  simulating: 'Checking your request.',
+  wallet: 'Confirm in your wallet.',
+  mining: 'Saving to the public record.',
+  reading: 'Checking it saved correctly.',
 };
 
 export interface PostOutcome {
@@ -40,26 +41,34 @@ async function sendFromBoard(
   const { registryAddress, publicClient, createRegistry } = environment;
   onStage('checking');
   const provider = environment.getProvider();
-  if (!provider) throw new PublishBlockedError('No browser wallet was found. Install one in this Chromium browser and reload.');
+  if (!provider) throw new PublishBlockedError('Your wallet was not found. Install a wallet extension in Chrome, then reload this page.');
   if (!registryAddress || !publicClient || !createRegistry) {
-    throw new PublishBlockedError('Set VITE_RPC_URL and VITE_REGISTRY_ADDRESS to post.');
+    throw new PublishBlockedError('Posting is not set up on this page. Ask whoever installed Paper Seal to finish the setup, then reload.');
   }
   const account = await currentAccount(provider);
-  if (!account) throw new PublishBlockedError('Connect your wallet first.');
+  if (!account) throw new PublishBlockedError('Connect your wallet, then press the button again.');
   const [walletChain, rpcChain] = [await walletChainId(provider), await publicClient.getChainId()];
   if (walletChain !== chain.chainId) {
     throw new PublishBlockedError(
-      `Your wallet is on chain ${String(walletChain)}. Switch it to Sepolia (chain ${String(chain.chainId)}) and try again.`,
+      'Your wallet is on the wrong network. Switch it to Sepolia in your wallet, then try again.',
     );
   }
   if (rpcChain !== chain.chainId) {
-    throw new PublishBlockedError(`VITE_RPC_URL points to chain ${String(rpcChain)}, not Sepolia (chain ${String(chain.chainId)}).`);
+    throw new PublishBlockedError(
+      withDetails(
+        'This page is connected to the wrong network. Ask whoever installed Paper Seal to fix the setup, then reload.',
+        `The page reads from chain ${String(rpcChain)}, not Sepolia (chain ${String(chain.chainId)}).`,
+      ),
+    );
   }
   const reader = createRegistry();
   const board = await reader.board();
   if (board.toLowerCase() !== account.toLowerCase()) {
     throw new PublishBlockedError(
-      `The connected account ${account} is not the board address. ExamRegistry only accepts writes from ${board}. Switch accounts in your wallet.`,
+      withDetails(
+        'This wallet account is not the exam board’s account. Switch to the board’s account in your wallet, then try again.',
+        `Connected: ${account}. Board: ${board}.`,
+      ),
     );
   }
 
@@ -87,7 +96,12 @@ async function sendFromBoard(
   onStage('mining');
   const receipt = await publicClient.waitForTransactionReceipt({ hash: transactionHash });
   if (receipt.status !== 'success') {
-    throw new Error(`The transaction ${transactionHash} was mined but reverted, so nothing was posted.`);
+    throw new Error(
+      withDetails(
+        'The public record refused it, so nothing was posted. Try again. If this happens again, contact whoever runs Paper Seal.',
+        `Transaction ${transactionHash} was reverted.`,
+      ),
+    );
   }
   return { transactionHash, blockNumber: receipt.blockNumber, reader };
 }
@@ -140,7 +154,7 @@ export async function postApprovedListFlow(
   const { examId, entries } = input;
   const existing = environment.createRegistry ? await environment.createRegistry().getApprovedList(examId) : null;
   if (existing) {
-    throw new PublishBlockedError('An approved list is already posted for this exam. It is write-once and cannot be replaced.');
+    throw new PublishBlockedError('The list of people is already posted for this exam. It cannot be replaced.');
   }
   const sent = await sendFromBoard(
     environment,
@@ -154,7 +168,7 @@ export async function postApprovedListFlow(
   const emittedRead = await retry(() => sent.reader.getApprovedListEntries(examId), attempts, wait);
   const list = listRead?.value;
   if (!list || !emittedRead) {
-    throw new Error('The transaction was mined, but ExamRegistry does not return the list yet. Reload and check the approved list screen.');
+    throw new Error('The list was sent, but it does not show yet. Wait a minute, then reload this page to see it.');
   }
   const rows = [
     row('List hash', lower(toHex(approvedListHash(fromHex(examId), fromHex(entries)))), lower(list.listHash)),
@@ -198,7 +212,7 @@ export async function postBuildFlow(
     build.instancePublicKey,
   ] as const;
   const existing = environment.createRegistry ? await environment.createRegistry().getBuild(build.examId) : null;
-  if (existing) throw new PublishBlockedError('A Build is already posted for this exam. ExamRegistry accepts only one.');
+  if (existing) throw new PublishBlockedError('The sealed paper is already recorded for this exam. It cannot be recorded twice.');
   const sent = await sendFromBoard(
     environment,
     { functionName: 'postBuild', args, send: (registry) => registry.postBuild(...args) },
@@ -208,7 +222,7 @@ export async function postBuildFlow(
   const storedRead = await retry(() => sent.reader.getBuild(build.examId), options.readBackAttempts ?? 5, options.wait ?? sleep);
   const stored = storedRead?.value;
   if (!stored) {
-    throw new Error('The transaction was mined, but ExamRegistry does not return the Build yet. Reload and check the overview.');
+    throw new Error('The record was sent, but it does not show yet. Wait a minute, then reload this page to see it.');
   }
   const rows = [
     row('Approved list hash', lower(build.approvedListHash), lower(stored.approvedListHash)),
@@ -225,21 +239,23 @@ export async function postBuildFlow(
 }
 
 const revertMessages: Record<string, (args: readonly unknown[]) => string> = {
-  NotBoard: ([caller]) => `Only the board address can post. ${String(caller)} is not it.`,
-  ExamNotFound: () => 'This exam is not published on ExamRegistry yet. Publish it first.',
-  ApprovedListAlreadyPosted: () => 'An approved list is already posted for this exam. It is write-once.',
-  ApprovedListNotPosted: () => 'The approved list has not been posted yet, and a Build needs it.',
+  NotBoard: () => 'Only the exam board’s account can post. Switch to that account in your wallet, then try again.',
+  ExamNotFound: () => 'This exam is not published yet. Publish the exam first.',
+  ApprovedListAlreadyPosted: () => 'The list of people is already posted for this exam. It cannot be replaced.',
+  ApprovedListNotPosted: () => 'The list of people has not been posted yet. Post the list first.',
   ApprovedListHashMismatch: () =>
-    'The Build was made against a different approved list than the one posted on-chain, so ExamRegistry refused it.',
-  CriteriaHashMismatch: () => 'The Build carries different selection criteria from the ones this exam was published with.',
-  BuildAlreadyPosted: () => 'A Build is already posted for this exam. ExamRegistry accepts only one.',
-  ZeroValue: () => 'A required value is zero or empty.',
-  InvalidSelection: () => 'The selected count must be at least 1 and no more than the bank size.',
-  InvalidPublicKey: () => 'The TEE instance public key is not a 65-byte uncompressed P-256 point.',
-  InvalidSignatureLength: () => 'The TEE signature is not 64 bytes.',
+    'The sealed paper was made for a different list of people from the one posted, so it was refused. Contact whoever runs Paper Seal.',
+  CriteriaHashMismatch: () => 'The sealed paper does not match the topics this exam was published with, so it was refused. Contact whoever runs Paper Seal.',
+  BuildAlreadyPosted: () => 'The sealed paper is already recorded for this exam. It cannot be recorded twice.',
+  ZeroValue: () => 'Something required is missing, so it was refused. Contact whoever runs Paper Seal.',
+  InvalidSelection: () => 'The number of questions on the paper is not valid, so it was refused. Contact whoever runs Paper Seal.',
+  InvalidPublicKey: () => 'The record is not in the right form, so it was refused. Contact whoever runs Paper Seal.',
+  InvalidSignatureLength: () => 'The record is not in the right form, so it was refused. Contact whoever runs Paper Seal.',
 };
 
-/** Turns a viem or wallet error from a post into a sentence for the board. */
+const somethingWentWrong = 'Something went wrong, and nothing was posted. Try again. If it keeps happening, contact whoever runs Paper Seal.';
+
+/** Turns a viem or wallet error from a post into a sentence for the board, with the original message folded behind it. */
 export function explainPostError(error: unknown): string {
   if (error instanceof PublishBlockedError) return error.message;
   if (error instanceof BaseError) {
@@ -248,14 +264,14 @@ export function explainPostError(error: unknown): string {
       const name = reverted.data?.errorName;
       if (name) {
         const explain = revertMessages[name];
-        return explain ? explain(reverted.data?.args ?? []) : `ExamRegistry rejected the post: ${name}.`;
+        return explain ? explain(reverted.data?.args ?? []) : withDetails('The public record did not accept this. Nothing was posted. Try again.', name);
       }
-      return `ExamRegistry rejected the post${reverted.reason ? `: ${reverted.reason}` : ' without a reason'}.`;
+      return withDetails('The public record did not accept this. Nothing was posted. Try again.', reverted.reason ?? '');
     }
     if (error.walk((cause) => cause instanceof UserRejectedRequestError)) {
-      return 'You rejected the request in your wallet. Nothing was sent.';
+      return 'You declined in your wallet, so nothing was posted. Press the button to try again.';
     }
-    return error.shortMessage;
+    return withDetails(somethingWentWrong, error.shortMessage);
   }
-  return error instanceof Error ? error.message : String(error);
+  return withDetails(somethingWentWrong, error instanceof Error ? error.message : String(error));
 }

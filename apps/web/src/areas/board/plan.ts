@@ -120,28 +120,15 @@ export function bankNeeded(criteria: Criteria): { questions: number; setters: nu
   };
 }
 
-const sentences: Record<string, string> = {
-  'The lock time must come before the unlock time (T − Δ), and the unlock time before the end time.':
-    'Questions must close before the paper is released to centres.',
-  'The end time must be after the exam start, T.': 'The exam must end after it starts.',
-  'The lock time has already passed. Choose a time in the future.': 'Questions would close in the past. Choose a later time.',
-  'Δ must be a whole number of minutes, at least 1.': 'Enter a whole number of minutes, at least 1.',
-  'Δ must not be zero.': 'Enter a whole number of minutes, at least 1.',
-  'A time is before the drand quicknet genesis.': 'That date is too far in the past.',
-  'T − Δ is before the drand quicknet genesis.': 'That date is too far in the past.',
-  'The name must not start or end with a space, because the exam ID hashes it exactly.':
-    'The name must not start or end with a space.',
-};
-
-/** The checks keep their exact wording in form.ts and the flows. This is what a primary screen shows. */
+/** A safety net for wording that still names the system's parts. The checks themselves already speak plainly. */
 export function plainWords(message: string): string {
-  return (sentences[message] ?? message)
+  return message
     .replaceAll('on ExamRegistry', 'on the public record')
     .replaceAll('ExamRegistry', 'the public record')
     .replaceAll('on-chain', 'on the public record')
-    .replaceAll('the TEE', 'the sealed machine')
-    .replaceAll('The TEE', 'The sealed machine')
-    .replaceAll('TEE', 'sealed machine');
+    .replaceAll('the TEE', 'Paper Seal')
+    .replaceAll('The TEE', 'Paper Seal')
+    .replaceAll('TEE', 'Paper Seal');
 }
 
 /** The hostname the wallet's reads already use, which is the operator a board would name. */

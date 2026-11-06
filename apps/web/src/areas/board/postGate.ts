@@ -3,6 +3,7 @@ import type { Hex } from '@paperseal/protocol';
 import type { TeeClient } from '@paperseal/tee-client';
 
 import { AttestationFailedError, verifyTee } from '../../shared/attest';
+import { withDetails } from './details';
 import { PublishBlockedError } from './publishFlow';
 
 /*
@@ -42,11 +43,11 @@ export async function checkPostTarget(input: {
   const exam = await registry.getExam(examId);
   if (!exam) {
     throw new PublishBlockedError(
-      'The selected exam is not published on ExamRegistry, so the pointer to it is stale. Publish the exam, or select the right one. Nothing was posted.',
+      'This exam is not on the public record, so the list cannot be posted. Publish the exam, or open the right one. Nothing was posted.',
     );
   }
   if (await registry.getApprovedList(examId)) {
-    throw new PublishBlockedError('An approved list is already posted for this exam. It is write-once and cannot be replaced.');
+    throw new PublishBlockedError('The list of people is already posted for this exam. It cannot be replaced.');
   }
   let verified: Awaited<ReturnType<typeof verifyTee>>;
   try {
@@ -54,15 +55,23 @@ export async function checkPostTarget(input: {
   } catch (error) {
     if (error instanceof AttestationFailedError) {
       throw new PublishBlockedError(
-        `This is not the TEE for this exam. ${error.message} The approved list is write-once, so nothing can be posted until the attestation passes.`,
+        withDetails(
+          'Paper Seal could not confirm it is ready for this exam, so the list is not posted. Wait a minute and try again. If it keeps happening, contact whoever runs Paper Seal.',
+          error.message,
+        ),
       );
     }
-    throw new PublishBlockedError(`The TEE could not be checked: ${error instanceof Error ? error.message : String(error)}`);
+    throw new PublishBlockedError(
+      withDetails(
+        'Paper Seal could not be reached, so the list is not posted. Wait a minute and try again.',
+        error instanceof Error ? error.message : String(error),
+      ),
+    );
   }
   const { stage } = await tee.status();
   if (stage !== 'onboard') {
     throw new PublishBlockedError(
-      `The TEE is at the ${stage} stage, not onboard. A list posted now would not be the one it onboards, so it is not allowed.`,
+      withDetails('Paper Seal is not ready for the list yet, so nothing was posted. Wait a minute and try again.', `Stage: ${stage}.`),
     );
   }
   return { examId, exam, instancePublicKey: verified.instancePublicKey, stage };
