@@ -286,10 +286,9 @@ function BoardFlow(props: { mode: Mode }) {
     );
   if (decided === 'people') {
     return onExam(
-      <>
-        <OnboardCheck examId={examId} snapshot={value} />
+      <OnboardCheck examId={examId} snapshot={value}>
         <PeopleStep examId={examId} snapshot={value} onPosted={reload} />
-      </>,
+      </OnboardCheck>,
     );
   }
   if (decided === 'wait') return onExam(<WaitStep snapshot={value} />);
