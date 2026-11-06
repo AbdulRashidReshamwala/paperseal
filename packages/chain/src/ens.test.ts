@@ -293,6 +293,15 @@ describe('resolveExamName', () => {
     });
   });
 
+  it('fails registry when a TEE or storage record is not a web address', async () => {
+    for (const bad of ['javascript:alert(1)', 'file:///etc/passwd', 'not a url']) {
+      const result = await resolveExamName(name, {
+        lookup: lookup({ text: (_, key) => Promise.resolve(key === ens.records.storage ? bad : records[key] ?? null) }),
+      });
+      expect(result, bad).toMatchObject({ ok: false, failed: 'registry', reason: expect.stringContaining('not a web address') as string });
+    }
+  });
+
   it('gives null for unset text records', async () => {
     const result = await resolveExamName(name, {
       lookup: lookup({ text: (_, key) => Promise.resolve(key === ens.records.tee ? '' : null) }),

@@ -199,6 +199,15 @@ async function readFor<T>(check: DecidingCheck, what: string, read: () => Promis
   }
 }
 
+/** Whether a TEE or storage record is a web address, the same rule the verifier's own settings have. */
+function isWebAddress(value: string): boolean {
+  try {
+    return ['http:', 'https:'].includes(new URL(value).protocol);
+  } catch {
+    return false;
+  }
+}
+
 const messageOf = (error: unknown): string =>
   error instanceof BaseError ? error.shortMessage : error instanceof Error ? error.message : String(error);
 
@@ -287,6 +296,12 @@ export async function resolveExamName(
           (await readFor('registry', `The ${key} text record of ${name}`, () => lookup.text(name, key))) || null,
       ),
     );
+    for (const [key, value] of [
+      [ens.records.tee, teeUrl],
+      [ens.records.storage, storageUrl],
+    ] as const) {
+      if (value && !isWebAddress(value)) return fail('registry', `The ${key} text record of ${name} is not a web address.`);
+    }
     return {
       ok: true,
       value: {
