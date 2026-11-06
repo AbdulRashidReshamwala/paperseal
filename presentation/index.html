@@ -153,4 +153,46 @@
   <div class="sheet screen drop" style="--fx:0px;--fy:-1100px;--r0:-5deg;--r1:-.6deg;--d:.2s"><div class="tape" style="left:600px;top:-34px;transform:rotate(-2deg)"></div>
     <div class="vbox"><svg class="ic big pulse" viewBox="0 0 24 24"><use href="#play"/></svg><b>Exam time</b><span>Demo video placeholder · countdown, key-holder release, centre decrypts</span></div></div>
 </section>
+<!-- verification 1 -->
+<section class="slide desk-stone vf">
+  <div class="hd"><div class="tag rise" style="--d:.05s">VERIFICATION</div><h2 class="rise" style="--d:.15s">Don’t trust it. <span class="hl">Check it.</span></h2></div>
+  <div class="sheet atk drop" style="--fx:-700px;--fy:0px;--r0:-8deg;--r1:-.8deg;--d:0.4s;top:330px"><small>ATTACK</small><p>The setter’s code is malicious</p></div>
+  <div class="arrow rise" style="--d:0.9s;top:376px">→</div>
+  <div class="sheet def drop" style="--fx:700px;--fy:0px;--r0:8deg;--r1:.8deg;--d:1.1s;top:330px"><small>DEFENCE</small><p>Open source and a reproducible build. Anyone can audit it and rebuild the same image.</p><div class="blocked press" style="--d:1.8s">BLOCKED</div></div><div class="sheet atk drop" style="--fx:-700px;--fy:0px;--r0:-8deg;--r1:-.8deg;--d:1.7s;top:555px"><small>ATTACK</small><p>The wrong version is running</p></div>
+  <div class="arrow rise" style="--d:2.2s;top:601px">→</div>
+  <div class="sheet def drop" style="--fx:700px;--fy:0px;--r0:8deg;--r1:.8deg;--d:2.4s;top:555px"><small>DEFENCE</small><p>The machine proves exactly which code it runs. Its fingerprint is on-chain.</p><div class="blocked press" style="--d:3.1s">BLOCKED</div></div><div class="sheet atk drop" style="--fx:-700px;--fy:0px;--r0:-8deg;--r1:-.8deg;--d:3.0s;top:780px"><small>ATTACK</small><p>An insider wants it early</p></div>
+  <div class="arrow rise" style="--d:3.5s;top:826px">→</div>
+  <div class="sheet def drop" style="--fx:700px;--fy:0px;--r0:8deg;--r1:.8deg;--d:3.7s;top:780px"><small>DEFENCE</small><p>No single key. A time lock plus 8 of 10 key holders.</p><div class="blocked press" style="--d:4.4s">BLOCKED</div></div>
+</section>
+<!-- verification 2 -->
+<section class="slide desk-stone vf">
+  <div class="hd"><div class="tag rise" style="--d:.05s">VERIFICATION</div><h2 class="rise" style="--d:.15s">Every attack has a <span class="hl">public answer.</span></h2></div>
+  <div class="sheet atk drop" style="--fx:-700px;--fy:0px;--r0:-8deg;--r1:-.8deg;--d:0.4s;top:330px"><small>ATTACK</small><p>Key holders collude</p></div>
+  <div class="arrow rise" style="--d:0.9s;top:376px">→</div>
+  <div class="sheet def drop" style="--fx:700px;--fy:0px;--r0:8deg;--r1:.8deg;--d:1.1s;top:330px"><small>DEFENCE</small><p>A neutral party must join, and one half alone is useless.</p><div class="blocked press" style="--d:1.8s">BLOCKED</div></div><div class="sheet atk drop" style="--fx:-700px;--fy:0px;--r0:-8deg;--r1:-.8deg;--d:1.7s;top:555px"><small>ATTACK</small><p>A setter rigs the pick</p></div>
+  <div class="arrow rise" style="--d:2.2s;top:601px">→</div>
+  <div class="sheet def drop" style="--fx:700px;--fy:0px;--r0:8deg;--r1:.8deg;--d:2.4s;top:555px"><small>DEFENCE</small><p>The random seed is born inside the machine, after the bank locks.</p><div class="blocked press" style="--d:3.1s">BLOCKED</div></div><div class="sheet atk drop" style="--fx:-700px;--fy:0px;--r0:-8deg;--r1:-.8deg;--d:3.0s;top:780px"><small>ATTACK</small><p>A hacker steals the file</p></div>
+  <div class="arrow rise" style="--d:3.5s;top:826px">→</div>
+  <div class="sheet def drop" style="--fx:700px;--fy:0px;--r0:8deg;--r1:.8deg;--d:3.7s;top:780px"><small>DEFENCE</small><p>It’s encrypted. Useless without both key halves.</p><div class="blocked press" style="--d:4.4s">BLOCKED</div></div>
+</section>
+<!-- verification demo -->
+<section class="slide desk-ink vid">
+  <div class="hd"><div class="tag rise" style="--d:.05s;color:#e49a8c">VERIFICATION · DEMO</div></div>
+  <div class="sheet screen drop" style="--fx:0px;--fy:-1100px;--r0:-5deg;--r1:-.6deg;--d:.2s"><div class="tape" style="left:600px;top:-34px;transform:rotate(-2deg)"></div>
+    <div class="vbox"><svg class="ic big pulse" viewBox="0 0 24 24"><use href="#play"/></svg><b>Anyone can verify</b><span>Demo video placeholder · verifier page: code fingerprint, attestation, approved list, live status</span></div></div>
+</section>
+<!-- honest limits -->
+<section class="slide desk-slate lim">
+  <div class="hd"><div class="tag rise" style="--d:.05s;color:#a9c9c2">WHAT WE DON’T CLAIM</div><h2 class="rise" style="--d:.15s;color:#f4efe6">We say it out loud.</h2></div>
+  <div class="sheet lm drop" style="--fx:-700px;--fy:0px;--r0:-9deg;--r1:-1.5deg;--d:.7s;left:130px"><h3>After it opens</h3><p>A centre could still leak the paper once it decrypts it. So the window stays as short as possible.</p></div>
+  <div class="sheet lm drop" style="--fx:0px;--fy:-800px;--r0:6deg;--r1:1deg;--d:1.7s;left:690px"><h3>The clock</h3><p>We rely on the public time network. If it fails, opening is delayed, not exposed.</p></div>
+  <div class="sheet lm drop" style="--fx:700px;--fy:0px;--r0:9deg;--r1:-1deg;--d:2.7s;left:1250px"><h3>The code</h3><p>Proof shows which code runs, not that it has no bugs. That is why it is open to review.</p></div>
+</section>
+<!-- close -->
+<section class="slide desk-ink close">
+  <div class="sheet fold cl drop" style="--deskc:#1f2a44;--fx:0px;--fy:-1100px;--r0:-6deg;--r1:-1deg;--d:.2s"><div class="tape" style="left:540px;top:-34px;transform:rotate(-2deg)"></div>
+    <div class="k rise" style="--d:1s">PAPER SEAL</div>
+    <h2 class="rise" style="--d:1.2s">Not trust.<br><span class="pr">Proof.</span></h2></div>
+  <div class="seal press" style="--d:2.2s">PS</div>
+</section>
 </main><div id="count"></div><script src="deck.js?v=3"></script></body></html>
