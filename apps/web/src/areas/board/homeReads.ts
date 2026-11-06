@@ -9,6 +9,9 @@ export type RowRead = { state: 'ready'; snapshot: Snapshot } | { state: 'failed'
 /** How many exams are read at once. */
 export const HOME_READ_LIMIT = 3;
 
+/** How long the home list waits for its first reads before showing the rows anyway. */
+export const HOME_LIST_DEADLINE_MS = 8_000;
+
 /**
  * Reads each exam in `ids` with at most `limit` reads at once, one failing read never stopping the
  * rest, then reads them all again `ms` after the last one finishes. A failed read keeps the row's
@@ -56,4 +59,27 @@ export function useRowReads(
   }, [key, load, ms, limit]);
 
   return reads;
+}
+
+/**
+ * Whether the home list can show its rows: every exam in `ids` has a read, a failed one included, or
+ * `ms` have passed since the page opened, or there is nothing `reading` them. Once true it stays
+ * true, so a later poll or a change of source never takes the list away again.
+ */
+export function useListSettled(ids: readonly Hex[], reads: ReadonlyMap<Hex, RowRead>, reading: boolean, ms = HOME_LIST_DEADLINE_MS): boolean {
+  const [settled, setSettled] = useState(false);
+  const done = !reading || ids.every((id) => reads.has(id));
+  if (done && !settled) setSettled(true);
+
+  useEffect(() => {
+    if (settled) return;
+    const timer = setTimeout(() => {
+      setSettled(true);
+    }, ms);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [settled, ms]);
+
+  return settled || done;
 }

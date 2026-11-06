@@ -236,6 +236,33 @@
   color: var(--ps-ink);
 }
 
+/* The list before its first reads, and the status of a row still unread after the deadline. */
+.board-skeleton-bar {
+  display: block;
+  width: 8em;
+  max-width: 100%;
+  background: var(--ps-paper-deep);
+  border-radius: var(--ps-radius);
+}
+
+/* A blank character gives each bar the height of the line of text it stands in for. */
+.board-skeleton-bar::before {
+  content: "\00a0";
+}
+
+.board-skeleton-title {
+  width: 12em;
+}
+
+.board-skeleton-line {
+  width: 14em;
+}
+
+.board-skeleton-button {
+  width: 5.5em;
+  height: 40px;
+}
+
 /* The row that is waiting for the board: set apart and heavier than the rest. */
 .board-row-act {
   padding-inline: var(--ps-space-3);

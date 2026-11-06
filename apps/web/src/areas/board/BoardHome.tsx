@@ -10,7 +10,7 @@ import { editedWords, listDrafts, removeDraft } from './draftStore';
 import { readSnapshot, type Snapshot } from './examState';
 import { listKnownExams } from './examsStore';
 import { useNow } from './hooks';
-import { useRowReads } from './homeReads';
+import { useListSettled, useRowReads } from './homeReads';
 import { examStatus, homeRows, type HomeRow } from './homeStatus';
 import { Fold } from './Parts';
 import { formatWhen } from './plan';
@@ -54,10 +54,43 @@ function OpenById() {
   );
 }
 
+/** The list before its first reads: one empty row for each real one, so nothing jumps when they arrive. */
+function ListSkeleton(props: { rows: readonly HomeRow[] }) {
+  return (
+    <div className="board-skeleton">
+      <span className="ps-sr" role="status">
+        Checking…
+      </span>
+      <ul className="board-home-list" aria-hidden="true">
+        {props.rows.map((row) => (
+          <li key={row.key} className="board-row">
+            <div className="board-list-text">
+              <strong className="board-skeleton-bar board-skeleton-title" />
+              <span className="board-skeleton-bar" />
+              <span className="board-skeleton-bar board-skeleton-line" />
+            </div>
+            <div className="board-list-actions">
+              <span className="board-skeleton-bar board-skeleton-button" />
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 /** What a published exam's row says about it: the exam's date, and its plain status. */
 function ExamLine(props: { snapshot: Snapshot | null; failed: boolean; now: number }) {
   const { snapshot, failed, now } = props;
-  if (!snapshot) return <span>{failed ? 'Status not available right now' : 'Checking…'}</span>;
+  if (!snapshot && failed) return <span>Status not available right now</span>;
+  if (!snapshot) {
+    return (
+      <span role="status">
+        <span className="board-skeleton-bar" aria-hidden="true" />
+        <span className="ps-sr">Checking…</span>
+      </span>
+    );
+  }
   const settings = snapshot.found?.exam.settings;
   return (
     <>
@@ -69,8 +102,10 @@ function ExamLine(props: { snapshot: Snapshot | null; failed: boolean; now: numb
 
 /**
  * `/board`: every exam and draft this browser knows, newest first, under the one way to start a new
- * one. Each published exam is read on its own, a few at a time, so the page is never held up and a
- * failed read only affects its row.
+ * one. Each published exam is read on its own, a few at a time, and a failed read only affects its
+ * row. The heading, the create button and Open by ID show at once. The list itself is a skeleton
+ * until every exam has a first read or `HOME_LIST_DEADLINE_MS` passes, whichever is first; a row
+ * still unread by then shows a skeleton bar for its status.
  */
 export function BoardHome() {
   const navigate = useNavigate();
@@ -88,11 +123,9 @@ export function BoardHome() {
     (examId: Hex, previous: Snapshot | null) => (reader ? readSnapshot({ registry: reader, tee: examId === current ? tee : null, examId }, previous) : Promise.reject(new Error('no registry'))),
     [reader, tee, current],
   );
-  const reads = useRowReads(
-    exams.map((exam) => exam.id),
-    reader ? load : null,
-    TEE_STATUS_POLL_MS,
-  );
+  const examIds = exams.map((exam) => exam.id);
+  const reads = useRowReads(examIds, reader ? load : null, TEE_STATUS_POLL_MS);
+  const settled = useListSettled(examIds, reads, reader !== null);
 
   const create = (
     <PrimaryAction
@@ -197,7 +230,8 @@ export function BoardHome() {
         action={create}
         next="Creating an exam opens the form. Nothing is published until you review it."
       >
-        {rows.length > 0 ? (
+        {rows.length > 0 && !settled ? <ListSkeleton rows={rows} /> : null}
+        {rows.length > 0 && settled ? (
           <ul className="board-home-list" aria-label="Your exams and drafts">
             {rows.map((row) => (row.kind === 'draft' ? draftRow(row) : examRow(row)))}
           </ul>

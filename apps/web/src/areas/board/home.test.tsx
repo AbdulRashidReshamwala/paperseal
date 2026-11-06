@@ -6,10 +6,11 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { setCurrentExamId } from '../../shared/currentExam';
+import { TEE_STATUS_POLL_MS } from '../../shared/TeeStatus';
 import BoardArea from './BoardArea';
 import { saveDraft, type DraftContent } from './draftStore';
 import { rememberExam } from './examsStore';
-import { HOME_READ_LIMIT, useRowReads } from './homeReads';
+import { HOME_LIST_DEADLINE_MS, HOME_READ_LIMIT, useListSettled, useRowReads, type RowRead } from './homeReads';
 import { defaultPlan } from './plan';
 import type { PublishEnvironment } from './publishFlow';
 
@@ -32,9 +33,9 @@ interface Chain {
   hang?: boolean;
 }
 
-/** A registry that knows these exams. `reading` counts reads in flight, and `peak` the most at once. */
+/** A registry that knows these exams. `reading` counts reads in flight, `peak` the most at once, and `listReads` every read of an approved list. */
 function chainOf(exams: Record<string, Chain>) {
-  const stats = { reading: 0, peak: 0 };
+  const stats = { reading: 0, peak: 0, listReads: 0 };
   const registry = {
     getExam: async (id: Hex) => {
       const known = Object.entries(exams).find(([name]) => examIdFromName(name) === id)?.[1];
@@ -68,8 +69,10 @@ function chainOf(exams: Record<string, Chain>) {
       }
     },
     getCriteria: () => Promise.resolve(null),
-    getApprovedList: (id: Hex) =>
-      Promise.resolve(Object.entries(exams).find(([name]) => examIdFromName(name) === id)?.[1].list ? { listHash: `0x${'11'.repeat(32)}`, postedAt: 1n, postedBlock: 1n } : null),
+    getApprovedList: (id: Hex) => {
+      stats.listReads += 1;
+      return Promise.resolve(Object.entries(exams).find(([name]) => examIdFromName(name) === id)?.[1].list ? { listHash: `0x${'11'.repeat(32)}`, postedAt: 1n, postedBlock: 1n } : null);
+    },
     getApprovedListEntries: () => Promise.resolve(null),
     getBuild: (id: Hex) => Promise.resolve(Object.entries(exams).find(([name]) => examIdFromName(name) === id)?.[1].build ? { buildHash: `0x${'22'.repeat(32)}` } : null),
   };
@@ -132,13 +135,14 @@ describe('/board, the home page', () => {
     expect(screen.queryByText('Your exams')).toBeNull();
   });
 
-  it('lists drafts and published exams together, newest first, with ones of unknown age last', () => {
+  it('lists drafts and published exams together, newest first, with ones of unknown age last', async () => {
     rememberExam({ id: examIdFromName('old-exam'), name: 'old-exam' }, 1_000);
     rememberExam({ id: examIdFromName('new-exam'), name: 'new-exam' }, 4_000);
     saveDraft('a', draft('middle-draft'), 3_000);
     saveDraft('b', draft('oldest-draft'), 500);
     localStorage.setItem(`paperseal.invites.${examIdFromName('legacy')}`, '[]');
     renderBoard('/board', chainOf({}).environment);
+    expect(await screen.findByText('new-exam')).toBeTruthy();
     expect(titles()).toEqual(['new-exam', 'middle-draft', 'old-exam', 'oldest-draft', 'An exam without a saved name']);
     expect(screen.getByText('Reference ' + examIdFromName('legacy').slice(2, 10))).toBeTruthy();
   });
@@ -194,6 +198,17 @@ describe('/board, the home page', () => {
   });
 });
 
+const remember = (all: string[]) => {
+  all.forEach((name, index) => {
+    rememberExam({ id: examIdFromName(name), name }, 1_000 + index);
+  });
+};
+const pass = (ms: number) =>
+  act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+const skeleton = () => document.querySelector('.board-skeleton');
+
 describe('the status on each published exam', () => {
   const names = {
     nobody: { start: 30 * DAY },
@@ -202,26 +217,30 @@ describe('the status on each published exam', () => {
     finished: { start: -30 * DAY, list: true, build: true },
     unposted: { start: -30 * DAY, list: true },
   } satisfies Record<string, Chain>;
-  const remember = (all: string[]) => {
-    all.forEach((name, index) => {
-      rememberExam({ id: examIdFromName(name), name }, 1_000 + index);
-    });
-  };
 
-  it('uses the words of each stage, and shows Checking… until a row is read', async () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('uses the words of each stage, and shows Checking… on a row still unread at the deadline', async () => {
+    vi.useFakeTimers();
     remember(['nobody', 'waiting', 'posted', 'finished', 'unposted', 'slow']);
     renderBoard('/board', chainOf({ ...names, slow: { start: DAY, hang: true } }).environment);
-    expect(screen.getAllByText('Checking…').length).toBeGreaterThan(0);
-    await waitFor(() => {
-      expect(within(row('nobody')).getByText('Choose who takes part')).toBeTruthy();
-    });
-    await waitFor(() => {
-      expect(within(row('waiting')).getByText('Waiting for questions')).toBeTruthy();
-      expect(within(row('posted')).getByText('Paper posted')).toBeTruthy();
-      expect(within(row('finished')).getByText('Exam finished')).toBeTruthy();
-      expect(within(row('unposted')).getByText('Exam failed')).toBeTruthy();
-    });
+    expect(screen.getAllByText('Checking…')).toHaveLength(1);
+    await pass(HOME_LIST_DEADLINE_MS - 1);
+    expect(screen.queryByText('nobody')).toBeNull();
+    await pass(1);
+    expect(within(row('nobody')).getByText('Choose who takes part')).toBeTruthy();
+    expect(within(row('waiting')).getByText('Waiting for questions')).toBeTruthy();
+    expect(within(row('posted')).getByText('Paper posted')).toBeTruthy();
+    expect(within(row('finished')).getByText('Exam finished')).toBeTruthy();
+    expect(within(row('unposted')).getByText('Exam failed')).toBeTruthy();
     expect(within(row('slow')).getByText('Checking…')).toBeTruthy();
+    expect(row('slow').querySelector('.board-skeleton-bar')?.getAttribute('aria-hidden')).toBe('true');
+    expect(within(row('slow')).getByRole('status').textContent).toBe('Checking…');
+    expect(within(row('slow')).getByText('Checking…').className).toBe('ps-sr');
+    expect(row('waiting').querySelector('.board-skeleton-bar')).toBeNull();
+    expect(document.querySelector('.board-skeleton')).toBeNull();
     // The exam date is shown as a real date and time.
     expect(within(row('waiting')).getByText(/^Exam on .*\d{4}/)).toBeTruthy();
   });
@@ -267,13 +286,14 @@ describe('the status on each published exam', () => {
   it('says the same when the page has no registry to read', () => {
     remember(['waiting']);
     renderBoard('/board', { createRegistry: null } as unknown as PublishEnvironment);
+    expect(skeleton()).toBeNull();
     expect(within(row('waiting')).getByText('Status not available right now')).toBeTruthy();
   });
 
   it('opens a published exam from its row', async () => {
     remember(['waiting']);
     renderBoard('/board', chainOf(names).environment);
-    fireEvent.click(screen.getByRole('button', { name: 'Open waiting' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open waiting' }));
     expect(where()).toBe(`/board/exam/${examIdFromName('waiting')}`);
   });
 
@@ -287,6 +307,95 @@ describe('the status on each published exam', () => {
     });
     expect(stats.peak).toBeLessThanOrEqual(HOME_READ_LIMIT);
     expect(stats.peak).toBeGreaterThan(1);
+  });
+});
+
+describe('the list on first load', () => {
+  const waiting = { start: 30 * DAY, list: true } satisfies Chain;
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('shows one placeholder for each row and no real row or draft, while the rest of the page is there', async () => {
+    remember(['waiting', 'other']);
+    saveDraft('a', draft('my-draft'), 2_000);
+    renderBoard('/board', chainOf({ waiting, other: waiting }).environment);
+    expect(skeleton()?.querySelectorAll('li.board-row')).toHaveLength(3);
+    expect(screen.queryByRole('listitem')).toBeNull();
+    expect(screen.queryByText('waiting')).toBeNull();
+    expect(screen.queryByText('my-draft')).toBeNull();
+    expect(screen.queryByText('Draft')).toBeNull();
+    expect(within(skeleton() as HTMLElement).getAllByRole('status')).toHaveLength(1);
+    expect(within(skeleton() as HTMLElement).getByRole('status').textContent).toBe('Checking…');
+    expect(screen.getAllByText('Checking…')).toHaveLength(1);
+    expect(screen.getByText('Checking…').className).toBe('ps-sr');
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Your exams');
+    expect(screen.getByRole('button', { name: 'Create an exam' })).toBeTruthy();
+    expect(screen.getByText('Open an exam by its ID')).toBeTruthy();
+    expect(await screen.findByText('my-draft')).toBeTruthy();
+    expect(skeleton()).toBeNull();
+    expect(titles()).toEqual(['my-draft', 'other', 'waiting']);
+  });
+
+  it('holds every row back until the last read is in, with no mix of the two', async () => {
+    vi.useFakeTimers();
+    const slowExam: Chain = { start: 30 * DAY, hang: true };
+    remember(['waiting', 'slow']);
+    renderBoard('/board', chainOf({ waiting, slow: slowExam }).environment);
+    await pass(1_000);
+    expect(skeleton()).not.toBeNull();
+    expect(screen.queryByText('Waiting for questions')).toBeNull();
+    expect(screen.queryByRole('listitem')).toBeNull();
+  });
+
+  it('counts a failed read as read, so the list shows without waiting for the deadline', async () => {
+    vi.useFakeTimers();
+    remember(['broken']);
+    renderBoard('/board', chainOf({ broken: { start: DAY, broken: true } }).environment);
+    expect(skeleton()).not.toBeNull();
+    await pass(1_000);
+    expect(skeleton()).toBeNull();
+    expect(within(row('broken')).getByText('Status not available right now')).toBeTruthy();
+  });
+
+  it('never comes back once settled, on later polls or when they fail', async () => {
+    vi.useFakeTimers();
+    const chain: Chain = { ...waiting };
+    remember(['waiting']);
+    const { environment, stats } = chainOf({ waiting: chain });
+    renderBoard('/board', environment);
+    await pass(1_000);
+    expect(skeleton()).toBeNull();
+    let returned = false;
+    const watcher = new MutationObserver(() => {
+      returned ||= skeleton() !== null;
+    });
+    watcher.observe(document.body, { childList: true, subtree: true });
+    const before = stats.listReads;
+    await pass(TEE_STATUS_POLL_MS * 2);
+    chain.broken = true;
+    await pass(TEE_STATUS_POLL_MS * 2);
+    watcher.disconnect();
+    expect(stats.listReads).toBeGreaterThan(before);
+    expect(returned).toBe(false);
+    expect(within(row('waiting')).getByText('Waiting for questions')).toBeTruthy();
+  });
+
+  it('skips the skeleton when only drafts are listed', () => {
+    saveDraft('a', draft('my-draft'));
+    renderBoard('/board', chainOf({}).environment);
+    expect(skeleton()).toBeNull();
+    expect(row('my-draft')).toBeTruthy();
+  });
+
+  it('stays settled if a source to read from turns up later', () => {
+    const ids = [examIdFromName('a')];
+    const empty: ReadonlyMap<Hex, RowRead> = new Map();
+    const { result, rerender } = renderHook(({ reading }) => useListSettled(ids, empty, reading), { initialProps: { reading: false } });
+    expect(result.current).toBe(true);
+    rerender({ reading: true });
+    expect(result.current).toBe(true);
   });
 });
 
