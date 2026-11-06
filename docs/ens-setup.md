@@ -10,6 +10,7 @@ This guide uses Sepolia, where anyone can register a look-alike name, so it is a
 
 1. Open [sepolia.app.ens.domains](https://sepolia.app.ens.domains) and connect the board wallet, with the wallet on Sepolia.
 2. Search for a name, for example `paperseal-mumbai`, and register it. This takes two transactions about a minute apart.
+   On Sepolia the registrar charges in **Circle's Sepolia USDC** (`0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238`), not ETH: about 8 USDC for a year. Get it free at [faucet.circle.com](https://faucet.circle.com) before you start, and keep a little Sepolia ETH for gas. The ENS test USDC and DAI listed in the ENS docs are refused by the registrar.
 3. Set it as the wallet's **primary name**. This is the reverse record the verifier reads to learn the board's name.
 4. Open the name's records and check its **ETH address** is the board wallet. The verifier checks the name both ways.
 
@@ -47,6 +48,8 @@ The ENS app has no screen for this, so use `cast`, with the board keystore from 
    ```bash
    cast send <resolver> "setText(bytes,string,string)" <encoded name> paperseal.tee https://tee.example.org --account paperseal-board --password-file ~/.paperseal/board-keystore-password --rpc-url https://ethereum-sepolia-rpc.publicnode.com
    ```
+
+With `cast`, never pass a string that ends in `.eth` as a `string` argument, because `cast` replaces it with the address it resolves to. Encode it with `cast calldata "setName(string)" <name>.eth` and send that with `--data`.
 
 If a public RPC times out, check with `cast nonce <board address> --block pending` whether the transaction went out before you send it again.
 

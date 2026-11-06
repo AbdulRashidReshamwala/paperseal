@@ -101,3 +101,4 @@ Set at build time for `apps/web` and `apps/verifier` (viewers can change them in
 | `VITE_TEE_STORAGE_BUCKET` | `<BUCKET>`, the one environment value the token check allows |
 | `VITE_RELEASES_REPO` | your fork as `owner/name`, so the apps read TEE releases from it (upstream's `AbdulRashidReshamwala/paperseal` when unset) |
 
+Demo ENS name on Sepolia: `paperseal-demo.eth`, owned by the board wallet, with a placeholder exam name `demo.paperseal-demo.eth` that carries the registry, TEE and storage records.
