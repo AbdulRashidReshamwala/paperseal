@@ -345,6 +345,7 @@ A link opened from email, WhatsApp or Safari shows "Open this page in Chrome", w
 
 1. Lead with a plain-language verdict, for example "This exam is on track. Nothing has failed so far."
 2. Show one `Stepper` for the whole chain: exam published, Paper Seal runs the published code, people approved, questions closed, paper built and sealed, key holders released, paper unlocks for centres, paper opens to everyone.
+   On a `#/name/` link, the `Stepper` starts with a Name step. Until it passes, every later step waits, nothing about the exam is read, and no seal shows. Its exact reasons stay in the evidence.
 3. Put the existing evidence (`Attestation`, `Commitments`, `Proof`) inside each step's `evidence`, with `Check` and `Hash`.
 4. A check not yet run is `Not checked`. A step that doesn't apply is `not-applicable`. If demo mode is on, because `requireHardwareAttestation` is false, say so visibly as a `note` in plain words: this is a demonstration and the security keys are simulated.
 5. The connection settings stay at the foot of the page, under "Check it yourself".
