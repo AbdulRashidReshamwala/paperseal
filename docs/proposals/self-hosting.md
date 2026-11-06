@@ -1,6 +1,6 @@
 # Proposal: Easy Self-Hosting
 
-**Status:** proposed, 2026-11-06. Nothing here is implemented. If accepted, the behaviour moves to the [README](../../README.md) and the shared rules to `spec/`.
+**Status:** parts 1 to 3 of the order below are implemented, 2026-11-07: `deploy.json`, OpenTofu in `deploy/tofu/`, `run-tee.sh --from-chain`, the stage guard, `doctor.sh` and the apps' runtime `config.json`. The rules are in [`spec/deploy.md`](../../spec/deploy.md), which replaces this proposal where they differ. The `gcp-lb` ingress and the Cloudflare Pages module are not built. Exam mode, hardware attestation, the chain allow-list and the per-exam threshold are still proposed.
 
 ## Summary
 
