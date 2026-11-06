@@ -116,7 +116,7 @@ describe('postApprovedListFlow', () => {
     const tooLong = toHex(new Uint8Array(limits.entriesBytes + 1));
     await expect(postApprovedListFlow(env, { examId, entries: tooLong }, undefined, noWait)).rejects.toThrow('The list is too long to post');
     const many = entries();
-    const padded = Array.from({ length: limits.entries + 1 }, (_, i) => ({ ...many[0]!, passkeyPublicKey: fromHex(key(i % 200)) }));
+    const padded = Array.from({ length: limits.entries + 1 }, (_, i) => ({ role: roles.setter, owner: 'x', derivedPublicKey: new Uint8Array(), passkeyPublicKey: fromHex(key(i % 200)), ...many[0] }));
     await expect(postApprovedListFlow(env, { examId, entries: toHex(encodeApprovedList(padded)) }, undefined, noWait)).rejects.toThrow('The list is too long to post');
     expect(node.sent).toHaveLength(0);
   });
