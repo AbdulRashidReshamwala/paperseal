@@ -113,7 +113,7 @@ describe('demo keys, one tab', () => {
     // ---------------------------------------------------------------- the bar
     await page.goto(web.url);
     await page.getByLabel('Acting as').waitFor();
-    expect(await acting.locator('option').allInnerTexts()).toEqual(['Exam board', ...setters, ...keyHolders, ...centres]);
+    expect(await acting.locator('option').allInnerTexts()).toEqual(['Exam board', ...setters, 'Setter 3', 'Setter 4', 'Setter 5', ...keyHolders, ...centres]);
     await actor.shot('demo-00-bar');
 
     // ---------------------------------------------------------------- the board publishes, with its wallet
