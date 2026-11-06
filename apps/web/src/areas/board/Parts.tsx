@@ -1,5 +1,5 @@
 import { toHex, roles, type ApprovedListEntry } from '@paperseal/protocol';
-import { Check, Hash, PrimaryAction, Row, Rows } from '@paperseal/ui';
+import { Button, Check, Hash, PrimaryAction, Row, Rows } from '@paperseal/ui';
 import { useState, type HTMLInputTypeAttribute, type ReactNode } from 'react';
 
 import { useBoardForm } from './BoardForm';
@@ -147,4 +147,47 @@ export function ReceiptRows() {
       <Hash value={receipt.outcome.transactionHash} label="transaction" />
     </Row>
   ));
+}
+
+export type CopyState = 'idle' | 'copied' | 'failed';
+
+/** Copies text to the clipboard, and says whether that worked. */
+export function useCopy(): [CopyState, (text: string) => void] {
+  const [copy, setCopy] = useState<CopyState>('idle');
+  const write = (text: string) => {
+    // navigator.clipboard is missing outside a secure context.
+    const written = (globalThis.navigator as Navigator | undefined)?.clipboard?.writeText(text);
+    if (!written) {
+      setCopy('failed');
+      return;
+    }
+    written.then(
+      () => {
+        setCopy('copied');
+      },
+      () => {
+        setCopy('failed');
+      },
+    );
+  };
+  return [copy, write];
+}
+
+/** A value shown in full, with a button that copies it. `what` names it for screen readers. */
+export function CopyValue(props: { what: string; value: string }) {
+  const [copy, write] = useCopy();
+  return (
+    <span className="board-copy">
+      <span className="ps-mono">{props.value}</span>
+      <Button
+        aria-label={`Copy ${props.what}`}
+        onClick={() => {
+          write(props.value);
+        }}
+      >
+        {copy === 'copied' ? 'Copied' : 'Copy'}
+      </Button>
+      {copy === 'failed' ? <span role="status">Copy failed. Select it instead.</span> : null}
+    </span>
+  );
 }

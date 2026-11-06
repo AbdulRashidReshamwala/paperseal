@@ -161,3 +161,11 @@
   margin: var(--ps-space-1) 0 var(--ps-space-2);
   list-style-type: upper-alpha;
 }
+
+/* A quiet line under a step's note, such as what a Sepolia name does not prove. */
+.vf-aside {
+  display: block;
+  margin-top: var(--ps-space-1);
+  font-size: var(--ps-text-small);
+  color: var(--ps-ink-soft);
+}

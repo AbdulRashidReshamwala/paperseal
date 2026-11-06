@@ -94,20 +94,30 @@ export function clearSettings(storage = browserStorage()): void {
   }
 }
 
-/** Clients for the viewer's own endpoints. Each is null until its settings are present. */
-export function connect(settings: Settings) {
+/**
+ * Clients for these endpoints. Each is null until its values are present. An exam name passes its
+ * own registry, exam, TEE and storage here for one view, with the viewer's RPC.
+ */
+export function endpoints(settings: Settings) {
   const { rpcUrl, teeUrl, storageUrl, registryAddress, examId } = settings;
   return {
     /** The public files. Needs the exam ID too, because they live under it. */
     storage: storageUrl && examId ? createStorage(storageUrl, examId as Hex) : null,
-    /** drand quicknet, pinned to the chain hash and public key in spec/constants.json. */
-    drand: quicknetClient(),
     tee: teeUrl ? createTeeClient({ baseUrl: teeUrl }) : null,
     registry:
       rpcUrl && registryAddress
         ? createExamRegistry({ rpcUrl, address: registryAddress as Hex })
         : null,
     examId: examId ? (examId as Hex) : null,
+  };
+}
+
+/** Clients for the viewer's own endpoints. Each is null until its settings are present. */
+export function connect(settings: Settings) {
+  return {
+    ...endpoints(settings),
+    /** drand quicknet, pinned to the chain hash and public key in spec/constants.json. */
+    drand: quicknetClient(),
   };
 }
 

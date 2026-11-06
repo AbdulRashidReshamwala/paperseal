@@ -10,7 +10,7 @@ import {
 } from './form';
 
 const blueprint = (patch: Partial<BlueprintInput> = {}): BlueprintInput => ({
-  name: 'Physics 2027',
+  name: 'physics-2027',
   topics: [
     { name: 'Mechanics', questions: '5' },
     { name: 'Optics', questions: '3' },
@@ -34,7 +34,7 @@ describe('evaluateBlueprint', () => {
     expect(result.selectedCount).toBe(8);
     expect(result.encoded).toBe(toHex(encodeCriteria(criteria)));
     expect(result.criteriaHash).toBe(toHex(criteriaHash(encodeCriteria(criteria))));
-    expect(result.examId).toBe(examIdFromName('Physics 2027'));
+    expect(result.examId).toBe(examIdFromName('physics-2027'));
   });
 
   it.each([
@@ -42,12 +42,29 @@ describe('evaluateBlueprint', () => {
     ['percent zero', { maxSetterPercent: '0' }, 'percentError'],
     ['percent not a number', { maxSetterPercent: '2.5' }, 'percentError'],
     ['multiple below 2', { minBankMultiple: '1' }, 'multipleError'],
-    ['name with a trailing space', { name: 'Physics ' }, 'nameError'],
+    ['name with a trailing space', { name: 'physics ' }, 'nameError'],
   ] as const)('rejects %s', (_label, patch, field) => {
     const result = evaluateBlueprint(blueprint(patch));
     expect(result[field]).toBeTruthy();
     if (field === 'nameError') expect(result.examId).toBeNull();
     else expect(result.criteria).toBeNull();
+  });
+
+  it.each([
+    ['a space', 'Maths 2026', /lowercase letters, digits and hyphens, like jee-main-2026/],
+    ['capitals', 'JEE-Main-2026', /Did you mean jee-main-2026\?/],
+    ['a dot', 'jee.main', /can't contain a dot/],
+    ['nothing', '', /empty/],
+  ])('refuses a name with %s, as one ENS label must', (_label, name, message) => {
+    const result = evaluateBlueprint(blueprint({ name }));
+    expect(result.nameError).toMatch(message);
+    expect(result.examId).toBeNull();
+  });
+
+  it('accepts a normalised ENS label, and hashes it exactly', () => {
+    const result = evaluateBlueprint(blueprint({ name: 'jee-main-2026' }));
+    expect(result.nameError).toBeNull();
+    expect(result.examId).toBe(examIdFromName('jee-main-2026'));
   });
 
   it('rejects zero questions, repeated topics and an empty topic list', () => {

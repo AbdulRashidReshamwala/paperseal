@@ -1,12 +1,21 @@
-import { roundTimeSeconds } from '@paperseal/protocol';
-import { Check, Countdown, Row, Rows, Stage, type SealState } from '@paperseal/ui';
+import { examIdFromName, roundTimeSeconds, type Hex } from '@paperseal/protocol';
+import { Check, Countdown, Panel, Row, Rows, Stage, type SealState } from '@paperseal/ui';
 import { Link } from 'react-router';
 
 import { useBoardForm } from './BoardForm';
 import { ExamRecord } from './ExamRecord';
 import type { Snapshot } from './examState';
 import { useNow } from './hooks';
-import { formatTimeOnly, plainWords, verifierUrl } from './plan';
+import { CopyValue } from './Parts';
+import {
+  ensRecords,
+  examNamePlaceholder,
+  formatTimeOnly,
+  parentPlaceholder,
+  plainWords,
+  verifierNameUrl,
+  verifierUrl,
+} from './plan';
 
 /** Time alone opens the seal, so the state follows the rounds' scheduled times. */
 export function sealStateAt(nowMs: number, unlockMs: number, endMs: number): SealState {
@@ -14,10 +23,45 @@ export function sealStateAt(nowMs: number, unlockMs: number, endMs: number): Sea
   return nowMs < endMs ? 'opening' : 'open';
 }
 
+/**
+ * The records to set for an optional ENS name, from "Exam Names" in spec/api.md. Nothing here reads
+ * ENS: the board sets the name itself, and the verifier checks it. `examName` is null when this
+ * session didn't publish the exam, because ExamRegistry stores only the name's hash.
+ */
+function EnsName(props: { examName: string | null; registryAddress: Hex | null; verifier: string | null }) {
+  const label = props.examName ?? examNamePlaceholder;
+  return (
+    <Panel title="Give this exam an ENS name (optional)">
+      <p className="board-note">
+        Anyone can then check this exam by its name in the public verifier. With the board wallet, set these records for{' '}
+        <span className="ps-mono">{label}.&lt;your primary name&gt;</span> on your name's resolver. With ENS v2 there is
+        nothing to create first. See docs/ens-setup.md.
+      </p>
+      <Rows>
+        <Row label="Subname">{props.examName ? <CopyValue what="subname" value={props.examName} /> : <span className="ps-mono">{label}</span>}</Row>
+        {ensRecords(props.registryAddress).map((entry) => (
+          <Row key={entry.record} label={entry.record}>
+            {entry.value ? (
+              <CopyValue what={entry.record} value={entry.value} />
+            ) : (
+              <Check status="not-checked">{`Not set. Set ${entry.setting}.`}</Check>
+            )}
+          </Row>
+        ))}
+        {props.verifier ? (
+          <Row label="Verifier link">
+            <span className="ps-mono">{verifierNameUrl(props.verifier, `${label}.${parentPlaceholder}`)}</span>
+          </Row>
+        ) : null}
+      </Rows>
+    </Panel>
+  );
+}
+
 /** Step 7: the Build is posted. From here the board only watches. */
 export function StatusStep(props: { eyebrow: string; snapshot: Snapshot }) {
   const { snapshot } = props;
-  const { receipts } = useBoardForm();
+  const { receipts, examName, environment } = useBoardForm();
   const now = useNow();
   const settings = snapshot.found?.exam.settings;
   const unlockRound = Number(settings?.unlockRound ?? 0);
@@ -27,6 +71,8 @@ export function StatusStep(props: { eyebrow: string; snapshot: Snapshot }) {
   const seal = sealStateAt(now, unlockSeconds * 1000, endSeconds * 1000);
   const { status, teeProblem } = snapshot;
   const verifier = verifierUrl();
+  // The session's name only counts for the exam it hashes to, not one opened from a link.
+  const named = examName && settings && examIdFromName(examName).toLowerCase() === settings.examId.toLowerCase() ? examName : null;
   const justSealed = receipts.some((receipt) => receipt.kind === 'build' && receipt.outcome.matches);
 
   const copy: Record<SealState, { title: string; lede: string; next: string }> = {
@@ -69,6 +115,7 @@ export function StatusStep(props: { eyebrow: string; snapshot: Snapshot }) {
           )}
         </Row>
       </Rows>
+      <EnsName examName={named} registryAddress={environment.registryAddress} verifier={verifier} />
       <ExamRecord snapshot={snapshot} />
       <p className="board-quiet">
         <Link to="/board/blueprint">Set up another exam</Link>

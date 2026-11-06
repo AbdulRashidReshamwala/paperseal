@@ -17,7 +17,7 @@ let browser: Browser;
 let web: { url: string; stop: () => Promise<void> };
 let verifier: { url: string; stop: () => Promise<void> } | null = null;
 
-const EXAM_NAME = 'Paper Seal e2e Physics Final';
+const EXAM_NAME = 'paperseal-e2e-physics-final';
 // The real release v0.1.0 of AbdulRashidReshamwala/paperseal on GitHub. The app fetches it live.
 const TAG = 'v0.1.0';
 const COMMIT = '0x00b6fd1d0e9862677e316f58f772668624d034c1';

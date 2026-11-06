@@ -134,3 +134,16 @@
     margin-top: calc(var(--ps-space-5) + var(--ps-space-1));
   }
 }
+
+.board-copy {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-1) var(--ps-space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.board-copy .ps-mono {
+  overflow-wrap: anywhere;
+  font-size: var(--ps-text-small);
+}

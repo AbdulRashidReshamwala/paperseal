@@ -39,6 +39,8 @@ export interface ExamRegistryOptions {
   /** RPC endpoint for Sepolia. Ignored when `transport` is given. */
   rpcUrl?: string;
   transport?: Transport;
+  /** `false` stops reads from following an `OffchainLookup` revert to a gateway, as ENS reads require. */
+  ccipRead?: false;
   /** Only the board's wallet can write. Reads work without one. */
   wallet?: WalletClient;
 }
@@ -75,6 +77,7 @@ export function createExamRegistry(options: ExamRegistryOptions) {
   const client: PublicClient = createPublicClient({
     chain: sepolia,
     transport: options.transport ?? http(options.rpcUrl),
+    ...(options.ccipRead === false ? { ccipRead: false as const } : {}),
   });
 
   function requireWallet(): WalletClient & {

@@ -23,7 +23,7 @@ import type { SetterEnv } from './session';
 
 /** Stubs for the TEE, the chain and the keys. Used only by tests. */
 
-export const examId = examIdFromName('Physics 2027');
+export const examId = examIdFromName('physics-2027');
 export const registryAddress = '0x00000000000000000000000000000000000000aa' as Hex;
 export const criteria: Criteria = {
   maxSetterPercent: 50,

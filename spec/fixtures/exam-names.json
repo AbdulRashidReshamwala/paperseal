@@ -1,0 +1,29 @@
+{
+  "valid": [
+    { "label": "jee-main-2026", "examId": "0xa8ec8fb4eda3d90b6190127d877227895bcd634a849e7f3a355311ed10637556" },
+    { "label": "neet-ug-2026", "examId": "0xb16dbf9df1f336b8e9cfa6cda6e0818e266be3ae7fcc544952f0c26fe17ee1df" },
+    { "label": "maths-2026", "examId": "0xabf8265610a334aee2aee1129bf4f56c2d8839d7be69550cf030c5d0da502828" },
+    { "label": "cbse-class-12-physics", "examId": "0x07022b3ded3618debe5f0895ceb14fca208ebeae2c922c9f8fdce9403d535da4" },
+    { "label": "🎓-2026", "examId": "0xf72a6a1d7823bbf61eda085b52d7038f45dd25f21ae6256fe0e83264e5fab3f7" }
+  ],
+  "invalid": [
+    { "label": "", "reason": "empty" },
+    { "label": "Maths 2026", "reason": "not normalised: a space is not allowed" },
+    { "label": "jee main", "reason": "not normalised: a space is not allowed" },
+    { "label": "JEE-Main-2026", "reason": "not normalised: it normalises to jee-main-2026, which hashes to a different examId" },
+    { "label": "jee.main", "reason": "more than one label" },
+    { "label": "ab--cd", "reason": "not normalised: hyphens in the third and fourth places" },
+    { "label": "a_b", "reason": "not normalised: an underscore is allowed only at the start" },
+    { "label": "परीक्षा-2026", "reason": "not normalised: Devanagari mixed with a Latin hyphen" }
+  ],
+  "names": [
+    {
+      "name": "jee-main-2026.paperseal-mumbai.eth",
+      "label": "jee-main-2026",
+      "parent": "paperseal-mumbai.eth",
+      "examId": "0xa8ec8fb4eda3d90b6190127d877227895bcd634a849e7f3a355311ed10637556",
+      "namehash": "0x5a8f111e9b11e05a674b399877ea8392ab3f3ae272eb4f6493d169c0b4281f83",
+      "parentNamehash": "0x3aafeee645a5a2f8725da32573b96018cf75f72abd2a655a768bda1edc06e998"
+    }
+  ]
+}

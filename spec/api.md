@@ -6,7 +6,7 @@ Formats shared by the TEE, contracts and apps. Change this file first, then ever
 
 - Bytes are lowercase hex with a `0x` prefix in JSON.
 - Integers that can exceed 2^53, including drand rounds, are decimal strings in JSON.
-- `examId` is 32 bytes, the `keccak256` of the exam's human-readable name.
+- `examId` is 32 bytes, the `keccak256` of the exam's human-readable name. The name must be one normalised ENS label (see [Exam Names](#exam-names)), so `examId` is also its ENS `labelhash`.
 - Every signed or hashed message is `SHA-256(abi.encode(string tag, field, ...))`, using Solidity's standard ABI encoding, not `abi.encodePacked`. `tag` is the domain tag from `constants.json`, and the fields follow in the listed order with the listed types. Use a library for this: `abi.encode` in Solidity, viem in TypeScript and go-ethereum's `accounts/abi` in Go.
 - Hashes are SHA-256 unless a field says otherwise. On-chain identifiers use `keccak256`.
 - TEE signatures are ECDSA over P-256 with SHA-256, encoded as 64-byte `r || s` with low `s`.
@@ -223,6 +223,28 @@ Unlock may run on a different instance from the Build, so the log names its sign
 - Its array offsets don't start right after the array's head and increase strictly, with each element ending at or before the next one starts.
 
 After decoding, readers also apply `limits.entries`, `limits.topics`, `limits.ownerBytes` and `limits.topicNameBytes`. `ExamRegistry` rejects oversized `entries` and `criteria` by length alone, and still doesn't decode them.
+
+## Exam Names
+
+An exam's human-readable name is one ENS label that is already normalised under ENSIP-15: `normalize(name)` returns `name` unchanged and it holds no `.`. So `jee-main-2026` is a name, but `Maths 2026`, `JEE-Main-2026` and `jee.main` are not. A name that normalises to something else would hash to a different `examId` than the one ENS finds, so the board app refuses it rather than fixing it. `spec/fixtures/exam-names.json` lists valid and invalid names with their `examId`.
+
+A board may give an exam an ENS name `<name>.<parent>`, where `parent` is the board address's primary name, so anyone can check the exam by name. This is optional and only helps people find the exam: the TEE and `ExamRegistry` never read ENS, and every value a name supplies is checked again by the usual checks. The exam name has these records, with the text keys in `spec/ens.json`:
+
+| Record | Holds |
+| --- | --- |
+| `addr` (ETH) | The `ExamRegistry` address |
+| `text` `ens.records.tee` | The TEE URL |
+| `text` `ens.records.storage` | The public storage URL |
+| `text` `ens.records.bucket` | The storage bucket the TEE was started with |
+
+A reader checks a name with the viewer's own RPC, on-chain only (`ens.ccipRead` is `false`, so no offchain gateway is asked), and fails unless all of these hold:
+
+1. The first label is a valid exam name, and its `labelhash` is the `examId` used for every other check.
+2. The name's `addr` record is set, and calling `board()` on it returns an address.
+3. That board address's primary name, read by reverse resolution, is exactly `parent`.
+4. `parent`'s own `addr` record is that board address, so the primary name is verified both ways.
+
+The TEE, storage and bucket records only say where to look. A wrong value makes the later checks fail; it can't make them pass.
 
 ## TEE Lifecycle
 

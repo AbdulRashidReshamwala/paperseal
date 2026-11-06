@@ -100,6 +100,12 @@ The TEE knows the board through its attested settings: they name `ExamRegistry`,
 4. **Check:** the TEE rejects the list if any entry wasn't verified at registration. It signs the list hash into the Build, and `ExamRegistry` rejects a Build whose hash differs from the posted one.
 5. **Use:** the TEE accepts questions only from setters on the list, and encrypts shares and `K_priv` only to keys on the list. Each published copy names its recipient. The verifier page compares recipients with the list, and each centre can check its own entry.
 
+### Exam Names
+
+An exam's name is a plain ENS label such as `jee-main-2026`, and its exam ID is that label's hash. A board can give an exam an ENS name under its own primary name, such as `jee-main-2026.paperseal.eth`, so anyone can check the exam by typing its name instead of a contract address and exam ID.
+
+The verifier page fails the name unless it points to an `ExamRegistry` whose board address has that parent as its primary name, verified both ways. It then runs every other check as usual. ENS only helps people find the real exam. The TEE and `ExamRegistry` never read it, and a name that points somewhere wrong makes the later checks fail, not pass. On Sepolia anyone can register a look-alike name, so the check only means something with a mainnet name. [ENS setup](docs/ens-setup.md) shows how to name an exam.
+
 ### Question Submission
 
 Setters talk to the TEE directly, and the board's infrastructure only ever carries ciphertext.

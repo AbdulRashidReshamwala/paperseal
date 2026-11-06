@@ -9,7 +9,7 @@ import { useBoardForm, useReader } from './BoardForm';
 import { usePoll } from './hooks';
 import { ExamRecord } from './ExamRecord';
 import type { Snapshot } from './examState';
-import { Fold, PostAction } from './Parts';
+import { Fold, PostAction, useCopy } from './Parts';
 import { centreRoles, createInvite, inviteRoleNames, linkFor, reissueInvite, type BoardInvite } from './invites';
 import { bankNeeded } from './plan';
 import { checkPostTarget, type PostGate } from './postGate';
@@ -62,22 +62,9 @@ function usePostGate(tee: TeeClient | null): PostGate {
 }
 
 function CopyLink(props: { who: string; url: string }) {
-  const [copy, setCopy] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const [copy, write] = useCopy();
   const onClick = () => {
-    // navigator.clipboard is missing outside a secure context.
-    const written = (globalThis.navigator as Navigator | undefined)?.clipboard?.writeText(props.url);
-    if (!written) {
-      setCopy('failed');
-      return;
-    }
-    written.then(
-      () => {
-        setCopy('copied');
-      },
-      () => {
-        setCopy('failed');
-      },
-    );
+    write(props.url);
   };
   return (
     <span className="board-link">

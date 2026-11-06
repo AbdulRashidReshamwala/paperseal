@@ -91,6 +91,15 @@ describe('exam links', () => {
     expect(url({ search: `?exam=0x${'11'.repeat(32)}`, routePath: `/exam/${id}` })).toEqual({ kind: 'exam', id });
   });
 
+  it('reads an exam name from #/name/, exactly as written, for the name check to judge', () => {
+    expect(url({ routePath: '/name/jee-main-2026.board.eth' })).toEqual({ kind: 'name', name: 'jee-main-2026.board.eth' });
+    expect(url({ routePath: '/name/JEE-Main-2026.board.eth/' })).toEqual({ kind: 'name', name: 'JEE-Main-2026.board.eth' });
+    expect(url({ routePath: `/name/${encodeURIComponent('🎓-2026.board.eth')}` })).toEqual({ kind: 'name', name: '🎓-2026.board.eth' });
+    expect(url({ routePath: '/name/%E0%A4%A' })).toEqual({ kind: 'name', name: '%E0%A4%A' });
+    expect(url({ routePath: '/name/jee-main-2026.board.eth', search: `?exam=${id}` })).toEqual({ kind: 'name', name: 'jee-main-2026.board.eth' });
+    expect(url({ routePath: '/name/' })).toEqual({ kind: 'none' });
+  });
+
   it('has no exam without a link, and an invalid one stays invalid', () => {
     expect(url({})).toEqual({ kind: 'none' });
     expect(url({ routePath: '/attestation' })).toEqual({ kind: 'none' });

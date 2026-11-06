@@ -5,6 +5,7 @@ import {
   criteriaHash,
   encodeCriteria,
   examIdFromName,
+  examNameProblem,
   firstRoundAtOrAfter,
   roundTimeSeconds,
   startupArgs,
@@ -87,8 +88,12 @@ export function computeSchedule(nowSeconds: number, using: LiveGaps = gaps): Sch
   };
 }
 
+/** The default exam name: one normalised ENS label (spec/api.md "Exam Names"), like `paperseal-live-20261106t120000z`. */
 export function examName(at: Date = new Date()): string {
-  return `Paper Seal live ${at.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z')}`;
+  const name = `paperseal-live-${at.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z').toLowerCase()}`;
+  const problem = examNameProblem(name);
+  if (problem) throw new Error(`the default exam name ${name} is invalid: ${problem}`);
+  return name;
 }
 
 export interface Plan {

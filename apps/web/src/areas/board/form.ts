@@ -6,6 +6,7 @@ import {
   CriteriaError,
   encodeCriteria,
   examIdFromName,
+  examNameProblem,
   firstRoundAtOrAfter,
   fromHex,
   roundTimeSeconds,
@@ -77,11 +78,8 @@ function parseUint(text: string, label: string): { value: number } | { error: st
 }
 
 export function evaluateBlueprint(input: BlueprintInput): BlueprintResult {
-  let nameError: string | null = null;
-  if (input.name === '') nameError = 'Name the exam.';
-  else if (input.name !== input.name.trim()) {
-    nameError = 'The name must not start or end with a space, because the exam ID hashes it exactly.';
-  }
+  // One normalised ENS label, refused rather than fixed: another spelling hashes to another exam ID.
+  const nameError = examNameProblem(input.name);
   const examId = nameError === null ? examIdFromName(input.name) : null;
 
   const percent = parseUint(input.maxSetterPercent, 'Max setter percent');

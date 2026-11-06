@@ -15,7 +15,7 @@ import { explainError, publishExam, PublishBlockedError, type PublishEnvironment
 
 const board = '0x70997970c51812dc3a010c7d01b50e0d17dc79c8' as Address;
 const stranger = '0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc' as Address;
-const name = 'Physics 2027';
+const name = 'physics-2027';
 const examId = examIdFromName(name);
 const commit = 'a'.repeat(40);
 const digest = 'b'.repeat(64);
@@ -267,6 +267,19 @@ describe('step 1, create the exam', () => {
     expect(screen.getByText('Max setter percent must be from 1 to 100.')).toBeTruthy();
     expect(button('Continue').disabled).toBe(true);
     expect(screen.getByText('Advanced').closest('details')?.open).toBe(true);
+  });
+
+  it('refuses a name that is not one ENS label, and says what it should be, without changing it', () => {
+    const { env } = environment();
+    renderBoard(env);
+    fillCreate();
+    expect(screen.getByText(/It becomes the exam's ENS name/)).toBeTruthy();
+    type('Exam name', 'JEE-Main-2026');
+    expect(screen.getByText('The exam name must already be in normalised form. Did you mean jee-main-2026?')).toBeTruthy();
+    expect((field('Exam name') as HTMLInputElement).value).toBe('JEE-Main-2026');
+    expect(button('Continue').disabled).toBe(true);
+    type('Exam name', 'jee-main-2026');
+    expect(button('Continue').disabled).toBe(false);
   });
 
   it('refuses a lock after the release, in plain words', () => {

@@ -7,7 +7,7 @@ import { status } from './status';
 
 const usage = `Paper Seal live run (Sepolia, the deployed TEE, real Chrome)
 
-  node e2e/live/cli.mjs publish --release v<x.y.z> [--repo owner/name] [--name "Exam name"]
+  node e2e/live/cli.mjs publish --release v<x.y.z> [--repo owner/name] [--name exam-name]
   node e2e/live/cli.mjs run        long-running; keep it alive until the end proof (about ${String(Math.ceil(gaps.end / 60))} minutes)
   node e2e/live/cli.mjs status
   node e2e/live/cli.mjs proof      the public proof for the exam in the state file: no browser, passkey or TEE

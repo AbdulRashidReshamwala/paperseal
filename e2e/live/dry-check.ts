@@ -7,6 +7,8 @@ import {
   checkSchedule,
   decodeCriteria,
   encodeApprovedList,
+  examIdFromName,
+  examNameProblem,
   approvedListHash,
   fromHex,
   inviteTag,
@@ -32,7 +34,7 @@ import { deployed, gapsFor, rpcHost } from './config';
 import { composeFromInvites, issueInvites, openLink, type IssuedInvite } from './invites';
 import { parseReleaseBody } from './github';
 import { releaseOrder, roster } from './roster';
-import { computeSchedule, liveCriteria, plan, liveQuestion, questionsPerSetterPerTopic, questionText, runTeeArgs } from './schedule';
+import { computeSchedule, examName, liveCriteria, plan, liveQuestion, questionsPerSetterPerTopic, questionText, runTeeArgs } from './schedule';
 
 /* `dry-check`: everything that can be checked with no network, no chain, no TEE and no key. */
 
@@ -53,6 +55,7 @@ const expect = (ok: boolean, message: string) => {
 const NOW = 1_800_000_000;
 const COMMIT = `0x${'ab'.repeat(20)}` as Hex;
 const DIGEST = `0x${'cd'.repeat(32)}` as Hex;
+const DRY_NAME = 'dry-check-exam';
 
 const sigOf = (name: string): string => {
   const item = getAbiItem({ abi: examRegistryAbi, name: name as 'createExam' }) as AbiFunction;
@@ -64,8 +67,17 @@ const sigOf = (name: string): string => {
 const cast = (args: string[]) => spawnSync('cast', args, { encoding: 'utf8' });
 
 export async function dryCheck(): Promise<void> {
+  await check('exam names: the default and the dry-check name are normalised ENS labels; spaces, uppercase and dots are refused', () => {
+    const fallback = examName(new Date(NOW * 1000));
+    expect(fallback === 'paperseal-live-20270115t080000z', `default name ${fallback}`);
+    for (const ok of [fallback, DRY_NAME, 'jee-main-2026']) expect(examNameProblem(ok) === null, `${ok} was refused`);
+    for (const bad of ['Paper Seal live', 'JEE-Main-2026', 'jee.main.2026', '']) expect(examNameProblem(bad) !== null, `${JSON.stringify(bad)} was accepted`);
+    expect(plan(fallback, computeSchedule(NOW)).examId === examIdFromName(fallback), 'plan hashes the name');
+    return fallback;
+  });
+
   const schedule = computeSchedule(NOW);
-  const settings = plan('Dry check exam', schedule).settings;
+  const settings = plan(DRY_NAME, schedule).settings;
 
   // Written out here, so a change to config.ts has to be made twice to pass.
   const expected = {
@@ -89,7 +101,7 @@ export async function dryCheck(): Promise<void> {
       expect(BigInt(s.lockRound) < BigInt(s.unlockRound) && BigInt(s.unlockRound) < BigInt(s.endRound), 'round order');
       expect(s.endAtUnix > s.examStart, 'the end round must be after T');
       expect(mode !== 'latest' || s.endAtUnix - NOW < 300, 'a dev exam must finish in under 5 minutes');
-      checkSchedule(plan('Dry check exam', s).settings);
+      checkSchedule(plan(DRY_NAME, s).settings);
       return `lock ${s.lockRound}, unlock ${s.unlockRound}, end ${s.endRound}, delta ${String(s.delta)}s, run needs ${String(want.lead)}s before Lock`;
     });
   }
@@ -110,7 +122,7 @@ export async function dryCheck(): Promise<void> {
     rejects({ delta: 0 }, 'delta_zero');
   });
 
-  const built = plan('Dry check exam', schedule);
+  const built = plan(DRY_NAME, schedule);
   await check('criteria: 2 topics of 3, maxSetterPercent 50, minBankMultiple 2; encoding round-trips and hashes', () => {
     const back = decodeCriteria(fromHex(built.criteriaEncoded));
     expect(JSON.stringify(back) === JSON.stringify(liveCriteria), 'round trip');
