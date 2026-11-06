@@ -36,6 +36,15 @@ export function demoGate(): LazyExoticComponent<ComponentType<{ role: GatedRole;
   return lazy(() => import('../demo/PersonaGate'));
 }
 
+/**
+ * The board's panel for doing everyone else's part. Null outside demo mode. The caller names its props,
+ * because this file sits in the entry bundle and may not import a board type.
+ */
+export function demoPanel<Props extends object>(): LazyExoticComponent<ComponentType<Props>> | null {
+  if (!on) return null;
+  return lazy(() => import('../demo/BoardPanel') as unknown as Promise<{ default: ComponentType<Props> }>);
+}
+
 /** The `credentials` option for `createWebAuthnKeys`, empty outside demo mode, so the browser's real one applies. */
 export function credentialsOption(): { credentials?: Pick<CredentialsContainer, 'create' | 'get'> } {
   if (!on) return {};

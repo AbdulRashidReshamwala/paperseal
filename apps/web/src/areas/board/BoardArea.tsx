@@ -1,12 +1,13 @@
 import { looksLikeEnsName } from '@paperseal/protocol';
 import type { TeeClient } from '@paperseal/tee-client';
 import { Button, LoadingSeal, Page, RoleHeader, Stage } from '@paperseal/ui';
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { Hex } from '@paperseal/protocol';
 
 import { Area, type AreaScreen } from '../../shared/Area';
 import { useCurrentExamId } from '../../shared/currentExam';
+import { demoPanel } from '../../shared/demoKeys';
 import { TEE_STATUS_POLL_MS } from '../../shared/TeeStatus';
 import './board.css';
 import { shortExamId } from '../../shared/examName';
@@ -21,6 +22,7 @@ import { usePoll } from './hooks';
 import { MachineCheck } from './MachineCheck';
 import { PeopleStep } from './PeopleStep';
 import { openExamName, type ExamNameRoute } from './nameFlow';
+import { loadParties, type ChosenParty } from './parties';
 import { Fold, Problem } from './Parts';
 import { PartyStep } from './PartyStep';
 import { centresProblem, draftScreen, furthestStep, neutralsProblem, plainWords } from './plan';
@@ -33,6 +35,8 @@ import { StatusStep } from './StatusStep';
 import { WaitStep } from './WaitStep';
 
 const step = (n: number) => `Step ${String(n)} of 6`;
+
+const DemoPanel = demoPanel<{ examId: Hex; snapshot: Snapshot; parties: readonly ChosenParty[] }>();
 
 /** The pages before there is an exam. They live in the browser until the exam is published. */
 function Draft(props: { review: boolean }) {
@@ -270,6 +274,11 @@ function BoardFlow(props: { mode: Mode }) {
         <MachineCheck examId={examId} snapshot={value} />
         <ExamNameCard key={examId} examId={examId} routeName={named.name} onVerified={verifiedAs} />
         {children}
+        {DemoPanel ? (
+          <Suspense fallback={null}>
+            <DemoPanel examId={examId} snapshot={value} parties={loadParties(examId)} />
+          </Suspense>
+        ) : null}
       </ExamShell>,
     );
   if (decided === 'people') return onExam(<PeopleStep examId={examId} snapshot={value} onPosted={reload} />);

@@ -129,6 +129,14 @@ Each person has a planted key, fixed and derived from a public seed in `packages
 5. Switch to each **Key holder** and **Centre**. Their page has their name filled in, and one click registers them.
 6. Carry on as each person when the exam needs them. Switching reloads the page. Each tab has its own person, so you can keep one tab per person. Each person has their own browser storage, the exam board's drafts stay with the exam board, and only the current exam is shared.
 
+There are five setters, because a limit of 20 percent per setter needs five. To present, do one setter and one centre by hand and let the exam board do the rest, from the **Everyone else** card on its exam page. It has one button per stage, shown only when the sealed machine is at that stage:
+
+- **Register everyone else**, before the list is posted. Add the setter invites first: each remaining setter takes the next unused invite, and the card says if the exam needs more. Key holders and centres the board chose register by name.
+- **Add questions for everyone else**, while questions are open. It seals plain sample questions so each topic meets its bank size and nobody passes the limit. A setter who wrote some by hand is left alone unless the limit needs them topped up. At 20 percent it does, because all five must hold the same share.
+- **Release the rest**, at unlock. It releases up to the 8 needed. Centres still open the paper on their own pages.
+
+Each button works one person at a time, with that person's planted key and through the same code as their own page, so the sealed machine checks every request as usual. Whatever comes back, such as a setter's receipts, is kept in that person's storage. Anyone already done is skipped, so pressing a button again is safe. If someone fails, the rest carry on, and that person's row says why and has **Try again**. The touch is asked at most once per click.
+
 **Ask for a touch** in the bar asks a plugged-in security key for a touch, at most once per click. The first touch makes a throwaway credential on it. The touch is only for show: its result is thrown away and never used for any key. If no key answers or you press Cancel, the planted key carries on, after 30 seconds at most. Untick it to skip the touch.
 
-`pnpm --filter @paperseal/e2e ui:demo` runs a whole exam this way in one tab, on the local mock world, without Sepolia.
+`pnpm --filter @paperseal/e2e ui:demo` runs whole exams this way in one tab, on the local mock world, without Sepolia: one person by person, and one with the **Everyone else** buttons.

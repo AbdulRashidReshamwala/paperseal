@@ -14,7 +14,12 @@ import { TechnicalDetail } from './Gate';
 import './holder.css';
 
 /** Everything the release flow needs, or null until it all exists. The derived key comes from the on-chain list. */
-export function releaseContext(examId: Hex | null, credential: StoredCredential | null, derivedPublicKey: Hex | null): ReleaseContext | null {
+export function releaseContext(
+  examId: Hex | null,
+  credential: StoredCredential | null,
+  derivedPublicKey: Hex | null,
+  keys?: ReleaseContext['keys'],
+): ReleaseContext | null {
   if (!tee || !registry || !examId || !storageUrl || !credential || !derivedPublicKey) return null;
   const reader = registry;
   return {
@@ -22,7 +27,7 @@ export function releaseContext(examId: Hex | null, credential: StoredCredential 
     credentialId: fromHex(credential.credentialId),
     passkeyPublicKey: credential.passkeyPublicKey,
     derivedPublicKey,
-    keys: browserKeys(),
+    keys: keys ?? browserKeys(),
     tee,
     checkAttestation: attestationChecker({ registry: reader, examId }),
     readOnChainListHash: async () => {
