@@ -1,3 +1,3 @@
 # Paper Seal presentation
 
-Plain HTML deck, no build. Run `python3 -m http.server 5180 --directory presentation` (or the `presentation` preview) and open http://localhost:5180. Arrow keys or clicks move between slides; print to PDF for a handout.
+The slides were deleted on purpose so the story could be settled first. `POINTS.md` is the agreed list of points, and the next deck is built from it. `assets/` keeps the brand fonts and the cropped Vitalik still, and `vitalik-transcript.md` has the Devcon India talk.
