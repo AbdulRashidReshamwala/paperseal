@@ -13,7 +13,7 @@ export const text = {
   // Board
   createHeading: 'Create the exam',
   reviewHeading: 'Preview and submit',
-  peopleHeading: 'Bring everyone in',
+  peopleHeading: 'Registration',
   /** The stamp above the invites once the read-back matched. */
   publishedStamp: 'Published',
   /** Shows only once the exam's ENS name passes every check. */

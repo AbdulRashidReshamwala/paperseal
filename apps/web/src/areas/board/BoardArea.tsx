@@ -273,7 +273,7 @@ function BoardFlow(props: { mode: Mode }) {
     page(
       <ExamShell snapshot={value}>
         <div className="board-strip">
-          <MachineCheck examId={examId} snapshot={value} />
+          {decided === 'people' ? null : <MachineCheck examId={examId} snapshot={value} />}
           <ExamNameCard key={examId} examId={examId} routeName={named.name} onVerified={verifiedAs} />
         </div>
         {children}

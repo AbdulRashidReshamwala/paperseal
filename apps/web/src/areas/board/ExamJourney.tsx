@@ -50,13 +50,13 @@ export function ExamJourney(props: { snapshot: Snapshot }) {
     end: roundTimeSeconds(Number(settings?.endRound ?? 0)),
   };
   const steps: { label: string; when?: string }[] = [
-    { label: 'Check the machine' },
-    { label: 'Bring everyone in' },
-    { label: 'Questions come in', when: `Until ${formatTimeOnly(times.lock)}` },
-    { label: 'Post the paper’s record' },
-    { label: 'Paper sealed' },
-    { label: 'Paper released to centres', when: formatTimeOnly(times.unlock) },
-    { label: 'Paper opens to everyone', when: formatTimeOnly(times.end) },
+    { label: 'Machine Check' },
+    { label: 'Registration' },
+    { label: 'Question Submission', when: `Until ${formatTimeOnly(times.lock)}` },
+    { label: 'Paper Build' },
+    { label: 'Paper Sealed' },
+    { label: 'Paper Release', when: formatTimeOnly(times.unlock) },
+    { label: 'Public Opening', when: formatTimeOnly(times.end) },
   ];
   const machineChecked = useMachineChecked(snapshot.found?.exam.settings.examId as Hex | undefined);
   const here = spotOf(snapshot, now, times, machineChecked);

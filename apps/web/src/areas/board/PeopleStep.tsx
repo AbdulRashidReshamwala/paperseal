@@ -369,7 +369,7 @@ export function PeopleStep(props: { examId: Hex; snapshot: Snapshot; onPosted: (
   if (!loaded) return <LoadingSeal />;
   return (
     <>
-      <h1 className="board-draft-title">Bring everyone in</h1>
+      <h1 className="board-draft-title">Registration</h1>
       <p className="board-draft-lede">Invite your setters and share the link with centres. Once everyone has registered, post the list.</p>
       {published ? (
         <div className="board-section board-people-published">
