@@ -25,12 +25,12 @@ html,body{height:100%;background:#05070d;overflow:hidden}
 .k{font:500 30px var(--mono);letter-spacing:4px;color:var(--soft)}
 
 /* page 1 */
-.p1 .sheet{left:190px;top:150px;width:1540px;height:780px;padding:84px 110px;transform:rotate(-1.2deg)}
+.p1 .sheet{left:190px;top:120px;width:1540px;height:840px;padding:84px 110px;transform:rotate(-1.2deg)}
 .p1 .k{margin-bottom:0}
 .p1 h1{font:700 330px/1 var(--serif);letter-spacing:-6px;margin:0 0 0 -8px}
-.p1 .sub{font:400 58px/1.25 var(--serif);max-width:1300px;margin-top:70px;color:#33405e}
+.p1 .sub{font:400 58px/1.25 var(--serif);max-width:1300px;margin-top:150px;color:#33405e}
 .p1 .tape{left:640px;top:-34px;transform:rotate(-3deg)}
-.p1 .stamp{left:930px;top:360px;font-size:92px;padding:14px 40px;border-width:12px;transform:rotate(-9deg)}
+.p1 .stamp{left:960px;top:330px;font-size:92px;padding:14px 40px;border-width:12px;transform:rotate(-9deg)}
 .p1 .stamp::after{inset:-26px;border-width:4px}
 
 /* animation: replays every time the slide is shown */
