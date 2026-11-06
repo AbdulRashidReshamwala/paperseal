@@ -5,6 +5,7 @@ coverage/
 .env
 .env.*
 !.env.example
+!apps/web/.env.demo-keys
 .DS_Store
 
 # Foundry

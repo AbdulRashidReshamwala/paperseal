@@ -20,7 +20,7 @@ export function nameRecordCalls(cards: readonly { name: string; card: Pick<KeyCa
 }
 
 /** Sends every record at once with consecutive nonces, so they land in a block or two, then waits for them all. */
-export async function writeNameRecords(cards: readonly { name: string; card: KeyCard }[], say: (line: string) => void): Promise<void> {
+export async function writeNameRecords(cards: readonly { name: string; card: Pick<KeyCard, 'passkey' | 'credentialId'> }[], say: (line: string) => void): Promise<void> {
   const client = createPublicClient({ chain: sepolia, transport: http(deployed.rpcUrl), ccipRead: false });
   const resolver = (await client.getEnsResolver({ name: partyParent })) as Address;
   const board = await client.readContract({ address: deployed.registry, abi: examRegistryAbi, functionName: 'board' });

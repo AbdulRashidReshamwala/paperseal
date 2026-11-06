@@ -38,3 +38,6 @@ A setter's invite link opens `/join`. `src/shared/Join.tsx` reads the fragment o
 
 A key holder or centre enrols once at `/enrol` (`src/shared/Enrol.tsx`) and sends the key card to whoever runs the directory. They then register per exam at `/exam` (`src/shared/ExamPage.tsx` and `RegisterByName.tsx`), which reads the name's records, so it works in any browser on this domain. It takes two touches. The credential is stored for both holder pages, because the board decides the role. A key already on the posted list, or already held by the TEE under this name, needs no touch: a new browser only learns it. The key holder and centre pages offer no registration once the exam has ended.
 
+## Demo keys
+
+`pnpm demo:keys` starts this app in the `demo-keys` Vite mode, with a bar that switches who you are acting as and a planted key per person, for showing a whole exam in one tab. `src/shared/demoKeys.ts` is the only door to `src/demo`, and `src/demoKeys.test.ts` checks a production build holds no trace of it. See "One-machine demo" in [deploy/README.md](../../deploy/README.md).

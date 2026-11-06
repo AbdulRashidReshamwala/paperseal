@@ -105,6 +105,7 @@ Set at build time for `apps/web` and `apps/verifier` (viewers can change them in
 | `VITE_EXAM_ID` | the published exam ID, as a fallback |
 | `VITE_STORAGE_URL` | `https://storage.googleapis.com/<BUCKET>` |
 | `VITE_TEE_STORAGE_BUCKET` | `<BUCKET>`, the one environment value the token check allows |
+| `VITE_SWARM_API_URL` | a read-only Swarm gateway for backups (`swarm.defaultApiUrl` in `spec/arkiv.json`, the viewer's own Bee node, when unset). The verifier only reads `GET /bzz/...` from it |
 | `VITE_RELEASES_REPO` | your fork as `owner/name`, so the apps read TEE releases from it (upstream's `AbdulRashidReshamwala/paperseal` when unset) |
 
 Demo ENS name on Sepolia: `paperseal-demo.eth`, owned by the board wallet, with a placeholder exam name `demo.paperseal-demo.eth` that carries the registry, TEE and storage records.
@@ -112,3 +113,20 @@ Demo ENS name on Sepolia: `paperseal-demo.eth`, owned by the board wallet, with 
 ## Party names
 
 `deploy/ens/records.mjs` prints the `cast send` commands that put a key card on a name and list the names in the directory. It sends nothing. See section 4 of [docs/ens-setup.md](../docs/ens-setup.md).
+
+## One-machine demo
+
+`pnpm demo:keys` shows a whole exam in one tab of your normal Chrome, with MetaMask for the board. It is the web app on <http://localhost:5171>, pointed at the deployed sealed machine and Sepolia (`apps/web/.env.demo-keys`), with a bar across the top: **Acting as** picks who you are. Use this to present. `pnpm demo` is the older way: one Chrome window per person, with keys that die with the browser. Use it only to try enrolment with a virtual key.
+
+Each person has a planted key, fixed and derived from a public seed in `packages/keys/src/demo.ts`, so reloads and restarts lose nothing. The keys are simulated and the app says so on every page. The WebAuthn answers and signatures are real and the sealed machine checks them as it checks any key, but anyone can derive these keys, so they must never be on a real exam. The mode cannot reach a production build: see `apps/web/src/shared/demoKeys.ts`.
+
+1. Put the planted keys on the names, once. They never change, so this does not need repeating. `node e2e/demo/cli.mjs names` prints the 11 key holder and centre cards and sends nothing. `node e2e/demo/cli.mjs names write` sends the records from the board keystore, as `pnpm live` does, and replaces whatever is on those names.
+2. Start the sealed machine for a new exam, as in step 3, and run `pnpm demo:keys`. It needs port 5171 free, so stop any other dev server first.
+3. As **Exam board**, connect MetaMask and publish the exam. Copy the exam's setter links.
+4. Switch to **Setter 1**, paste that setter's link in the address bar and register. Do the same for **Setter 2**.
+5. Switch to each **Key holder** and **Centre**. Their page has their name filled in, and one click registers them.
+6. Carry on as each person when the exam needs them. Switching reloads the page. Each person has their own browser storage, the exam board's drafts stay with the exam board, and only the current exam is shared.
+
+**Ask for a touch** in the bar asks a plugged-in security key for a touch, at most once per click. The first touch makes a throwaway credential on it. The touch is only for show: its result is thrown away and never used for any key. If no key answers or you press Cancel, the planted key carries on, after 30 seconds at most. Untick it to skip the touch.
+
+`pnpm --filter @paperseal/e2e ui:demo` runs a whole exam this way in one tab, on the local mock world, without Sepolia.

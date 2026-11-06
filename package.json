@@ -13,7 +13,8 @@
     "typecheck": "pnpm -r typecheck",
     "abi:sync": "make abi",
     "demo": "pnpm --filter @paperseal/e2e demo",
-    "demo:check": "pnpm --filter @paperseal/e2e demo:check"
+    "demo:check": "pnpm --filter @paperseal/e2e demo:check",
+    "demo:keys": "pnpm --filter @paperseal/web demo:keys"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

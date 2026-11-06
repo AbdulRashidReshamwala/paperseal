@@ -17,13 +17,14 @@ Every file is already public and already encrypted or signed, so the collection 
 
 | | |
 | --- | --- |
-| Arkiv entity | [`0x766f01f7b808ef19378a715d0dd9512b3c2508dda38521ab7255156f8c61de36`](https://rabdi.explorer.arkiv.network/entity/0x766f01f7b808ef19378a715d0dd9512b3c2508dda38521ab7255156f8c61de36) |
-| `swarmRef` | `64221579f12d975d45155eca774770505ebf76c4108cc96bdc44f5adf97448fd` |
-| Exam | `0x422205bde8135878ece4ccb921496e30076b32e14f48fb2886e3fa3f5181f295`, on registry `0x6a9f017F374630EcB84e8E3816B1eE9F8Fa2dBE8` (Sepolia) |
-| Phase | `unlock`, 25 files |
-| Link | `http://127.0.0.1:1633/bzz/64221579f12d975d45155eca774770505ebf76c4108cc96bdc44f5adf97448fd/manifest.json` |
+| Arkiv entity | [`0x2d08b220813b576a3a87193723aa31969c22792eef5b5c333f1049f26a9871a8`](https://rabdi.explorer.arkiv.network/entity/0x2d08b220813b576a3a87193723aa31969c22792eef5b5c333f1049f26a9871a8) |
+| `swarmRef` | `bae94aa7a550c4d870856306bb0bf68fa366a2e59039de2d48e404b27c527ed6` |
+| Exam | `0x83b30c31827789be7213e71731864d40ea7a89b92844ab09070cd132cccfd4c3`, on registry `0xc25F7e0004f0E9B77581CFf6B4B5Ae8b120658eb` (Sepolia) |
+| Phase | `unlock`, 25 files, 1.09 MB |
+| Link | [`https://34-93-7-127.sslip.io/bzz/bae94aa7…7ed6/manifest.json`](https://34-93-7-127.sslip.io/bzz/bae94aa7a550c4d870856306bb0bf68fa366a2e59039de2d48e404b27c527ed6/manifest.json) |
+| Verifier | [`https://34-93-7-127.sslip.io/#/exam/0x83b3…c4c3`](https://34-93-7-127.sslip.io/#/exam/0x83b30c31827789be7213e71731864d40ea7a89b92844ab09070cd132cccfd4c3) |
 
-**About the link:** the upload is on Swarm's **Sepolia testnet**, which has no public gateway. So the link opens through any testnet Bee node, here the one on `127.0.0.1:1633`. With a node on the testnet, replace the host with your own. We checked that `paper.bin` downloaded from Swarm has exactly the hash in the bucket and in the on-chain manifest (`c4a1765f…6cee`).
+**About the link:** the upload is on Swarm's **Sepolia testnet**, which has no public gateway, so we run one for the hackathon: our Bee node behind Caddy, which passes only `GET /bzz/...` and `/health` and refuses every other Bee route, so nobody can upload, buy stamps or touch the node's wallet. It is a temporary VM, so after the event the link opens only through your own testnet Bee node: replace the host with it. Before uploading, the relay checked every file against Sepolia and the signed release log, and after uploading it read `manifest.json` back from Swarm and compared its bytes.
 
 ## Postage Batch and Node
 
@@ -32,7 +33,8 @@ Every file is already public and already encrypted or signed, so the collection 
 | Batch ID | `6b239feebe6cc8efb71eda3dc87c1cc496b93966ed6a04895495c5e5b4829626` |
 | Size and life | Depth 18 (about 6.6 MB reliably), 3 days from 2026-11-06, bought for 0.0565 sBZZ |
 | Bought by | The Bee node's wallet [`0x1A33528CFA77203027643aB842a26455C68DC329`](https://sepolia.etherscan.io/address/0x1A33528CFA77203027643aB842a26455C68DC329), funded from the team's board wallet `0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b` |
-| Uploaded through | Our own Bee 2.8.3 light node on the Swarm Sepolia testnet (`mainnet: false`), API on `127.0.0.1:1633` |
+| Uploaded through | Our own Bee 2.8.3 light node on the Swarm Sepolia testnet (`mainnet: false`), first on a laptop, then moved to a GCP VM in Mumbai with its synced state, so it kept its wallet and batch and skipped the first sync |
+| Read through | `https://34-93-7-127.sslip.io`, the read-only gateway above, with `cors-allowed-origins: ["*"]`, so a verifier on any domain can read it |
 
 ## Code
 
@@ -52,27 +54,28 @@ You need a Bee node on the Swarm Sepolia testnet, with a usable postage batch, a
 **One upload.** This checks the files, uploads 25 of them, writes the Arkiv row and reads the manifest back:
 
 ```bash
-node relay/cli.mjs backup --exam 0x422205bde8135878ece4ccb921496e30076b32e14f48fb2886e3fa3f5181f295 --registry 0x6a9f017F374630EcB84e8E3816B1eE9F8Fa2dBE8 --storage https://storage.googleapis.com/paperseal-demo-paperseal-exams --batch <your batch id>
+node relay/cli.mjs backup --exam 0x83b30c31827789be7213e71731864d40ea7a89b92844ab09070cd132cccfd4c3 --registry 0xc25F7e0004f0E9B77581CFf6B4B5Ae8b120658eb --storage https://storage.googleapis.com/paperseal-demo-paperseal-exams --batch <your batch id>
 ```
 
 You should see `hash … the Build's storageManifestHash on Sepolia`, `uploaded reference …`, `row written` and `read-back manifest.json from Swarm matches`. Writing the row needs a wallet with tGLM on Arkiv (see `relay/README.md`). Re-running with the same files skips the row.
 
-**One read.** The verifier with the board's bucket gone:
+**One read.** The verifier with the board's bucket gone. The quickest way is the hosted verifier: open the Verifier link above, and under "Check it yourself" set "Where the public files are kept" to `https://storage.googleapis.com/paperseal-demo-bucket-gone` and save. To run it locally instead:
 
 1. Put this in `apps/verifier/.env.local`. The storage URL is a bucket that doesn't exist:
 
    ```bash
    VITE_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com
-   VITE_REGISTRY_ADDRESS=0x6a9f017F374630EcB84e8E3816B1eE9F8Fa2dBE8
+   VITE_REGISTRY_ADDRESS=0xc25F7e0004f0E9B77581CFf6B4B5Ae8b120658eb
    VITE_TEE_STORAGE_BUCKET=paperseal-demo-paperseal-exams
    VITE_ARKIV_WRITERS=0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b
+   VITE_SWARM_API_URL=https://34-93-7-127.sslip.io
    VITE_STORAGE_URL=https://storage.googleapis.com/paperseal-demo-bucket-gone
    ```
 
-2. Run `pnpm --filter @paperseal/verifier dev` and open `http://localhost:5172/#/exam/0x422205bde8135878ece4ccb921496e30076b32e14f48fb2886e3fa3f5181f295`.
-3. All 7 steps should be done, ending with "The paper is open". Each step's evidence has a "Backup on Swarm" block marking `token.jwt`, `manifest.json`, `paper.bin` and `key-pub.tlock` as "From the Swarm backup, checked against the exam's on-chain record". `release-log.json`, `release-token.jwt` and `key-priv.tlock` also come from Swarm, checked by the same steps as the bucket's copies. Each block links to the files on Swarm and to the Arkiv row. The browser console shows the failed requests to the missing bucket.
+2. Run `pnpm --filter @paperseal/verifier dev` and open `http://localhost:5172/#/exam/0x83b30c31827789be7213e71731864d40ea7a89b92844ab09070cd132cccfd4c3`.
+3. All 7 steps should be done, ending with "The paper is open". Each step's evidence has a "Backup on Swarm" block marking `token.jwt`, `manifest.json`, `paper.bin` and `key-pub.tlock` as "From the Swarm backup, checked against the exam's on-chain record". `release-log.json`, `release-token.jwt` and `key-priv.tlock` also come from Swarm, checked by the same steps as the bucket's copies. Each block links to the files on Swarm and to the Arkiv row. The browser console shows the failed requests to the missing bucket: 42 in our run, while all 7 files came from Swarm.
 
-Your Bee node must allow the verifier's origin: `cors-allowed-origins: ["http://localhost:5172"]` in its config.
+With your own Bee node instead of the gateway, set `VITE_SWARM_API_URL` to it, and allow the verifier's origin in its config, for example `cors-allowed-origins: ["http://localhost:5172"]`.
 
 ## Demo Video
 
@@ -86,7 +89,8 @@ To be added by the team, with the timestamp where the bucket is switched off and
 4. **The first batch purchase failed on a race.** `POST /stamps` returned `500 cannot create batch`, and the log said `ERC20: insufficient allowance`. The approval was mined a moment later, and the same request then worked.
 5. **"Synced" is never exactly the chain tip.** Bee trails the tip by about 5 blocks, by design, so a check for `block == chainTip` never passes. We allow 10.
 6. **The price swings while syncing.** `/chainstate` showed 24,618, then 205,334, then 99,788 PLUR per chunk per block during the sync, so quotes were only good once synced.
-7. **There is no testnet gateway,** so the reads judges can do need their own node. We'd love a public, CORS-enabled testnet gateway, even a rate-limited one.
+7. **There is no testnet gateway,** so judges would need their own node. We ran a read-only one on a VM for the event (Caddy in front of Bee, passing only `GET /bzz/*`), but we'd love a public, CORS-enabled testnet gateway, even a rate-limited one.
+10. **Moving a node is easy once you know how.** Copying the data directory (`keys`, `statestore`, `localstore`, `stamperstore`, 7 MB) to a new machine kept the wallet, the batch and the postage sync. The new node was ready in under a minute.
 8. **Depth 17 holds only about 45 KB reliably.** That surprised us, because it is the minimum depth and its theoretical size is 537 MB. The effective volume table is what matters, and it is easy to miss.
 9. **sBZZ only comes from a Uniswap testnet swap.** A faucet would be simpler.
 
