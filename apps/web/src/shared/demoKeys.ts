@@ -51,6 +51,17 @@ export function demoTopics(): { name: string; questions: string }[] | null {
   return ['Mathematics', 'Physics', 'Chemistry', 'Biology', 'English'].map((name) => ({ name, questions: '5' }));
 }
 
+/** Times for a short exam from now, in the date picker's local format. Null outside demo mode. */
+export function demoTimes(now = new Date()): { examStart: string; lockTime: string; durationMinutes: string; releaseMinutes: string } | null {
+  if (!on) return null;
+  const local = (minutes: number) => {
+    const at = new Date(now.getTime() + minutes * 60_000);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${String(at.getFullYear())}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(at.getHours())}:${pad(at.getMinutes())}`;
+  };
+  return { examStart: local(40), lockTime: local(25), durationMinutes: '10', releaseMinutes: '10' };
+}
+
 /** How many setters a demo has, to fill the invites in one click. Null outside demo mode. */
 export function demoSetters(): number | null {
   if (!on) return null;

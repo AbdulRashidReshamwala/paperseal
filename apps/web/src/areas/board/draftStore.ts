@@ -1,5 +1,6 @@
 import type { PublishInput } from './form';
 import { validParties } from './parties';
+import { demoTimes } from '../../shared/demoKeys';
 import { defaultPlan, draftSteps, evaluatePlan, type DraftStep, type PlanInput } from './plan';
 
 /*
@@ -104,7 +105,9 @@ function readStored(): StoredDraft[] {
 
 /** True while nothing has been typed, so an empty form never becomes a draft. */
 export function isBlank(content: Pick<DraftContent, 'plan' | 'publish'>): boolean {
-  return JSON.stringify(content.plan) === JSON.stringify(defaultPlan) && content.publish.version === '';
+  // Demo mode fills the times in by itself, which alone doesn't make a draft worth keeping.
+  const plan = demoTimes() ? { ...content.plan, examStart: '', lockTime: '', durationMinutes: defaultPlan.durationMinutes, releaseMinutes: defaultPlan.releaseMinutes } : content.plan;
+  return JSON.stringify(plan) === JSON.stringify(defaultPlan) && content.publish.version === '';
 }
 
 /** The one draft an older version kept, moved into the list. A draft that cannot be used is dropped. */

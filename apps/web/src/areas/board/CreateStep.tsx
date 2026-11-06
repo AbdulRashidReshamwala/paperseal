@@ -1,7 +1,7 @@
 import { Button } from '@paperseal/ui';
-import { useState, type ReactNode } from 'react';
+import { useState, type ReactNode, useEffect } from 'react';
 
-import { demoTopics } from '../../shared/demoKeys';
+import { demoTimes, demoTopics } from '../../shared/demoKeys';
 import { useBoardForm, useEvaluated } from './BoardForm';
 import { DraftPage, type DraftRail } from './DraftFrame';
 import { evaluatePublish, parseLocalTime, whenTyped } from './form';
@@ -38,6 +38,12 @@ export function DetailsStep(props: { rail: DraftRail; onContinue: () => void }) 
   const set = (patch: Partial<PlanInput>) => {
     setPlan({ ...plan, ...patch });
   };
+  // A short exam from now, so a demo needs no typing. It fills in once, and stays editable.
+  const blankTimes = plan.examStart === '';
+  useEffect(() => {
+    const times = blankTimes ? demoTimes() : null;
+    if (times) setPlan({ ...plan, ...times });
+  }, [blankTimes, plan, setPlan]);
   const hostError = evaluatePublish(publish, null).errors.rpcHost;
   const ready = Boolean(blueprint.examId && schedule.settings && !hostError);
   const lockAt = schedule.lock?.entered ?? null;
