@@ -101,56 +101,6 @@ export function createInvite(
   return { ok: true, invite: { id, role, owner: name, label: name, inviteSecret: newInviteSecret() } };
 }
 
-/** One name per line. Blank lines and spaces around a name are ignored. */
-export function parseNames(text: string): string[] {
-  return text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line !== '');
-}
-
-/**
- * Invites for a whole box of names. Nothing is made unless every name is acceptable, so the box
- * can be corrected and added again without leaving half of it behind.
- */
-export function createInvites(
-  existing: readonly BoardInvite[],
-  role: Exclude<InviteRole, 'setter'>,
-  text: string,
-): { ok: true; invites: BoardInvite[] } | { ok: false; reasons: string[] } {
-  const made: BoardInvite[] = [];
-  const reasons: string[] = [];
-  parseNames(text).forEach((name, index) => {
-    const one = createInvite([...existing, ...made], role, name);
-    if (one.ok) made.push(one.invite);
-    else reasons.push(`Line ${String(index + 1)}: ${one.reason}`);
-  });
-  return reasons.length > 0 ? { ok: false, reasons } : { ok: true, invites: made };
-}
-
-export const MAX_SETTER_INVITES = 500;
-
-/** `count` setter invites. A setter needs no name, so each gets a number the board can tell apart. */
-export function createSetters(
-  existing: readonly BoardInvite[],
-  count: number,
-): { ok: true; invites: BoardInvite[] } | { ok: false; reason: string } {
-  if (!Number.isInteger(count) || count < 1 || count > MAX_SETTER_INVITES) {
-    return { ok: false, reason: `Enter a whole number of setters, from 1 to ${String(MAX_SETTER_INVITES)}.` };
-  }
-  const made: BoardInvite[] = [];
-  for (let i = 0; i < count; i += 1) {
-    const one = createInvite([...existing, ...made], 'setter', '');
-    if (one.ok) made.push(one.invite);
-  }
-  return { ok: true, invites: made };
-}
-
-/** "Name, link" for each invite, one per line, ready to paste into a mail merge or a message. */
-export function copyAllText(rows: readonly { invite: BoardInvite; link: string }[]): string {
-  return rows.map(({ invite, link }) => `${invite.label}, ${link}`).join('\n');
-}
-
 const BACKUP_KIND = 'paperseal-invites';
 
 /** The backup file: everything needed to bring this exam's invites back. It holds the secret links. */

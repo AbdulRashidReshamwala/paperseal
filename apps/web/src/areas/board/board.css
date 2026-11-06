@@ -120,15 +120,19 @@
 
 .board-invite-form {
   display: grid;
-  gap: var(--ps-space-3);
-  justify-items: start;
+  gap: var(--ps-space-2) var(--ps-space-3);
+  align-items: start;
   margin-bottom: var(--ps-space-4);
 }
 
-.board-invite-form .ps-field,
-.board-invite-form textarea {
-  width: 100%;
-  max-width: 34em;
+@media (min-width: 560px) {
+  .board-invite-form {
+    grid-template-columns: 11em minmax(0, 1fr) auto;
+  }
+
+  .board-invite-form .ps-button {
+    margin-top: calc(var(--ps-space-5) + var(--ps-space-1));
+  }
 }
 
 .board-actions {
