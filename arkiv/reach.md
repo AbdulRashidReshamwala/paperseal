@@ -12,7 +12,16 @@ The unlock lasts minutes. That is exactly when a dishonest or overloaded board c
 
 ## Can They Try It Today
 
-Yes. Run the verifier (`pnpm --filter @paperseal/verifier dev`) and open `#/exam/0x422205bde8135878ece4ccb921496e30076b32e14f48fb2886e3fa3f5181f295`. Set no storage and no TEE, and set `VITE_ARKIV_WRITERS=0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b`. Step 6 shows "8 of the 8 needed key holders have released. Read from the copy on Arkiv", with the Google token and the TEE signature both checked from Arkiv alone.
+Yes, locally. There is no hosted verifier yet. After `pnpm install`, put this in `apps/verifier/.env.local`, leaving out storage and the TEE on purpose, so the board's servers play no part:
+
+```bash
+VITE_RPC_URL=https://ethereum-sepolia-rpc.publicnode.com
+VITE_REGISTRY_ADDRESS=0x6a9f017F374630EcB84e8E3816B1eE9F8Fa2dBE8
+VITE_TEE_STORAGE_BUCKET=paperseal-demo-paperseal-exams
+VITE_ARKIV_WRITERS=0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b
+```
+
+Then run `pnpm --filter @paperseal/verifier dev` and open `http://localhost:5172/#/exam/0x422205bde8135878ece4ccb921496e30076b32e14f48fb2886e3fa3f5181f295`. Step 6 shows "8 of the 8 needed key holders have released. Read from the copy on Arkiv", with the Google token and the TEE signature both checked from Arkiv alone.
 
 Four finished demo exams are mirrored now, at 2 entities each:
 
@@ -25,7 +34,7 @@ Four finished demo exams are mirrored now, at 2 entities each:
 
 ## After Mumbai
 
-The mirror is part of Paper Seal's design, not a side demo. Every live exam runs `node relay/cli.mjs watch` during unlock. Next we plan to:
+The mirror is part of Paper Seal's design, not a side demo. The demo rows above were mirrored from public storage after those exams finished. For a live exam, the board runs `node relay/cli.mjs watch` during unlock, which writes each new signed snapshot and a heartbeat every minute. Next we plan to:
 
 - mirror an index of exams;
 - let neutral parties run their own relays and publish their writer addresses;

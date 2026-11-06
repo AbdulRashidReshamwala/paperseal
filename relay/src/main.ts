@@ -1,4 +1,4 @@
-import { arkiv, createArkivReader, createArkivWriter } from '@paperseal/arkiv';
+import { arkiv, createArkivReader, createArkivWriter, type ArkivWriter } from '@paperseal/arkiv';
 import { chain } from '@paperseal/protocol';
 import type { Address } from 'viem';
 
@@ -6,10 +6,10 @@ import { parseCommand, usage, UsageError, type MirrorTarget } from './args';
 import { relayEnv, type RelayEnv } from './config';
 import { dryCheck } from './dry-check';
 import { keystoreAddress, loadSigner } from './keystore';
-import { explorerLinks, mirrorPass, tally, type PassReport, type RelayWriter } from './mirror';
+import { explorerLinks, mirrorPass, tally, type PassReport } from './mirror';
 import { errorText, print, printError, registerSecret } from './output';
-import { statusRows } from './status';
-import { abortableSleep, watch } from './watch';
+import { ageText, statusRows, type StatusRow } from './status';
+import { abortableSleep, watch, type Beat } from './watch';
 
 const links = explorerLinks(arkiv.network.explorer);
 
@@ -19,12 +19,21 @@ function accessKeyLine(env: RelayEnv): string {
     : 'no access key: the public RPC, which is rate limited';
 }
 
+/** The TEE part of a pass's summary. A stage is shown only for a TEE that serves this exam. */
+export function teeSummary(tee: PassReport['tee']): string {
+  if (tee.servesExam === true) return tee.stage ? `  (TEE stage ${tee.stage})` : '';
+  if (tee.servesExam === false) return '  (TEE serves another exam)';
+  return tee.stage ? '  (TEE shows no exam)' : '';
+}
+
+export function summaryLine(report: PassReport): string {
+  const counts = tally(report);
+  return `[${report.at.toISOString()}] written ${String(counts.written)}, skipped ${String(counts.skipped)}, held ${String(counts.held)}, refused ${String(counts.refused)}, failed ${String(counts.failed)}${teeSummary(report.tee)}`;
+}
+
 /** Prints one pass: every outcome, with its entity, transaction and explorer link, then notes. */
 export function printReport(report: PassReport): void {
-  const counts = tally(report);
-  print(
-    `[${report.at.toISOString()}] written ${String(counts.written)}, skipped ${String(counts.skipped)}, held ${String(counts.held)}, refused ${String(counts.refused)}, failed ${String(counts.failed)}${report.tee.stage ? `  (TEE stage ${report.tee.stage})` : ''}`,
-  );
+  print(summaryLine(report));
   for (const o of report.outcomes) {
     print(`  ${o.kind.padEnd(5)} ${o.source.padEnd(7)} ${o.result.padEnd(7)} ${o.detail}`);
     if (o.entityKey) print(`        entity ${o.entityKey}  ${links.entity(o.entityKey)}`);
@@ -41,7 +50,23 @@ function header(env: RelayEnv, target: MirrorTarget, writer: Address): void {
   print(`sources   ${[target.storageUrl && `storage ${target.storageUrl}`, target.teeUrl && `TEE ${target.teeUrl}`].filter(Boolean).join(', ')}`);
 }
 
-async function signedWriter(env: RelayEnv): Promise<RelayWriter> {
+export function printBeat(beat: Beat): void {
+  print(`[${beat.at.toISOString()}] heartbeat written: entriesHash ${beat.entriesHash ?? 'none'}, TEE stage ${beat.stage ?? 'none'}`);
+  print(`        entity ${beat.entityKey}  ${links.entity(beat.entityKey)}`);
+  print(`        tx     ${beat.txHash}  ${links.tx(beat.txHash)}`);
+}
+
+/** Heartbeats can number in the hundreds, so `status` shows only the newest few. */
+const heartbeatsShown = 10;
+
+function printRow(row: StatusRow): void {
+  const when = row.writtenAt ? new Date(row.writtenAt * 1000).toISOString() : 'unknown time';
+  print(`  ${row.kind.padEnd(9)} block ${String(row.createdAtBlock)}  ~${when} (${ageText(row.ageSeconds)})  registry ${row.registry}`);
+  print(`            ${row.detail}`);
+  print(`            entity ${row.entityKey}  ${links.entity(row.entityKey)}`);
+}
+
+async function signedWriter(env: RelayEnv): Promise<ArkivWriter> {
   const account = await loadSigner(env.keystore);
   return createArkivWriter({ account, accessKey: env.accessKey.value });
 }
@@ -85,14 +110,15 @@ async function run(argv: string[]): Promise<void> {
     print(`Arkiv     ${arkiv.network.name}, ${accessKeyLine(env)}`);
     print(`writer    ${writer}${command.writer ? '' : ` (keystore ${env.keystore.account})`}  ${links.address(writer)}`);
     print(`exam      ${command.examId}`);
-    const { rows, latest } = await statusRows(reader, command.examId, writer);
+    print(`registry  ${command.registry ?? 'any (pass --registry to narrow)'}`);
+    const { rows, heartbeats, latest } = await statusRows(reader, command.examId, writer, command.registry);
     print(`${String(rows.length)} row${rows.length === 1 ? '' : 's'} from this writer${latest ? ` (latest Arkiv block ${String(latest.number)})` : ''}, newest first`);
-    for (const row of rows) {
-      const when = row.writtenAt ? new Date(row.writtenAt * 1000).toISOString() : 'unknown time';
-      print(`  ${row.kind.padEnd(5)} block ${String(row.createdAtBlock)}  ~${when}  registry ${row.registry}`);
-      print(`        ${row.detail}`);
-      print(`        entity ${row.entityKey}  ${links.entity(row.entityKey)}`);
-    }
+    for (const row of rows) printRow(row);
+    const shown = heartbeats.slice(0, heartbeatsShown);
+    print(
+      `${String(heartbeats.length)} heartbeat${heartbeats.length === 1 ? '' : 's'} from this writer, newest first${heartbeats.length > shown.length ? ` (the newest ${String(shown.length)} shown)` : ''}`,
+    );
+    for (const row of shown) printRow(row);
     return;
   }
 
@@ -120,6 +146,7 @@ async function run(argv: string[]): Promise<void> {
   process.on('SIGINT', onSignal);
   process.on('SIGTERM', onSignal);
   print(`watching every ${String(command.everySeconds)}s until the TEE says released or failed, or Ctrl+C`);
+  print(command.heartbeat ? `heartbeat every ${String(arkiv.heartbeatSeconds)}s while watching` : 'no heartbeat (--no-heartbeat)');
   try {
     const end = await watch(command.target, command.everySeconds, {
       ...deps,
@@ -127,6 +154,7 @@ async function run(argv: string[]): Promise<void> {
       signal: controller.signal,
       onReport: printReport,
       onError: (message) => printError(`  error ${message}`),
+      heartbeat: command.heartbeat ? { seconds: arkiv.heartbeatSeconds, write: writer.heartbeat, onWritten: printBeat } : undefined,
     });
     print(end === 'stopped' ? 'stopped' : `the TEE says ${end}; the mirror is done`);
   } catch (error) {

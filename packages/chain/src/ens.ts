@@ -5,7 +5,9 @@ import {
   createPublicClient,
   ExecutionRevertedError,
   http,
+  getAddress,
   HttpRequestError,
+  isAddress,
   isAddressEqual,
   isHex,
   offchainLookupSignature,
@@ -52,6 +54,13 @@ export interface ResolvedExamName {
   teeUrl: string | null;
   storageUrl: string | null;
   bucket: string | null;
+  /**
+   * The Arkiv writers the board publishes in `ens.records.arkivWriters` (spec/arkiv.md, "Writers"),
+   * checksummed and without repeats. Null when the record is unset.
+   */
+  arkivWriters: Address[] | null;
+  /** Entries of that record that are not valid addresses, trimmed, so a viewer can be told. */
+  arkivWritersIgnored: string[];
 }
 
 /** The check that failed, in the order of spec/api.md. `unreadable`: the RPC failed, so nothing was decided. */
@@ -211,6 +220,23 @@ function wholeNameProblem(name: string): string | null {
   }
 }
 
+/**
+ * The `arkivWriters` record: addresses separated by commas. It only lists writers, and readers check
+ * every row anyway, so a bad entry is dropped and reported rather than failing the name. A mixed-case
+ * entry must have a valid checksum, so a mistyped address isn't quietly read as another.
+ */
+export function parseArkivWriters(record: string | null): Pick<ResolvedExamName, 'arkivWriters' | 'arkivWritersIgnored'> {
+  if (record === null) return { arkivWriters: null, arkivWritersIgnored: [] };
+  const writers = new Set<Address>();
+  const ignored: string[] = [];
+  for (const entry of record.split(',').map((part) => part.trim())) {
+    if (entry === '') continue;
+    if (isAddress(entry)) writers.add(getAddress(entry));
+    else ignored.push(entry);
+  }
+  return { arkivWriters: [...writers], arkivWritersIgnored: ignored };
+}
+
 /** Runs the checks of "Exam Names" in spec/api.md in order, stopping at the first that fails. */
 export async function resolveExamName(
   name: string,
@@ -281,8 +307,8 @@ export async function resolveExamName(
     }
 
     // The text records belong to the name, so a refused one fails the registry check with the addr record.
-    const [teeUrl, storageUrl, bucket] = await Promise.all(
-      [ens.records.tee, ens.records.storage, ens.records.bucket].map(
+    const [teeUrl, storageUrl, bucket, arkivWriters] = await Promise.all(
+      [ens.records.tee, ens.records.storage, ens.records.bucket, ens.records.arkivWriters].map(
         async (key) =>
           (await readFor('registry', `The ${key} text record of ${name}`, () => lookup.text(name, key))) || null,
       ),
@@ -299,6 +325,7 @@ export async function resolveExamName(
         teeUrl: teeUrl ?? null,
         storageUrl: storageUrl ?? null,
         bucket: bucket ?? null,
+        ...parseArkivWriters(arkivWriters ?? null),
       },
     };
   } catch (error) {

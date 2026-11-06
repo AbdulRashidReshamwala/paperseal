@@ -27,6 +27,7 @@ With ENS v2, which the Sepolia ENS app runs, there is no subname to create. Your
 | Text `paperseal.tee` | The TEE URL, for example `https://tee.example.org` |
 | Text `paperseal.storage` | The storage URL, for example `https://storage.googleapis.com/<bucket>` |
 | Text `paperseal.bucket` | The storage bucket the TEE was started with |
+| Text `paperseal.arkiv-writers` | Optional. The relay addresses that mirror the unlock to Arkiv, separated by commas (`spec/arkiv.md`, "Writers") |
 
 The ENS app has no screen for this, so use `cast`, with the board keystore from the main setup:
 

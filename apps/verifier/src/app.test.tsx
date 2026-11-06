@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { arkiv } from '@paperseal/arkiv';
 import { criteriaHash, encodeApprovedList, approvedListHash, encodeCriteria, fromHex, toHex, type Hex } from '@paperseal/protocol';
+import { getAddress } from 'viem';
+
 import { App } from './App';
 import { chainChecks } from './checks';
 import { examLink, routeOfHash } from './link';
@@ -14,6 +16,7 @@ import {
   clearSettings,
   connect,
   arkivWriterList,
+  arkivWriters,
   defaultSettings,
   loadSettings,
   saveSettings,
@@ -195,6 +198,20 @@ describe('runtime settings', () => {
     expect(connect(custom).arkiv).toBeNull();
     expect(connect({ ...custom, arkivRpcUrl: '', arkivWriters: `0x${'ab'.repeat(20)}` }).arkiv).toBeNull();
     expect(connect({ ...custom, arkivWriters: `0x${'ab'.repeat(20)}` }).arkiv?.writers).toEqual([`0x${'ab'.repeat(20)}`]);
+  });
+
+  it("merges the name's Arkiv writers with the viewer's own, once each and checksummed, and says where each came from", () => {
+    const a = getAddress(`0x${'a1'.repeat(20)}`);
+    const b = getAddress(`0x${'b2'.repeat(20)}`);
+    const c = getAddress(`0x${'c3'.repeat(20)}`);
+    expect(arkivWriters(`${b.toLowerCase()}, ${c.toLowerCase()}, ${c}`, [a, b], c.toLowerCase())).toEqual([
+      { address: a, from: ['name'] },
+      { address: b, from: ['name', 'own'] },
+      { address: c, from: ['built'] },
+    ]);
+    // Without a name, only the viewer's own.
+    expect(arkivWriters(a.toLowerCase(), null, '')).toEqual([{ address: a, from: ['own'] }]);
+    expect(arkivWriters('', null, '')).toEqual([]);
   });
 
   it('calls the endpoints the viewer chose', async () => {

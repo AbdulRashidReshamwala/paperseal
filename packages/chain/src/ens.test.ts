@@ -18,6 +18,7 @@ import {
   examRegistryAbi,
   examRegistryRuntime,
   isExamRegistryCode,
+  parseArkivWriters,
   resolveExamName,
   type EnsLookup,
 } from './index';
@@ -31,6 +32,7 @@ const records: Record<string, string> = {
   [ens.records.tee]: 'https://tee.example.org',
   [ens.records.storage]: 'https://storage.example.org/jee',
   [ens.records.bucket]: 'paperseal-jee',
+  [ens.records.arkivWriters]: ' 0x1111111111111111111111111111111111111111,0x2222222222222222222222222222222222222222 ',
 };
 
 /** ExamRegistry's deployed code with `forBoard` written into each `board` immutable, as its constructor does. */
@@ -147,6 +149,8 @@ describe('resolveExamName', () => {
         teeUrl: 'https://tee.example.org',
         storageUrl: 'https://storage.example.org/jee',
         bucket: 'paperseal-jee',
+        arkivWriters: ['0x1111111111111111111111111111111111111111', '0x2222222222222222222222222222222222222222'],
+        arkivWritersIgnored: [],
       },
     });
   });
@@ -297,7 +301,48 @@ describe('resolveExamName', () => {
     const result = await resolveExamName(name, {
       lookup: lookup({ text: (_, key) => Promise.resolve(key === ens.records.tee ? '' : null) }),
     });
-    expect(result).toMatchObject({ ok: true, value: { teeUrl: null, storageUrl: null, bucket: null } });
+    expect(result).toMatchObject({
+      ok: true,
+      value: { teeUrl: null, storageUrl: null, bucket: null, arkivWriters: null, arkivWritersIgnored: [] },
+    });
+  });
+
+  it('keeps the valid arkivWriters entries and reports the rest', async () => {
+    const record = ' 0xab5801a7d398351b8be11c439e05c5b3259aec9b, ,nope,0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B,0xAB5801A7D398351B8BE11C439E05C5B3259AEC9b,0x1234,';
+    const result = await resolveExamName(name, {
+      lookup: lookup({ text: (_, key) => Promise.resolve(key === ens.records.arkivWriters ? record : null) }),
+    });
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        // Lowercase and correctly checksummed entries are the same writer; a bad checksum is not.
+        arkivWriters: ['0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B'],
+        arkivWritersIgnored: ['nope', '0xAB5801A7D398351B8BE11C439E05C5B3259AEC9b', '0x1234'],
+      },
+    });
+  });
+
+  it('gives an empty list, not null, for an arkivWriters record with no valid entry', () => {
+    expect(parseArkivWriters(' , ')).toEqual({ arkivWriters: [], arkivWritersIgnored: [] });
+    expect(parseArkivWriters('x')).toEqual({ arkivWriters: [], arkivWritersIgnored: ['x'] });
+    expect(parseArkivWriters(null)).toEqual({ arkivWriters: null, arkivWritersIgnored: [] });
+  });
+
+  it('fails registry when the chain refuses the arkivWriters record, and is unreadable when the RPC fails', async () => {
+    const only = (error: () => Error) =>
+      lookup({ text: (_, key) => (key === ens.records.arkivWriters ? Promise.reject(error()) : Promise.resolve(records[key] ?? null)) });
+    expect(await resolveExamName(name, { lookup: only(reverted) })).toMatchObject({
+      ok: false,
+      failed: 'registry',
+      reason: expect.stringContaining(ens.records.arkivWriters) as string,
+    });
+    expect(await resolveExamName(name, { lookup: only(needsGateway) })).toMatchObject({
+      ok: false,
+      failed: 'registry',
+      reason: expect.stringContaining('needs an offchain gateway') as string,
+    });
+    const down = () => new HttpRequestError({ url: 'https://rpc.example.org', status: 503 });
+    expect(await resolveExamName(name, { lookup: only(down) })).toMatchObject({ ok: false, failed: 'unreadable' });
   });
 });
 

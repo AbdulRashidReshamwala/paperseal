@@ -7,8 +7,11 @@
   },
   "schemas": {
     "releaseLog": "paperseal.v1.release-log",
-    "releaseToken": "paperseal.v1.release-token"
+    "releaseToken": "paperseal.v1.release-token",
+    "relayHeartbeat": "paperseal.v1.relay-heartbeat"
   },
   "lifetimeDays": 180,
-  "staleAfterSeconds": 120
+  "staleAfterSeconds": 120,
+  "heartbeatSeconds": 60,
+  "heartbeatLifetimeHours": 24
 }

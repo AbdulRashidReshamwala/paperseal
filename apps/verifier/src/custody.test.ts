@@ -4,7 +4,7 @@ import { roundTimeSeconds, type Hex } from '@paperseal/protocol';
 
 import { checkPublishedToken, checkRecordToken, type Build, type FreshVerdict } from './attest';
 import { approvedEntries, checkManifest, holdersOf } from './commitments';
-import { clockTime, custody, inWords, repository, type Custody, type CustodyStep, type Item, type NameView, type StepId, type View } from './custody';
+import { clockTime, custody, inWords, repository, utcTime, type Custody, type CustodyStep, type Item, type NameView, type StepId, type View } from './custody';
 import { buildWorld, examId, registryAddress, type World } from './fixtures';
 import type { ArkivReport, LiveReport, ProofRun, Records } from './load';
 import type { ProofChecks, ProofState } from './proof';
@@ -491,30 +491,39 @@ describe('step 6, the copy on Arkiv', () => {
     const holders = holdersOf(approvedEntries(world.entriesHex) ?? []);
     return releaseProgress(holders, world.releaseLog.entries.slice(0, count).map((e) => e.passkeyPublicKey));
   };
-  const report = (count: number | null, newestAt = roundTimeSeconds(UNLOCK) - 30, over: Partial<ArkivReport> = {}): View['arkiv'] => ({
-    state: 'ready',
-    readAt: 0,
-    value: {
-      writers: [writer],
-      read: { logs: count === null ? 0 : 1, tokens: 1 },
-      log:
-        count === null
-          ? null
-          : {
-              entityKey,
-              creator: writer,
-              createdAtBlock: 1n,
-              writtenAt: newestAt,
-              entries: count,
-              instancePublicKey: world.releaseLog.instancePublicKey,
-              verdict: { examId: 'pass', entriesHash: 'pass', signature: 'pass' },
-              progress: progressOf(count),
-            },
-      ignored: { tokens: 0, unreadable: 0, unattested: 0, failed: 0 },
-      newestAt,
-      ...over,
-    },
-  });
+  const report = (
+    count: number | null,
+    ageSeconds: number | null = 30,
+    over: Partial<ArkivReport> = {},
+  ): View['arkiv'] => {
+    const newestAt = ageSeconds === null ? null : roundTimeSeconds(UNLOCK) - ageSeconds;
+    return {
+      state: 'ready',
+      readAt: 0,
+      value: {
+        writers: [writer],
+        read: { logs: count === null ? 0 : 1, tokens: 1, heartbeats: 0 },
+        log:
+          count === null
+            ? null
+            : {
+                entityKey,
+                creator: writer,
+                createdAtBlock: 1n,
+                writtenAt: newestAt ?? 0,
+                entries: count,
+                instancePublicKey: world.releaseLog.instancePublicKey,
+                verdict: { examId: 'pass', entriesHash: 'pass', signature: 'pass' },
+                progress: progressOf(count),
+              },
+        ignored: { tokens: 0, unreadable: 0, unattested: 0, failed: 0 },
+        heartbeat: null,
+        newestAt,
+        ageSeconds,
+        ...over,
+      },
+    };
+  };
 
   it('keeps showing progress from Arkiv when the live machine cannot be reached', () => {
     const s = step(scene({ round: UNLOCK, records: noLog, live: down(), arkiv: report(5) }), 'unlock');
@@ -552,7 +561,7 @@ describe('step 6, the copy on Arkiv', () => {
 
   it('never counts rows that did not verify, and says how many were ignored', () => {
     const ignored = { tokens: 1, unreadable: 0, unattested: 2, failed: 0 };
-    const s = step(scene({ round: UNLOCK, records: noLog, arkiv: report(null, undefined, { ignored, read: { logs: 2, tokens: 1 } }) }), 'unlock');
+    const s = step(scene({ round: UNLOCK, records: noLog, arkiv: report(null, undefined, { ignored, read: { logs: 2, tokens: 1, heartbeats: 0 } }) }), 'unlock');
     expect(s.note).toBe('Unlocked. No release has been verified yet.');
     expect(s.failures).toEqual([]);
     expect(s.aside).toBeUndefined();
@@ -565,19 +574,91 @@ describe('step 6, the copy on Arkiv', () => {
   });
 
   it('warns when the copy stops updating while unlock is not over', () => {
-    const now = roundTimeSeconds(UNLOCK);
-    const stale = step(scene({ round: UNLOCK, records: noLog, arkiv: report(5, now - 600) }), 'unlock');
+    const stale = step(scene({ round: UNLOCK, records: noLog, arkiv: report(5, 600) }), 'unlock');
     expect(stale.items).toContainEqual({
       kind: 'text',
       tone: 'warn',
       text: 'The Arkiv copy stopped updating 10 minutes ago. That does not mean no one has released since. This page keeps reading it.',
     });
     expect(stale.failures).toEqual([]);
-    const fresh = step(scene({ round: UNLOCK, records: noLog, arkiv: report(5, now - 60) }), 'unlock');
+    const fresh = step(scene({ round: UNLOCK, records: noLog, arkiv: report(5, 60) }), 'unlock');
     expect(fresh.items.some((item) => item.kind === 'text' && item.tone === 'warn')).toBe(false);
-    const finished = step(scene({ round: UNLOCK, arkiv: report(5, now - 600) }), 'unlock');
+    const finished = step(scene({ round: UNLOCK, arkiv: report(5, 600) }), 'unlock');
     expect(finished.state).toBe('done');
     expect(finished.items.some((item) => item.kind === 'text' && /stopped updating/.test(item.text))).toBe(false);
+  });
+
+  const warnings = (s: CustodyStep) => s.items.filter((item) => item.kind === 'text' && item.tone === 'warn');
+
+  it('judges the copy by its age in Arkiv blocks, never by this device\'s clock', () => {
+    // The same report, read with this device's clock far ahead and far behind.
+    for (const shift of [-86_400, 0, 86_400 * 365]) {
+      const at = (age: number) => {
+        const view = sceneView({ round: UNLOCK, records: noLog, arkiv: report(5, age) });
+        return step(custody({ ...view, now: view.now + shift }), 'unlock');
+      };
+      expect(warnings(at(60))).toEqual([]);
+      expect(warnings(at(600))).toHaveLength(1);
+    }
+  });
+
+  it('shows the newest heartbeat, and a heartbeat never moves progress', () => {
+    const heartbeat = { creator: writer, createdAtBlock: 9n, writtenAt: roundTimeSeconds(UNLOCK) - 10, stage: 'unlock' };
+    const withBeat = step(scene({ round: UNLOCK, records: noLog, arkiv: report(5, 10, { heartbeat, read: { logs: 1, tokens: 1, heartbeats: 4 } }) }), 'unlock');
+    const without = step(scene({ round: UNLOCK, records: noLog, arkiv: report(5, 10) }), 'unlock');
+    expect(withBeat.note).toBe(without.note);
+    expect(withBeat.state).toBe(without.state);
+    expect(withBeat.failures).toEqual([]);
+    expect(withBeat.items).toContainEqual({ kind: 'fact', label: 'Newest heartbeat written at', value: utcTime(heartbeat.writtenAt) });
+    expect(withBeat.items).toContainEqual({ kind: 'fact', label: 'Stage the relay last read, as it says', value: 'unlock' });
+    expect(withBeat.items).toContainEqual({ kind: 'fact', label: 'Rows read', value: '1 release log, 1 release token, 4 heartbeats' });
+    // Only heartbeats and no verified log: still no progress.
+    const onlyBeats = step(scene({ round: UNLOCK, records: noLog, arkiv: report(null, 10, { heartbeat }) }), 'unlock');
+    expect(onlyBeats.note).toBe('Unlocked. No release has been verified yet.');
+    expect(warnings(onlyBeats)).toEqual([]);
+  });
+
+  it('says so when no relay has written since unlock opened, only while unlock is open', () => {
+    const silent = report(null, null);
+    const open = step(scene({ round: UNLOCK, records: noLog, arkiv: silent }), 'unlock');
+    expect(open.items).toContainEqual({
+      kind: 'text',
+      tone: 'warn',
+      text: 'No relay has written to Arkiv for this exam since unlock opened. That does not mean no one has released. This page keeps reading it.',
+    });
+    expect(open.failures).toEqual([]);
+    const before = step(scene({ round: LOCK, records: noLog, arkiv: silent }), 'unlock');
+    expect(warnings(before)).toEqual([]);
+    const over = step(scene({ round: END, records: noLog, arkiv: silent }), 'unlock');
+    expect(warnings(over)).toEqual([]);
+    const done = step(scene({ round: UNLOCK, arkiv: silent }), 'unlock');
+    expect(done.state).toBe('done');
+    expect(warnings(done)).toEqual([]);
+    const noWriters = step(scene({ round: UNLOCK, records: noLog }), 'unlock');
+    expect(warnings(noWriters)).toEqual([]);
+  });
+
+  it('tags each writer with where it came from, and notes name entries that are not addresses', () => {
+    const own: Hex = '0x2222222222222222222222222222222222222222';
+    const built: Hex = '0x3333333333333333333333333333333333333333';
+    const view = sceneView({ round: UNLOCK, records: noLog, arkiv: report(5, 10, { writers: [writer, own, built] }) });
+    const s = step(
+      custody({
+        ...view,
+        arkivWriters: [
+          { address: writer, from: ['name', 'own'] },
+          { address: own, from: ['own'] },
+          { address: built, from: ['built'] },
+        ],
+        arkivWritersIgnored: ['nope', '0x12'],
+      }),
+      'unlock',
+    );
+    expect(s.items).toContainEqual({ kind: 'tag', label: 'Writer read', tone: 'neutral', tag: 'From the name and your own choice', value: writer });
+    expect(s.items).toContainEqual({ kind: 'tag', label: 'Writer read', tone: 'neutral', tag: 'Your own choice', value: own });
+    expect(s.items).toContainEqual({ kind: 'tag', label: 'Writer read', tone: 'neutral', tag: 'Built into this page', value: built });
+    expect(s.items).toContainEqual({ kind: 'text', text: "The exam's name also lists nope, 0x12. They are not addresses, so this page does not read them." });
+    expect(s.failures).toEqual([]);
   });
 
   it('is neutral when Arkiv cannot be read', () => {
@@ -684,7 +765,7 @@ describe('step 1 on a name route, the name', () => {
   const used = { teeUrl: '', storageUrl: 'https://files.example/bucket', bucket: 'bucket' };
   const passed: ExamNameResult = {
     ok: true,
-    value: { name, label: 'jee-main-2026', parent: 'board.eth', examId, registry: registryAddress, board: `0x${'bb'.repeat(20)}`, teeUrl: null, storageUrl: 'https://files.example/bucket', bucket: null },
+    value: { name, label: 'jee-main-2026', parent: 'board.eth', examId, registry: registryAddress, board: `0x${'bb'.repeat(20)}`, teeUrl: null, storageUrl: 'https://files.example/bucket', bucket: null, arkivWriters: null, arkivWritersIgnored: [] },
   };
   const named = (result: NameView['result'], over: Scene = {}) =>
     custody({ ...sceneView(over), name: { name, result, used } });

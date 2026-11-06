@@ -1,6 +1,6 @@
 # Proposal: Arkiv Evidence Mirror
 
-**Status:** parts 1 and 3 (in part) are implemented: the live unlock feed, with the Unlock token mirrored so a mirrored log can be checked on its own. The behaviour is in the [README](../../README.md#arkiv-copy), the rules are in [`spec/arkiv.md`](../../spec/arkiv.md), the relay is in [`relay/`](../../relay), and the prize answers are in [`arkiv/`](../../arkiv). Part 2, the exam index, and the Swarm backup are still proposed, 2026-11-06.
+**Status:** part 1, the live unlock feed, is implemented, built a little differently from the table below. There is one row per signed log snapshot rather than per release, so each row can be checked by its signature. The Unlock token is mirrored too, so a mirrored log can be checked with the board silent. A heartbeat row shows the relay is alive. The verifier polls instead of using `watchEntityEvents`. The rules are in [`spec/arkiv.md`](../../spec/arkiv.md), which replaces this proposal where they differ, the behaviour is in the [README](../../README.md#arkiv-copy), the relay is in [`relay/`](../../relay), and the prize answers are in [`arkiv/`](../../arkiv). Part 2 (the exam index) and part 3 (backup files and Swarm) are still proposed, 2026-11-06.
 
 ## Summary
 
@@ -30,7 +30,7 @@ A small TypeScript relay outside the TEE does the writing. Changing the TEE woul
 
 ### Reading
 
-- The verifier rechecks every row against the TEE's signature, Sepolia or the file hashes, and shows a failure if one doesn't match.
+- The verifier rechecks every row against the TEE's signature, Sepolia or the file hashes. As built, a row that doesn't match is ignored and counted, never treated as a failure of the exam, because anyone who is a writer could post one (`spec/arkiv.md`, "Reading").
 - Anyone can write to Arkiv, so apps read only from published writer addresses.
 - The feed is only as live as the relay's last read. If it goes quiet, the verifier warns that it has stopped, and doesn't treat that as proof that nothing happened.
 - The verifier must really read from Arkiv. The prize doesn't count Arkiv "used only as a log that nothing reads".
@@ -64,9 +64,9 @@ Arkiv also doesn't replace `ExamRegistry`, and the TEE never reads from it.
 
 ## Open Questions
 
-- Can a static verifier read Arkiv reliably from the browser without an access key? Test this first, because the feed depends on it.
-- Should the board run the only relay, or should anyone be able to run one and publish a writer address?
-- Is the Swarm bonus worth the extra work? It covers uploading `paper.bin`, buying a postage batch and writing `/arkiv/swarm.md`. Our ciphertext is already encrypted, so upload it as a plain Swarm reference. An encrypted reference contains its key, and entities are public.
+- Can a static verifier read Arkiv reliably from the browser without an access key? **Answered: yes.** Rabdi's RPC returns `access-control-allow-origin: *`, and the verifier reads it with no key. It is rate limited, so a hosted verifier should use an origin-locked key ([`arkiv/friction.md`](../../arkiv/friction.md) #5).
+- Should the board run the only relay, or should anyone be able to run one and publish a writer address? **Answered: anyone.** The board lists its writers in the exam's ENS name (`paperseal.arkiv-writers`), and viewers can add their own, such as a neutral party's relay. In the demo, the board's wallet is the only writer.
+- Is the Swarm bonus worth the extra work? Not decided. It covers uploading `paper.bin`, buying a postage batch and writing `/arkiv/swarm.md`. Our ciphertext is already encrypted, so upload it as a plain Swarm reference. An encrypted reference contains its key, and entities are public.
 
 ## Prize Fit
 

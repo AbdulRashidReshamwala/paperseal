@@ -23,7 +23,12 @@ const fixtures = JSON.parse(
 
 describe('exam names', () => {
   it('reads spec/ens.json', () => {
-    expect(ens.records).toEqual({ tee: 'paperseal.tee', storage: 'paperseal.storage', bucket: 'paperseal.bucket' });
+    expect(ens.records).toEqual({
+      tee: 'paperseal.tee',
+      storage: 'paperseal.storage',
+      bucket: 'paperseal.bucket',
+      arkivWriters: 'paperseal.arkiv-writers',
+    });
     expect(ens.ccipRead).toBe(false);
   });
 

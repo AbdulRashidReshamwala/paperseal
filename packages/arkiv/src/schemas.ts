@@ -2,7 +2,7 @@ import { addr, bytes, defineSchema, i32, str, u64 } from '@arkiv-network/sdk/sch
 
 import { arkiv } from './spec';
 
-// The two row types of spec/arkiv.md "Rows", column for column. Only the columns readers look rows
+// The three row types of spec/arkiv.md "Rows", column for column. Only the columns readers look rows
 // up by are indexed. Every reader parses `body` and ignores the other columns where they disagree.
 
 /** One signed release log, exactly as the TEE returned it. */
@@ -22,4 +22,12 @@ export const releaseTokenSchema = defineSchema(arkiv.schemas.releaseToken, {
   chainId: u64(),
   instanceKeyHash: str().indexed(),
   body: bytes(),
+});
+
+/** A writer's sign of life while it watches an exam. Not evidence, and never counts toward progress. */
+export const relayHeartbeatSchema = defineSchema(arkiv.schemas.relayHeartbeat, {
+  examId: str().indexed(),
+  registry: addr().indexed(),
+  entriesHash: str(),
+  stage: str(),
 });

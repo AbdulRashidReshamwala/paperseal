@@ -3,6 +3,7 @@ import type { ExamNameCheck, ExamNameResult, ResolvedExamName } from '@paperseal
 import { decodeApprovedList, fromHex, toHex } from '@paperseal/protocol';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
+import { getAddress } from 'viem';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from './App';
@@ -486,6 +487,7 @@ describe('step 6, the copy on Arkiv', () => {
       Promise.resolve({
         tokens: [{ ...row(1, token), instanceKeyHash: '0x' }],
         logs: [{ ...row(2, new TextEncoder().encode(JSON.stringify(log))), entriesHash: log.entriesHash }],
+        heartbeats: [],
       }),
     );
     arkivReader = { releaseRows, latestBlock: () => Promise.resolve(latest()) };
@@ -499,7 +501,7 @@ describe('step 6, the copy on Arkiv', () => {
     // token.jwt never traces back to Google's root in these tests, so only step 6 is looked at.
     expect(screen.queryByRole('alert')?.textContent ?? '').not.toMatch(/Step 6/);
     expect(arkivReaders).toEqual([{ rpcUrl: 'https://arkiv.example/rpc' }]);
-    expect(releaseRows).toHaveBeenCalledWith(examId, [writer]);
+    expect(releaseRows).toHaveBeenCalledWith(examId, [writer], { registry: registryAddress });
   });
 
   it('is neutral when Arkiv cannot be read', async () => {
@@ -627,7 +629,7 @@ describe('verify by name', () => {
   const saved = { registryAddress: `0x${'99'.repeat(20)}`, examId: `0x${'33'.repeat(32)}` };
   const passed = (over: Partial<ResolvedExamName> = {}): ExamNameResult => ({
     ok: true,
-    value: { name, label: 'jee-main-2026', parent: 'board.eth', examId, registry: registryAddress, board, teeUrl: null, storageUrl: null, bucket: null, ...over },
+    value: { name, label: 'jee-main-2026', parent: 'board.eth', examId, registry: registryAddress, board, teeUrl: null, storageUrl: null, bucket: null, arkivWriters: null, arkivWritersIgnored: [], ...over },
   });
   const failed = (check: ExamNameCheck): ExamNameResult => ({ ok: false, failed: check, reason: 'The record says otherwise.', partial: { name } });
   const noteOf = (step: HTMLElement) => step.querySelector('.ps-step-note')?.textContent ?? '';
@@ -698,6 +700,48 @@ describe('verify by name', () => {
       expect(buckets.length).toBeGreaterThan(0);
     });
     expect(new Set(buckets)).toEqual(new Set([teeStorageBucket]));
+  });
+
+  describe('Arkiv writers', () => {
+    const fromName = getAddress(`0x${'a1'.repeat(20)}`);
+    const both = getAddress(`0x${'b2'.repeat(20)}`);
+    const own = getAddress(`0x${'c3'.repeat(20)}`);
+    const quiet = () => {
+      const releaseRows = vi.fn(() => Promise.resolve({ logs: [], tokens: [], heartbeats: [] }));
+      arkivReader = { releaseRows, latestBlock: () => Promise.resolve({ number: 10_000n, time: 1_900_000_000 }) };
+      return releaseRows;
+    };
+
+    it("reads the name's writers with the viewer's own, once each, and says where each came from", async () => {
+      const world = await buildWorld({ endRound: 99_999_999 });
+      arrange(world);
+      const releaseRows = quiet();
+      nameAnswer = () => passed({ arkivWriters: [fromName, both], arkivWritersIgnored: ['not-a-writer'] });
+      open(1000, { ...saved, arkivWriters: `${both.toLowerCase()}, ${own.toLowerCase()}` }, `/name/${name}`);
+      const step = await findStep(/^7\. Paper unlocks for centres$/);
+      await waitFor(() => {
+        expect(releaseRows).toHaveBeenCalledWith(examId, [fromName, both, own], { registry: registryAddress });
+      });
+      await within(step).findByText(fromName, { exact: false }, { timeout: 5000 });
+      expect(within(step).getByText('From the name')).toBeTruthy();
+      expect(within(step).getByText('From the name and your own choice')).toBeTruthy();
+      expect(within(step).getByText('Your own choice')).toBeTruthy();
+      expect(within(step).getByText(/^The exam's name also lists not-a-writer\. It is not an address/)).toBeTruthy();
+      // release-token.jwt never traces back to Google's root here, so only Arkiv is looked at.
+      expect(screen.queryByRole('alert')?.textContent ?? '').not.toMatch(/Arkiv|relay|writer/i);
+    });
+
+    it("reads the name's writers on the viewer's own Arkiv node when the viewer has none", async () => {
+      const world = await buildWorld({ endRound: 99_999_999 });
+      arrange(world);
+      const releaseRows = quiet();
+      nameAnswer = () => passed({ arkivWriters: [fromName] });
+      open(1000, saved, `/name/${name}`);
+      await waitFor(() => {
+        expect(releaseRows).toHaveBeenCalledWith(examId, [fromName], { registry: registryAddress });
+      });
+      expect(arkivReaders).toEqual([{ rpcUrl: settings.arkivRpcUrl }]);
+    });
   });
 
   it.each([

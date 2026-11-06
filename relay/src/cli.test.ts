@@ -8,8 +8,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { parseCommand, UsageError } from './args';
 import { accessKeyFromEnvFile, findCast, loadAccessKey, relayEnv, type KeystoreConfig } from './config';
 import { castAddressArgs, castPrivateKeyArgs, keystoreAddress, loadSigner, scrubCastOutput, type Spawn } from './keystore';
+import { summaryLine, teeSummary } from './main';
+import type { PassReport } from './mirror';
 import { errorText, redact, registerSecret } from './output';
-import { statusRows } from './status';
+import { ageText, statusRows } from './status';
 
 const examId: Hex = `0x${'ab'.repeat(32)}`;
 const registry: Address = '0x6a9f017F374630EcB84e8E3816B1eE9F8Fa2dBE8';
@@ -26,13 +28,21 @@ describe('parseCommand', () => {
 
   it('parses watch with --every, defaulting to 10 seconds', () => {
     const base = ['--exam', examId, '--registry', registry, '--tee', 'https://t'];
-    expect(parseCommand(['watch', ...base])).toMatchObject({ command: 'watch', everySeconds: 10 });
-    expect(parseCommand(['watch', ...base, '--every', '45'])).toMatchObject({ everySeconds: 45 });
+    expect(parseCommand(['watch', ...base])).toMatchObject({ command: 'watch', everySeconds: 10, heartbeat: true });
+    expect(parseCommand(['watch', ...base, '--every', '45'])).toMatchObject({ everySeconds: 45, heartbeat: true });
   });
 
-  it('parses status with and without --writer, and dry-check and help', () => {
-    expect(parseCommand(['status', '--exam', examId])).toEqual({ command: 'status', examId, writer: undefined });
-    expect(parseCommand(['status', '--exam', examId, '--writer', registry.toLowerCase()])).toEqual({ command: 'status', examId, writer: registry });
+  it('turns heartbeats off for watch with --no-heartbeat, and only for watch', () => {
+    const base = ['--exam', examId, '--registry', registry, '--tee', 'https://t'];
+    expect(parseCommand(['watch', ...base, '--no-heartbeat'])).toMatchObject({ command: 'watch', heartbeat: false });
+    expect(() => parseCommand(['mirror', ...base, '--no-heartbeat'])).toThrow(UsageError);
+    expect(() => parseCommand(['watch', ...base, '--no-heartbeat=1'])).toThrow(UsageError);
+  });
+
+  it('parses status with and without --writer and --registry, and dry-check and help', () => {
+    expect(parseCommand(['status', '--exam', examId])).toEqual({ command: 'status', examId, writer: undefined, registry: undefined });
+    expect(parseCommand(['status', '--exam', examId, '--writer', registry.toLowerCase()])).toEqual({ command: 'status', examId, writer: registry, registry: undefined });
+    expect(parseCommand(['status', '--exam', examId, '--registry', registry.toLowerCase()])).toEqual({ command: 'status', examId, writer: undefined, registry });
     expect(parseCommand(['dry-check'])).toEqual({ command: 'dry-check' });
     expect(parseCommand([])).toEqual({ command: 'help' });
   });
@@ -49,6 +59,7 @@ describe('parseCommand', () => {
     [['watch', '--exam', examId, '--registry', registry, '--tee', 'https://t', '--every', '1']],
     [['watch', '--exam', examId, '--registry', registry, '--tee', 'https://t', '--every', '5s']],
     [['status', '--exam', examId, '--writer', 'nope']],
+    [['status', '--exam', examId, '--registry', 'nope']],
     [['dry-check', '--x']],
     [['publish']],
   ])('refuses %j', (argv) => {
@@ -175,27 +186,71 @@ describe('keystore', () => {
 });
 
 describe('statusRows', () => {
-  it('lists log and token rows newest first, with write times from the latest block', async () => {
-    const reader = {
-      releaseRows: vi.fn(() =>
-        Promise.resolve({
-          logs: [
-            { entityKey: `0x${'01'.repeat(32)}` as Hex, creator: registry, createdAtBlock: 90n, examId, registry, body: new TextEncoder().encode('{"entries":[1,2]}'), entriesHash: 'h1' },
-            { entityKey: `0x${'02'.repeat(32)}` as Hex, creator: registry, createdAtBlock: 99n, examId, registry, body: new TextEncoder().encode('{"entries":[1,2,3]}'), entriesHash: 'h2' },
-          ],
-          tokens: [{ entityKey: `0x${'03'.repeat(32)}` as Hex, creator: registry, createdAtBlock: 80n, examId, registry, body: new Uint8Array(), instanceKeyHash: 'k1' }],
-        }),
-      ),
-      latestBlock: vi.fn(() => Promise.resolve({ number: 100n, time: 1_000 })),
-    };
-    const { rows } = await statusRows(reader, examId, registry);
-    expect(reader.releaseRows).toHaveBeenCalledWith(examId, [registry]);
-    expect(rows.map((r) => [r.kind, r.createdAtBlock, r.writtenAt])).toEqual([
-      ['log', 99n, 998],
-      ['log', 90n, 980],
-      ['token', 80n, 960],
+  const key = (n: number) => `0x${String(n).padStart(2, '0').repeat(32)}` as Hex;
+  const reader = () => ({
+    releaseRows: vi.fn(() =>
+      Promise.resolve({
+        logs: [
+          { entityKey: key(1), creator: registry, createdAtBlock: 90n, examId, registry, body: new TextEncoder().encode('{"entries":[1,2]}'), entriesHash: 'h1' },
+          { entityKey: key(2), creator: registry, createdAtBlock: 99n, examId, registry, body: new TextEncoder().encode('{"entries":[1,2,3]}'), entriesHash: 'h2' },
+        ],
+        tokens: [{ entityKey: key(3), creator: registry, createdAtBlock: 80n, examId, registry, body: new Uint8Array(), instanceKeyHash: 'k1' }],
+        heartbeats: [
+          { entityKey: key(4), creator: registry, createdAtBlock: 70n, examId, registry, entriesHash: '', stage: '' },
+          { entityKey: key(5), creator: registry, createdAtBlock: 97n, examId, registry, entriesHash: 'h2', stage: 'unlock' },
+        ],
+      }),
+    ),
+    latestBlock: vi.fn(() => Promise.resolve({ number: 100n, time: 1_000 })),
+  });
+
+  it('lists log and token rows newest first, with write times and ages from the latest block', async () => {
+    const r = reader();
+    const { rows } = await statusRows(r, examId, registry, registry);
+    expect(r.releaseRows).toHaveBeenCalledWith(examId, [registry], { registry });
+    expect(rows.map((row) => [row.kind, row.createdAtBlock, row.writtenAt, row.ageSeconds])).toEqual([
+      ['log', 99n, 998, 2],
+      ['log', 90n, 980, 20],
+      ['token', 80n, 960, 40],
     ]);
     expect(rows[0]?.detail).toBe('entriesHash h2, 3 entries');
     expect(rows[2]?.detail).toBe('instanceKeyHash k1');
+  });
+
+  it('lists heartbeats apart, newest first, with block, age and what they said', async () => {
+    const r = reader();
+    const { heartbeats } = await statusRows(r, examId, registry);
+    expect(r.releaseRows).toHaveBeenCalledWith(examId, [registry], { registry: undefined });
+    expect(heartbeats.map((row) => [row.kind, row.createdAtBlock, row.ageSeconds, row.detail])).toEqual([
+      ['heartbeat', 97n, 6, 'entriesHash h2, TEE stage unlock'],
+      ['heartbeat', 70n, 60, 'entriesHash none, TEE stage none'],
+    ]);
+  });
+
+  it('has no times without the latest block', async () => {
+    const r = reader();
+    r.latestBlock = vi.fn(() => Promise.reject(new Error('down')));
+    const { rows, heartbeats, latest } = await statusRows(r, examId, registry);
+    expect(latest).toBeUndefined();
+    expect([...rows, ...heartbeats].every((row) => row.writtenAt === undefined && row.ageSeconds === undefined)).toBe(true);
+  });
+
+  it('writes ages for people', () => {
+    expect([ageText(undefined), ageText(42), ageText(185), ageText(7_260)]).toEqual(['age unknown', '42s ago', '3m 5s ago', '2h 1m ago']);
+  });
+});
+
+describe('pass summary', () => {
+  const report = (tee: PassReport['tee']): PassReport => ({ at: new Date(0), outcomes: [], notes: [], logs: [], tee });
+
+  it('shows the TEE stage only when the TEE serves this exam', () => {
+    expect(teeSummary({ stage: 'failed', servesExam: true })).toBe('  (TEE stage failed)');
+    expect(teeSummary({ stage: 'failed', servesExam: false })).toBe('  (TEE serves another exam)');
+    expect(teeSummary({ stage: 'onboard' })).toBe('  (TEE shows no exam)');
+    expect(teeSummary({})).toBe('');
+    expect(summaryLine(report({ stage: 'released', servesExam: false }))).toBe(
+      '[1970-01-01T00:00:00.000Z] written 0, skipped 0, held 0, refused 0, failed 0  (TEE serves another exam)',
+    );
+    expect(summaryLine(report({ stage: 'unlock', servesExam: true }))).toMatch(/failed 0 {2}\(TEE stage unlock\)$/);
   });
 });

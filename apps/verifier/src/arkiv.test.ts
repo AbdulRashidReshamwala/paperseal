@@ -1,10 +1,10 @@
-import type { ReleaseLogRow, ReleaseTokenRow } from '@paperseal/arkiv';
+import type { HeartbeatRow, ReleaseLogRow, ReleaseTokenRow } from '@paperseal/arkiv';
 import type { Hex } from '@paperseal/protocol';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { ChainData } from './checks';
 import { buildWorld, examId, p256, registryAddress, signedReleaseLog, type World } from './fixtures';
-import { ARKIV_BLOCK_SECONDS, loadArkiv, type ArkivReport, type ArkivSource } from './load';
+import { ARKIV_BLOCK_SECONDS, ARKIV_STALE_AFTER_SECONDS, loadArkiv, type ArkivReport, type ArkivSource } from './load';
 
 /*
  * The Arkiv reader is the one thing stubbed here. Every row body is a real token or a real signed
@@ -44,10 +44,14 @@ function logRow(log: object, n: number, block = 9_990n): ReleaseLogRow {
 const chainOf = (w: World): ChainData =>
   ({ exam: w.exam, build: w.build, list: { listHash: w.build.approvedListHash }, criteria: w.criteriaHex, entries: w.entriesHex }) as ChainData;
 
-function readerOf(rows: { logs?: ReleaseLogRow[]; tokens?: ReleaseTokenRow[] }) {
+function heartbeatRow(n: number, block: bigint, stage = 'unlock'): HeartbeatRow {
+  return { ...common(n, block), entriesHash: '', stage };
+}
+
+function readerOf(rows: { logs?: ReleaseLogRow[]; tokens?: ReleaseTokenRow[]; heartbeats?: HeartbeatRow[] }, latest = LATEST) {
   const reader = {
-    releaseRows: vi.fn(() => Promise.resolve({ logs: rows.logs ?? [], tokens: rows.tokens ?? [] })),
-    latestBlock: vi.fn(() => Promise.resolve(LATEST)),
+    releaseRows: vi.fn(() => Promise.resolve({ logs: rows.logs ?? [], tokens: rows.tokens ?? [], heartbeats: rows.heartbeats ?? [] })),
+    latestBlock: vi.fn(() => Promise.resolve(latest)),
   };
   return reader satisfies ArkivSource;
 }
@@ -66,14 +70,16 @@ describe('reading the Arkiv mirror', () => {
     expect(report.log?.verdict).toEqual({ examId: 'pass', entriesHash: 'pass', signature: 'pass' });
     expect(report.log?.writtenAt).toBe(LATEST.time - 60 * ARKIV_BLOCK_SECONDS);
     expect(report.ignored).toEqual({ tokens: 0, unreadable: 0, unattested: 0, failed: 0 });
-    // The token row is the newest.
-    expect(report.newestAt).toBe(LATEST.time - 10 * ARKIV_BLOCK_SECONDS);
+    // Tokens are not a sign of life, so the log row is the newest that counts.
+    expect(report.newestAt).toBe(LATEST.time - 60 * ARKIV_BLOCK_SECONDS);
+    expect(report.ageSeconds).toBe(60 * ARKIV_BLOCK_SECONDS);
+    expect(report.heartbeat).toBeNull();
   });
 
-  it('asks only for rows from the writers the viewer trusts', async () => {
+  it('asks only for rows from the writers given, in the registry this view reads', async () => {
     const reader = readerOf({});
     await read(world, reader, [writer, otherWriter]);
-    expect(reader.releaseRows).toHaveBeenCalledWith(examId, [writer, otherWriter]);
+    expect(reader.releaseRows).toHaveBeenCalledWith(examId, [writer, otherWriter], { registry: registryAddress });
   });
 
   it('shows the verified log with the most entries, as logs only grow', async () => {
@@ -132,5 +138,57 @@ describe('reading the Arkiv mirror', () => {
   it('throws when Arkiv cannot be read, so the page says so and nothing fails', async () => {
     const reader = { ...readerOf({}), releaseRows: vi.fn(() => Promise.reject(new Error('rate limited'))) };
     await expect(read(world, reader)).rejects.toThrow('rate limited');
+  });
+});
+
+describe('the mirror\'s last sign of life', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('counts a fresh heartbeat, so a relay that only writes on change does not look stopped', async () => {
+    const report = await read(
+      world,
+      readerOf({
+        tokens: [tokenRow(world, 1, 9_995n)],
+        logs: [logRow(world.releaseLog, 2, 9_000n)],
+        heartbeats: [heartbeatRow(3, 9_970n, 'build'), heartbeatRow(4, 9_985n, 'unlock'), heartbeatRow(5, 9_950n)],
+      }),
+    );
+    expect(report.ageSeconds).toBe(15 * ARKIV_BLOCK_SECONDS);
+    expect(report.ageSeconds).toBeLessThan(ARKIV_STALE_AFTER_SECONDS);
+    expect(report.newestAt).toBe(LATEST.time - 15 * ARKIV_BLOCK_SECONDS);
+    expect(report.heartbeat).toEqual({ creator: writer, createdAtBlock: 9_985n, writtenAt: LATEST.time - 15 * ARKIV_BLOCK_SECONDS, stage: 'unlock' });
+    expect(report.read).toEqual({ logs: 1, tokens: 1, heartbeats: 3 });
+  });
+
+  it('never lets a heartbeat move progress or count as evidence', async () => {
+    const earlier = await signedReleaseLog(world, 3);
+    const rows = { tokens: [tokenRow(world, 1)], logs: [logRow(earlier, 2)] };
+    const without = await read(world, readerOf(rows));
+    const withBeats = await read(world, readerOf({ ...rows, heartbeats: [heartbeatRow(3, 9_999n, 'complete')] }));
+    expect(withBeats.log).toEqual(without.log);
+    expect(withBeats.log?.progress?.count).toBe(3);
+    expect(withBeats.ignored).toEqual(without.ignored);
+  });
+
+  it('times the newest row by Arkiv blocks alone, whatever this device\'s clock says', async () => {
+    const rows = { logs: [logRow(world.releaseLog, 2, 9_000n)], heartbeats: [heartbeatRow(3, 9_100n)] };
+    const ages: (number | null)[] = [];
+    for (const deviceTime of ['2001-01-01T00:00:00Z', '2099-12-31T00:00:00Z']) {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(deviceTime));
+      ages.push((await read(world, readerOf(rows))).ageSeconds);
+      vi.useRealTimers();
+    }
+    expect(ages).toEqual([900 * ARKIV_BLOCK_SECONDS, 900 * ARKIV_BLOCK_SECONDS]);
+    expect(ages[0]).toBeGreaterThan(ARKIV_STALE_AFTER_SECONDS);
+  });
+
+  it('has no sign of life with no heartbeat or log row, even with a token', async () => {
+    const report = await read(world, readerOf({ tokens: [tokenRow(world, 1)] }));
+    expect(report.ageSeconds).toBeNull();
+    expect(report.newestAt).toBeNull();
+    expect(report.heartbeat).toBeNull();
   });
 });

@@ -10,10 +10,13 @@ import { createArkivReader } from './index';
 const reader = createArkivReader({ accessKey: process.env.ARKIV_ACCESS_KEY });
 
 describe('Rabdi', () => {
-  it('finds no rows for a random exam', async () => {
+  it('finds no rows or heartbeats for a random exam', async () => {
     const examId = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
     const writer = bytesToHex(crypto.getRandomValues(new Uint8Array(20)));
-    expect(await reader.releaseRows(examId, [writer])).toEqual({ logs: [], tokens: [] });
+    const registry = bytesToHex(crypto.getRandomValues(new Uint8Array(20)));
+    const empty = { logs: [], tokens: [], heartbeats: [] };
+    expect(await reader.releaseRows(examId, [writer])).toEqual(empty);
+    expect(await reader.releaseRows(examId, [writer], { registry })).toEqual(empty);
   }, 30_000);
 
   it('reports a recent latest block', async () => {

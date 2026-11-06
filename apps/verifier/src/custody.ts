@@ -33,6 +33,7 @@ import {
 } from './load';
 import type { Polled } from './poll';
 import type { ProofChecks } from './proof';
+import type { SourcedWriter, WriterOrigin } from './settings';
 import type { LogVerdict, ReleaseProgress } from './unlock';
 
 /*
@@ -143,8 +144,12 @@ export interface View {
   sources: { chain: boolean; storage: boolean; tee: boolean; arkiv: boolean };
   records: Polled<Records>;
   live: Polled<LiveReport | Neutral>;
-  /** The Arkiv mirror of the release evidence. Off until the viewer has writers to trust. */
+  /** The Arkiv mirror of the release evidence. Off until there are writers to trust. */
   arkiv: Polled<ArkivReport | Neutral>;
+  /** The writers read from Arkiv, and where each came from. Left out, the report's list is shown untagged. */
+  arkivWriters?: readonly SourcedWriter[];
+  /** Entries in the exam name's writer record that are not addresses, so are not read. */
+  arkivWritersIgnored?: readonly string[];
   latest: LatestRound;
   /** Unix seconds. */
   now: number;
@@ -957,18 +962,63 @@ function ignoredWords(ignored: ArkivIgnored): string {
   return parts.length > 0 ? parts.join(', ') : 'None';
 }
 
-/** Arkiv evidence. Rows that don't verify are counted, never shown as progress, and never fail the step. */
+const originWords: Record<WriterOrigin, string> = {
+  name: 'From the name',
+  own: 'Your own choice',
+  built: 'Built into this page',
+};
+
+/** `From the name and your own choice`. */
+function originTag(from: readonly WriterOrigin[]): string {
+  const words = from.map((origin, index) => (index === 0 ? originWords[origin] : originWords[origin].toLowerCase()));
+  return words.join(' and ');
+}
+
+/** Each writer read, and where it came from when the page knows. */
+function writerItems(c: Context, report: ArkivReport): Item[] {
+  const sourced = c.view.arkivWriters;
+  if (!sourced) return [{ kind: 'fact', label: 'Writers read', value: report.writers.join(', ') }];
+  const known = new Map(sourced.map((writer) => [writer.address.toLowerCase(), writer.from]));
+  return report.writers.map((address) => {
+    const from = known.get(address.toLowerCase()) ?? [];
+    return from.length > 0
+      ? { kind: 'tag' as const, label: 'Writer read', tone: 'neutral' as const, tag: originTag(from), value: address }
+      : { kind: 'fact' as const, label: 'Writer read', value: address };
+  });
+}
+
+/** The name's writer record entries that are not addresses. Never a failure: they are only not read. */
+function ignoredWriterItems(c: Context): Item[] {
+  const ignored = c.view.arkivWritersIgnored ?? [];
+  if (ignored.length === 0) return [];
+  const one = ignored.length === 1;
+  return [
+    {
+      kind: 'text',
+      text: `The exam's name also lists ${ignored.join(', ')}. ${one ? 'It is not an address' : 'They are not addresses'}, so this page does not read ${one ? 'it' : 'them'}.`,
+    },
+  ];
+}
+
+/**
+ * Arkiv evidence. Rows that don't verify are counted, never shown as progress, and never fail the
+ * step. Heartbeats only say a writer is running: they are shown, and never count.
+ */
 function arkivItems(c: Context, over: boolean): Item[] {
   const heading: Item = { kind: 'heading', text: 'Copy on Arkiv, optional' };
-  if (!c.view.sources.arkiv) return [heading, { kind: 'text', text: needsArkiv }];
+  const ignoredWriters = ignoredWriterItems(c);
+  if (!c.view.sources.arkiv) return [heading, { kind: 'text', text: needsArkiv }, ...ignoredWriters];
   const polled = c.view.arkiv;
-  if (polled.state === 'error') return [heading, notChecked('Copy on Arkiv', `Could not be read: ${polled.message}`)];
-  if (polled.state !== 'ready') return [heading, notChecked('Copy on Arkiv', 'Not read yet')];
-  if ('kind' in polled.value) return [heading, notChecked('Copy on Arkiv', polled.value.message)];
+  if (polled.state === 'error') return [heading, notChecked('Copy on Arkiv', `Could not be read: ${polled.message}`), ...ignoredWriters];
+  if (polled.state !== 'ready') return [heading, notChecked('Copy on Arkiv', 'Not read yet'), ...ignoredWriters];
+  if ('kind' in polled.value) return [heading, notChecked('Copy on Arkiv', polled.value.message), ...ignoredWriters];
   const report = polled.value;
-  const { log } = report;
-  const age = report.newestAt === null ? null : c.view.now - report.newestAt;
-  const stale = !over && age !== null && age > ARKIV_STALE_AFTER_SECONDS;
+  const { log, heartbeat } = report;
+  // Rule 4: only while unlock is open, and timed by Arkiv's blocks, never this device's clock.
+  const open = c.unlockReached && !over;
+  const age = report.ageSeconds;
+  const stale = open && age !== null && age > ARKIV_STALE_AFTER_SECONDS;
+  const silent = open && age === null;
   const readAt = new Intl.DateTimeFormat('en-GB', { timeStyle: 'medium', ...(c.view.timeZone ? { timeZone: c.view.timeZone } : {}) });
   return [
     heading,
@@ -981,11 +1031,25 @@ function arkivItems(c: Context, over: boolean): Item[] {
           },
         ]
       : []),
+    ...(silent
+      ? [
+          {
+            kind: 'text' as const,
+            tone: 'warn' as const,
+            text: 'No relay has written to Arkiv for this exam since unlock opened. That does not mean no one has released. This page keeps reading it.',
+          },
+        ]
+      : []),
     ...(polled.stale
       ? [{ kind: 'text' as const, text: `The copy on Arkiv could not be read again, so this shows what it said at ${readAt.format(polled.readAt)}. This page keeps trying.` }]
       : []),
-    { kind: 'fact', label: 'Writers read', value: report.writers.join(', ') },
-    { kind: 'fact', label: 'Rows read', value: `${plural(report.read.logs, 'release log')}, ${plural(report.read.tokens, 'release token')}` },
+    ...writerItems(c, report),
+    ...ignoredWriters,
+    {
+      kind: 'fact',
+      label: 'Rows read',
+      value: `${plural(report.read.logs, 'release log')}, ${plural(report.read.tokens, 'release token')}, ${plural(report.read.heartbeats, 'heartbeat')}`,
+    },
     ...(log
       ? ([
           { kind: 'check', label: 'Release log signed by a key a passing release token attests', status: 'pass' },
@@ -1002,7 +1066,13 @@ function arkivItems(c: Context, over: boolean): Item[] {
           ),
         ]),
     { kind: 'fact', label: 'Rows ignored', value: ignoredWords(report.ignored) },
-    ...(report.newestAt === null ? [] : [{ kind: 'fact' as const, label: 'Newest row written at', value: utcTime(report.newestAt) }]),
+    ...(heartbeat
+      ? ([
+          { kind: 'fact', label: 'Newest heartbeat written at', value: utcTime(heartbeat.writtenAt) },
+          { kind: 'fact', label: 'Stage the relay last read, as it says', value: heartbeat.stage || 'Not given' },
+        ] satisfies Item[])
+      : []),
+    ...(report.newestAt === null ? [] : [{ kind: 'fact' as const, label: 'Relay last wrote at', value: utcTime(report.newestAt) }]),
   ];
 }
 

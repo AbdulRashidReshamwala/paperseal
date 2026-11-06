@@ -34,7 +34,7 @@ A working list for the team at ETHGlobal Mumbai, from a read of the whole reposi
 | S10 | Low | `checkToken` throws on a malformed token instead of returning a failed verdict. | [token.ts](../packages/attestation/src/token.ts) `checkToken` | Open |
 | S11 | Low | Only PKI attestation tokens are verified. OIDC (`kid` and JWKS) tokens return not-implemented. The TEE only issues PKI tokens. | [token.ts](../packages/attestation/src/token.ts) | Accepted |
 | S13 | Medium | In the demo, the Arkiv relay signs with the board wallet, so the board's key decrypts into the relay's memory on every run. A leak would also expose the wallet that controls `ExamRegistry` and the ENS name. | [relay/](../relay) | Accepted for the prototype. Use a separate relay wallet for a real exam |
-| S14 | Low | Arkiv readers trust writers by `$creator` only for spam control. Every row is checked anyway, but a writer can stay silent, and the default writer list is a build-time value. | [spec/arkiv.md](../spec/arkiv.md) | Accepted. Let neutral parties run relays |
+| S14 | Low | Arkiv readers trust writers by `$creator` only for spam control. Every row is checked anyway, but a writer can stay silent. Heartbeats only show whether a writer is alive and are not signed evidence. Writers come from the exam's ENS name or the build, so a board can leave out a neutral relay that viewers would want. | [spec/arkiv.md](../spec/arkiv.md) | Accepted. Viewers can add relays they trust |
 | S12 | Low | The keyholder boundary lint rule bans fewer names than its test, and doesn't cover `apps/web/src/shared/`, which keyholder pages import. | [apps/eslint.config.mjs](../apps/eslint.config.mjs), [boundaries.test.ts](../apps/web/src/boundaries.test.ts) | Open |
 
 ## Open: Bugs and Spec Mismatches

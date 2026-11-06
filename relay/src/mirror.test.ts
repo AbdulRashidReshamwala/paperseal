@@ -1,11 +1,11 @@
-import { instanceKeyHash, MirrorInputError, type MirrorInput, type MirrorResult } from '@paperseal/arkiv';
+import { instanceKeyHash, MirrorInputError, type HeartbeatInput, type MirrorInput, type MirrorResult } from '@paperseal/arkiv';
 import type { Hex } from 'viem';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { MirrorTarget } from './args';
 import { mirrorPass, newMemo, tally, type RelayWriter } from './mirror';
 import { fetchStorageFile, storageObjectUrl, type Fetch } from './storage';
-import { watch } from './watch';
+import { abortableSleep, watch, type Beat, type HeartbeatDeps } from './watch';
 
 const examId: Hex = `0x${'ab'.repeat(32)}`;
 const otherExam: Hex = `0x${'cd'.repeat(32)}`;
@@ -265,6 +265,18 @@ describe('mirrorPass', () => {
     expect(summary(second.outcomes)).toEqual(['token/storage/skipped', 'log/storage/skipped']);
     expect(second.outcomes.every((o) => o.detail === 'already mirrored in this run')).toBe(true);
   });
+
+  it('reports the logs it read for this exam, and writes no heartbeat (mirror is one pass)', async () => {
+    const { writer } = fakeWriter();
+    const heartbeat = vi.fn();
+    const send = routes({ ...storageFiles(logBody({ entries: 1 }), jwt('c3Rv')), ...teeRoutes({ listExam: examId, log: logBody({ entries: 3 }) }) });
+    const report = await mirrorPass(target({ storage: true, tee: true }), { fetch: send, writer: Object.assign(writer, { heartbeat }), chainId: 1 });
+    expect(report.logs).toEqual([
+      { source: 'storage', entriesHash: hash(101), entries: 1 },
+      { source: 'tee', entriesHash: hash(103), entries: 3 },
+    ]);
+    expect(heartbeat).not.toHaveBeenCalled();
+  });
 });
 
 describe('watch', () => {
@@ -362,5 +374,136 @@ describe('watch', () => {
     expect(end).toBe('released');
     expect(writer.mirrorReleaseToken).toHaveBeenCalledTimes(3);
     expect(errors).toHaveLength(2);
+  });
+});
+
+describe('watch heartbeats', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** A heartbeat writer that records what each beat said and when, by the (fake) clock. */
+  function beats(fail: (n: number) => boolean = () => false) {
+    const calls: { at: number; input: HeartbeatInput }[] = [];
+    const written: Beat[] = [];
+    const write = vi.fn((input: HeartbeatInput) => {
+      calls.push({ at: Date.now(), input });
+      if (fail(calls.length)) return Promise.reject(new Error('HTTP request failed: status 503'));
+      return Promise.resolve({ entityKey: hash(3000 + calls.length), txHash: hash(4000 + calls.length) });
+    });
+    const deps: HeartbeatDeps = { seconds: 60, write, onWritten: (beat) => written.push(beat) };
+    return { calls, written, write, deps };
+  }
+
+  /** Watches with real abortable sleeps on fake timers; `table` can be swapped between steps. */
+  function start(sources: { storage?: boolean; tee?: boolean }, first: Record<string, Route>, heartbeat: HeartbeatDeps | undefined) {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    vi.setSystemTime(0);
+    const state = { table: first, passes: 0, errors: [] as string[] };
+    const controller = new AbortController();
+    const { writer } = fakeWriter();
+    const ended = watch(target(sources), 10, {
+      fetch: (input, init) => routes(state.table)(input, init),
+      writer,
+      chainId: 1,
+      signal: controller.signal,
+      sleep: abortableSleep,
+      onReport: () => {
+        state.passes += 1;
+      },
+      onError: (message) => state.errors.push(message),
+      heartbeat,
+    });
+    return { state, controller, ended, writer };
+  }
+
+  it('beats after the first pass and then every heartbeatSeconds, apart from --every, until the TEE says released', async () => {
+    const hb = beats();
+    const { state, ended } = start({ tee: true }, teeRoutes({ stage: 'unlock', listExam: examId, log: logBody({ entries: 1 }) }), hb.deps);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state.passes).toBe(1);
+    expect(hb.calls.map((c) => c.at)).toEqual([0]);
+
+    state.table = teeRoutes({ stage: 'unlock', listExam: examId, log: logBody({ entries: 2 }) });
+    await vi.advanceTimersByTimeAsync(59_000);
+    expect(state.passes).toBe(6);
+    expect(hb.calls).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(hb.calls.map((c) => c.at)).toEqual([0, 60_000, 120_000]);
+
+    state.table = teeRoutes({ stage: 'released', listExam: examId, log: logBody({ entries: 3 }) });
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(ended).resolves.toBe('released');
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(hb.calls).toHaveLength(3);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(state.errors).toEqual([]);
+  });
+
+  it('carries the newest entriesHash seen and the stage of a TEE serving this exam', async () => {
+    const hb = beats();
+    const { state, controller, ended } = start(
+      { storage: true, tee: true },
+      { ...storageFiles(logBody({ entries: 2 }), jwt('c3Rv')), ...teeRoutes({ stage: 'unlock', listExam: examId, log: logBody({ entries: 1 }) }) },
+      hb.deps,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    // The storage log has more entries than the TEE's, so it is the newest.
+    expect(hb.calls[0]?.input).toEqual({ examId, registry, chainId: 1, entriesHash: hash(102), stage: 'unlock' });
+    expect(hb.written[0]).toMatchObject({ entriesHash: hash(102), stage: 'unlock', entityKey: hash(3001), txHash: hash(4001) });
+
+    state.table = { ...storageFiles(logBody({ entries: 2 }), jwt('c3Rv')), ...teeRoutes({ stage: 'unlock', listExam: examId, log: logBody({ entries: 4 }) }) };
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(hb.calls[1]?.input).toMatchObject({ entriesHash: hash(104), stage: 'unlock' });
+
+    // An unreachable TEE leaves the last stage it read, and storage alone never shrinks the log.
+    state.table = storageFiles(logBody({ entries: 2 }), jwt('c3Rv'));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(hb.calls[2]?.input).toMatchObject({ entriesHash: hash(104), stage: 'unlock' });
+
+    controller.abort();
+    await expect(ended).resolves.toBe('stopped');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('says null for the stage of a TEE serving another exam, and for a log when none was seen', async () => {
+    const hb = beats();
+    const { controller, ended } = start({ tee: true }, teeRoutes({ stage: 'failed', listExam: otherExam, log: logBody({ exam: otherExam }) }), hb.deps);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(hb.calls[0]?.input).toMatchObject({ entriesHash: null, stage: null });
+    controller.abort();
+    await expect(ended).resolves.toBe('stopped');
+  });
+
+  it('prints a failed heartbeat and tries again next tick, without stopping the passes', async () => {
+    const hb = beats((n) => n === 1);
+    const { state, controller, ended } = start({ tee: true }, teeRoutes({ stage: 'unlock', listExam: examId, log: logBody() }), hb.deps);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state.errors).toEqual(['heartbeat failed, trying again in 60s: Error: HTTP request failed: status 503']);
+    expect(hb.written).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(state.passes).toBe(7);
+    expect(hb.calls.map((c) => c.at)).toEqual([0, 60_000]);
+    expect(hb.written).toHaveLength(1);
+    controller.abort();
+    await expect(ended).resolves.toBe('stopped');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('writes none when the first pass already ends the watch, or with --no-heartbeat', async () => {
+    const done = beats();
+    const first = start({ tee: true }, teeRoutes({ stage: 'released', listExam: examId, log: logBody() }), done.deps);
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(first.ended).resolves.toBe('released');
+    expect(done.write).not.toHaveBeenCalled();
+
+    const heartbeat = vi.fn();
+    const off = start({ tee: true }, teeRoutes({ stage: 'unlock', listExam: examId, log: logBody() }), undefined);
+    Object.assign(off.writer, { heartbeat });
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(off.state.passes).toBe(31);
+    expect(heartbeat).not.toHaveBeenCalled();
+    off.controller.abort();
+    await expect(off.ended).resolves.toBe('stopped');
   });
 });

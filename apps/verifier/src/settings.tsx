@@ -4,7 +4,7 @@ import { quicknetClient, type ChainClient } from '@paperseal/crypto';
 import type { Hex } from '@paperseal/protocol';
 import { createTeeClient } from '@paperseal/tee-client';
 import { createContext, use, useMemo, useState, type ReactNode } from 'react';
-import { isAddress } from 'viem';
+import { getAddress, isAddress } from 'viem';
 
 import { createStorage } from './storage';
 
@@ -43,6 +43,43 @@ export const arkivWriterList = (text: string): Hex[] =>
     .split(',')
     .map((part) => part.trim())
     .filter((part) => part !== '') as Hex[];
+
+/** Where a writer the page reads came from: the exam's name, the viewer, or this page's build. */
+export type WriterOrigin = 'name' | 'own' | 'built';
+
+export interface SourcedWriter {
+  address: Hex;
+  /** Every place that lists it, in that order. */
+  from: WriterOrigin[];
+}
+
+/** A writer with its checksum. One with a bad checksum is kept as written, so reading it fails loudly. */
+function checksummed(writer: string): Hex {
+  try {
+    return getAddress(writer);
+  } catch {
+    return writer as Hex;
+  }
+}
+
+/**
+ * The writers to read, as spec/arkiv.md "Writers" says: the ones the exam's name lists now, if
+ * any, and the viewer's own, each once. A viewer's writer that is also built into this page counts
+ * as built in. Without a name, these are the viewer's own writers.
+ */
+export function arkivWriters(own: string, fromName: readonly string[] | null, built: string = defaultSettings.arkivWriters): SourcedWriter[] {
+  const builtIn = new Set(arkivWriterList(built).map(checksummed));
+  const merged = new Map<Hex, WriterOrigin[]>();
+  const add = (writer: string, origin: WriterOrigin) => {
+    const address = checksummed(writer);
+    const from = merged.get(address) ?? [];
+    if (!from.includes(origin)) from.push(origin);
+    merged.set(address, from);
+  };
+  for (const writer of fromName ?? []) add(writer, 'name');
+  for (const writer of arkivWriterList(own)) add(writer, builtIn.has(checksummed(writer)) ? 'built' : 'own');
+  return [...merged].map(([address, from]) => ({ address, from }));
+}
 
 /** Each writer must be an address, and one written in mixed case must have a valid checksum. */
 function writerError(text: string): string | undefined {
@@ -149,7 +186,7 @@ export function endpoints(settings: Pick<Settings, 'rpcUrl' | 'teeUrl' | 'storag
 
 /**
  * The Arkiv mirror, read with the viewer's own node and writers. Off, with nothing read, until both
- * are set. A name route uses it too, because an exam name never sets who may write the mirror.
+ * are set. A name route adds the name's writers to these, and reads them with the same node.
  */
 export function arkivSource(settings: Pick<Settings, 'arkivRpcUrl' | 'arkivWriters'>) {
   const writers = arkivWriterList(settings.arkivWriters);

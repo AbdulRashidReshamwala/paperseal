@@ -42,6 +42,8 @@ export interface PassReport {
   outcomes: Outcome[];
   /** What a source didn't have, or couldn't give. Never fatal. */
   notes: string[];
+  /** The release logs for this exam this pass read, written or not. `watch` puts the newest in its heartbeat. */
+  logs: { source: Source; entriesHash: string; entries: number }[];
   tee: {
     stage?: Stage;
     /** True if the TEE showed this exam, false if it showed another, undefined if it showed neither. */
@@ -277,7 +279,8 @@ export async function mirrorPass(target: MirrorTarget, deps: PassDeps, memo: Mem
     }
   }
 
-  return { at: new Date(), outcomes, notes: gathered.notes, tee: gathered.tee };
+  const logs = gathered.logs.map(({ source, entriesHash, entries }) => ({ source, entriesHash, entries }));
+  return { at: new Date(), outcomes, notes: gathered.notes, logs, tee: gathered.tee };
 }
 
 const entity = (key: Hex | undefined) => (key ? { entityKey: key } : {});

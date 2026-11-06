@@ -18,13 +18,16 @@ The Overview leads with chain checks, which need only the RPC URL, registry addr
 
 The page can also read the release evidence that a relay copies to Arkiv, as in "Reading" in `spec/arkiv.md`. Arkiv is only a copy, so unlock progress keeps showing when the TEE can't be reached, and nothing from Arkiv counts until it passes the checks below.
 
-`VITE_ARKIV_WRITERS` holds the writer addresses the board publishes, comma-separated, as the build-time default. When it is empty, the Arkiv copy is off and nothing is read from Arkiv. The Arkiv RPC URL defaults to `network.rpcUrl` in `spec/arkiv.json`, Rabdi's public RPC, which allows cross-origin reads without a key. Viewers can change both under "Check it yourself". A writer written in mixed case must have a valid checksum.
+`VITE_ARKIV_WRITERS` holds the writer addresses the board publishes, comma-separated, as the build-time default. The Arkiv RPC URL defaults to `network.rpcUrl` in `spec/arkiv.json`, Rabdi's public RPC, which allows cross-origin reads without a key. Viewers can change both under "Check it yourself". A writer written in mixed case must have a valid checksum.
 
-Once an exam ID is known and writers are set, the page reads the exam's `release-token` and `release-log` rows from those writers only, as often as the live TEE:
+On a `#/name/` route, the writers read are the ones the name's `arkivWriters` record lists now, plus the viewer's own, each once and checksummed. Without a name they are the viewer's own. With no writers at all, the Arkiv copy is off and nothing is read from Arkiv. The evidence tags each writer "From the name", "Your own choice" or "Built into this page", and shows any record entries that are not addresses as a quiet note.
+
+Once an exam ID is known and writers are set, the page reads the exam's `release-token`, `release-log` and `relay-heartbeat` rows from those writers only, for the registry this view reads, as often as the live TEE:
 
 - Each token row's body is checked exactly like `release-token.jwt` in storage, with the same claims from the exam on `ExamRegistry`. A token that passes attests the instance key of a log it is checked against.
 - Each log row's body is parsed like `release-log.json`, and counts only if its `teeSignature`, `entriesHash` and exam ID pass under a key that a passing token attested.
 - The verified log with the most entries is shown. Rows that don't verify are counted under "Rows ignored", never shown as progress, and never fail the exam. The indexed columns are only used to find rows.
-- Step 6 shows the verified progress with the most releases among the TEE, storage and Arkiv, and says which one it came from. Its evidence lists the writers, the log's entity key with a link to the Arkiv explorer, when it was written, and the rows ignored.
-- The newest row's age comes from its block and Arkiv's latest block, at 2 seconds a block. If it is older than `staleAfterSeconds` in `spec/arkiv.json` and unlock isn't over, the step warns that the copy has stopped updating. Silence is never treated as proof that nothing happened.
+- Step 6 shows the verified progress with the most releases among the TEE, storage and Arkiv, and says which one it came from. Its evidence lists the writers, the log's entity key with a link to the Arkiv explorer, when it was written, the rows ignored, and the newest heartbeat's time and the stage it names.
+- Heartbeats only say a writer is running. They never count toward progress and never fail anything.
+- The mirror's last sign of life is its newest heartbeat or log row. Its age is the distance from Arkiv's latest block, at 2 seconds a block, and never uses this device's clock. While unlock is open, an age over `staleAfterSeconds` in `spec/arkiv.json` warns that the copy has stopped updating, and no heartbeat or log row at all says that no relay has written for this exam since unlock opened. Silence is never treated as proof that nothing happened.
 - An Arkiv read that fails shows as not read, never as a failed check.

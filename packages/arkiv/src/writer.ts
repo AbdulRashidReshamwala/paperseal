@@ -18,7 +18,7 @@ import {
 } from 'viem';
 
 import { arkivChain, arkivTransport, examIdColumn, type ArkivConnection } from './client';
-import { releaseLogSchema, releaseTokenSchema } from './schemas';
+import { relayHeartbeatSchema, releaseLogSchema, releaseTokenSchema } from './schemas';
 import { arkiv } from './spec';
 
 export interface ArkivWriterOptions extends ArkivConnection {
@@ -45,6 +45,18 @@ export interface MirrorResult {
   written: boolean;
   entityKey: Hex;
   txHash?: Hash;
+}
+
+/** What a heartbeat says: the newest log this writer has seen, and the TEE stage it last read. */
+export interface HeartbeatInput {
+  examId: Hex;
+  registry: Address;
+  /** Not a column: a heartbeat has no `chainId`. Accepted so callers can pass their exam as is. */
+  chainId?: number | bigint | undefined;
+  /** The newest log's `entriesHash`, or null if this writer has seen none. */
+  entriesHash: string | null;
+  /** The TEE stage this writer last read, or null. */
+  stage: string | null;
 }
 
 /** The input can't be mirrored. Thrown before anything is sent. */
@@ -184,7 +196,30 @@ export function createArkivWriter(options: ArkivWriterOptions) {
     return { written: true, entityKey, txHash };
   }
 
-  return { address, mirrorReleaseLog, mirrorReleaseToken };
+  /**
+   * Writes a heartbeat, every time: it says the writer is still running, so it is never deduped.
+   * Readonly, not extendable, and gone after `heartbeatLifetimeHours`, so heartbeats clean themselves up.
+   */
+  async function heartbeat(input: HeartbeatInput): Promise<{ entityKey: Hex; txHash: Hash }> {
+    const examId = examIdColumn(input.examId);
+    const registry = addr(getAddress(input.registry));
+    let entriesHash = '';
+    if (input.entriesHash !== null) {
+      if (!hash32.test(input.entriesHash)) throw new MirrorInputError('entriesHash is not 32 bytes of hex');
+      entriesHash = input.entriesHash.toLowerCase();
+    }
+    const { entityKey, txHash } = await wallet.createEntity(
+      relayHeartbeatSchema,
+      { examId, registry, entriesHash, stage: input.stage ?? '' },
+      {
+        expiration: ExpirationTime.fromHours(arkiv.heartbeatLifetimeHours),
+        flags: { readonly: true, permissionlessExtension: false },
+      },
+    );
+    return { entityKey, txHash };
+  }
+
+  return { address, mirrorReleaseLog, mirrorReleaseToken, heartbeat };
 }
 
 export type ArkivWriter = ReturnType<typeof createArkivWriter>;

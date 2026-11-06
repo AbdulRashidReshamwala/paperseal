@@ -203,7 +203,7 @@ export async function loadLive(args: {
 /** Rabdi makes a block every 2 seconds, so a row's age is its distance from the latest block. */
 export const ARKIV_BLOCK_SECONDS = 2;
 
-/** How long the mirror may go without a new row before the page says it has stopped. */
+/** How long the mirror may go without a heartbeat or log row before the page says it has stopped. */
 export const ARKIV_STALE_AFTER_SECONDS = arkiv.staleAfterSeconds;
 
 /** The verified release log from Arkiv with the most entries, and the row it came from. */
@@ -211,12 +211,22 @@ export interface ArkivLog {
   entityKey: Hex;
   creator: Hex;
   createdAtBlock: bigint;
-  /** Unix seconds, worked out from how many blocks ago the row was created. */
+  /** Unix seconds, worked out from Arkiv's latest block time and how many blocks ago the row was created. */
   writtenAt: number;
   entries: number;
   instancePublicKey: Hex;
   verdict: LogVerdict;
   progress: ReleaseProgress | null;
+}
+
+/** The newest heartbeat from the writers. Only a sign of life: it is never evidence and never counts. */
+export interface ArkivHeartbeat {
+  creator: Hex;
+  createdAtBlock: bigint;
+  /** Unix seconds, from Arkiv's own blocks, as for `ArkivLog.writtenAt`. */
+  writtenAt: number;
+  /** The TEE stage the writer says it last read, unchecked, or `''`. */
+  stage: string;
 }
 
 /** Rows from published writers that did not count, by why. Never a failure of the exam. */
@@ -233,12 +243,22 @@ export interface ArkivIgnored {
 
 export interface ArkivReport {
   writers: readonly Hex[];
-  read: { logs: number; tokens: number };
+  read: { logs: number; tokens: number; heartbeats: number };
   /** Null until a log passes every check. */
   log: ArkivLog | null;
   ignored: ArkivIgnored;
-  /** When the newest row from these writers was written, in Unix seconds, or null with none. */
+  /** The newest heartbeat, or null with none. */
+  heartbeat: ArkivHeartbeat | null;
+  /**
+   * When the newest heartbeat or log row was written, in Unix seconds, or null with none. This is
+   * the mirror's last sign of life (spec/arkiv.md, "Reading", rule 4).
+   */
   newestAt: number | null;
+  /**
+   * How long ago that row was written, in seconds, from Arkiv's block distance alone: never the
+   * device clock. Null with no heartbeat or log row at all.
+   */
+  ageSeconds: number | null;
 }
 
 /** The two reads `loadArkiv` makes. `createArkivReader` from `@paperseal/arkiv` gives both. */
@@ -267,8 +287,15 @@ export async function loadArkiv(args: {
   const chain = args.chain();
   const exam = chain?.exam;
   if (!exam) return neutral('The exam is not on the public record yet.');
-  const [{ logs, tokens }, latest] = await Promise.all([reader.releaseRows(examId, writers), reader.latestBlock()]);
-  const writtenAt = (block: bigint) => latest.time - Number(latest.number - block) * ARKIV_BLOCK_SECONDS;
+  const [{ logs, tokens, heartbeats }, latest] = await Promise.all([
+    // Rule 1: only rows for this exam in the registry this view reads.
+    reader.releaseRows(examId, writers, { registry }),
+    reader.latestBlock(),
+  ]);
+  // A row's age is its distance from Arkiv's latest block. A row from a block past the latest one
+  // the node reports is taken as just written.
+  const blocksAgo = (block: bigint) => (latest.number > block ? Number(latest.number - block) : 0);
+  const writtenAt = (block: bigint) => latest.time - blocksAgo(block) * ARKIV_BLOCK_SECONDS;
   const ignored: ArkivIgnored = { tokens: 0, unreadable: 0, unattested: 0, failed: 0 };
 
   const parsed = logs.map((row) => {
@@ -341,14 +368,29 @@ export async function loadArkiv(args: {
     }
   }
 
-  const blocks = [...logs, ...tokens].map((row) => row.createdAtBlock);
+  // Heartbeats only say a writer is running. They never reach progress or any check.
+  const newestBeat = heartbeats.reduce<(typeof heartbeats)[number] | null>(
+    (max, row) => (max === null || row.createdAtBlock > max.createdAtBlock ? row : max),
+    null,
+  );
+  // Rule 4: the mirror's last sign of life is its newest heartbeat or log row. Tokens are left out.
+  const blocks = [...logs, ...heartbeats].map((row) => row.createdAtBlock);
   const newest = blocks.reduce<bigint | null>((max, block) => (max === null || block > max ? block : max), null);
   return {
     writers,
-    read: { logs: logs.length, tokens: tokens.length },
+    read: { logs: logs.length, tokens: tokens.length, heartbeats: heartbeats.length },
     log: best,
     ignored,
+    heartbeat: newestBeat
+      ? {
+          creator: newestBeat.creator,
+          createdAtBlock: newestBeat.createdAtBlock,
+          writtenAt: writtenAt(newestBeat.createdAtBlock),
+          stage: newestBeat.stage,
+        }
+      : null,
     newestAt: newest === null ? null : writtenAt(newest),
+    ageSeconds: newest === null ? null : blocksAgo(newest) * ARKIV_BLOCK_SECONDS,
   };
 }
 

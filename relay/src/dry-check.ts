@@ -72,10 +72,15 @@ export async function dryCheck(): Promise<void> {
     expect(watched.command === 'watch' && watched.everySeconds === 30, '--every');
     const defaulted = parseCommand(['watch', '--exam', EXAM, '--registry', REGISTRY, '--tee', 'https://tee.example']);
     expect(defaulted.command === 'watch' && defaulted.everySeconds === 10, '--every defaults to 10');
+    expect(defaulted.command === 'watch' && defaulted.heartbeat, 'watch writes heartbeats by default');
+    const quiet = parseCommand(['watch', '--exam', EXAM, '--registry', REGISTRY, '--tee', 'https://tee.example', '--no-heartbeat']);
+    expect(quiet.command === 'watch' && !quiet.heartbeat, '--no-heartbeat');
     const status = parseCommand(['status', '--exam', EXAM]);
-    expect(status.command === 'status' && status.writer === undefined, 'status without --writer');
+    expect(status.command === 'status' && status.writer === undefined && status.registry === undefined, 'status without --writer or --registry');
+    const narrowed = parseCommand(['status', '--exam', EXAM, '--registry', REGISTRY.toLowerCase()]);
+    expect(narrowed.command === 'status' && narrowed.registry === REGISTRY, 'status --registry');
     expect(parseCommand(['dry-check']).command === 'dry-check', 'dry-check');
-    return 'mirror, watch, status, dry-check';
+    return 'mirror, watch (--no-heartbeat), status (--registry), dry-check';
   });
 
   await check('arguments: bad input is a usage error', () => {

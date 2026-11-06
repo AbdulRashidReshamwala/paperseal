@@ -12,10 +12,13 @@ node relay/cli.mjs mirror --exam <examId> --registry <ExamRegistry> [--storage <
 
 # The same pass every N seconds (default 10), writing only new snapshots, until the TEE says
 # released or failed, or Ctrl+C. TEE and storage errors are printed and the loop goes on.
-node relay/cli.mjs watch --exam <examId> --registry <ExamRegistry> [--storage <url>] [--tee <url>] [--every 10]
+# Also writes a heartbeat every heartbeatSeconds (60), unless --no-heartbeat.
+node relay/cli.mjs watch --exam <examId> --registry <ExamRegistry> [--storage <url>] [--tee <url>] [--every 10] [--no-heartbeat]
 
-# Read-only: this exam's rows from one writer, newest first. Default writer: the relay's keystore address.
-node relay/cli.mjs status --exam <examId> [--writer <address>]
+# Read-only: this exam's rows from one writer, newest first, then its heartbeats (the newest 10),
+# each with its block and age. Default writer: the relay's keystore address. --registry keeps
+# only rows for that ExamRegistry; without it, rows for every registry are shown.
+node relay/cli.mjs status --exam <examId> [--registry <ExamRegistry>] [--writer <address>]
 
 # Offline self-test: argument parsing, storage URLs, payload preparation, cast arguments.
 node relay/cli.mjs dry-check
@@ -30,7 +33,7 @@ node relay/cli.mjs mirror \
   --storage https://storage.googleapis.com/paperseal-demo-paperseal-exams
 ```
 
-Each pass prints one line per piece of evidence: `written` (new row, with its entity key, transaction hash and explorer links from `arkiv.network.explorer`), `skipped` (this writer already has it), `held` (not written yet; a later pass may write it), `refused` (not this exam's evidence) or `failed` (the write failed). `mirror` exits 1 if anything was refused or failed.
+Each pass starts with a summary line, ending in `(TEE stage <stage>)` only when the TEE serves this exam, `(TEE serves another exam)` when it shows another exam's approved list, or `(TEE shows no exam)` when it shows none. Then it prints one line per piece of evidence: `written` (new row, with its entity key, transaction hash and explorer links from `arkiv.network.explorer`), `skipped` (this writer already has it), `held` (not written yet; a later pass may write it), `refused` (not this exam's evidence) or `failed` (the write failed). `mirror` exits 1 if anything was refused or failed.
 
 `pnpm --filter @paperseal/relay test|typecheck|lint` run the unit tests (no network), `tsc` and ESLint.
 
@@ -41,6 +44,14 @@ Each pass prints one line per piece of evidence: `written` (new row, with its en
 3. Every log must have `examId` equal to `--exam`, or it is refused, along with the storage token beside it. A TEE whose status shows another exam's approved list is ignored entirely.
 4. **Tokens first.** The storage token's instance key is the storage log's `instancePublicKey`, as spec/api.md "Storage" says. The TEE's token is mirrored only when the attestation's `instancePublicKey` is the key that signed the TEE's log, so it is the Unlock instance's token. Otherwise it is held.
 5. **Then logs.** A log is written only once a token for its signer is on Arkiv from this writer, because readers ignore a log whose signer no token attests. A newer TEE log and an older storage log are both written: readers show the verified log with the most entries.
+
+## Heartbeats
+
+Readers time the mirror's last sign of life from its newest heartbeat or log row (spec/arkiv.md "Reading", rule 4), and warn once it is older than `staleAfterSeconds` (120). So `watch` writes a `relay-heartbeat` row every `heartbeatSeconds` (60) from `spec/arkiv.json`, whether or not the log changed, on its own timer apart from `--every`. The first is written right after the first pass; if that pass already ends the watch, unlock is over and none is written. Heartbeats stop when the loop does, by the rules below.
+
+Each heartbeat carries the `entriesHash` of the newest log the relay has seen for this exam in this run (from the TEE or storage, the one with the most entries; none if it has seen none) and the TEE's stage when the TEE serves this exam (none otherwise; a TEE that didn't answer leaves the last stage read). These are the writer's word, not evidence: readers only use the row's block and creator. A failed heartbeat is printed and tried again at the next tick; it never stops the loop. Heartbeats are never deduplicated, are `readonly`, not extendable, and expire after `heartbeatLifetimeHours` (24). `--no-heartbeat` turns them off; `mirror` (one pass) never writes one.
+
+## Deduplication and stopping
 
 `@paperseal/arkiv` skips a row this writer already has (the same `examId`, `registry` and `entriesHash`, or the same `instanceKeyHash`). `watch` also remembers what it confirmed, so it doesn't query Arkiv for the same rows every few seconds. `watch` stops only when a TEE that shows this exam says `released` or `failed`, after a pass with no failed writes (or three more tries).
 
@@ -58,8 +69,8 @@ cast is found on `PATH`, else at `~/.foundry/bin/cast`. `status` and `dry-check`
 
 ## Safety
 
-- **Only already-public, signed evidence is mirrored**: the release log (`GET /v1/release/log` or `release-log.json`) and the Unlock instance's PKI attestation token (`release-token.jwt` or `GET /v1/attestation`). The relay reads nothing else, so it can't mirror anything else. Questions (even encrypted), setter receipts, keys or submission times, invite secrets, shares and anything not already public never go on Arkiv, because Arkiv is public and permanent.
+- **Only already-public, signed evidence is mirrored**: the release log (`GET /v1/release/log` or `release-log.json`) and the Unlock instance's PKI attestation token (`release-token.jwt` or `GET /v1/attestation`). The relay reads nothing else, so it can't mirror anything else. Questions (even encrypted), setter receipts, keys or submission times, invite secrets, shares and anything not already public never go on Arkiv, because Arkiv is public and permanent. A heartbeat adds nothing else: the exam ID, the registry, the `entriesHash` of a log already public, and the stage the TEE's public `GET /v1/status` shows.
 - **The signing key stays in memory.** `mirror` and `watch` run `cast wallet private-key --account <name> --password-file <path>` with stdin closed, and pass its output straight to viem's `privateKeyToAccount`. The key is never printed, logged or written to disk. cast's stdout is never shown, even on failure, and anything key-shaped is cut from its stderr. The relay never opens the password file.
 - **The access key is not printed.** It rides in the RPC URL's path, so every line the relay prints, errors included, is redacted for it.
-- The relay sends Arkiv transactions only from `mirror` and `watch`. Use a dedicated writer address, fund it with Rabdi testnet tGLM, and publish it next to the board's other settings so readers trust its rows.
+- The relay sends Arkiv transactions only from `mirror` and `watch` (rows, and in `watch` heartbeats). Use a dedicated writer address, fund it with Rabdi testnet tGLM, and publish it next to the board's other settings so readers trust its rows.
 - Two relays, or two runs of one, at once may both write a row. Readers ignore the duplicate.

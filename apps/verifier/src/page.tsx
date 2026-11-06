@@ -1,3 +1,4 @@
+import { createArkivReader } from '@paperseal/arkiv';
 import { resolveExamName, type ExamNameResult } from '@paperseal/chain';
 import { requireHardwareAttestation, type Hex, type Paper } from '@paperseal/protocol';
 import {
@@ -24,6 +25,7 @@ import { loadArkiv, loadLive, loadRecords, useProof, type Records } from './load
 import { usePoll, type Polled } from './poll';
 import { createStorage } from './storage';
 import {
+  arkivWriters,
   defaultSettings,
   endpoints,
   isExamId,
@@ -108,12 +110,25 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
   }, [tee, registry, examId, examPublished, bucket]);
   const live = usePoll(loadLiveNow, pollMs.live);
 
-  // The Arkiv mirror is read as often as the live TEE, and only from the writers the viewer trusts.
+  // The Arkiv mirror is read as often as the live TEE, and only from published writers: on a name
+  // route the ones the name lists now, plus the viewer's own (spec/arkiv.md, "Writers").
+  const nameWriters = onName ? (resolved?.arkivWriters ?? null) : null;
+  const nameWritersKey = nameWriters ? nameWriters.join(',') : null;
+  const writers = useMemo(
+    () => arkivWriters(settings.arkivWriters, nameWritersKey === null ? null : nameWritersKey.split(',').filter(Boolean)),
+    [settings.arkivWriters, nameWritersKey],
+  );
+  const wantsArkiv = writers.length > 0 && settings.arkivRpcUrl !== '';
+  const arkivReader = useMemo(
+    () => (wantsArkiv ? (arkiv?.reader ?? createArkivReader({ rpcUrl: settings.arkivRpcUrl })) : null),
+    [wantsArkiv, arkiv, settings.arkivRpcUrl],
+  );
   const loadArkivNow = useMemo(() => {
-    if (!arkiv || !registry || !examId || !examPublished) return null;
+    if (!arkivReader || !registry || !examId || !examPublished) return null;
+    const addresses = writers.map((writer) => writer.address);
     return () =>
-      loadArkiv({ reader: arkiv.reader, writers: arkiv.writers, chain: () => chainRef.current, examId, registry: registry.address as Hex, bucket });
-  }, [arkiv, registry, examId, examPublished, bucket]);
+      loadArkiv({ reader: arkivReader, writers: addresses, chain: () => chainRef.current, examId, registry: registry.address as Hex, bucket });
+  }, [arkivReader, writers, registry, examId, examPublished, bucket]);
   const arkivRead = usePoll(loadArkivNow, pollMs.live);
 
   const proof = useProof({
@@ -130,10 +145,12 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
     examId,
     invalidLink: link.kind === 'invalid',
     ...(link.kind === 'name' && name ? { name: { name: link.name, result: name, used: { teeUrl, storageUrl, bucket } } } : {}),
-    sources: { chain: registry !== null, storage: storage !== null, tee: tee !== null, arkiv: arkiv !== null },
+    sources: { chain: registry !== null, storage: storage !== null, tee: tee !== null, arkiv: arkivReader !== null },
     records,
     live,
     arkiv: arkivRead,
+    arkivWriters: writers,
+    arkivWritersIgnored: resolved?.arkivWritersIgnored ?? [],
     latest,
     now,
     proof,

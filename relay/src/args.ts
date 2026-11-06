@@ -12,8 +12,8 @@ export interface MirrorTarget {
 
 export type Command =
   | { command: 'mirror'; target: MirrorTarget }
-  | { command: 'watch'; target: MirrorTarget; everySeconds: number }
-  | { command: 'status'; examId: Hex; writer: Address | undefined }
+  | { command: 'watch'; target: MirrorTarget; everySeconds: number; heartbeat: boolean }
+  | { command: 'status'; examId: Hex; writer: Address | undefined; registry: Address | undefined }
   | { command: 'dry-check' }
   | { command: 'help' };
 
@@ -28,10 +28,12 @@ export const usage = `Paper Seal relay: mirrors an exam's public unlock evidence
 
   node relay/cli.mjs mirror --exam <examId> --registry <address> [--storage <url>] [--tee <url>]
       One pass: the release token first, then the release log, from storage and/or the TEE.
-  node relay/cli.mjs watch  --exam <examId> --registry <address> [--storage <url>] [--tee <url>] [--every 10]
-      Repeats the pass every N seconds until the TEE says released or failed, or Ctrl+C.
-  node relay/cli.mjs status --exam <examId> [--writer <address>]
-      Read-only: this exam's rows on Arkiv from one writer (default: the relay's own address), newest first.
+  node relay/cli.mjs watch  --exam <examId> --registry <address> [--storage <url>] [--tee <url>] [--every 10] [--no-heartbeat]
+      Repeats the pass every N seconds until the TEE says released or failed, or Ctrl+C, and writes
+      a heartbeat every heartbeatSeconds (spec/arkiv.json) unless --no-heartbeat.
+  node relay/cli.mjs status --exam <examId> [--registry <address>] [--writer <address>]
+      Read-only: this exam's rows and heartbeats on Arkiv from one writer (default: the relay's own
+      address), newest first, only for --registry when given.
   node relay/cli.mjs dry-check
       Offline self-test of argument parsing and payload preparation. No network, no key.
 
@@ -108,15 +110,23 @@ export function parseCommand(argv: readonly string[]): Command {
     case 'mirror':
       return { command, target: mirrorTarget(flags(rest, mirrorFlags) as Record<string, string>) };
     case 'watch': {
-      const values = flags(rest, { ...mirrorFlags, every: { type: 'string' } }) as Record<string, string>;
-      return { command, target: mirrorTarget(values), everySeconds: parseEvery(values.every) };
+      const values = flags(rest, { ...mirrorFlags, every: { type: 'string' }, 'no-heartbeat': { type: 'boolean' } }) as {
+        exam?: string;
+        registry?: string;
+        storage?: string;
+        tee?: string;
+        every?: string;
+        'no-heartbeat'?: boolean;
+      };
+      return { command, target: mirrorTarget(values), everySeconds: parseEvery(values.every), heartbeat: values['no-heartbeat'] !== true };
     }
     case 'status': {
-      const values = flags(rest, { exam: { type: 'string' }, writer: { type: 'string' } }) as Record<string, string>;
+      const values = flags(rest, { exam: { type: 'string' }, registry: { type: 'string' }, writer: { type: 'string' } }) as Record<string, string>;
       return {
         command,
         examId: parseExamId(values.exam),
         writer: values.writer === undefined ? undefined : parseAddress('--writer', values.writer),
+        registry: values.registry === undefined ? undefined : parseAddress('--registry', values.registry),
       };
     }
     case 'dry-check':
