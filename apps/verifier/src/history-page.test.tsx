@@ -55,6 +55,7 @@ const settings: Settings = {
   rpcUrl: 'https://rpc.example',
   teeUrl: '',
   storageUrl: '',
+  storageBucket: '',
   registryAddress,
   examId: '',
   arkivRpcUrl: 'https://arkiv.example',

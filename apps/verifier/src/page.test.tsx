@@ -100,6 +100,7 @@ const settings: Settings = {
   rpcUrl: 'https://rpc.example',
   teeUrl: '',
   storageUrl: 'https://files.example/bucket',
+  storageBucket: teeStorageBucket,
   registryAddress,
   examId,
   arkivRpcUrl: 'https://arkiv.example',
@@ -960,7 +961,7 @@ describe('verify by name', () => {
     expect(new Set(buckets)).toEqual(new Set(['name-bucket']));
   });
 
-  it("falls back to the viewer's own TEE and storage, and the built-in bucket, where the name sets none", async () => {
+  it("falls back to the viewer's own TEE, storage and bucket where the name sets none", async () => {
     const world = await buildWorld();
     arrange(world);
     nameAnswer = () => passed();

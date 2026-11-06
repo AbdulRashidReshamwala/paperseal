@@ -16,14 +16,15 @@ import { attestation, chain, encodeMessage, fromHex, type ExamSettings, type Hex
 import type { TeeClient } from '@paperseal/tee-client';
 
 import { rootOption } from './mockMode';
+import { resolveDefaults } from './runtime-config';
 
 /**
- * The bucket the TEE was started with, which `env_override` must name. Build-time, like the other
- * defaults, and an exam name's bucket record replaces it for that view. Unset, it is empty and the
- * claim fails against any real token.
+ * The bucket the TEE was started with, which `env_override` must name, as this build and host
+ * default it: `VITE_TEE_STORAGE_BUCKET`, then `config.json`. The page passes the viewer's own
+ * setting instead, and an exam name's bucket record replaces that for one view. Unset, it is empty
+ * and the claim fails against any real token.
  */
-export const teeStorageBucket: string =
-  (import.meta.env as Record<string, string | undefined>).VITE_TEE_STORAGE_BUCKET ?? '';
+export const teeStorageBucket: string = resolveDefaults().storageBucket;
 
 export type Exam = NonNullable<Awaited<ReturnType<ExamRegistry['getExam']>>>;
 export type Build = NonNullable<Awaited<ReturnType<ExamRegistry['getBuild']>>>;

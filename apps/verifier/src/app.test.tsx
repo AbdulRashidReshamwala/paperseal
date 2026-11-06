@@ -32,6 +32,7 @@ const custom: Settings = {
   rpcUrl: 'https://my-rpc.example/v1',
   teeUrl: 'https://tee.example',
   storageUrl: 'https://files.example/bucket',
+  storageBucket: 'my-exam-bucket',
   registryAddress: `0x${'ab'.repeat(20)}`,
   examId: `0x${'11'.repeat(32)}`,
   arkivRpcUrl: 'https://arkiv.example',
@@ -168,13 +169,14 @@ describe('runtime settings', () => {
 
   it('validates each field and allows empty', () => {
     expect(validateSettings(custom)).toEqual({});
-    expect(validateSettings({ rpcUrl: '', teeUrl: '', storageUrl: '', registryAddress: '', examId: '', arkivRpcUrl: '', arkivWriters: '', swarmApiUrl: '' })).toEqual({});
+    expect(validateSettings({ rpcUrl: '', teeUrl: '', storageUrl: '', storageBucket: '', registryAddress: '', examId: '', arkivRpcUrl: '', arkivWriters: '', swarmApiUrl: '' })).toEqual({});
     expect(
       Object.keys(
         validateSettings({
           rpcUrl: 'ftp://x',
           teeUrl: 'nope',
           storageUrl: 'file:///x',
+          storageBucket: 'Not A Bucket',
           registryAddress: '0x1',
           examId: '0x2',
           arkivRpcUrl: 'ws://x',
@@ -182,7 +184,7 @@ describe('runtime settings', () => {
           swarmApiUrl: 'bzz://x',
         }),
       ).sort(),
-    ).toEqual(['arkivRpcUrl', 'arkivWriters', 'examId', 'registryAddress', 'rpcUrl', 'storageUrl', 'swarmApiUrl', 'teeUrl']);
+    ).toEqual(['arkivRpcUrl', 'arkivWriters', 'examId', 'registryAddress', 'rpcUrl', 'storageBucket', 'storageUrl', 'swarmApiUrl', 'teeUrl']);
   });
 
   it('accepts Arkiv writers in lower case or with a valid checksum, and catches a mistyped one', () => {
@@ -271,7 +273,7 @@ describe('runtime settings', () => {
   });
 
   it('connects to nothing until settings exist', () => {
-    const nothing = connect({ rpcUrl: '', teeUrl: '', storageUrl: '', registryAddress: '', examId: '', arkivRpcUrl: '', arkivWriters: '', swarmApiUrl: '' });
+    const nothing = connect({ rpcUrl: '', teeUrl: '', storageUrl: '', storageBucket: '', registryAddress: '', examId: '', arkivRpcUrl: '', arkivWriters: '', swarmApiUrl: '' });
     expect([nothing.tee, nothing.registry, nothing.examId, nothing.storage, nothing.arkiv]).toEqual([null, null, null, null, null]);
   });
 });

@@ -4,7 +4,13 @@ The public verifier, on port 5172, with no sign-in. `pnpm build` writes `dist/` 
 
 `VITE_RPC_URL`, `VITE_TEE_URL`, `VITE_STORAGE_URL`, `VITE_REGISTRY_ADDRESS` and `VITE_EXAM_ID` set build-time defaults. Viewers can replace them under "Check it yourself", and the values stay in their browser.
 
-`VITE_RELEASES_REPO` is optional. It is the `owner/name` GitHub repository the code, rebuild and self-hosting links point at, `AbdulRashidReshamwala/paperseal` when unset, so a fork can set its own. Any other shape is an error. Viewers cannot change it.
+`config.json` beside `index.html` is read before the page renders, as in "App config.json" in `spec/deploy.md`, so one build works for every board: overwrite `dist/config.json` to point it at yours. The build writes it from its `VITE_` values, with empty ones left out. Each value resolves as `VITE_` first, then `config.json`, then the built-in default, and a viewer's own settings under "Check it yourself" override all three, the bucket included.
+
+A missing or invalid file counts as empty. Its `chainId` and `chainName` only describe the chain, are dropped when they name another chain than `spec/constants.json`, and never switch it. Mock mode never reads the file.
+
+`VITE_TEE_STORAGE_BUCKET`, or `storageBucket` in `config.json`, is the bucket the TEE's token must name. Viewers can change it under "Check it yourself" too.
+
+`VITE_RELEASES_REPO` is optional. It is the `owner/name` GitHub repository the code, rebuild and self-hosting links point at, `AbdulRashidReshamwala/paperseal` when unset, so a fork can set its own. Any other shape is an error. `config.json`'s `repository` sets it too. Viewers cannot change it.
 
 Browsers only allow these calls if the RPC and TEE send cross-origin headers for the hosting domain.
 
