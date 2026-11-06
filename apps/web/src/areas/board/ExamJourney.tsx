@@ -1,19 +1,41 @@
-import { roundTimeSeconds } from '@paperseal/protocol';
+import { roundTimeSeconds, type Hex } from '@paperseal/protocol';
+import { useSyncExternalStore } from 'react';
 
 import { decideStep, type Snapshot } from './examState';
 import { useNow } from './hooks';
 import { formatTimeOnly } from './plan';
 import { sealStateAt } from './StatusStep';
 
-const LAST = 5;
+const LAST = 6;
+
+const checked = new Set<string>();
+const listeners = new Set<() => void>();
+
+/** Says the machine test passed for this exam, so the rail can move past it. */
+export function noteMachineChecked(examId: Hex, ok: boolean): void {
+  if (ok === checked.has(examId)) return;
+  if (ok) checked.add(examId);
+  else checked.delete(examId);
+  for (const listener of listeners) listener();
+}
+
+function useMachineChecked(examId: Hex | undefined): boolean {
+  return useSyncExternalStore(
+    (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    () => examId !== undefined && checked.has(examId),
+  );
+}
 
 /** Which step of the exam's life the board is on. It reads the same state that picks the screen. */
-function spotOf(snapshot: Snapshot, now: number, times: { lock: number; unlock: number; end: number }): number {
+function spotOf(snapshot: Snapshot, now: number, times: { lock: number; unlock: number; end: number }, machineChecked: boolean): number {
   const step = decideStep(snapshot);
-  if (step === 'draft' || step === 'people') return 0;
-  if (step === 'post-build') return 2;
-  if (step === 'wait') return snapshot.status?.stage !== 'failed' && now >= times.lock * 1000 ? 2 : 1;
-  return { sealed: 3, opening: 4, open: LAST }[sealStateAt(now, times.unlock * 1000, times.end * 1000)];
+  if (step === 'draft' || step === 'people') return machineChecked ? 1 : 0;
+  if (step === 'post-build') return 3;
+  if (step === 'wait') return snapshot.status?.stage !== 'failed' && now >= times.lock * 1000 ? 3 : 2;
+  return { sealed: 4, opening: 5, open: LAST }[sealStateAt(now, times.unlock * 1000, times.end * 1000)];
 }
 
 /** The exam's whole life at a glance. It only shows where things stand: the state decides the screen, so nothing here is pressed. */
@@ -27,6 +49,7 @@ export function ExamJourney(props: { snapshot: Snapshot }) {
     end: roundTimeSeconds(Number(settings?.endRound ?? 0)),
   };
   const steps: { label: string; when?: string }[] = [
+    { label: 'Check the machine' },
     { label: 'Bring everyone in' },
     { label: 'Questions come in', when: `Until ${formatTimeOnly(times.lock)}` },
     { label: 'Post the paper’s record' },
@@ -34,7 +57,8 @@ export function ExamJourney(props: { snapshot: Snapshot }) {
     { label: 'Paper released to centres', when: formatTimeOnly(times.unlock) },
     { label: 'Paper opens to everyone', when: formatTimeOnly(times.end) },
   ];
-  const here = spotOf(snapshot, now, times);
+  const machineChecked = useMachineChecked(snapshot.found?.exam.settings.examId as Hex | undefined);
+  const here = spotOf(snapshot, now, times, machineChecked);
   const over = here === LAST;
   return (
     <ol className="board-journey" aria-label="Where this exam is">

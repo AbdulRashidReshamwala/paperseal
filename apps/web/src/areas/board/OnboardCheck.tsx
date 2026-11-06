@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 
 import { useBoardForm, useReader } from './BoardForm';
 import type { Snapshot } from './examState';
+import { noteMachineChecked } from './ExamJourney';
 import { listKnownExams } from './examsStore';
 import { checkMachineReady, type ReadyResult } from './machineReady';
 import { Fold } from './Parts';
@@ -22,7 +23,10 @@ export function OnboardCheck(props: { examId: Hex; snapshot: Snapshot }) {
     if (!exam || !registry) return;
     let live = true;
     void checkMachineReady(tee, { examId: props.examId, exam, registry, otherExam }).then((result) => {
-      if (live) setDone({ round, result });
+      if (live) {
+        setDone({ round, result });
+        noteMachineChecked(props.examId, result.ok);
+      }
     });
     return () => {
       live = false;
