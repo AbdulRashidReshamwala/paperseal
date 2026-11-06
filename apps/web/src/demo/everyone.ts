@@ -38,11 +38,23 @@ export interface Job {
   run: (say: (note: string) => void) => Promise<void>;
 }
 
-/** Between two people, so a public RPC is read politely. */
-export const PAUSE_BETWEEN_PEOPLE_MS = 100;
-const PAUSE_BETWEEN_QUESTIONS_MS = 20;
-
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** Between two people when they go one at a time. */
+export const PAUSE_BETWEEN_PEOPLE_MS = 0;
+const QUESTION_TRIES = 4;
+
+/** A public RPC or the machine may turn a burst away, so a failed question is sent again, not paced in advance. */
+async function retried<T>(send: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await send();
+    } catch (error) {
+      if (attempt >= QUESTION_TRIES) throw error;
+      await wait(300 * 2 ** attempt);
+    }
+  }
+}
 
 export interface RunOptions {
   onState: (id: string, state: PersonState) => void;
@@ -272,27 +284,29 @@ export async function questionJobs(
         for (const [topic, count] of add) {
           for (let n = 0; n < count; n++) {
             say(`${String(sealed)} of ${String(total)} sealed`);
-            const receipt = await sealAndSubmit(
-              {
-                keys: world.keysFor(persona),
-                tee,
-                credentialId: toHex(key.credentialId),
-                passkeyPublicKey: passkey,
-                pending,
-                keep: (exam, stored) => {
-                  world.storageOf(persona, () => {
-                    saveReceipt(exam, stored);
-                  });
+            const question = sampleQuestion(topic);
+            const receipt = await retried(() =>
+              sealAndSubmit(
+                {
+                  keys: world.keysFor(persona),
+                  tee,
+                  credentialId: toHex(key.credentialId),
+                  passkeyPublicKey: passkey,
+                  pending,
+                  keep: (exam, stored) => {
+                    world.storageOf(persona, () => {
+                      saveReceipt(exam, stored);
+                    });
+                  },
                 },
-              },
-              checked.confirmed,
-              sampleQuestion(topic),
+                checked.confirmed,
+                question,
+              ),
             );
             world.storageOf(persona, () => {
               saveTopic(examId, receipt.questionHash, topic);
             });
             sealed += 1;
-            await wait(PAUSE_BETWEEN_QUESTIONS_MS);
           }
         }
       },
