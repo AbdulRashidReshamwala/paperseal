@@ -358,6 +358,31 @@ describe('createExamRegistry', () => {
     await expect(tampered.getCriteria(examId)).rejects.toMatchObject({ what: 'criteria', kind: 'mismatch' });
     const missing = createExamRegistry({ address, transport: chainStub(record, () => []) });
     await expect(missing.getCriteria(examId)).rejects.toMatchObject({ what: 'criteria', kind: 'missing' });
+
+    // A reorg marks a log removed. It isn't on the chain any more, so it must not count.
+    const removed = createExamRegistry({ address, transport: chainStub(record, () => [{ ...log(criteria), removed: true }]) });
+    await expect(removed.getCriteria(examId)).rejects.toMatchObject({ what: 'criteria', kind: 'missing' });
+    const beside = createExamRegistry({ address, transport: chainStub(record, () => [{ ...log('0xc0ffef'), removed: true }, log(criteria)]) });
+    expect(await beside.getCriteria(examId)).toBe(criteria);
+  });
+
+  it('skips removed ApprovedListPosted logs too', async () => {
+    const entries: Hex = '0xabcd';
+    const posted = { listHash: toHex(approvedListHash(fromHex(examId), fromHex(entries))), postedAt: 7n, postedBlock: 42n };
+    const log = (bytes: Hex, removed: boolean) => ({
+      address,
+      topics: encodeEventTopics({ abi: examRegistryAbi, eventName: 'ApprovedListPosted', args: { examId } }),
+      data: encodeAbiParameters([{ type: 'bytes32' }, { type: 'bytes' }], [posted.listHash, bytes]),
+      blockNumber: '0x2a',
+      blockHash: hash32,
+      transactionHash: hash32,
+      transactionIndex: '0x0',
+      logIndex: '0x0',
+      removed,
+    });
+    const reading = (logs: unknown[]) => createExamRegistry({ address, transport: chainStub((name) => (name === 'getApprovedList' ? posted : exam), () => logs) });
+    await expect(reading([log(entries, true)]).getApprovedListEntries(examId)).rejects.toMatchObject({ what: 'approvedList', kind: 'missing' });
+    expect(await reading([log('0xdead', true), log(entries, false)]).getApprovedListEntries(examId)).toBe(entries);
   });
 
   it('returns null criteria before the exam exists', async () => {
