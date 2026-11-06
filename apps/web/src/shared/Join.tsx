@@ -54,7 +54,7 @@ export default function Join() {
         lede={
           problem
             ? 'The link is incomplete or was changed on the way. Open the link your exam board sent you again, copied in full.'
-            : 'You register from the private link your exam board sent you. There is nothing to type here.'
+            : 'Your exam board sent you a private link. Open that link to register. There is nothing to type here.'
         }
         next="If you can’t find the link, or it still doesn’t work, ask your exam board to send it again."
       >

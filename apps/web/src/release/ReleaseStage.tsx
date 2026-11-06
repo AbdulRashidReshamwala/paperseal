@@ -1,7 +1,7 @@
 import { fromHex, requireHardwareAttestation, type Hex } from '@paperseal/protocol';
 import { RELEASE_NOT_OPEN_MESSAGE } from '@paperseal/tee-client';
 import { KeyTouch, PrimaryAction, Stage, type SealState } from '@paperseal/ui';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { attestationChecker } from '../shared/attest';
 import { storageUrl } from '../shared/config';
@@ -9,7 +9,7 @@ import { browserKeys, describeError, type StoredCredential } from '../shared/Reg
 import { registry } from '../shared/registry';
 import { storageFetcher } from '../shared/storage';
 import { tee } from '../shared/tee';
-import { ReleaseAbortedError, runRelease, type ReleaseContext, type ReleaseStep } from './flow';
+import { finishRelease, prepareRelease, ReleaseAbortedError, type PreparedRelease, type ReleaseContext, type ReleaseStep } from './flow';
 import { TechnicalDetail } from './Gate';
 import './holder.css';
 
@@ -39,6 +39,9 @@ export function releaseContext(examId: Hex | null, credential: StoredCredential 
   };
 }
 
+/** How long the checks that run before the press stay good. After this they run again at the press. */
+export const PREPARED_TTL_MS = 60_000;
+
 type Phase =
   | { name: 'idle' }
   /** Checking the sealed machine and the share file. The key is not used yet. */
@@ -52,12 +55,12 @@ type Phase =
   | { name: 'failed'; step: ReleaseStep | null; detail: string };
 
 const WHY: Record<ReleaseStep, string> = {
-  attest: 'The sealed machine could not prove it is running the published code, so nothing was sent to it.',
-  listHash: 'The sealed machine’s approved list does not match the public record, so nothing was sent to it.',
-  fetch: 'Your share’s file could not be downloaded, or it does not match the public record.',
-  challenge: 'The sealed machine did not answer.',
-  release: 'Your share does not match the public record, so it was not sent.',
-  submit: 'Your share did not reach the sealed machine.',
+  attest: 'We could not confirm that this page is talking to the real Paper Seal, so nothing was sent.',
+  listHash: 'The list of people did not match the public record, so nothing was sent.',
+  fetch: 'Your part of the key could not be downloaded, or it did not match the public record. Nothing was sent.',
+  challenge: 'Paper Seal did not answer. Nothing was sent.',
+  release: 'Your part of the key did not match the public record, so it was not sent.',
+  submit: 'Your part of the key did not reach Paper Seal.',
 };
 
 /**
@@ -69,24 +72,52 @@ export function ReleaseStage(props: {
   context: ReleaseContext | null;
   onReleased: () => void;
   seal?: SealState;
+  /** Told when the screen shows a failure, so the page can leave the seal off it. */
+  onRefused?: (refused: boolean) => void;
   next: ReactNode;
   children?: ReactNode;
 }) {
   const { context } = props;
   const [phase, setPhase] = useState<Phase>({ name: 'idle' });
+  // The checks that don't need the key run as soon as the page is ready, so the press goes straight
+  // to the touch. A result that failed, or is older than PREPARED_TTL_MS, is never used: the press runs it again.
+  const latest = useRef(context);
+  useEffect(() => {
+    latest.current = context;
+  });
+  const early = useRef<{ promise: Promise<PreparedRelease | null> } | null>(null);
+  const ready = context ? `${context.examId}:${context.passkeyPublicKey}:${context.derivedPublicKey}` : null;
+
+  const prepareQuietly = (from: ReleaseContext): Promise<PreparedRelease | null> =>
+    prepareRelease(from).then(
+      (prepared) => prepared,
+      () => null,
+    );
+  useEffect(() => {
+    if (!ready || !latest.current) return;
+    early.current = { promise: prepareQuietly(latest.current) };
+    return () => {
+      early.current = null;
+    };
+  }, [ready]);
 
   async function start() {
     if (!context) return;
     let current: ReleaseStep | null = null;
     setPhase({ name: 'checking' });
+    const withSteps: ReleaseContext = {
+      ...context,
+      onStep: (step) => {
+        current = step;
+        setPhase(step === 'release' ? { name: 'touch' } : step === 'submit' ? { name: 'sending' } : { name: 'checking' });
+      },
+    };
     try {
-      await runRelease({
-        ...context,
-        onStep: (step) => {
-          current = step;
-          setPhase(step === 'release' ? { name: 'touch' } : step === 'submit' ? { name: 'sending' } : { name: 'checking' });
-        },
-      });
+      const waiting = early.current;
+      early.current = null;
+      const ahead = waiting ? await waiting.promise : null;
+      const fresh = ahead && Date.now() - ahead.preparedAt < PREPARED_TTL_MS ? ahead : null;
+      await finishRelease(withSteps, fresh ?? (await prepareRelease(withSteps)));
       props.onReleased();
     } catch (error) {
       if (current === 'release' && !(error instanceof ReleaseAbortedError)) {
@@ -96,8 +127,18 @@ export function ReleaseStage(props: {
       } else {
         setPhase({ name: 'failed', step: current, detail: describeError(error) });
       }
+      // A later press starts the checks again, since this result is spent.
+      if (latest.current) early.current = { promise: prepareQuietly(latest.current) };
     }
   }
+  const refused = phase.name === 'failed' || phase.name === 'key-failed';
+  const { onRefused } = props;
+  useEffect(() => {
+    onRefused?.(refused);
+    return () => {
+      onRefused?.(false);
+    };
+  }, [refused, onRefused]);
   const go = () => void start();
   const demo = !requireHardwareAttestation;
 
@@ -106,8 +147,8 @@ export function ReleaseStage(props: {
     return (
       <Stage
         {...stage}
-        title="Your share can't be released from this page"
-        lede="This page could not put together what the release needs. Reload it. If this stays, contact your exam board."
+        title="You can't release your part of the key from this page"
+        lede="This page is missing something it needs. Reload it. If this stays, contact your exam board."
       >
         {props.children}
       </Stage>
@@ -117,8 +158,8 @@ export function ReleaseStage(props: {
     return (
       <Stage
         {...stage}
-        title="Release has not opened yet"
-        lede="The sealed machine has not seen the unlock round. Give it a moment, then try again."
+        title="Release is not open yet"
+        lede="It is not quite time. Wait a minute, then press the button."
         action={<PrimaryAction onClick={go}>Try again</PrimaryAction>}
       >
         {props.children}
@@ -129,7 +170,7 @@ export function ReleaseStage(props: {
     return (
       <Stage
         {...stage}
-        title="Your share was not released"
+        title="Your part of the key was not sent"
         lede={`${phase.step ? WHY[phase.step] : 'The release could not start.'} Try again. If it fails again, contact your exam board.`}
         action={<PrimaryAction onClick={go}>Try again</PrimaryAction>}
       >
@@ -141,18 +182,18 @@ export function ReleaseStage(props: {
   return (
     <Stage
       {...stage}
-      title="Release your share"
-      lede="One touch of your security key sends your share to the sealed machine."
+      title="Release your part of the key"
+      lede="Touch your security key once. That sends your part of the key."
       action={
         phase.name === 'idle' ? (
-          <KeyTouch state="idle" purpose="to release your share" actionLabel="Release my share" onUse={go} demo={demo} />
+          <KeyTouch state="idle" purpose="to release your part of the key" actionLabel="Release my part of the key" onUse={go} demo={demo} />
         ) : phase.name === 'touch' ? (
           <KeyTouch state="waiting" onUse={go} demo={demo} />
         ) : phase.name === 'key-failed' ? (
           <KeyTouch state="failed" error={phase.error} onUse={go} demo={demo} />
         ) : (
-          <PrimaryAction status="busy" busyLabel={phase.name === 'sending' ? 'Sending your share' : 'Checking before your key is used'}>
-            Release my share
+          <PrimaryAction status="busy" busyLabel={phase.name === 'sending' ? 'Sending your part of the key' : 'Checking before your security key is used'}>
+            Release my part of the key
           </PrimaryAction>
         )
       }
@@ -167,9 +208,9 @@ export function ReleaseCount(props: { status: { release: { released: readonly un
   const { status } = props;
   return status ? (
     <p className="holder-count" role="status">
-      {status.release.released.length} of {status.release.required} released
+      {status.release.released.length} of {status.release.required} parts of the key released
     </p>
   ) : (
-    <p className="holder-count-note">The release count can't be read right now. This page keeps trying.</p>
+    <p className="holder-count-note">We can't see how many parts of the key are released right now. This page keeps trying.</p>
   );
 }

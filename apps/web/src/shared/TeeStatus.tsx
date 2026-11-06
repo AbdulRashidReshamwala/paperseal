@@ -9,11 +9,11 @@ export const TEE_STATUS_POLL_MS = 5000;
 
 export function TeeStatus() {
   return (
-    <Connected title="TEE" notConnected={notConnectedToTee} load={loadStatus} pollMs={TEE_STATUS_POLL_MS}>
+    <Connected title="Paper Seal" notConnected={notConnectedToTee} load={loadStatus} pollMs={TEE_STATUS_POLL_MS}>
       {(status) => (
         <Rows>
-          <Row label="Stage">{status.stage}</Row>
-          <Row label="Shares released">
+          <Row label="Progress">{status.stage}</Row>
+          <Row label="Parts of the key released">
             {status.release.released.length} of {status.release.required}
           </Row>
         </Rows>

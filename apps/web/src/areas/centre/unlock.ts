@@ -59,7 +59,39 @@ export interface UnlockContext {
   /** Opens a tlock ciphertext from drand. Fails until the unlock round is published. */
   timelockDecrypt: (ciphertext: string) => Promise<Uint8Array>;
   fetchFile: FetchFile;
+  /** The time seal and the centre's sealed key, got ahead of the press. Used up, and wiped, by `unlockPaper`. */
+  prepared?: PreparedUnlock;
   onStep?: (step: UnlockStep) => void;
+}
+
+/** What can be got before the security key is touched. The half-key `kPub` is wiped by whoever ends up holding it. */
+export interface PreparedUnlock {
+  kPub: Uint8Array;
+  sealedKeyPriv: Uint8Array;
+  /** When it was got, in milliseconds. */
+  preparedAt: number;
+}
+
+/** Opens the time seal and downloads this centre's sealed key. Neither needs the security key. */
+export async function prepareUnlock(
+  context: Pick<UnlockContext, 'keyPubTlock' | 'timelockDecrypt' | 'fetchFile' | 'derivedPublicKey' | 'onStep'>,
+): Promise<PreparedUnlock> {
+  const step = (name: UnlockStep) => context.onStep?.(name);
+  step('timelock');
+  let kPub: Uint8Array;
+  try {
+    kPub = await context.timelockDecrypt(context.keyPubTlock);
+  } catch (error) {
+    throw new UnlockError('timelock', `The time seal has not opened: ${(error as Error).message}`);
+  }
+  step('keyPriv');
+  try {
+    const sealedKeyPriv = await context.fetchFile(storageNames.centreKeyPriv(fromHex(context.derivedPublicKey)));
+    return { kPub, sealedKeyPriv, preparedAt: Date.now() };
+  } catch (error) {
+    kPub.fill(0);
+    throw new UnlockError('keyPriv', `Your encrypted K_priv is not available: ${(error as Error).message}`);
+  }
 }
 
 /**
@@ -73,23 +105,10 @@ export async function unlockPaper(context: UnlockContext): Promise<Paper> {
   const step = (name: UnlockStep) => context.onStep?.(name);
   const id = fromHex(examId);
 
-  step('timelock');
-  let kPub: Uint8Array;
-  try {
-    kPub = await context.timelockDecrypt(context.keyPubTlock);
-  } catch (error) {
-    throw new UnlockError('timelock', `The time seal has not opened: ${(error as Error).message}`);
-  }
+  const prepared = context.prepared ?? (await prepareUnlock(context));
+  const { kPub, sealedKeyPriv } = prepared;
 
   try {
-    step('keyPriv');
-    let sealedKeyPriv: Uint8Array;
-    try {
-      sealedKeyPriv = await context.fetchFile(storageNames.centreKeyPriv(fromHex(context.derivedPublicKey)));
-    } catch (error) {
-      throw new UnlockError('keyPriv', `Your encrypted K_priv is not available: ${(error as Error).message}`);
-    }
-
     step('touch');
     const kPriv = await keys.openKeyPriv(context.credentialId, id, sealedKeyPriv);
     try {

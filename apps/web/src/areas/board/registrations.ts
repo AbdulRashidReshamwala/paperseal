@@ -38,9 +38,9 @@ export function withRoles(
 
 export const roleNames: Record<number, string> = {
   [roles.setter]: 'Setter',
-  [roles.neutral]: 'Neutral party',
-  [roles.centreKeyHolder]: 'Centre with a key',
-  [roles.centre]: 'Centre without a key',
+  [roles.neutral]: 'Key holder',
+  [roles.centreKeyHolder]: 'Centre holding part of the key',
+  [roles.centre]: 'Centre getting the key at unlock',
 };
 
 export interface ComposedList {

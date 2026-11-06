@@ -1,17 +1,38 @@
-import type { checkToken } from '@paperseal/attestation';
-import type { ExamRegistry } from '@paperseal/chain';
-import type { Keys } from '@paperseal/keys';
-import type { Hex } from '@paperseal/protocol';
-import type { StatusResponse, TeeClient } from '@paperseal/tee-client';
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import type { checkToken } from "@paperseal/attestation";
+import type { ExamRegistry } from "@paperseal/chain";
+import type { Keys } from "@paperseal/keys";
+import type { Hex } from "@paperseal/protocol";
+import type { StatusResponse, TeeClient } from "@paperseal/tee-client";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
-import { browserKeys, describeError, loadCredential, type StoredCredential } from '../../shared/Register';
-import { teeStorageBucket } from '../../shared/config';
-import { useCurrentExamId } from '../../shared/currentExam';
-import { registry, registryAddress } from '../../shared/registry';
-import { tee as defaultTee } from '../../shared/tee';
-import { TEE_STATUS_POLL_MS } from '../../shared/TeeStatus';
-import { CONFIRMATION_TTL_MS, confirmTee, type ConfirmOutcome, type Confirmed, type TrustPolicy } from './confirm';
+import {
+  browserKeys,
+  describeError,
+  loadCredential,
+  type StoredCredential,
+} from "../../shared/Register";
+import { teeStorageBucket } from "../../shared/config";
+import { useCurrentExamId } from "../../shared/currentExam";
+import { registry, registryAddress } from "../../shared/registry";
+import { tee as defaultTee } from "../../shared/tee";
+import { TEE_STATUS_POLL_MS } from "../../shared/TeeStatus";
+import {
+  CONFIRMATION_REFRESH_MS,
+  CONFIRMATION_TTL_MS,
+  confirmTee,
+  type ConfirmOutcome,
+  type Confirmed,
+  type TrustPolicy,
+} from "./confirm";
 
 /** Everything the setter flow talks to. The app wires the real ones, and a test can pass stubs. */
 export interface SetterEnv {
@@ -20,10 +41,18 @@ export interface SetterEnv {
   registryAddress: Hex | null;
   tee: Pick<
     TeeClient,
-    'attestation' | 'status' | 'registerChallenge' | 'register' | 'questionChallenge' | 'question'
+    | "attestation"
+    | "status"
+    | "registerChallenge"
+    | "register"
+    | "questionChallenge"
+    | "question"
   > | null;
-  chain: Pick<ExamRegistry, 'getExam' | 'getApprovedList' | 'getCriteria' | 'getBuild'> | null;
-  keys: () => Pick<Keys, 'register' | 'sign'>;
+  chain: Pick<
+    ExamRegistry,
+    "getExam" | "getApprovedList" | "getCriteria" | "getBuild"
+  > | null;
+  keys: () => Pick<Keys, "register" | "sign">;
   policy: TrustPolicy;
   /** The real `checkToken` unless a test swaps it. */
   verifyToken?: typeof checkToken;
@@ -71,16 +100,22 @@ const SessionContext = createContext<Session | null>(null);
 
 export function useSession(): Session {
   const session = useContext(SessionContext);
-  if (!session) throw new Error('useSession needs a SessionProvider');
+  if (!session) throw new Error("useSession needs a SessionProvider");
   return session;
 }
 
-export function SessionProvider(props: { env: SetterEnv; children: ReactNode }) {
+export function SessionProvider(props: {
+  env: SetterEnv;
+  children: ReactNode;
+}) {
   const { env } = props;
   const currentExam = useCurrentExamId();
   const examId = env.examId === undefined ? currentExam : env.examId;
   // The credential is read per exam, so changing the current exam can never leave another exam's key in use.
-  const [saved, setSaved] = useState<{ examId: Hex; credential: StoredCredential } | null>(null);
+  const [saved, setSaved] = useState<{
+    examId: Hex;
+    credential: StoredCredential;
+  } | null>(null);
   const credentialSaved = useCallback(
     (registered: StoredCredential) => {
       if (examId) setSaved({ examId, credential: registered });
@@ -88,11 +123,19 @@ export function SessionProvider(props: { env: SetterEnv; children: ReactNode }) 
     [examId],
   );
   const credential = useMemo(
-    () => (saved && saved.examId === examId ? saved.credential : examId ? loadCredential(examId, 'setter') : null),
+    () =>
+      saved && saved.examId === examId
+        ? saved.credential
+        : examId
+          ? loadCredential(examId, "setter")
+          : null,
     [examId, saved],
   );
   // A confirmation is for one exam: another exam never inherits it.
-  const [held, setHeld] = useState<{ examId: Hex | null; outcome: ConfirmOutcome | null }>({ examId: null, outcome: null });
+  const [held, setHeld] = useState<{
+    examId: Hex | null;
+    outcome: ConfirmOutcome | null;
+  }>({ examId: null, outcome: null });
   const outcome = held.examId === examId ? held.outcome : null;
   const setOutcome = useCallback(
     (next: ConfirmOutcome | null) => {
@@ -135,36 +178,52 @@ export function SessionProvider(props: { env: SetterEnv; children: ReactNode }) 
   }, [tee, refreshStatus, pollMs]);
 
   const running = useRef(false);
-  const runConfirm = useCallback(async () => {
-    if (!tee || !chain || !examId || !env.registryAddress) return;
-    if (running.current) return;
-    running.current = true;
-    setChecking(true);
-    // Any earlier pass is dropped first, so a failed re-check can never leave uploading open.
-    setOutcome(null);
-    try {
-      setOutcome(
-        await confirmTee({
-          examId,
-          registryAddress: env.registryAddress,
-          tee,
-          chain,
-          policy: env.policy,
-          ...(env.verifyToken ? { verifyToken: env.verifyToken } : {}),
-        }),
-      );
-    } catch (error) {
-      setOutcome({ ok: false, step: 'attestation', reasons: [describeError(error)] });
-    } finally {
-      running.current = false;
-      setChecking(false);
-    }
-    await refreshStatus();
-  }, [tee, chain, examId, env, refreshStatus, setOutcome]);
+  /**
+   * Runs the checks. A refresh runs them while the writer is still writing: the screen stays as it is,
+   * and the earlier pass stays in force until a new one replaces it, so nothing closes or flickers.
+   */
+  const confirm = useCallback(
+    async (refresh: boolean) => {
+      if (!tee || !chain || !examId || !env.registryAddress) return;
+      if (running.current) return;
+      running.current = true;
+      if (!refresh) {
+        setChecking(true);
+        // Any earlier pass is dropped first, so a failed re-check can never leave uploading open.
+        setOutcome(null);
+      }
+      try {
+        setOutcome(
+          await confirmTee({
+            examId,
+            registryAddress: env.registryAddress,
+            tee,
+            chain,
+            policy: env.policy,
+            ...(env.verifyToken ? { verifyToken: env.verifyToken } : {}),
+          }),
+        );
+      } catch (error) {
+        // A refresh that could not even run (a network blip) leaves the earlier pass to run out by itself.
+        if (!refresh)
+          setOutcome({
+            ok: false,
+            step: "attestation",
+            reasons: [describeError(error)],
+          });
+      } finally {
+        running.current = false;
+        if (!refresh) setChecking(false);
+      }
+      await refreshStatus();
+    },
+    [tee, chain, examId, env, refreshStatus, setOutcome],
+  );
+  const runConfirm = useCallback(() => confirm(false), [confirm]);
 
   const dropConfirmation = useCallback(
     (reason: string) => {
-      setOutcome({ ok: false, step: 'attestation', reasons: [reason] });
+      setOutcome({ ok: false, step: "attestation", reasons: [reason] });
     },
     [setOutcome],
   );
@@ -173,18 +232,30 @@ export function SessionProvider(props: { env: SetterEnv; children: ReactNode }) 
     setOutcome(null);
   }, [setOutcome]);
 
-  // A confirmation is good for 5 minutes. Past that, sealing closes until the checks pass again.
+  // A confirmation is good for 5 minutes. A writer who is still writing near the end gets a fresh
+  // one first, so the expiry never lands in the middle of sealing. If that doesn't happen, sealing
+  // closes at 5 minutes until the checks pass again.
   const confirmedAt = outcome?.ok ? outcome.confirmed.confirmedAt : null;
   useEffect(() => {
     if (confirmedAt === null) return;
-    const left = Math.max(0, confirmedAt + CONFIRMATION_TTL_MS - Date.now());
-    const timer = setTimeout(() => {
-      expireConfirmation();
-    }, left);
+    const age = Date.now() - confirmedAt;
+    const refresh = setTimeout(
+      () => {
+        void confirm(true);
+      },
+      Math.max(0, CONFIRMATION_REFRESH_MS - age),
+    );
+    const expire = setTimeout(
+      () => {
+        expireConfirmation();
+      },
+      Math.max(0, CONFIRMATION_TTL_MS - age),
+    );
     return () => {
-      clearTimeout(timer);
+      clearTimeout(refresh);
+      clearTimeout(expire);
     };
-  }, [confirmedAt, expireConfirmation]);
+  }, [confirmedAt, confirm, expireConfirmation]);
 
   const session = useMemo<Session>(
     () => ({
@@ -203,7 +274,26 @@ export function SessionProvider(props: { env: SetterEnv; children: ReactNode }) 
       statusError,
       refreshStatus,
     }),
-    [env, examId, tee, chain, credential, credentialSaved, outcome, checking, runConfirm, dropConfirmation, expireConfirmation, status, statusError, refreshStatus],
+    [
+      env,
+      examId,
+      tee,
+      chain,
+      credential,
+      credentialSaved,
+      outcome,
+      checking,
+      runConfirm,
+      dropConfirmation,
+      expireConfirmation,
+      status,
+      statusError,
+      refreshStatus,
+    ],
   );
-  return <SessionContext.Provider value={session}>{props.children}</SessionContext.Provider>;
+  return (
+    <SessionContext.Provider value={session}>
+      {props.children}
+    </SessionContext.Provider>
+  );
 }

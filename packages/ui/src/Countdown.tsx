@@ -38,7 +38,7 @@ const defaultNow = () => Date.now();
 export function Countdown(props: {
   /** The moment, in milliseconds since the epoch. */
   at: number;
-  /** The drand round due at that moment. */
+  /** The public clock round due at that moment. Kept for callers; the page shows the time instead. */
   round: number;
   /** What the moment is, such as "Paper unlocks". */
   label?: string;
@@ -49,7 +49,7 @@ export function Countdown(props: {
   locale?: string;
   timeZone?: string;
 }) {
-  const { at, round, label = 'Opens', locale, timeZone } = props;
+  const { at, label = 'Opens', locale, timeZone } = props;
   const ms = useNowMs(props.now ?? defaultNow, at);
   const remaining = Math.ceil((at - ms) / 1000);
   const when = new Intl.DateTimeFormat(locale, {
@@ -58,6 +58,7 @@ export function Countdown(props: {
     month: 'short',
     hour: '2-digit',
     minute: '2-digit',
+    timeZoneName: 'short',
     ...(timeZone ? { timeZone } : {}),
   }).format(at);
   return (
@@ -68,7 +69,6 @@ export function Countdown(props: {
       </p>
       <p className="ps-countdown-when">
         <span>{when}</span>
-        <span>Public clock round {round.toLocaleString(locale)}</span>
       </p>
     </div>
   );

@@ -18,18 +18,18 @@ const BUILD_POLL_MS = 15_000;
 const stillOpen: readonly ExamStage[] = ['publish', 'onboard', 'submit'];
 
 const blockedWhy: Record<Extract<ConfirmOutcome, { ok: false }>['step'], string> = {
-  chain: 'The exam’s public record could not be read, or it doesn’t match.',
-  attestation: 'The machine answering this link couldn’t prove it is the sealed system your exam board published.',
-  list: 'The approved list held by the sealed system doesn’t match the public one.',
+  chain: 'We could not check your exam’s details. Wait a minute, then press “Check again”.',
+  attestation: 'We could not confirm that this page is connected to the right place. Wait a minute, then press “Check again”.',
+  list: 'The list of people for this exam does not match the one your exam board published. Contact your exam board.',
 };
 
-const BLOCKED_TITLE = 'We can’t confirm this is the genuine sealed system';
+const BLOCKED_TITLE = 'We can’t take your questions yet';
 
 function Blocked(props: { outcome: Extract<ConfirmOutcome, { ok: false }> }) {
   const { runConfirm, checking } = useSession();
   return (
     <div className="ss-blocked">
-      <Trouble detail={props.outcome.reasons}>Sealing has stopped, and nothing new has been sent. Contact your exam board before you continue.</Trouble>
+      <Trouble detail={props.outcome.reasons}>Nothing new has been sent. Press “Check again”. If this stays, contact your exam board before you write more.</Trouble>
       <Button
         disabled={checking}
         onClick={() => {
@@ -172,22 +172,22 @@ export function SetterFlow() {
           />
         );
       case 'opening':
-        return <Quiet title="Opening your exam…" next="This takes a moment." />;
+        return <Quiet title="Opening your exam…" next="This takes a moment. Then this page shows what to do." />;
       case 'unreachable':
         return (
           <Quiet
-            title="Can’t reach the sealed system right now"
-            lede="This is usually a connection problem. Nothing has been lost."
-            next="This page keeps trying by itself."
+            title="Can’t connect right now"
+            lede="Check your internet connection. Nothing has been lost."
+            next="This page keeps trying by itself. Leave it open, or come back to this link later."
             detail={statusError}
           />
         );
       case 'not-open':
         return (
           <Quiet
-            title="Registration hasn’t opened yet"
-            lede="Your exam board is still setting up this exam."
-            next="This page moves on by itself once registration opens."
+            title="Nothing to do yet"
+            lede="Your exam board is still setting up this exam, so registration is not open."
+            next="Come back to this link later, or leave this page open and it moves on by itself."
           />
         );
       case 'register':
@@ -199,28 +199,32 @@ export function SetterFlow() {
             tee={env.tee}
             keys={env.keys()}
             onRegistered={session.credentialSaved}
-            {...(stage === 'submit' ? { next: 'We check the sealed system by ourselves, then you can write your questions.' } : {})}
+            {...(stage === 'submit' ? { next: 'Then you can write your questions.' } : {})}
           />
         );
       case 'waiting':
         return (
           <Quiet
-            title="Waiting for your exam board"
-            lede="Your security key is registered. The board still has to publish the approved list."
-            next="This page opens for writing by itself, so you can leave it open or come back to this link. To use a different security key, ask your exam board for a new invitation link."
+            title="Nothing to do yet"
+            lede={
+              stage === 'onboard'
+                ? 'Your security key is registered. Your exam board has sent the list of people for this exam. Questions open soon, usually within about 20 minutes.'
+                : 'Your security key is registered. Your exam board has not sent the list of people for this exam yet.'
+            }
+            next="This page opens for writing by itself. You can close it and come back to this link later, in this same browser. To use a different security key, ask your exam board for a new invitation link."
           />
         );
       case 'write': {
         const failed = outcome && !outcome.ok ? outcome : null;
         if (!criteria) {
           if (failed) {
-            return <Stage title={BLOCKED_TITLE} lede={blockedWhy[failed.step]} action={<Blocked outcome={failed} />} next="Your exam board can find out what went wrong and tell you when to try again." />;
+            return <Stage title={BLOCKED_TITLE} lede={blockedWhy[failed.step]} action={<Blocked outcome={failed} />} next="Press “Check again” in a minute. If it still fails, your exam board can tell you when to try again." />;
           }
           return (
             <>
-              <Stage title="Checking this is the genuine sealed system…" next="Then you can start writing. This takes a moment." />
+              <Stage title="Getting ready for your questions…" next="Then you can start writing. This takes a moment." />
               <span className="ps-sr" role="status">
-                Checking this is the genuine sealed system.
+                Getting ready for your questions.
               </span>
             </>
           );

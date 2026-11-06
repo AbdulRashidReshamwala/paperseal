@@ -45,14 +45,14 @@ function isHttpUrl(value: string): boolean {
 /** Empty is allowed: it means that source is not connected. */
 export function validateSettings(settings: Settings): SettingsErrors {
   const errors: SettingsErrors = {};
-  if (settings.rpcUrl && !isHttpUrl(settings.rpcUrl)) errors.rpcUrl = 'Enter an http or https URL.';
-  if (settings.teeUrl && !isHttpUrl(settings.teeUrl)) errors.teeUrl = 'Enter an http or https URL.';
-  if (settings.storageUrl && !isHttpUrl(settings.storageUrl)) errors.storageUrl = 'Enter an http or https URL.';
+  if (settings.rpcUrl && !isHttpUrl(settings.rpcUrl)) errors.rpcUrl = 'Enter a web address that starts with http:// or https://.';
+  if (settings.teeUrl && !isHttpUrl(settings.teeUrl)) errors.teeUrl = 'Enter a web address that starts with http:// or https://.';
+  if (settings.storageUrl && !isHttpUrl(settings.storageUrl)) errors.storageUrl = 'Enter a web address that starts with http:// or https://.';
   if (settings.registryAddress && !/^0x[0-9a-fA-F]{40}$/.test(settings.registryAddress)) {
-    errors.registryAddress = 'Enter a 20-byte address starting with 0x.';
+    errors.registryAddress = 'Enter 0x followed by 40 letters or digits.';
   }
   if (settings.examId && !isExamId(settings.examId)) {
-    errors.examId = 'Enter a 32-byte lowercase hex ID starting with 0x.';
+    errors.examId = 'Enter an exam ID: 0x followed by 64 letters or digits.';
   }
   return errors;
 }

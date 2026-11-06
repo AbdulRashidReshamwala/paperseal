@@ -58,10 +58,9 @@ describe('bankNeeded', () => {
 
 describe('plainWords', () => {
   it('rewrites the words the design rules out of primary screens', () => {
-    expect(plainWords('The lock time has already passed. Choose a time in the future.')).toBe('Questions would close in the past. Choose a later time.');
-    expect(plainWords('ExamRegistry only accepts writes from the TEE')).toBe('the public record only accepts writes from the sealed machine');
+    expect(plainWords('ExamRegistry only accepts writes from the TEE')).toBe('the public record only accepts writes from Paper Seal');
     expect(plainWords('Not published on ExamRegistry.')).toBe('Not published on the public record.');
-    expect(plainWords('Topic names must be unique.')).toBe('Topic names must be unique.');
+    expect(plainWords('Each topic needs its own name.')).toBe('Each topic needs its own name.');
   });
 });
 
@@ -76,16 +75,19 @@ describe('configuration', () => {
     expect(verifierUrl({ VITE_VERIFIER_URL: 'https://verify.example.org/' })).toBe('https://verify.example.org/');
     expect(verifierUrl({ VITE_VERIFIER_URL: 'javascript:alert(1)' })).toBeNull();
     expect(verifierUrl({})).toBeNull();
+    const id = `0x${'ab'.repeat(32)}`;
+    expect(verifierUrl({ VITE_VERIFIER_URL: 'https://verify.example.org/' }, id)).toBe(`https://verify.example.org/?exam=${id}`);
+    expect(verifierUrl({ VITE_VERIFIER_URL: 'https://verify.example.org/app#/old' }, id.toUpperCase().replace('0X', '0x'))).toBe(
+      `https://verify.example.org/app?exam=${id}`,
+    );
+    expect(verifierUrl({ VITE_VERIFIER_URL: 'javascript:alert(1)' }, id)).toBeNull();
   });
 });
 
 describe('draftScreen', () => {
-  const ready = { create: true, version: true };
-  it('sends the board back to the first unfinished step', () => {
-    expect(draftScreen('review', { create: false, version: true })).toBe('create');
-    expect(draftScreen('review', { create: true, version: false })).toBe('version');
-    expect(draftScreen('review', ready)).toBe('review');
-    expect(draftScreen('version', ready)).toBe('version');
-    expect(draftScreen('create', ready)).toBe('create');
+  it('sends the board back to the details until they are complete', () => {
+    expect(draftScreen('review', { create: false })).toBe('create');
+    expect(draftScreen('review', { create: true })).toBe('review');
+    expect(draftScreen('create', { create: true })).toBe('create');
   });
 });

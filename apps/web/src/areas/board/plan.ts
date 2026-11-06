@@ -120,26 +120,15 @@ export function bankNeeded(criteria: Criteria): { questions: number; setters: nu
   };
 }
 
-const sentences: Record<string, string> = {
-  'The lock time must come before the unlock time (T − Δ), and the unlock time before the end time.':
-    'Questions must close before the paper is released to centres.',
-  'The end time must be after the exam start, T.': 'The exam must end after it starts.',
-  'The lock time has already passed. Choose a time in the future.': 'Questions would close in the past. Choose a later time.',
-  'Δ must be a whole number of minutes, at least 1.': 'Enter a whole number of minutes, at least 1.',
-  'Δ must not be zero.': 'Enter a whole number of minutes, at least 1.',
-  'A time is before the drand quicknet genesis.': 'That date is too far in the past.',
-  'T − Δ is before the drand quicknet genesis.': 'That date is too far in the past.',
-};
-
-/** The checks keep their exact wording in form.ts and the flows. This is what a primary screen shows. */
+/** A safety net for wording that still names the system's parts. The checks themselves already speak plainly. */
 export function plainWords(message: string): string {
-  return (sentences[message] ?? message)
+  return message
     .replaceAll('on ExamRegistry', 'on the public record')
     .replaceAll('ExamRegistry', 'the public record')
     .replaceAll('on-chain', 'on the public record')
-    .replaceAll('the TEE', 'the sealed machine')
-    .replaceAll('The TEE', 'The sealed machine')
-    .replaceAll('TEE', 'sealed machine');
+    .replaceAll('the TEE', 'Paper Seal')
+    .replaceAll('The TEE', 'Paper Seal')
+    .replaceAll('TEE', 'Paper Seal');
 }
 
 /** The hostname the wallet's reads already use, which is the operator a board would name. */
@@ -153,14 +142,24 @@ export function defaultRpcHost(
   }
 }
 
-/** The public verifier is a separate app, hosted on its own, so its address is configuration. */
+/**
+ * The public verifier is a separate app, hosted on its own, so its address is configuration. With an
+ * exam ID it is the share link from spec/agent-verification.md, `<verifier URL>/?exam=<examId>`,
+ * which names the exam in the part of the address a server sees, so it also works for an agent.
+ */
 export function verifierUrl(
   env: Record<string, string | undefined> = import.meta.env as Record<string, string | undefined>,
+  examId?: string | null,
 ): string | null {
   const given = env.VITE_VERIFIER_URL?.trim();
   if (!given) return null;
   try {
-    return ['http:', 'https:'].includes(new URL(given).protocol) ? given : null;
+    const url = new URL(given);
+    if (!['http:', 'https:'].includes(url.protocol)) return null;
+    if (!examId) return given;
+    url.hash = '';
+    url.searchParams.set('exam', examId.toLowerCase());
+    return url.toString();
   } catch {
     return null;
   }
@@ -201,11 +200,9 @@ export function verifierNameUrl(verifier: string, name: string): string {
   return `${verifier.replace(/\/+$/, '')}/#/name/${name}`;
 }
 
-export type DraftStep = 'create' | 'version' | 'review';
+export type DraftStep = 'create' | 'review';
 
-/** The first unfinished step wins, so a value that stops being valid sends the board back to it. */
-export function draftScreen(chosen: DraftStep, ready: { create: boolean; version: boolean }): DraftStep {
-  if (!ready.create || chosen === 'create') return 'create';
-  if (!ready.version || chosen === 'version') return 'version';
-  return 'review';
+/** The exam has to be complete to be reviewed, so a value that stops being valid sends the board back to it. */
+export function draftScreen(chosen: DraftStep, ready: { create: boolean }): DraftStep {
+  return !ready.create || chosen === 'create' ? 'create' : 'review';
 }

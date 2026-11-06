@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { criteriaHash, encodeApprovedList, approvedListHash, encodeCriteria, fromHex, toHex, type Hex } from '@paperseal/protocol';
 import { App } from './App';
 import { chainChecks } from './checks';
-import { examLink } from './link';
+import { examLink, routeOfHash } from './link';
 import {
   clearSettings,
   connect,
@@ -52,24 +52,24 @@ describe('the page', () => {
     'an old link to %s still reaches the one page, with no sign-in',
     (path) => {
       const html = render(path);
-      expect(html).toContain('Chain of custody');
-      expect(html).toContain('Check against your own RPC');
+      expect(html).toContain('Steps for this exam');
+      expect(html).toContain('Check it yourself');
       expect(html).not.toMatch(/sign in/i);
     },
   );
 
   it('with no TEE URL shows no failure and only neutral TEE wording', () => {
     const html = render('/', { ...defaultSettings, teeUrl: '' });
-    expect(html).toContain('Live from the sealed machine, optional');
-    expect(html).toContain('Needs a TEE URL');
+    expect(html).toContain('Live from the machine, optional');
+    expect(html).toContain('Add the live machine address');
     expect(html).not.toMatch(/\bFail\b|data-status="fail"|data-tone="bad"|role="alert"/);
   });
 
   it('labels the TEE URL optional', () => {
     const html = render('/');
-    expect(html).toContain('TEE URL (optional)');
-    expect(html).toContain('fresh attestation and live release progress');
-    expect(html).toContain('Storage URL');
+    expect(html).toContain('Live machine address (optional)');
+    expect(html).toContain('It adds live progress');
+    expect(html).toContain('Where the public files are kept');
   });
 });
 
@@ -98,6 +98,14 @@ describe('exam links', () => {
     expect(url({ routePath: '/name/%E0%A4%A' })).toEqual({ kind: 'name', name: '%E0%A4%A' });
     expect(url({ routePath: '/name/jee-main-2026.board.eth', search: `?exam=${id}` })).toEqual({ kind: 'name', name: 'jee-main-2026.board.eth' });
     expect(url({ routePath: '/name/' })).toEqual({ kind: 'none' });
+    expect(url({ ...(routeOfHash('#/name/jee-main-2026.board.eth') ?? {}) })).toEqual({ kind: 'name', name: 'jee-main-2026.board.eth' });
+  });
+
+  it('reads the route from the address, so a changed hash is seen without a reload', () => {
+    expect(routeOfHash('#/exam/0xnothex')).toEqual({ routePath: '/exam/0xnothex', routeSearch: '' });
+    expect(routeOfHash(`#/?exam=${id}`)).toEqual({ routePath: '/', routeSearch: `?exam=${id}` });
+    expect(routeOfHash('')).toBeNull();
+    expect(url({ ...(routeOfHash('#/exam/0xnothex') ?? {}) })).toEqual({ kind: 'invalid' });
   });
 
   it('has no exam without a link, and an invalid one stays invalid', () => {

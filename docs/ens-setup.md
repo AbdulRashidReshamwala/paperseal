@@ -50,11 +50,11 @@ The ENS app has no screen for this, so use `cast`, with the board keystore from 
 
 If a public RPC times out, check with `cast nonce <board address> --block pending` whether the transaction went out before you send it again.
 
-The three text records only tell the verifier where to look. A wrong value makes the later checks fail, it can't make them pass. Leave one out and the verifier uses the viewer's own Connection settings for it.
+The three text records only tell the verifier where to look. A wrong value makes the later checks fail, it can't make them pass. Leave one out and the verifier uses the viewer's own settings, under "Check it yourself", for it.
 
 ## 3. Check it
 
-Open the verifier, type the full name into the exam box, or open `<verifier>/#/name/jee-main-2026.paperseal-mumbai.eth`. The first step, **Name**, should pass, and the page then runs the usual checks. If it fails, the step says which check failed:
+Open the verifier, type the full name into the exam box, or open `<verifier>/#/name/jee-main-2026.paperseal-mumbai.eth`. The first step, **Exam name**, should pass, and the page then runs the usual checks. If it fails, the step says which check failed:
 
 | Failure | Usual cause |
 | --- | --- |
@@ -62,4 +62,4 @@ Open the verifier, type the full name into the exam box, or open `<verifier>/#/n
 | No registry | The exam name's ETH address is unset, or its code isn't `ExamRegistry`'s, or its records need an offchain gateway |
 | Primary name differs | The board wallet's primary name isn't the parent name, or isn't set |
 | Not verified both ways | The parent name's ETH address isn't the board wallet |
-| Can't read ENS | The RPC URL in Connection is down or isn't Sepolia |
+| Can't read ENS | The RPC URL under "Check it yourself" is down or isn't Sepolia |
