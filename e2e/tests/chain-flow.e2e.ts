@@ -78,6 +78,15 @@ describe('exam on a local anvil chain', () => {
       await value(page, 'Length, in minutes').fill('180');
       await rec.say('Step 1: released to centres 30 minutes before');
       await value(page, 'Minutes before the exam to release the paper to centres').fill('30');
+      await rec.say('Step 1: Advanced holds the public record provider');
+      await unfold(page, 'Advanced');
+      await value(page, 'Public record address').fill(RPC_HOST);
+      await rec.check('The first page works out when questions close', async () => {
+        const note = (await page.locator('.board-note').first().innerText()).replace(/\s+/g, ' ');
+        if (!note.includes('Questions close')) throw new Error(`no closing time: ${note}`);
+        return note;
+      });
+      await page.getByRole('button', { name: 'Continue' }).click();
       await rec.say('Step 1: first topic, Mechanics, 5 questions');
       await rec.type(value(page, 'Topic 1 name'), 'Mechanics');
       await rec.type(value(page, 'Topic 1 questions'), '5');
@@ -85,22 +94,21 @@ describe('exam on a local anvil chain', () => {
       await page.getByRole('button', { name: 'Add topic' }).click();
       await rec.type(value(page, 'Topic 2 name'), 'Optics');
       await rec.type(value(page, 'Topic 2 questions'), '3');
-      await rec.say('Step 1: Advanced holds the setter limits and the public record provider');
+      await rec.say('Step 1: Advanced holds the setter limits');
       await unfold(page, 'Advanced');
       await value(page, 'Most of a topic one setter can write, in percent').fill('20');
       await value(page, 'How many questions to collect, compared with the questions used').fill('4');
-      await value(page, 'Public record address').fill(RPC_HOST);
       await rec.pause(2000);
       await rec.check('Create step works out the rest: 8 questions at a multiple of 4 and 20 percent need 32 questions from 5 setters', async () => {
         const note = (await page.locator('.board-note').first().innerText()).replace(/\s+/g, ' ');
         if (!note.includes('at least 32 questions from at least 5 setters')) throw new Error(note);
-        if (!note.includes('Questions close')) throw new Error(`no closing time: ${note}`);
         return note;
       });
 
-      await page.getByRole('button', { name: 'Continue' }).click();
+      // On past topics, then the centres and neutral parties, which can wait until after publishing.
+      for (let step = 0; step < 3; step += 1) await page.getByRole('button', { name: 'Continue' }).click();
       await rec.say('Step 2: one summary of everything. The Paper Seal version is a row in it, and the version list is fetched live from GitHub releases');
-      await page.getByRole('heading', { name: 'Review and publish' }).waitFor({ timeout: 15_000 });
+      await page.getByRole('heading', { name: 'Preview and submit' }).waitFor({ timeout: 15_000 });
       const other = page.locator('summary', { hasText: 'Use a different version' });
       const versions = page.locator('details', { has: other }).locator('select');
       await other.waitFor({ timeout: 60_000 }).catch(() => undefined);

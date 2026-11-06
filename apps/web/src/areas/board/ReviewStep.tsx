@@ -1,4 +1,4 @@
-import { chain } from '@paperseal/protocol';
+import { chain, roles } from '@paperseal/protocol';
 import { Button, Hash, PrimaryAction, Row, Rows, Stage } from '@paperseal/ui';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
@@ -9,18 +9,25 @@ import { rememberExam } from './examsStore';
 import { evaluatePublish, evaluateSchedule, formatClock } from './form';
 import { useBoardWallet, walletStageLabels, type WalletStage } from './hooks';
 import { Fold, Problem, WalletProblem } from './Parts';
+import { saveParties, type ChosenParty } from './parties';
 import { bankNeeded, formatWhen } from './plan';
 import { explainError, publishExam, type PublishRequest } from './publishFlow';
 import type { Releases } from './releases';
 import { versionSummary, VersionEvidence, VersionPicker, VersionProblems } from './VersionChoice';
 
+/** The names chosen for these roles, or a plain line when there are none yet. */
+const partyNames = (parties: readonly ChosenParty[], wanted: readonly number[]): string => {
+  const names = parties.filter((party) => party.role !== null && wanted.includes(party.role)).map((party) => party.name);
+  return names.length > 0 ? names.join(', ') : 'None yet. You can choose them after publishing.';
+};
+
 type Progress = { state: 'idle' } | { state: 'running'; stage: WalletStage } | { state: 'failed'; message: string };
 
 /**
- * Step 2: one summary, with the Paper Seal version already chosen, and one action that connects the
+ * The last page: one summary, with the Paper Seal version already chosen, and one action that connects the
  * wallet if it must and asks it to confirm. A version that can't be used is explained here and blocks it.
  */
-export function ReviewStep(props: { eyebrow: string; releases: Releases; onBack: () => void }) {
+export function ReviewStep(props: { releases: Releases; onBack: () => void }) {
   const { plan, publish, setPublish, environment, addReceipt, resetDraft } = useBoardForm();
   const navigate = useNavigate();
   const { blueprint, schedule, scheduleInput } = useEvaluated();
@@ -57,6 +64,7 @@ export function ReviewStep(props: { eyebrow: string; releases: Releases; onBack:
         setCurrentExamId(request.examId);
         rememberExam({ id: request.examId, name: plan.name });
       }
+      if (outcome.matches && plan.parties.length > 0) saveParties(request.examId, plan.parties);
       addReceipt({ kind: 'publish', outcome, version: request.fields.version, name: plan.name });
       setProgress({ state: 'idle' });
       // A correct read-back goes straight on to the invites. Only a mismatch stops on a receipt.
@@ -74,8 +82,7 @@ export function ReviewStep(props: { eyebrow: string; releases: Releases; onBack:
   const running = progress.state === 'running';
   return (
     <Stage
-      eyebrow={props.eyebrow}
-      title="Review and publish"
+      title="Preview and submit"
       lede={
         <strong>Once you publish, nothing here can be changed, not even by the exam board.</strong>
       }
@@ -99,6 +106,8 @@ export function ReviewStep(props: { eyebrow: string; releases: Releases; onBack:
                   At least {needs.questions} questions in total, and no setter writes more than {criteria.maxSetterPercent}% of a topic
                 </Row>
               ) : null}
+              <Row label="Centres">{partyNames(plan.parties, [roles.centreKeyHolder, roles.centre])}</Row>
+              <Row label="Neutral parties">{partyNames(plan.parties, [roles.neutral])}</Row>
               <Row label="Paper Seal version">{versionSummary(props.releases, publish.version)}</Row>
             </Rows>
           </div>
@@ -115,7 +124,7 @@ export function ReviewStep(props: { eyebrow: string; releases: Releases; onBack:
           </PrimaryAction>
         </>
       }
-      next="Your wallet asks you to confirm once. Then you invite the people who take part."
+      next="Your wallet asks you to confirm once. Then everyone you chose can register, and you invite the setters."
     >
       <VersionPicker
         releases={props.releases}
@@ -161,7 +170,7 @@ export function ReviewStep(props: { eyebrow: string; releases: Releases; onBack:
       ) : null}
       <p className="board-quiet">
         <Button disabled={running} onClick={props.onBack}>
-          Change the details
+          Back
         </Button>
       </p>
     </Stage>

@@ -12,7 +12,7 @@ import type { Page } from 'playwright-core';
 export const text = {
   // Board
   createHeading: 'Create the exam',
-  reviewHeading: 'Review and publish',
+  reviewHeading: 'Preview and submit',
   peopleHeading: 'Choose who takes part',
   /** The stamp above the invites once the read-back matched. */
   publishedStamp: 'Published',

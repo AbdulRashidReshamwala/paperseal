@@ -39,6 +39,9 @@ export function boardTests(lab: () => Lab): void {
         await board.type(page.getByLabel(field.examName).first(), NAME);
         await board.type(page.getByLabel(field.examStart).first(), local(new Date(Date.now() + 30 * 86_400_000)));
         await board.type(page.getByLabel(field.releaseMinutes).first(), '30');
+        await unfold(page, fold.advanced);
+        await board.type(page.getByLabel(field.rpcHost).first(), 'sepolia.example.org');
+        await page.getByRole('button', { name: button.continue }).click();
         await board.type(page.getByLabel(field.topicName(1)).first(), 'Mechanics');
         await board.type(page.getByLabel(field.topicQuestions(1)).first(), '5');
         await page.getByRole('button', { name: button.addTopic }).click();
@@ -50,9 +53,9 @@ export function boardTests(lab: () => Lab): void {
         await page.locator('.ps-field-error').first().waitFor({ state: 'visible' });
         await board.shot('02-create-bad-percent');
         await board.type(page.getByLabel(field.maxPercent).first(), '20');
-        await board.type(page.getByLabel(field.rpcHost).first(), 'sepolia.example.org');
         await board.shot('03-create-filled');
-        await page.getByRole('button', { name: button.continue }).click();
+        // On past topics, then the centres and neutral parties, which can wait until after publishing.
+        for (let page_ = 0; page_ < 3; page_ += 1) await page.getByRole('button', { name: button.continue }).click();
       });
       await board.flow('review, choose the version and publish', async () => {
         await board.seeHeading(text.reviewHeading, 60_000);

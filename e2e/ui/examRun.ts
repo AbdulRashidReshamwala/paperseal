@@ -238,6 +238,10 @@ describe('real exam through the screens', () => {
       await board.type(bp.getByLabel(field.examStart).first(), localInput(examStart));
       await board.type(bp.getByLabel(field.length).first(), String(DURATION));
       await board.type(bp.getByLabel(field.releaseMinutes).first(), String(DELTA));
+      await unfold(bp, fold.advanced);
+      await board.type(bp.getByLabel(field.questionsClose).first(), localInput(lockAt));
+      await board.type(bp.getByLabel(field.rpcHost).first(), world.rpcHost);
+      await bp.getByRole('button', { name: button.continue }).click();
       await board.type(bp.getByLabel(field.topicName(1)).first(), liveCriteria.topics[0]?.name ?? '');
       await board.type(bp.getByLabel(field.topicQuestions(1)).first(), String(liveCriteria.topics[0]?.questions));
       await bp.getByRole('button', { name: button.addTopic }).click();
@@ -246,11 +250,10 @@ describe('real exam through the screens', () => {
       await unfold(bp, fold.advanced);
       await board.type(bp.getByLabel(field.maxPercent).first(), String(liveCriteria.maxSetterPercent));
       await board.type(bp.getByLabel(field.bankMultiple).first(), String(liveCriteria.minBankMultiple));
-      await board.type(bp.getByLabel(field.questionsClose).first(), localInput(lockAt));
-      await board.type(bp.getByLabel(field.rpcHost).first(), world.rpcHost);
       await board.shot(`${PREFIX}01-create`);
       await board.beat(2500);
-      await bp.getByRole('button', { name: button.continue }).click();
+      // On past topics, then the centres and neutral parties, which are chosen after publishing here.
+      for (let step = 0; step < 3; step += 1) await bp.getByRole('button', { name: button.continue }).click();
       await board.seeHeading(text.reviewHeading, 60_000);
       await board.say('Exam board: review, then publish');
       // The version is a row in the review. The newest checked one is already chosen.

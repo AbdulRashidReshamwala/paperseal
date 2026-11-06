@@ -1,5 +1,6 @@
 import type { PublishInput } from './form';
-import { defaultPlan, evaluatePlan, type DraftStep, type PlanInput } from './plan';
+import { validParties } from './parties';
+import { defaultPlan, draftSteps, evaluatePlan, type DraftStep, type PlanInput } from './plan';
 
 /*
  * The board's unfinished exams, kept in this browser so a reload or a closed tab loses nothing. Each
@@ -54,9 +55,9 @@ function parseContent(value: unknown): DraftContent | null {
     return null;
   }
   return {
-    plan: plan as unknown as PlanInput,
+    plan: { ...(plan as unknown as PlanInput), typedName: isText(plan.typedName) ? plan.typedName : '', parties: validParties(plan.parties) },
     publish: { version: publish.version, rpcHost: publish.rpcHost },
-    draftStep: draftStep === 'review' ? 'review' : 'create',
+    draftStep: draftSteps.includes(draftStep as DraftStep) ? (draftStep as DraftStep) : 'create',
   };
 }
 

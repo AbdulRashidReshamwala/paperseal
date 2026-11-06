@@ -222,7 +222,7 @@ function PartyRow(props: {
 }
 
 /** Adds a name that isn't in the directory. Its own records decide, as for any other. */
-function AddName(props: { taken: readonly string[]; onAdd: (name: string) => void }) {
+export function AddName(props: { taken: readonly string[]; onAdd: (name: string) => void }) {
   const [text, setText] = useState('');
   const [error, setError] = useState<string | undefined>();
   const submit = (event: FormEvent) => {

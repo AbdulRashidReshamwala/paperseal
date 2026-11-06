@@ -598,3 +598,241 @@
   font-size: var(--ps-text-small);
   border-radius: 6px;
 }
+
+/*
+ * The pages of the create form: the steps down the side, one page at a time. Same quiet style as
+ * the board home page, and everything sits under `.board-draft`.
+ */
+.ps-shell:has(.board-draft) {
+  max-width: 1080px;
+  padding-inline: var(--ps-space-6);
+}
+
+.ps-shell:has(.board-draft) .ps-role {
+  align-items: center;
+  padding-bottom: var(--ps-space-4);
+  margin-bottom: 40px;
+  border-bottom: 1px solid var(--ps-rule);
+}
+
+.board-draft {
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr);
+  gap: var(--ps-space-7);
+  align-items: start;
+}
+
+.board-draft-rail {
+  position: sticky;
+  top: var(--ps-space-5);
+  display: grid;
+  gap: var(--ps-space-1);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.board-draft-rail button {
+  display: flex;
+  gap: var(--ps-space-3);
+  align-items: center;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 var(--ps-space-3);
+  font: inherit;
+  font-size: var(--ps-text-small);
+  color: var(--ps-ink-soft);
+  text-align: left;
+  cursor: pointer;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+}
+
+.board-draft-rail button:hover:not(:disabled) {
+  background: var(--ps-paper-deep);
+}
+
+.board-draft-rail button:disabled {
+  cursor: default;
+}
+
+.board-draft-rail span {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid var(--ps-rule-strong);
+  border-radius: 50%;
+}
+
+.board-draft-rail [data-state='done'] button {
+  color: var(--ps-ink);
+}
+
+.board-draft-rail [data-state='here'] button {
+  font-weight: 600;
+  color: var(--ps-ink);
+  background: var(--ps-paper-deep);
+}
+
+.board-draft-rail [data-state='here'] span {
+  color: var(--ps-on-wax);
+  background: var(--ps-wax);
+  border-color: var(--ps-wax);
+}
+
+.board-draft-main {
+  min-width: 0;
+  max-width: 680px;
+}
+
+.board-draft-title,
+.board-draft .ps-stage-title {
+  margin: 0;
+  font-size: 2rem;
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
+.board-draft-lede {
+  margin: var(--ps-space-1) 0 var(--ps-space-5);
+  font-size: 0.9375rem;
+  color: var(--ps-ink-soft);
+}
+
+.board-draft .board-form {
+  display: block;
+  max-width: none;
+}
+
+.board-draft-card {
+  display: grid;
+  gap: var(--ps-space-4);
+  padding: var(--ps-space-5);
+  background: var(--ps-field);
+  border: 1px solid var(--ps-rule);
+  border-radius: 8px;
+}
+
+.board-draft-card .ps-field {
+  margin: 0;
+}
+
+.board-draft-card .ps-input {
+  background: var(--ps-paper);
+  border-radius: 6px;
+}
+
+.board-draft-card .board-fold {
+  margin: 0;
+}
+
+.board-draft-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ps-space-4);
+  align-items: start;
+}
+
+.board-draft-foot {
+  display: flex;
+  gap: var(--ps-space-4);
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--ps-space-4);
+}
+
+.board-draft-next {
+  display: flex;
+  gap: var(--ps-space-4);
+  align-items: center;
+}
+
+.board-draft-next .board-blocked {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--ps-ink-soft);
+}
+
+.board-draft .ps-primary,
+.board-draft-foot .ps-button,
+.board-draft-card .ps-button {
+  width: auto;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 var(--ps-space-4);
+  font-size: var(--ps-text-small);
+  white-space: nowrap;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.board-draft .ps-primary:not(:disabled) {
+  border: 0;
+}
+
+.board-party-count {
+  margin: 0;
+  font-size: var(--ps-text-small);
+  color: var(--ps-ink-soft);
+}
+
+.board-party-count strong {
+  font-weight: 600;
+  color: var(--ps-ink);
+}
+
+.board-party-list {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  border: 1px solid var(--ps-rule);
+  border-radius: 6px;
+}
+
+.board-party-list li {
+  display: flex;
+  gap: var(--ps-space-3);
+  align-items: center;
+  justify-content: space-between;
+  min-height: 48px;
+  padding: var(--ps-space-1) var(--ps-space-3);
+}
+
+.board-party-list li + li {
+  border-top: 1px solid var(--ps-rule);
+}
+
+.board-party-list label {
+  display: flex;
+  gap: var(--ps-space-3);
+  align-items: center;
+  min-width: 0;
+  font-size: var(--ps-text-small);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.board-party-list select {
+  flex: none;
+  width: 260px;
+  min-height: 36px;
+  font-size: 0.8125rem;
+}
+
+.board-draft-name p {
+  margin: var(--ps-space-2) 0 0;
+  font-size: 0.8125rem;
+  color: var(--ps-ink-soft);
+}
+
+.board-draft-name .ps-mono {
+  font-weight: 500;
+  color: var(--ps-ink);
+}

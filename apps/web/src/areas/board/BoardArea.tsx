@@ -11,12 +11,14 @@ import './board.css';
 import { BoardFormProvider, useBoardForm, useEvaluated, useReader } from './BoardForm';
 import { BoardHome } from './BoardHome';
 import { BuildStep } from './BuildStep';
-import { CreateStep } from './CreateStep';
+import { DetailsStep, TopicsStep } from './CreateStep';
+import { DraftShell } from './DraftFrame';
 import { decideStep, readSnapshot, type Snapshot } from './examState';
 import { usePoll } from './hooks';
 import { PeopleStep } from './PeopleStep';
 import { Fold } from './Parts';
-import { draftScreen, plainWords } from './plan';
+import { PartyStep } from './PartyStep';
+import { draftScreen, furthestStep, plainWords } from './plan';
 import type { PublishEnvironment } from './publishFlow';
 import { evaluatePublish } from './form';
 import { ReceiptStep } from './ReceiptStep';
@@ -27,7 +29,7 @@ import { WaitStep } from './WaitStep';
 
 const step = (n: number) => `Step ${String(n)} of 6`;
 
-/** Steps 1 and 2, before there is an exam. They live in the browser until the exam is published. */
+/** The pages before there is an exam. They live in the browser until the exam is published. */
 function Draft(props: { review: boolean }) {
   const { publish, draftStep, setDraftStep } = useBoardForm();
   const { blueprint, schedule } = useEvaluated();
@@ -39,32 +41,57 @@ function Draft(props: { review: boolean }) {
     if (review) setDraftStep('review');
   }, [review, setDraftStep]);
 
-  const created = Boolean(
-    blueprint.criteria && blueprint.examId && schedule.settings && !evaluatePublish(publish, null).errors.rpcHost,
-  );
-  const screen = draftScreen(draftStep, { create: created });
+  const details = Boolean(blueprint.examId && schedule.settings && !evaluatePublish(publish, null).errors.rpcHost);
+  const ready = { details, topics: details && Boolean(blueprint.criteria) };
+  const screen = draftScreen(draftStep, ready);
+  const rail = { step: screen, furthest: furthestStep(ready), onStep: setDraftStep };
+  if (screen === 'create') {
+    return (
+      <DetailsStep
+        rail={rail}
+        onContinue={() => {
+          setDraftStep('topics');
+        }}
+      />
+    );
+  }
+  if (screen === 'topics') {
+    return (
+      <TopicsStep
+        rail={rail}
+        onBack={() => {
+          setDraftStep('create');
+        }}
+        onContinue={() => {
+          setDraftStep('centres');
+        }}
+      />
+    );
+  }
+  if (screen === 'centres' || screen === 'neutrals') {
+    return (
+      <PartyStep
+        key={screen}
+        kind={screen}
+        rail={rail}
+        onBack={() => {
+          setDraftStep(screen === 'centres' ? 'topics' : 'centres');
+        }}
+        onContinue={() => {
+          setDraftStep(screen === 'centres' ? 'neutrals' : 'review');
+        }}
+      />
+    );
+  }
   return (
-    <>
-      {screen === 'create' ? (
-        <>
-          <CreateStep
-            eyebrow={step(1)}
-            onContinue={() => {
-              setDraftStep('review');
-            }}
-          />
-        </>
-      ) : null}
-      {screen === 'review' ? (
-        <ReviewStep
-          eyebrow={step(2)}
-          releases={releases}
-          onBack={() => {
-            setDraftStep('create');
-          }}
-        />
-      ) : null}
-    </>
+    <DraftShell {...rail}>
+      <ReviewStep
+        releases={releases}
+        onBack={() => {
+          setDraftStep('neutrals');
+        }}
+      />
+    </DraftShell>
   );
 }
 

@@ -658,7 +658,6 @@ describe('deep links', () => {
   it.each(['/new', '/blueprint', '/schedule', '/publish'])('/board%s starts a new exam when there is none', (path) => {
     renderBoard(environment().env, null, `/board${path}`);
     expect(screen.getByText('Create the exam')).toBeTruthy();
-    expect(screen.queryByRole('navigation')).toBeNull();
   });
 
   it.each(['/onboarding', '/list', '/outbox'])('/board%s shows what the last published exam needs now', async (path) => {

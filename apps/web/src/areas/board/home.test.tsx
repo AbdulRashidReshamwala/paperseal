@@ -128,7 +128,6 @@ describe('/board, the home page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create an exam' }));
     expect(where()).toBe('/board/new');
     expect(screen.getByText('Create the exam')).toBeTruthy();
-    expect(screen.getByText('Step 1 of 6')).toBeTruthy();
     expect((screen.getByLabelText(/^Exam name/) as HTMLInputElement).value).toBe('');
     cleanup();
     renderBoard('/board/new', environment);
@@ -163,7 +162,6 @@ describe('/board, the home page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Continue maths-2027' }));
     expect(where()).toBe('/board/draft/abc');
     expect((screen.getByLabelText(/^Exam name/) as HTMLInputElement).value).toBe('maths-2027');
-    expect(screen.getByText('Step 1 of 6')).toBeTruthy();
   });
 
   it('deletes a draft after one confirm, and keeping it changes nothing', () => {
