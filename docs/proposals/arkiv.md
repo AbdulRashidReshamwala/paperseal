@@ -66,7 +66,7 @@ Arkiv also doesn't replace `ExamRegistry`, and the TEE never reads from it.
 
 - Can a static verifier read Arkiv reliably from the browser without an access key? **Answered: yes.** Rabdi's RPC returns `access-control-allow-origin: *`, and the verifier reads it with no key. It is rate limited, so a hosted verifier should use an origin-locked key ([`arkiv/friction.md`](../../arkiv/friction.md) #5).
 - Should the board run the only relay, or should anyone be able to run one and publish a writer address? **Answered: anyone.** The board lists its writers in the exam's ENS name (`paperseal.arkiv-writers`), and viewers can add their own, such as a neutral party's relay. In the demo, the board's wallet is the only writer.
-- Is the Swarm bonus worth the extra work? Not decided. It covers uploading `paper.bin`, buying a postage batch and writing `/arkiv/swarm.md`. Our ciphertext is already encrypted, so upload it as a plain Swarm reference. An encrypted reference contains its key, and entities are public.
+- Is the Swarm bonus worth the extra work? **Answered: built.** See [`arkiv/swarm.md`](../../arkiv/swarm.md). The rest of this point, kept as written: It covers uploading `paper.bin`, buying a postage batch and writing `/arkiv/swarm.md`. Our ciphertext is already encrypted, so upload it as a plain Swarm reference. An encrypted reference contains its key, and entities are public.
 
 ## Prize Fit
 
