@@ -1,9 +1,9 @@
 import { participantRoles, type ArkivReader, type ExamRow, type ParticipantRow } from '@paperseal/arkiv';
 import { OnChainBytesError, type ExamNameResult, type ExamRegistry } from '@paperseal/chain';
 import { ApprovedListError, decodeApprovedList, fromHex, type Hex } from '@paperseal/protocol';
+import { sameHex } from '@paperseal/verify';
 import { isAddressEqual, sha256, type Address } from 'viem';
 
-import { sameHex } from './checks';
 import { roleNames } from './custody';
 import { isExamId } from './settings';
 

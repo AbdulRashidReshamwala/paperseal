@@ -59,6 +59,9 @@ importers:
       '@paperseal/ui':
         specifier: workspace:*
         version: link:../../packages/ui
+      '@paperseal/verify':
+        specifier: workspace:*
+        version: link:../../packages/verify
       react:
         specifier: 19.3.1
         version: 19.3.1
@@ -319,6 +322,43 @@ importers:
       vite:
         specifier: 8.3.6
         version: 8.3.6(@types/node@26.6.6)
+
+  packages/verify:
+    dependencies:
+      '@paperseal/arkiv':
+        specifier: workspace:*
+        version: link:../arkiv
+      '@paperseal/attestation':
+        specifier: workspace:*
+        version: link:../attestation
+      '@paperseal/chain':
+        specifier: workspace:*
+        version: link:../chain
+      '@paperseal/crypto':
+        specifier: workspace:*
+        version: link:../crypto
+      '@paperseal/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@paperseal/swarm':
+        specifier: workspace:*
+        version: link:../swarm
+      '@paperseal/tee-client':
+        specifier: workspace:*
+        version: link:../tee-client
+    devDependencies:
+      '@peculiar/x509':
+        specifier: 3.1.0
+        version: 3.1.0(@peculiar/asn1-schema@3.0.0(asn1js@4.0.0))(asn1js@4.0.0)
+      jose:
+        specifier: 6.1.0
+        version: 6.1.0
+      reflect-metadata:
+        specifier: 0.2.2
+        version: 0.2.2
+      tlock-js:
+        specifier: 0.9.0
+        version: 0.9.0
 
   relay:
     dependencies:

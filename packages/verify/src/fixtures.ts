@@ -31,7 +31,7 @@ import { BasicConstraintsExtension, X509Certificate, X509CertificateGenerator } 
 import { CompactSign } from 'jose';
 import { Buffer as TlockBuffer, defaultChainInfo, timelockEncrypt, type ChainInfo } from 'tlock-js';
 
-import { examSettings, teeStorageBucket, type Build, type Exam } from './attest';
+import { examSettings, type Build, type Exam } from './attest';
 import type { StorageReader } from './storage';
 
 /*
@@ -46,6 +46,8 @@ const rsa = { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256', publicExponent: new Ui
 export const examId: Hex = `0x${'11'.repeat(32)}`;
 export const registryAddress: Hex = '0x00000000000000000000000000000000000000aa';
 export const imageDigest: Hex = `0x${'ab'.repeat(32)}`;
+/** The bucket the test TEE was started with, which its tokens name. */
+export const storageBucket = 'paperseal-test-bucket';
 
 export const boardAddress: Hex = '0x000000000000000000000000000000000000b0a2';
 /** A registry whose code passed the check. */
@@ -258,7 +260,7 @@ export async function buildWorld(options: WorldOptions = {}) {
     eat_nonce: attestationNonce(signing.publicKey, examBytes),
     submods: {
       confidential_space: { support_attributes: ['STABLE'] },
-      container: { image_digest: `sha256:${imageDigest.slice(2)}`, args: ['/tee', ...startupArgs(settings)], cmd_override: startupArgs(settings), env_override: { STORAGE_BUCKET: teeStorageBucket } },
+      container: { image_digest: `sha256:${imageDigest.slice(2)}`, args: ['/tee', ...startupArgs(settings)], cmd_override: startupArgs(settings), env_override: { STORAGE_BUCKET: storageBucket } },
     },
   };
   const token = await signToken(claims, pki);

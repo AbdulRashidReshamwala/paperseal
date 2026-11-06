@@ -15,20 +15,17 @@ import {
   type Step,
   useLoaded,
 } from '@paperseal/ui';
+import { approvedEntries, createBackupCache, createStorage, loadChain, type BackupSource, type ChainData } from '@paperseal/verify';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 
-import { teeStorageBucket } from './attest';
-import { createBackupCache, type BackupSource } from './backup';
-import { loadChain, type ChainData } from './checks';
 import { clockTime, custody, dayTime, REPOSITORY, type Custody, type CustodyStep, type Failure } from './custody';
 import { Evidence } from './evidence';
-import { useExamLink } from './link';
+import { teeStorageBucket } from './env';
+import { useExamLink, useShareAddress } from './link';
 import { useLatestRound, useNow } from './live';
 import { loadArkiv, loadLive, loadRecords, signedKeyPriv, useProof, type Records } from './load';
 import { usePoll, type Polled } from './poll';
-import { approvedEntries } from './commitments';
-import { createStorage } from './storage';
 import {
   arkivWriters,
   defaultSettings,
@@ -86,6 +83,7 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
   const connections = useConnections();
   const { drand, settings, examId: savedExam, arkiv } = connections;
   const link = useExamLink();
+  useShareAddress(link);
   const name = useExamName(link.kind === 'name' ? link.name : null, settings.rpcUrl, pollMs.records);
   const resolved = name?.state === 'ready' && name.value.ok ? name.value.value : null;
 

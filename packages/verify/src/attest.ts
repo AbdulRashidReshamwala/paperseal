@@ -15,16 +15,6 @@ import { verifyTeeSignature } from '@paperseal/crypto';
 import { attestation, chain, encodeMessage, fromHex, type ExamSettings, type Hex } from '@paperseal/protocol';
 import type { TeeClient } from '@paperseal/tee-client';
 
-import { rootOption } from './mockMode';
-
-/**
- * The bucket the TEE was started with, which `env_override` must name. Build-time, like the other
- * defaults, and an exam name's bucket record replaces it for that view. Unset, it is empty and the
- * claim fails against any real token.
- */
-export const teeStorageBucket: string =
-  (import.meta.env as Record<string, string | undefined>).VITE_TEE_STORAGE_BUCKET ?? '';
-
 export type Exam = NonNullable<Awaited<ReturnType<ExamRegistry['getExam']>>>;
 export type Build = NonNullable<Awaited<ReturnType<ExamRegistry['getBuild']>>>;
 
@@ -61,7 +51,8 @@ export function expectedClaims(
   registry: Hex,
   examId: Hex,
   keys: Pick<KeyMaterial, 'instancePublicKey'> & Partial<KeyMaterial>,
-  bucket: string = teeStorageBucket,
+  /** The bucket the TEE was started with, which `env_override` must name. Empty fails against any real token. */
+  bucket: string,
 ): ExpectedClaims {
   return {
     instancePublicKey: fromHex(keys.instancePublicKey),
@@ -122,9 +113,9 @@ export async function checkRecordToken(args: {
   examId: Hex;
   registry: Hex;
   instancePublicKey: Hex;
-  /** The bucket the TEE must name. `teeStorageBucket` when left out. */
-  bucket?: string;
-  /** A DER root in place of Google's. Tests only. */
+  /** The bucket the TEE must name. */
+  bucket: string;
+  /** A DER root in place of Google's. Tests and the mock suite only. */
   trustedRoot?: Uint8Array;
 }): Promise<RecordVerdict> {
   const { token, exam, examId, registry } = args;
@@ -132,7 +123,7 @@ export async function checkRecordToken(args: {
   const options = {
     mode: 'published' as const,
     now: Math.floor(Date.now() / 1000),
-    ...(args.trustedRoot ? { trustedRoot: args.trustedRoot } : rootOption()),
+    ...(args.trustedRoot ? { trustedRoot: args.trustedRoot } : {}),
   };
   let claims: ClaimCheck[];
   try {
@@ -156,7 +147,7 @@ export async function checkPublishedToken(args: {
   build: Build;
   examId: Hex;
   registry: Hex;
-  bucket?: string;
+  bucket: string;
   trustedRoot?: Uint8Array;
 }): Promise<PublishedVerdict> {
   const record = await checkRecordToken({ ...args, instancePublicKey: args.build.instancePublicKey as Hex });
@@ -174,14 +165,14 @@ export async function checkFreshToken(args: {
   exam: Exam;
   examId: Hex;
   registry: Hex;
-  bucket?: string;
+  bucket: string;
   trustedRoot?: Uint8Array;
 }): Promise<FreshVerdict> {
   const { token, ...keys } = await args.tee.attestation();
   const verdict = await checkToken(token, expectedClaims(args.exam, args.registry, args.examId, keys, args.bucket), {
     mode: 'live',
     now: Math.floor(Date.now() / 1000),
-    ...(args.trustedRoot ? { trustedRoot: args.trustedRoot } : rootOption()),
+    ...(args.trustedRoot ? { trustedRoot: args.trustedRoot } : {}),
   });
   return { ...verdict, instancePublicKey: keys.instancePublicKey };
 }

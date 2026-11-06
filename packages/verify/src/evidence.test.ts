@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { checkBuildSignature, checkFreshToken, checkPublishedToken, checkRecordToken } from './attest';
 import type { ChainData } from './checks';
 import { checkManifest, approvedEntries, holdersOf } from './commitments';
-import { buildWorld, p256, random, registryAddress, teeSign, examId, signToken, type World } from './fixtures';
+import { buildWorld, p256, random, registryAddress, storageBucket, teeSign, examId, signToken, type World } from './fixtures';
 import { loadLive, signedKeyPriv } from './load';
 import { runProof } from './proof';
 import { checkReleaseFiles, checkReleaseLog, expectedReleaseFiles, parseReleaseLog, releaseProgress } from './unlock';
@@ -66,6 +66,7 @@ describe('published token', () => {
       build: w.build,
       examId,
       registry: registryAddress,
+      bucket: storageBucket,
       trustedRoot: w.pki.root,
       ...overrides,
     });
@@ -87,6 +88,7 @@ describe('published token', () => {
       build: w.build,
       examId,
       registry: registryAddress,
+      bucket: storageBucket,
     });
     expect(verdict.signature.ok).toBe(false);
     expect(verdict.verified).toBe(false);
@@ -135,7 +137,7 @@ describe('published token', () => {
           instanceKeySignature: toHex(new Uint8Array(64)),
         }),
     };
-    const fresh = await checkFreshToken({ tee: tee as never, exam: w.exam, examId, registry: registryAddress, trustedRoot: w.pki.root });
+    const fresh = await checkFreshToken({ tee: tee as never, exam: w.exam, examId, registry: registryAddress, bucket: storageBucket, trustedRoot: w.pki.root });
     expect(fresh.claims.find((c) => c.claim === 'exp')?.ok).toBe(false);
     expect(fresh.trusted).toBe(false);
   });
@@ -156,13 +158,13 @@ describe('fresh token', () => {
           instanceKeySignature: toHex(signature),
         }),
     });
-    const verdict = await checkFreshToken({ tee: ask(good) as never, exam: w.exam, examId, registry: registryAddress, trustedRoot: w.pki.root });
+    const verdict = await checkFreshToken({ tee: ask(good) as never, exam: w.exam, examId, registry: registryAddress, bucket: storageBucket, trustedRoot: w.pki.root });
     expect(verdict.signature).toEqual({ ok: true });
     expect(verdict.instanceKey.ok).toBe(true);
     expect(verdict.claims.filter((c) => !c.ok)).toEqual([]);
     expect(verdict.trusted).toBe(true);
     expect(verdict.instancePublicKey).toBe(toHex(w.signing.publicKey));
-    const forged = await checkFreshToken({ tee: ask(new Uint8Array(64)) as never, exam: w.exam, examId, registry: registryAddress, trustedRoot: w.pki.root });
+    const forged = await checkFreshToken({ tee: ask(new Uint8Array(64)) as never, exam: w.exam, examId, registry: registryAddress, bucket: storageBucket, trustedRoot: w.pki.root });
     expect(forged.instanceKey.ok).toBe(false);
     expect(forged.trusted).toBe(false);
   });
@@ -279,6 +281,7 @@ describe('release log', () => {
       exam: w.exam,
       examId,
       registry: registryAddress,
+      bucket: storageBucket,
       instancePublicKey: log.instancePublicKey,
       trustedRoot: w.pki.root,
     });
@@ -295,6 +298,7 @@ describe('release log', () => {
       exam: w.exam,
       examId,
       registry: registryAddress,
+      bucket: storageBucket,
       instancePublicKey: log.instancePublicKey,
       trustedRoot: w.pki.root,
     });
@@ -338,7 +342,7 @@ describe('release log', () => {
       attestation: () => Promise.reject(new Error('down')),
     } as unknown as TeeClient;
     const chain = { exam: w.exam, entries: w.entriesHex } as ChainData;
-    const report = await loadLive({ tee, chain: () => chain, examId, registry: registryAddress });
+    const report = await loadLive({ tee, chain: () => chain, examId, registry: registryAddress, bucket: storageBucket });
     if ('kind' in report) throw new Error('expected a report');
     expect(report.log).toBeNull();
   });
