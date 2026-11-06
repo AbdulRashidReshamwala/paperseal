@@ -8,10 +8,13 @@
   "schemas": {
     "releaseLog": "paperseal.v1.release-log",
     "releaseToken": "paperseal.v1.release-token",
-    "relayHeartbeat": "paperseal.v1.relay-heartbeat"
+    "relayHeartbeat": "paperseal.v1.relay-heartbeat",
+    "exam": "paperseal.v1.exam",
+    "participant": "paperseal.v1.participant"
   },
   "lifetimeDays": 180,
   "staleAfterSeconds": 120,
   "heartbeatSeconds": 60,
-  "heartbeatLifetimeHours": 24
+  "heartbeatLifetimeHours": 24,
+  "logChunkBlocks": 10000
 }

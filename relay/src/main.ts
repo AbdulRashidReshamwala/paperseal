@@ -1,14 +1,16 @@
 import { arkiv, createArkivReader, createArkivWriter, type ArkivWriter } from '@paperseal/arkiv';
+import { createExamRegistry, resolveExamName } from '@paperseal/chain';
 import { chain } from '@paperseal/protocol';
 import type { Address } from 'viem';
 
-import { parseCommand, usage, UsageError, type MirrorTarget } from './args';
+import { parseCommand, usage, UsageError, type IndexTarget, type MirrorTarget } from './args';
 import { relayEnv, type RelayEnv } from './config';
 import { dryCheck } from './dry-check';
+import { indexLoop, indexPass, indexReportLines, indexTally, newIndexState, rpcLabel, type IndexDeps, type IndexReport } from './indexer';
 import { keystoreAddress, loadSigner } from './keystore';
 import { explorerLinks, mirrorPass, tally, type PassReport } from './mirror';
 import { errorText, print, printError, registerSecret } from './output';
-import { ageText, statusRows, type StatusRow } from './status';
+import { ageText, indexStatus, indexStatusLines, statusRows, type StatusRow } from './status';
 import { abortableSleep, watch, type Beat } from './watch';
 
 const links = explorerLinks(arkiv.network.explorer);
@@ -66,6 +68,67 @@ function printRow(row: StatusRow): void {
   print(`            entity ${row.entityKey}  ${links.entity(row.entityKey)}`);
 }
 
+export function printIndexReport(report: IndexReport): void {
+  for (const line of indexReportLines(report, links)) print(line);
+}
+
+const rpcSourceText = { '--rpc': 'from --rpc', RELAY_SEPOLIA_RPC: 'from RELAY_SEPOLIA_RPC', default: 'the public default (pass --rpc or set RELAY_SEPOLIA_RPC to change it)' } as const;
+
+function indexHeader(env: RelayEnv, target: IndexTarget, writer: Address): void {
+  print(`Arkiv     ${arkiv.network.name} (chain ${String(arkiv.network.chainId)}), ${accessKeyLine(env)}`);
+  print(`writer    ${writer}  ${links.address(writer)}`);
+  print(`registry  ${target.registry} (chain ${String(chain.chainId)})`);
+  print(`Sepolia   ${rpcLabel(target.rpcUrl).shown}, ${rpcSourceText[target.rpcSource]}`);
+  print(`blocks    ${target.fromBlock.toString()} to ${target.toBlock?.toString() ?? 'latest'}, ${String(arkiv.logChunkBlocks)} per log query`);
+  print(`names     ${target.names.length > 0 ? target.names.join(', ') : 'none (pass --names to index exam names)'}`);
+}
+
+async function runIndex(env: RelayEnv, target: IndexTarget): Promise<void> {
+  for (const secret of rpcLabel(target.rpcUrl).secrets) registerSecret(secret);
+  const writer = await signedWriter(env);
+  indexHeader(env, target, writer.address);
+  const deps: IndexDeps = {
+    registry: createExamRegistry({ address: target.registry, rpcUrl: target.rpcUrl }),
+    writer,
+    resolveName: (name) => resolveExamName(name, { rpcUrl: target.rpcUrl }),
+    chainId: chain.chainId,
+    chunk: arkiv.logChunkBlocks,
+  };
+
+  if (target.everySeconds === undefined) {
+    const report = await indexPass(target, deps, newIndexState(target.fromBlock));
+    printIndexReport(report);
+    const t = indexTally(report);
+    if (t.failed > 0 || t.held > 0 || t.listsRefused > 0 || t.listsFailed > 0) process.exitCode = 1;
+    return;
+  }
+
+  const controller = new AbortController();
+  let interrupts = 0;
+  const onSignal = () => {
+    interrupts += 1;
+    if (interrupts > 1) process.exit(130);
+    print('stopping after this pass (Ctrl+C again to quit now)');
+    controller.abort();
+  };
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
+  print(`indexing every ${String(target.everySeconds)}s from the last block scanned, until Ctrl+C`);
+  try {
+    const state = await indexLoop(target, {
+      ...deps,
+      sleep: abortableSleep,
+      signal: controller.signal,
+      onReport: printIndexReport,
+      onError: (message) => printError(`  error ${message}`),
+    });
+    print(`stopped; the next scan would start at block ${state.nextBlock.toString()}`);
+  } finally {
+    process.off('SIGINT', onSignal);
+    process.off('SIGTERM', onSignal);
+  }
+}
+
 async function signedWriter(env: RelayEnv): Promise<ArkivWriter> {
   const account = await loadSigner(env.keystore);
   return createArkivWriter({ account, accessKey: env.accessKey.value });
@@ -103,6 +166,21 @@ async function run(argv: string[]): Promise<void> {
 
   const env = relayEnv();
   registerSecret(env.accessKey.value);
+
+  if (command.command === 'status-index') {
+    const writer = command.writer ?? (await keystoreAddress(env.keystore));
+    const reader = createArkivReader({ accessKey: env.accessKey.value });
+    print(`Arkiv     ${arkiv.network.name}, ${accessKeyLine(env)}`);
+    print(`writer    ${writer}${command.writer ? '' : ` (keystore ${env.keystore.account})`}  ${links.address(writer)}`);
+    print(`registry  ${command.registry}`);
+    for (const line of indexStatusLines(await indexStatus(reader, command.registry, writer), links.entity)) print(line);
+    return;
+  }
+
+  if (command.command === 'index') {
+    await runIndex(env, command.target);
+    return;
+  }
 
   if (command.command === 'status') {
     const writer = command.writer ?? (await keystoreAddress(env.keystore));

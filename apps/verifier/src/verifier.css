@@ -169,3 +169,19 @@
   font-size: var(--ps-text-small);
   color: var(--ps-ink-soft);
 }
+
+/* A quiet way on, under a form. */
+.vf-more {
+  margin: var(--ps-space-3) 0 0;
+}
+
+.vf-ignored {
+  margin-top: var(--ps-space-2);
+  font-size: var(--ps-text-small);
+  color: var(--ps-ink-soft);
+}
+
+.vf-ignored ul {
+  padding-left: 1.25em;
+  margin: var(--ps-space-2) 0 0;
+}

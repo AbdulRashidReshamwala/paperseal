@@ -12,7 +12,10 @@ import {
   arkivChain,
   createArkivReader,
   createArkivWriter,
+  examSchema,
   MirrorInputError,
+  participantBatchSize,
+  participantSchema,
   relayHeartbeatSchema,
   releaseLogSchema,
   releaseTokenSchema,
@@ -133,7 +136,7 @@ describe('schemas', () => {
   function specTables(): Map<string, [string, string, boolean][]> {
     const text = readFileSync(resolve(import.meta.dirname, '../../../spec/arkiv.md'), 'utf8');
     const tables = new Map<string, [string, string, boolean][]>();
-    for (const [, name = '', table = ''] of text.matchAll(/^`([\w.-]+)` (?:holds|says)[^\n]*\n\n((?:\|[^\n]*\n)+)/gm)) {
+    for (const [, name = '', table = ''] of text.matchAll(/^`([\w.-]+)` (?:holds|says|describes)[^\n]*\n\n((?:\|[^\n]*\n)+)/gm)) {
       const rows = table.trim().split('\n').slice(2);
       tables.set(
         name,
@@ -155,8 +158,10 @@ describe('schemas', () => {
       arkiv.schemas.releaseLog,
       arkiv.schemas.releaseToken,
       arkiv.schemas.relayHeartbeat,
+      arkiv.schemas.exam,
+      arkiv.schemas.participant,
     ]);
-    for (const schema of [releaseLogSchema, releaseTokenSchema, relayHeartbeatSchema]) {
+    for (const schema of [releaseLogSchema, releaseTokenSchema, relayHeartbeatSchema, examSchema, participantSchema]) {
       const columns = Object.entries(schema.columns).map(([name, column]) => [
         name,
         column.type,
@@ -392,5 +397,367 @@ describe('createArkivWriter', () => {
     await expect(writer.mirrorReleaseToken({ ...input, body: log(), instancePublicKey })).rejects.toThrow(/compact JWT/);
     const compressed: Hex = `0x02${'05'.repeat(32)}`;
     await expect(writer.mirrorReleaseToken({ ...input, body: jwt, instancePublicKey: compressed })).rejects.toThrow(/P-256/);
+  });
+});
+
+const u64Attr = (name: string, value: bigint): RpcAttribute => ({ name, type: 'u64', value: `0x${value.toString(16)}` });
+const addrAttr = (name: string, value: Address): RpcAttribute => ({ name, type: 'addr', value });
+const board: Address = '0x00000000000000000000000000000000000000cc';
+const criteriaHash: Hex = `0x${'c1'.repeat(32)}`;
+const listHash: Hex = `0x${'1a'.repeat(32)}`;
+const paperHash: Hex = `0x${'9a'.repeat(32)}`;
+
+/** The exam-index columns of a well-formed row. */
+const examValues = {
+  board,
+  chainId: 11155111n,
+  stage: 'listed',
+  examStart: 1_900_000_000n,
+  createdBlock: 12_070_912n,
+  criteriaHash: criteriaHash as string,
+  approvedListHash: listHash as string,
+  paperHash: '',
+  name: '',
+};
+
+/** An exam entity as the node returns it. */
+function examEntity(n: number, creator: Address, overrides: Partial<typeof examValues> = {}, rowRegistry: Address = registry) {
+  const values = { ...examValues, ...overrides };
+  return {
+    key: keyOf(n),
+    creator,
+    createdAt: '0x30',
+    attributes: [
+      str('arkiv.schema', arkiv.schemas.exam),
+      str('examId', examId),
+      addrAttr('registry', rowRegistry),
+      addrAttr('board', values.board),
+      u64Attr('chainId', values.chainId),
+      str('stage', values.stage),
+      u64Attr('examStart', values.examStart),
+      u64Attr('createdBlock', values.createdBlock),
+      str('criteriaHash', values.criteriaHash),
+      str('approvedListHash', values.approvedListHash),
+      str('paperHash', values.paperHash),
+      str('name', values.name),
+    ],
+  };
+}
+
+/** A participant entity as the node returns it. */
+function participantEntity(n: number, creator: Address, owner: string, passkeyKeyHash: string, rowRegistry: Address = registry) {
+  return {
+    key: keyOf(n),
+    creator,
+    createdAt: '0x40',
+    attributes: [
+      str('arkiv.schema', arkiv.schemas.participant),
+      str('examId', examId),
+      addrAttr('registry', rowRegistry),
+      str('role', 'neutral'),
+      str('owner', owner),
+      str('passkeyKeyHash', passkeyKeyHash),
+      str('derivedKeyHash', ''),
+    ],
+  };
+}
+
+const point = (n: number) => Uint8Array.from([0x04, ...new Uint8Array(64).fill(n)]);
+
+describe('exam index writer', () => {
+  const created = { entityKey: keyOf(0xee), txHash: keyOf(0xff), expiresAt: 1n };
+  const examInput = {
+    examId: `0x${'AB'.repeat(32)}` as Hex,
+    registry,
+    board,
+    chainId: 11155111,
+    stage: 'listed' as const,
+    examStart: 1_900_000_000n,
+    createdBlock: 12_070_912n,
+    criteriaHash: `0x${'C1'.repeat(32)}` as Hex,
+    approvedListHash: listHash,
+    paperHash: null,
+    name: null,
+  };
+
+  function setup(query: (text: string, options: QueryOptions) => unknown[] = () => [], batch = true) {
+    const rpc = stubRpc(query);
+    const createEntity = vi.fn((..._args: unknown[]) => Promise.resolve(created));
+    const patchEntity = vi.fn((_schema: unknown, entityKey: Hex, _changes: unknown) =>
+      Promise.resolve({ entityKey, txHash: keyOf(0xfa) }),
+    );
+    let nextKey = 0x100;
+    const executeBatch = vi.fn((data: { creates: unknown[] }) =>
+      Promise.resolve({
+        txHash: keyOf(0xfb),
+        createdEntities: data.creates.map(() => keyOf(nextKey++)),
+        patchedEntities: [],
+        deletedEntities: [],
+        extendedEntities: [],
+        ownershipChanges: [],
+      }),
+    );
+    const walletClient = batch
+      ? { createEntity, patchEntity, executeBatch }
+      : { createEntity, patchEntity };
+    const writer = createArkivWriter({ account: writerA, transport: rpc.transport, walletClient: walletClient as never });
+    return { rpc, createEntity, patchEntity, executeBatch, writer };
+  }
+
+  it("creates a patchable, publicly extendable row when this writer has none", async () => {
+    const { rpc, createEntity, patchEntity, writer } = setup();
+    expect(await writer.upsertExam(examInput)).toEqual({ action: 'created', entityKey: created.entityKey, txHash: created.txHash });
+    expect(patchEntity).not.toHaveBeenCalled();
+    const [query] = rpc.queries();
+    expect(query?.text).toContain(`arkiv.schema = str('${arkiv.schemas.exam}')`);
+    expect(query?.text).toContain(`examId = str('${examId}')`);
+    expect(query?.text.toLowerCase()).toContain(`registry = addr(${registry})`);
+    expect(query?.text.toLowerCase()).toContain(`$creator = addr(${writerA})`);
+    const [schema, values, options] = createEntity.mock.calls[0] ?? [];
+    expect(schema).toBe(examSchema);
+    expect(values).toMatchObject({ examId, stage: 'listed', criteriaHash, approvedListHash: listHash, paperHash: '', name: '' });
+    const typed = values as Record<string, { value: unknown }>;
+    expect(typed.board?.value).toBe(getAddress(board));
+    expect(typed.examStart?.value).toBe(1_900_000_000n);
+    expect(typed.createdBlock?.value).toBe(12_070_912n);
+    expect(typed.chainId?.value).toBe(11155111n);
+    expect(options).toEqual({
+      expiration: ExpirationTime.fromDays(arkiv.lifetimeDays),
+      flags: { readonly: false, permissionlessExtension: true },
+    });
+  });
+
+  it('sends nothing when the row already says it all', async () => {
+    const { createEntity, patchEntity, writer } = setup(() => [examEntity(1, writerA)]);
+    expect(await writer.upsertExam(examInput)).toEqual({ action: 'unchanged', entityKey: keyOf(1) });
+    expect(createEntity).not.toHaveBeenCalled();
+    expect(patchEntity).not.toHaveBeenCalled();
+  });
+
+  it('patches only the columns that changed', async () => {
+    const { patchEntity, writer } = setup(() => [examEntity(1, writerA, { stage: 'published', approvedListHash: '' })]);
+    const result = await writer.upsertExam({ ...examInput, stage: 'built', paperHash, name: 'math.exams.eth' });
+    expect(result).toEqual({ action: 'patched', entityKey: keyOf(1), txHash: keyOf(0xfa) });
+    const [schema, key, changes] = patchEntity.mock.calls[0] ?? [];
+    expect(schema).toBe(examSchema);
+    expect(key).toBe(keyOf(1));
+    expect(changes).toEqual({ set: { stage: 'built', approvedListHash: listHash, paperHash, name: 'math.exams.eth' } });
+  });
+
+  it('never moves the stage back, but still updates other columns', async () => {
+    const row = () => [examEntity(1, writerA, { stage: 'built', paperHash })];
+    const behind = { ...examInput, stage: 'published' as const, approvedListHash: null };
+    const { patchEntity, writer } = setup(row);
+    expect(await writer.upsertExam(behind)).toEqual({ action: 'unchanged', entityKey: keyOf(1) });
+    expect(await writer.upsertExam({ ...behind, name: 'math.exams.eth' })).toMatchObject({ action: 'patched' });
+    expect(patchEntity.mock.calls[0]?.[2]).toEqual({ set: { name: 'math.exams.eth' } });
+  });
+
+  it('replaces a stage it does not know, and patches a changed u64 or address', async () => {
+    const { patchEntity, writer } = setup(() => [examEntity(1, writerA, { stage: 'weird', examStart: 1n, board: writerB })]);
+    await writer.upsertExam(examInput);
+    const changes = patchEntity.mock.calls[0]?.[2] as { set: Record<string, unknown> };
+    expect(Object.keys(changes.set).sort()).toEqual(['board', 'examStart', 'stage']);
+    expect(changes.set.stage).toBe('listed');
+    expect(changes.set.examStart).toMatchObject({ value: 1_900_000_000n });
+    expect(changes.set.board).toMatchObject({ value: getAddress(board) });
+  });
+
+  it('refuses hashes that disagree with the stage, and an oversized name, before sending anything', async () => {
+    const { rpc, createEntity, writer } = setup();
+    await expect(writer.upsertExam({ ...examInput, approvedListHash: null })).rejects.toThrow(/needs approvedListHash/);
+    await expect(writer.upsertExam({ ...examInput, paperHash })).rejects.toThrow(/has no paperHash/);
+    await expect(writer.upsertExam({ ...examInput, stage: 'built' })).rejects.toThrow(/needs paperHash/);
+    await expect(writer.upsertExam({ ...examInput, approvedListHash: '0x12' })).rejects.toThrow(/32 bytes/);
+    await expect(writer.upsertExam({ ...examInput, stage: 'done' as never })).rejects.toThrow(MirrorInputError);
+    await expect(writer.upsertExam({ ...examInput, name: `${'é'.repeat(64)}a` })).rejects.toThrow(/129 bytes/);
+    expect(rpc.calls).toEqual([]);
+    expect(createEntity).not.toHaveBeenCalled();
+  });
+
+  it('says so when a row must change but the wallet client cannot patch', async () => {
+    const rpc = stubRpc(() => [examEntity(1, writerA, { name: 'old.eth' })]);
+    const createEntity = vi.fn();
+    const writer = createArkivWriter({ account: writerA, transport: rpc.transport, walletClient: { createEntity } as never });
+    await expect(writer.upsertExam(examInput)).rejects.toThrow(/no patchEntity/);
+  });
+
+  const setterOwner = `0x${'5e'.repeat(32)}`;
+  const entries = [
+    { role: 1, passkeyPublicKey: point(1), derivedPublicKey: new Uint8Array(), owner: setterOwner },
+    { role: 2, passkeyPublicKey: point(2), derivedPublicKey: point(12), owner: 'neutral.example' },
+    { role: 3, passkeyPublicKey: point(3), derivedPublicKey: point(13), owner: 'centre-a.example' },
+    { role: 4, passkeyPublicKey: point(4), derivedPublicKey: point(14), owner: 'centre-b.example' },
+  ];
+  const participants = { examId: `0x${'AB'.repeat(32)}` as Hex, registry, entries };
+
+  it('writes one readonly row per entry in one batch, with roles and key hashes', async () => {
+    const { rpc, executeBatch, createEntity, writer } = setup();
+    const result = await writer.mirrorParticipants(participants);
+    expect(createEntity).not.toHaveBeenCalled();
+    expect(executeBatch).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      written: entries.map((entry, index) => ({ passkeyKeyHash: sha256(entry.passkeyPublicKey), entityKey: keyOf(0x100 + index) })),
+      skipped: [],
+      txHashes: [keyOf(0xfb)],
+    });
+    const [query] = rpc.queries();
+    expect(query?.text).toContain(`arkiv.schema = str('${arkiv.schemas.participant}')`);
+    expect(query?.text.toLowerCase()).toContain(`$creator = addr(${writerA})`);
+    const creates = (executeBatch.mock.calls[0]?.[0] as { creates: Record<string, unknown>[] }).creates;
+    expect(creates.map((create) => (create.values as { role: string }).role)).toEqual(['setter', 'neutral', 'centre-holder', 'centre']);
+    expect(creates[0]).toMatchObject({
+      schema: participantSchema,
+      values: { examId, owner: setterOwner, passkeyKeyHash: sha256(point(1)), derivedKeyHash: '' },
+      expiration: ExpirationTime.fromDays(arkiv.lifetimeDays),
+      flags: { readonly: true, permissionlessExtension: true },
+    });
+    expect(creates[1]?.values).toMatchObject({ owner: 'neutral.example', derivedKeyHash: sha256(point(12)) });
+    expect((creates[1]?.values as { registry: { value: Address } }).registry.value).toBe(getAddress(registry));
+  });
+
+  it('skips entries this writer already has, and creates one by one without executeBatch', async () => {
+    const { createEntity, writer } = setup(
+      () => [participantEntity(7, writerA, 'neutral.example', sha256(point(2))), participantEntity(8, writerA, 'x', sha256(point(3)))],
+      false,
+    );
+    const result = await writer.mirrorParticipants(participants);
+    expect(result.skipped).toEqual([
+      { passkeyKeyHash: sha256(point(2)), entityKey: keyOf(7) },
+      { passkeyKeyHash: sha256(point(3)), entityKey: keyOf(8) },
+    ]);
+    expect(result.written.map((row) => row.passkeyKeyHash)).toEqual([sha256(point(1)), sha256(point(4))]);
+    expect(createEntity).toHaveBeenCalledTimes(2);
+    expect(createEntity.mock.calls[0]?.[0]).toBe(participantSchema);
+    expect(result.txHashes).toEqual([created.txHash, created.txHash]);
+  });
+
+  it(`splits a long list into batches of ${String(participantBatchSize)}`, async () => {
+    const { executeBatch, writer } = setup();
+    const many = Array.from({ length: participantBatchSize * 2 + 1 }, (_, i) => ({
+      role: 4,
+      passkeyPublicKey: Uint8Array.from([0x04, i, ...new Uint8Array(63)]),
+      derivedPublicKey: Uint8Array.from([0x04, i, 1, ...new Uint8Array(62)]),
+      owner: `centre-${String(i)}`,
+    }));
+    const result = await writer.mirrorParticipants({ ...participants, entries: many });
+    expect(executeBatch.mock.calls.map(([data]) => data.creates.length)).toEqual([participantBatchSize, participantBatchSize, 1]);
+    expect(result.written).toHaveLength(many.length);
+    expect(result.txHashes).toHaveLength(3);
+  });
+
+  it('refuses a list with a bad entry before sending anything', async () => {
+    const { rpc, executeBatch, createEntity, writer } = setup();
+    const bad = (entry: Partial<(typeof entries)[number]>) => [...entries.slice(0, 3), { ...entries[3], ...entry }] as typeof entries;
+    await expect(writer.mirrorParticipants({ ...participants, entries: bad({ owner: 'o'.repeat(129) }) })).rejects.toThrow(/129 bytes/);
+    await expect(writer.mirrorParticipants({ ...participants, entries: bad({ role: 5 }) })).rejects.toThrow(/unknown role 5/);
+    await expect(writer.mirrorParticipants({ ...participants, entries: bad({ owner: '' }) })).rejects.toThrow(/empty owner/);
+    await expect(writer.mirrorParticipants({ ...participants, entries: bad({ passkeyPublicKey: point(1) }) })).rejects.toThrow(/repeats/);
+    await expect(writer.mirrorParticipants({ ...participants, entries: bad({ derivedPublicKey: new Uint8Array() }) })).rejects.toThrow(MirrorInputError);
+    // 128 bytes fits.
+    await writer.mirrorParticipants({ ...participants, entries: bad({ owner: 'o'.repeat(128) }) });
+    expect(rpc.queries()).toHaveLength(1);
+    expect(executeBatch).toHaveBeenCalledTimes(1);
+    expect(createEntity).not.toHaveBeenCalled();
+  });
+
+  it('sends nothing for an empty list', async () => {
+    const { rpc, writer } = setup();
+    expect(await writer.mirrorParticipants({ ...participants, entries: [] })).toEqual({ written: [], skipped: [], txHashes: [] });
+    expect(rpc.calls).toEqual([]);
+  });
+});
+
+describe('exam index reader', () => {
+  it('reads nothing without writers', async () => {
+    const rpc = stubRpc();
+    const reader = createArkivReader({ transport: rpc.transport });
+    expect(await reader.examRows(registry, [])).toEqual([]);
+    expect(await reader.participantRows({ owner: 'x' }, [])).toEqual([]);
+    expect(rpc.calls).toEqual([]);
+  });
+
+  it('reads exam rows for one registry, and drops rows a node should not have sent', async () => {
+    const rpc = stubRpc(() => [
+      examEntity(1, writerA, { stage: 'built', paperHash, name: 'math.exams.eth' }),
+      examEntity(2, writerA, {}, otherRegistry),
+      examEntity(3, writerB),
+    ]);
+    const reader = createArkivReader({ transport: rpc.transport });
+    const rows = await reader.examRows(registry, [writerA]);
+    expect(rows).toEqual([
+      {
+        entityKey: keyOf(1),
+        creator: getAddress(writerA),
+        createdAtBlock: 48n,
+        examId,
+        registry: getAddress(registry),
+        board: getAddress(board),
+        chainId: 11155111n,
+        stage: 'built',
+        examStart: 1_900_000_000n,
+        createdBlock: 12_070_912n,
+        criteriaHash,
+        approvedListHash: listHash,
+        paperHash,
+        name: 'math.exams.eth',
+      },
+    ]);
+    const [query] = rpc.queries();
+    expect(query?.text).toContain(`arkiv.schema = str('${arkiv.schemas.exam}')`);
+    expect(query?.text.toLowerCase()).toContain(`registry = addr(${registry})`);
+    expect(query?.text.toLowerCase()).toContain(`$creator = addr(${writerA})`);
+    expect(query?.text).toContain('ORDER BY $key');
+    expect(query?.options.limit).toBe('0x64');
+  });
+
+  it('pages through exam rows', async () => {
+    const rpc = stubRpc((_text, { offset }) =>
+      offset === undefined || offset === '0x0'
+        ? Array.from({ length: 100 }, (_, i) => examEntity(i + 1, writerA))
+        : offset === '0x64'
+          ? [examEntity(500, writerA)]
+          : [],
+    );
+    const reader = createArkivReader({ transport: rpc.transport });
+    expect(await reader.examRows(registry, [writerA])).toHaveLength(101);
+  });
+
+  it('finds participants by owner or passkey hash, and checks the answer', async () => {
+    const hash = sha256(point(2));
+    const rpc = stubRpc(() => [
+      participantEntity(1, writerA, 'neutral.example', hash),
+      participantEntity(2, writerA, 'someone-else', hash),
+      participantEntity(3, writerB, 'neutral.example', hash),
+      participantEntity(4, writerA, 'neutral.example', hash, otherRegistry),
+    ]);
+    const reader = createArkivReader({ transport: rpc.transport });
+    const byOwner = await reader.participantRows({ owner: 'neutral.example' }, [writerA]);
+    expect(byOwner.map((row) => row.entityKey)).toEqual([keyOf(1), keyOf(4)]);
+    expect(byOwner[0]).toEqual({
+      entityKey: keyOf(1),
+      creator: getAddress(writerA),
+      createdAtBlock: 64n,
+      examId,
+      registry: getAddress(registry),
+      role: 'neutral',
+      owner: 'neutral.example',
+      passkeyKeyHash: hash,
+      derivedKeyHash: '',
+    });
+    const byKey = await reader.participantRows({ passkeyKeyHash: hash.toUpperCase().replace('0X', '0x'), registry }, [writerA]);
+    expect(byKey.map((row) => row.entityKey)).toEqual([keyOf(1), keyOf(2)]);
+    const [ownerQuery, keyQuery] = rpc.queries();
+    expect(ownerQuery?.text).toContain(`arkiv.schema = str('${arkiv.schemas.participant}')`);
+    expect(ownerQuery?.text).toContain(`owner = str('neutral.example')`);
+    expect(ownerQuery?.text).not.toContain('registry');
+    expect(keyQuery?.text).toContain(`passkeyKeyHash = str('${hash}')`);
+    expect(keyQuery?.text.toLowerCase()).toContain(`registry = addr(${registry})`);
+  });
+
+  it('needs a filter, and a well-formed passkey hash', async () => {
+    const reader = createArkivReader({ transport: stubRpc().transport });
+    await expect(reader.participantRows({}, [writerA])).rejects.toThrow(TypeError);
+    await expect(reader.participantRows({ passkeyKeyHash: '0x12' }, [writerA])).rejects.toThrow(/32 bytes/);
   });
 });

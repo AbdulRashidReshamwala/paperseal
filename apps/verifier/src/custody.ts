@@ -162,7 +162,7 @@ const needsStorage = 'Add where the public files are kept under "Check it yourse
 const needsTee = 'Add the live machine address under "Check it yourself" at the foot of the page. Every other check works without it.';
 const needsArkiv = 'Add who may write the copy on Arkiv under "Check it yourself" at the foot of the page. Every other check works without it.';
 
-const roleNames: Record<number, string> = {
+export const roleNames: Record<number, string> = {
   1: 'Setter',
   2: 'Key holder',
   3: 'Centre holding part of the key',

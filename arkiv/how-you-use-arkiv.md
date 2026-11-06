@@ -7,11 +7,14 @@
 | `examId` (indexed `str`) | Every reader looks at one exam | The verifier's step 6 for that exam |
 | `$creator` in the trusted writers | Anyone can write rows, so we read only from published writers | "Writers read" in the evidence, and rows from strangers never appear |
 | `entriesHash` / `instanceKeyHash` (indexed `str`) | The relay checks for these before it writes, so a snapshot is written only once | One row per log snapshot, and no spam |
+| `registry` (indexed `addr`), alone | The exam history page lists a registry's exams, which `ExamRegistry` itself can't do | `#/exams`: 10 exams, newest first, each checked against Sepolia |
+| `examStart` (indexed `u64`), sorted | People look for an exam by when it was | The history list's order and dates |
+| `owner` (indexed `str`) | A centre or key holder wants every exam they're on | "Find exams by person": `centre-1` finds 6 exams, each checked against that exam's approved list on Sepolia |
 | `registry` (indexed `addr`) | The same exam ID can't be mixed up across registries | The verifier asks only for rows in the registry it reads, and the token check binds the registry as well |
 
 ## Who Can Edit Each Entity
 
-Nobody. Rows are `readonly`, and that is the point: the record of an unlock must not change. The owner is the relay's wallet, but readers trust the creator, not the owner, because ownership can be handed over.
+Nobody, for evidence, participant and heartbeat rows. They are `readonly`, and that is the point: the record of an unlock must not change. Exam rows are the one kind their writer can edit (`patchEntity`), because an exam moves from published to listed to built. The relay only ever moves the stage forward. The verifier shows Sepolia's stage, not the row's, and says "The Arkiv copy is behind" when the row lags. The owner is the relay's wallet, but readers trust the creator, not the owner, because ownership can be handed over.
 
 ## When It Expires
 

@@ -1,4 +1,4 @@
-import type { ArkivReader } from '@paperseal/arkiv';
+import type { ArkivReader, ExamRow } from '@paperseal/arkiv';
 import type { Address, Hex } from 'viem';
 
 /*
@@ -102,4 +102,31 @@ export function ageText(seconds: number | undefined): string {
   if (s < 60) return `${String(s)}s ago`;
   if (s < 3600) return `${String(Math.floor(s / 60))}m ${String(s % 60)}s ago`;
   return `${String(Math.floor(s / 3600))}h ${String(Math.floor((s % 3600) / 60))}m ago`;
+}
+
+/**
+ * `status --index`: the exam-index rows for `registry` from one writer, by exam date. Read-only;
+ * like the rest of `status`, it shows what the rows say and checks nothing against Sepolia.
+ */
+export async function indexStatus(reader: Pick<ArkivReader, 'examRows'>, registry: Address, writer: Address): Promise<ExamRow[]> {
+  const rows = await reader.examRows(registry, [writer]);
+  return [...rows].sort((a, b) =>
+    a.examStart === b.examStart ? a.examId.localeCompare(b.examId) : a.examStart < b.examStart ? -1 : 1,
+  );
+}
+
+/** `examStart` as an ISO date, or the raw number if it isn't a date `Date` can show. */
+export function examStartText(examStart: bigint): string {
+  const ms = Number(examStart) * 1000;
+  return Number.isSafeInteger(ms) && Math.abs(ms) <= 8.64e15 ? new Date(ms).toISOString() : `T=${examStart.toString()}`;
+}
+
+/** Two lines per row: stage, date, name and exam; then the entity and its explorer link. */
+export function indexStatusLines(rows: readonly ExamRow[], entityLink: (key: Hex) => string): string[] {
+  const lines = [`${String(rows.length)} exam row${rows.length === 1 ? '' : 's'} from this writer, by examStart`];
+  for (const row of rows) {
+    lines.push(`  ${row.stage.padEnd(9)} ${examStartText(row.examStart)}  ${row.name || '(no name)'}  exam ${row.examId}`);
+    lines.push(`            entity ${row.entityKey}  ${entityLink(row.entityKey)}`);
+  }
+  return lines;
 }

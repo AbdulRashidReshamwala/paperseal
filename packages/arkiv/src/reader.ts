@@ -4,7 +4,14 @@ import { addr } from '@arkiv-network/sdk/schema';
 import { getAddress, hexToBytes, isAddressEqual, type Address, type Hex } from 'viem';
 
 import { arkivChain, arkivTransport, examIdColumn, type ArkivConnection } from './client';
-import { relayHeartbeatSchema, releaseLogSchema, releaseTokenSchema } from './schemas';
+import { allPages } from './pages';
+import {
+  examSchema,
+  participantSchema,
+  relayHeartbeatSchema,
+  releaseLogSchema,
+  releaseTokenSchema,
+} from './schemas';
 
 /**
  * What every row carries. `creator` is the Arkiv `$creator`, which never changes; callers show it
@@ -51,31 +58,58 @@ export interface ReleaseRowsOptions {
   registry?: Address | undefined;
 }
 
+/**
+ * An exam-index row (spec/arkiv.md, "Exam Index"). Every column is what the writer says: callers
+ * check the exam against Sepolia before showing it, and the name against "Exam Names".
+ */
+export interface ExamRow {
+  entityKey: Hex;
+  creator: Address;
+  createdAtBlock: bigint;
+  examId: string;
+  registry: Address;
+  board: Address;
+  chainId: bigint;
+  /** `published`, `listed` or `built` from a well-behaved writer, but unchecked. */
+  stage: string;
+  examStart: bigint;
+  createdBlock: bigint;
+  criteriaHash: string;
+  /** `''` before `ApprovedListPosted`. */
+  approvedListHash: string;
+  /** `''` before `BuildPosted`. */
+  paperHash: string;
+  /** `''` without a name. */
+  name: string;
+}
+
+/** A participant-index row. Callers check the entry is in the exam's approved list on Sepolia. */
+export interface ParticipantRow {
+  entityKey: Hex;
+  creator: Address;
+  createdAtBlock: bigint;
+  examId: string;
+  registry: Address;
+  role: string;
+  owner: string;
+  passkeyKeyHash: string;
+  /** `''` for a setter. */
+  derivedKeyHash: string;
+}
+
+/** What to look participants up by. At least one is required. */
+export interface ParticipantQuery {
+  registry?: Address | undefined;
+  owner?: string | undefined;
+  /** SHA-256 of the passkey public key, `0x` hex. */
+  passkeyKeyHash?: string | undefined;
+}
+
 export type ArkivReaderOptions = ArkivConnection;
 
-/** One page of a query: its rows, and how many matches it left out for not fitting the schema. */
-interface Page<R> {
-  entities: readonly R[];
-  skipped: number;
-}
-
-/**
- * Reads every page of a query sorted by `$key`. The node counts skipped entities toward the offset,
- * so the next page starts past both, and a page that covered less than a full page was the last.
- * A row created mid-walk can shift a later page, so rows are deduplicated by key.
- */
-async function allPages<R extends { $key: Hex }>(
-  fetchPage: (offset: number) => Promise<Page<R>>,
-): Promise<R[]> {
-  const rows = new Map<Hex, R>();
-  for (let offset = 0; ; ) {
-    const { entities, skipped } = await fetchPage(offset);
-    for (const row of entities) rows.set(row.$key, row);
-    const covered = entities.length + skipped;
-    if (covered < MAX_LIMIT) return [...rows.values()];
-    offset += covered;
-  }
-}
+/** The writers to read from, checksummed. A mistyped writer throws instead of matching nobody. */
+const trustedSet = (writers: readonly Address[]) => new Set(writers.map((writer) => getAddress(writer)));
+const byCreator = (trusted: ReadonlySet<Address>) => or([...trusted].map((writer) => eq('$creator', addr(writer))));
 
 export function createArkivReader(options: ArkivReaderOptions = {}) {
   const client = createPublicClient({
@@ -94,11 +128,10 @@ export function createArkivReader(options: ArkivReaderOptions = {}) {
     options: ReleaseRowsOptions = {},
   ): Promise<ReleaseRows> {
     const id = examIdColumn(examId);
-    // getAddress throws on a bad checksum, so a mistyped writer fails loudly instead of matching nobody.
-    const trusted = new Set(writers.map((writer) => getAddress(writer)));
+    const trusted = trustedSet(writers);
     const registry = options.registry === undefined ? undefined : getAddress(options.registry);
     if (trusted.size === 0) return { logs: [], tokens: [], heartbeats: [] };
-    const byWriter = or([...trusted].map((writer) => eq('$creator', addr(writer))));
+    const byWriter = byCreator(trusted);
     const filters =
       registry === undefined
         ? [eq('examId', id), byWriter]
@@ -167,13 +200,132 @@ export function createArkivReader(options: ArkivReaderOptions = {}) {
     };
   }
 
+  /**
+   * Every `exam` row for `registry` created by any of `writers`. Rows for other registries are
+   * never requested, and any a node returns anyway are dropped.
+   */
+  async function examRows(registry: Address, writers: readonly Address[]): Promise<ExamRow[]> {
+    const wantedRegistry = getAddress(registry);
+    const trusted = trustedSet(writers);
+    if (trusted.size === 0) return [];
+    const rows = await allPages((offset) =>
+      client
+        .select({
+          $key: true,
+          $creator: true,
+          $createdAt: true,
+          examId: true,
+          registry: true,
+          board: true,
+          chainId: true,
+          stage: true,
+          examStart: true,
+          createdBlock: true,
+          criteriaHash: true,
+          approvedListHash: true,
+          paperHash: true,
+          name: true,
+        })
+        .from(examSchema)
+        .where(eq('registry', addr(wantedRegistry)), byCreator(trusted))
+        .orderBy(asc('$key'))
+        .limit(MAX_LIMIT)
+        .offset(offset)
+        .fetch(),
+    );
+    return rows
+      .filter((row) => trusted.has(getAddress(row.$creator)) && isAddressEqual(row.registry.value, wantedRegistry))
+      .map((row) => ({
+        entityKey: row.$key,
+        creator: getAddress(row.$creator),
+        createdAtBlock: row.$createdAt,
+        examId: row.examId.value,
+        registry: getAddress(row.registry.value),
+        board: getAddress(row.board.value),
+        chainId: row.chainId.value,
+        stage: row.stage.value,
+        examStart: row.examStart.value,
+        createdBlock: row.createdBlock.value,
+        criteriaHash: row.criteriaHash.value,
+        approvedListHash: row.approvedListHash.value,
+        paperHash: row.paperHash.value,
+        name: row.name.value,
+      }));
+  }
+
+  /**
+   * The `participant` rows matching every filter in `query`, created by any of `writers`. The
+   * node's answer is filtered again here, so it can't add rows that don't match.
+   */
+  async function participantRows(query: ParticipantQuery, writers: readonly Address[]): Promise<ParticipantRow[]> {
+    const registry = query.registry === undefined ? undefined : getAddress(query.registry);
+    const { owner } = query;
+    let passkeyKeyHash: string | undefined;
+    if (query.passkeyKeyHash !== undefined) {
+      if (!/^0x[0-9a-fA-F]{64}$/.test(query.passkeyKeyHash)) {
+        throw new TypeError(`passkeyKeyHash must be 32 bytes of hex, got ${query.passkeyKeyHash}`);
+      }
+      passkeyKeyHash = query.passkeyKeyHash.toLowerCase();
+    }
+    if (registry === undefined && owner === undefined && passkeyKeyHash === undefined) {
+      throw new TypeError('participantRows needs a registry, owner or passkeyKeyHash');
+    }
+    const trusted = trustedSet(writers);
+    if (trusted.size === 0) return [];
+    const filters = [
+      ...(registry === undefined ? [] : [eq('registry', addr(registry))]),
+      ...(owner === undefined ? [] : [eq('owner', owner)]),
+      ...(passkeyKeyHash === undefined ? [] : [eq('passkeyKeyHash', passkeyKeyHash)]),
+      byCreator(trusted),
+    ];
+    const rows = await allPages((offset) =>
+      client
+        .select({
+          $key: true,
+          $creator: true,
+          $createdAt: true,
+          examId: true,
+          registry: true,
+          role: true,
+          owner: true,
+          passkeyKeyHash: true,
+          derivedKeyHash: true,
+        })
+        .from(participantSchema)
+        .where(...filters)
+        .orderBy(asc('$key'))
+        .limit(MAX_LIMIT)
+        .offset(offset)
+        .fetch(),
+    );
+    return rows
+      .filter(
+        (row) =>
+          trusted.has(getAddress(row.$creator)) &&
+          (registry === undefined || isAddressEqual(row.registry.value, registry)) &&
+          (owner === undefined || row.owner.value === owner) &&
+          (passkeyKeyHash === undefined || row.passkeyKeyHash.value === passkeyKeyHash),
+      )
+      .map((row) => ({
+        entityKey: row.$key,
+        creator: getAddress(row.$creator),
+        createdAtBlock: row.$createdAt,
+        examId: row.examId.value,
+        registry: getAddress(row.registry.value),
+        role: row.role.value,
+        owner: row.owner.value,
+        passkeyKeyHash: row.passkeyKeyHash.value,
+        derivedKeyHash: row.derivedKeyHash.value,
+      }));
+  }
+
   /** Arkiv's latest block and its time in Unix seconds, to tell how long ago a row was written. */
   async function latestBlock(): Promise<{ number: bigint; time: number }> {
     const { currentBlock, currentBlockTime } = await client.getBlockTiming();
     return { number: currentBlock, time: currentBlockTime };
   }
 
-  return { releaseRows, latestBlock };
+  return { releaseRows, examRows, participantRows, latestBlock };
 }
 
 export type ArkivReader = ReturnType<typeof createArkivReader>;

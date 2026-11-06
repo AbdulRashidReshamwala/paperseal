@@ -48,10 +48,12 @@ The indexed columns only help readers find rows. Every reader parses `body` and 
 
 ## What May Be Mirrored
 
-Only evidence that is already public, and signed by the TEE or Google:
+Only data that is already public. As evidence, only what the TEE or Google signed:
 
 - The release log, from `GET /v1/release/log` or `release-log.json`.
 - The PKI attestation token of the Unlock instance, from `release-token.jwt` or `GET /v1/attestation`.
+
+For the exam index, only what `ExamRegistry`'s events already publish, plus an exam's ENS name once it passes its checks ("Exam Index").
 
 These never go on Arkiv, because Arkiv is public and permanent: questions, even encrypted; setter receipts, keys or submission times; invite secrets; shares; and anything that isn't already public.
 
@@ -75,3 +77,61 @@ To show unlock progress from Arkiv, a reader:
 4. While unlock is open, takes the newest heartbeat or log row from published writers as the mirror's last sign of life, timed by Arkiv's own blocks (`createdAt` against the latest block), not the device clock. If that is more than `staleAfterSeconds` old, it warns that the mirror has stopped. If there is none at all, it says no writer has written for this exam since unlock opened. Either way it never treats silence as proof that nothing happened.
 
 When the TEE is also reachable, the reader shows whichever verified log has more entries, and says where each came from. Two verified logs never conflict, because both are signed by an attested key.
+
+## Exam Index
+
+`ExamRegistry` can find one exam by its ID but can't list exams, so nobody can browse a board's exams without an indexer. The index is a copy, on Arkiv, of what the registry's events already say in public. A reader checks every row against Sepolia, so the index only helps people find exams; it never decides what an exam is.
+
+### Rows
+
+`paperseal.v1.exam` describes one exam in one registry:
+
+| Column | Type | Indexed | Holds |
+| --- | --- | --- | --- |
+| `examId` | `str` | Yes | The exam ID, lowercase `0x` hex |
+| `registry` | `addr` | Yes | The `ExamRegistry` the exam is in |
+| `board` | `addr` | Yes | That registry's `board()` |
+| `chainId` | `u64` | No | The registry's chain |
+| `stage` | `str` | Yes | `published`, `listed` or `built`, the furthest of `ExamCreated`, `ApprovedListPosted` and `BuildPosted` seen |
+| `examStart` | `u64` | Yes | `T`, in Unix seconds, so readers can filter and sort by date |
+| `createdBlock` | `u64` | No | The block of `ExamCreated` |
+| `criteriaHash` | `str` | No | From `ExamCreated` |
+| `approvedListHash` | `str` | No | From `ApprovedListPosted`, or empty |
+| `paperHash` | `str` | No | From `BuildPosted`, or empty |
+| `name` | `str` | No | The exam's ENS name, or empty. It is set only when that name passes every check in "Exam Names" in `api.md` and resolves to this exam ID and registry |
+
+An exam row is not `readonly`. Its writer patches it as the exam moves on, and the stage only moves forward. It lives for `lifetimeDays`, and anyone can extend it.
+
+`paperseal.v1.participant` describes one entry of an exam's approved list:
+
+| Column | Type | Indexed | Holds |
+| --- | --- | --- | --- |
+| `examId` | `str` | Yes | The exam ID, lowercase `0x` hex |
+| `registry` | `addr` | Yes | The `ExamRegistry` the exam is in |
+| `role` | `str` | Yes | `setter`, `neutral`, `centre-holder` or `centre`, for list roles 1 to 4 |
+| `owner` | `str` | Yes | The entry's `owner`. For a setter this is already its `setterOwner` hash, so no setter's name is ever indexed |
+| `passkeyKeyHash` | `str` | Yes | The SHA-256 of the entry's `passkeyPublicKey`, lowercase `0x` hex |
+| `derivedKeyHash` | `str` | No | The SHA-256 of `derivedPublicKey`, or empty for a setter |
+
+A participant row is `readonly`, because the approved list is written once. It lives for `lifetimeDays`, and anyone can extend it. An `owner` longer than 128 bytes can't fit a `str`, but `limits.ownerBytes` in `constants.json` is 128, so every owner on a valid list fits.
+
+### Writing
+
+An indexer reads `ExamCreated`, `ApprovedListPosted` and `BuildPosted` from the registry in ranges of at most `logChunkBlocks` blocks, because public RPCs refuse wider log queries. Then:
+
+- It writes one exam row per exam that has none from this writer, and patches the row when its stage, hashes or name change.
+- It writes one participant row per approved-list entry that has no row from this writer with the same `examId`, `registry` and `passkeyKeyHash`. It decodes the entries with the same rules as every other reader of the approved list, and writes nothing for a list that fails them.
+- It writes an exam's name only after checking that name in full, as "Exam Names" in `api.md` says. The registry only stores the name's hash, so names come from the board.
+
+Index rows only ever hold data the registry's events already make public.
+
+### Reading
+
+To list a registry's exams, a reader:
+
+1. Finds the `exam` rows for the registry from published writers. Rows for other registries are never requested.
+2. For each row, reads `getExam`, `getApprovedList` and `getBuild` from Sepolia, through the viewer's own RPC. It shows an exam only if `getExam` has it with the same `examStart` and `criteriaHash`. It shows the stage that Sepolia shows, and says when the row is behind. A row for an exam that isn't on chain is ignored and counted.
+3. Shows a name only after checking it again, as in "Exam Names". A name that fails is ignored, and the exam is shown by its ID.
+4. Says that the list holds only the exams its writers have indexed, so a missing exam isn't proof that the exam doesn't exist.
+
+To find exams by participant, a reader looks up `participant` rows by `owner` or `passkeyKeyHash`. It shows an exam only if that entry is in the exam's approved list on Sepolia, which `getApprovedListEntries` reads and checks against the list hash.

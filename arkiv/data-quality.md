@@ -4,4 +4,6 @@
 
 **Correct:** every row's `body` is the exact signed bytes. The verifier checks each one against Google's root, the on-chain exam settings and the TEE's signature, and ignores any row that fails.
 
+**Exam index:** `node relay/cli.mjs index --every 60` follows `ExamRegistry`'s events and patches each exam row as its stage moves forward. A second run on unchanged data writes nothing: in the live run, all 10 exams were unchanged and all 91 participants were skipped.
+
 **Searchable:** by exam ID and by writer, the two things a reader knows. See the query in the [README](../README.md#arkiv-copy).

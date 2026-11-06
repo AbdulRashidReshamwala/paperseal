@@ -310,6 +310,9 @@ importers:
       '@paperseal/arkiv':
         specifier: workspace:*
         version: link:../packages/arkiv
+      '@paperseal/chain':
+        specifier: workspace:*
+        version: link:../packages/chain
       '@paperseal/protocol':
         specifier: workspace:*
         version: link:../packages/protocol

@@ -8,6 +8,8 @@ Paper Seal mirrors an exam's unlock evidence to Arkiv's Rabdi testnet. The full 
 | --- | --- | --- |
 | `paperseal.v1.release-log` | Signed release log snapshot: which key holders have released, signed by the TEE | The exact bytes of the TEE's `GET /v1/release/log`, or of `release-log.json` in public storage |
 | `paperseal.v1.release-token` | Unlock machine | The Google-signed PKI attestation token that proves which code the Unlock machine runs and which signing key it holds |
+| `paperseal.v1.exam` | Exam in a registry, for the exam index | Stage, start time, hashes and verified ENS name, copied from `ExamRegistry`'s events. Its writer edits it as the exam moves on |
+| `paperseal.v1.participant` | Entry on an exam's approved list | Role, owner (a setter's is already a hash) and key hashes, copied from `ApprovedListPosted` |
 | `paperseal.v1.relay-heartbeat` | Minute a relay is watching an unlock | Nothing signed: `entriesHash` of the newest log seen and the TEE `stage`. It only tells readers the relay is alive, and never counts as evidence |
 
 ## Fields
@@ -23,12 +25,24 @@ Paper Seal mirrors an exam's unlock evidence to Arkiv's Rabdi testnet. The full 
 | `released` | `i32` | No | Log |
 | `body` | `bytes` | No, it can't be | Both |
 
-Readers query by `examId`, `registry`, and `$creator` in the writers they trust. Then they parse `body` and check it, and never trust the other columns over it.
+Index fields:
+
+| Field | Type | Indexed | In |
+| --- | --- | --- | --- |
+| `board` | `addr` | Yes | Exam |
+| `stage` | `str` | Yes, to filter by how far an exam has got | Exam |
+| `examStart` | `u64` | Yes, to sort and filter by date | Exam |
+| `createdBlock`, `criteriaHash`, `approvedListHash`, `paperHash`, `name` | `u64`, `str` | No | Exam |
+| `role`, `owner`, `passkeyKeyHash` | `str` | Yes, to find a person's exams | Participant |
+| `derivedKeyHash` | `str` | No | Participant |
+
+Readers query by `examId`, `registry`, and `$creator` in the writers they trust. The index is also queried by `registry` alone (every exam), and by `owner` or `passkeyKeyHash` (a person's exams). Then they parse `body` and check it, and never trust the other columns over it.
 
 ## Ownership and Editing
 
 - The relay's wallet creates and owns each entity. Readers only accept rows whose `$creator` is a published writer, because ownership can be handed over.
-- Every entity is created `readonly`, so nobody can change it, its owner included.
+- Evidence, participant and heartbeat rows are created `readonly`, so nobody can change them, their owner included.
+- Exam rows are the one exception. Their writer patches them as an exam moves from published to listed to built. Readers never trust a row's stage, and take it from Sepolia instead.
 - Every entity also has `permissionlessExtension`, so anyone can pay to keep the evidence alive after the board loses interest.
 
 ## Expiry

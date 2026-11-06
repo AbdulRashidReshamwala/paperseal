@@ -19,6 +19,15 @@ describe('Rabdi', () => {
     expect(await reader.releaseRows(examId, [writer], { registry })).toEqual(empty);
   }, 30_000);
 
+  it('finds no exam or participant rows for a random registry and writer', async () => {
+    const writer = bytesToHex(crypto.getRandomValues(new Uint8Array(20)));
+    const registry = bytesToHex(crypto.getRandomValues(new Uint8Array(20)));
+    const passkeyKeyHash = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
+    expect(await reader.examRows(registry, [writer])).toEqual([]);
+    expect(await reader.participantRows({ owner: 'nobody.example' }, [writer])).toEqual([]);
+    expect(await reader.participantRows({ registry, passkeyKeyHash }, [writer])).toEqual([]);
+  }, 30_000);
+
   it('reports a recent latest block', async () => {
     const { number, time } = await reader.latestBlock();
     expect(number).toBeGreaterThan(0n);

@@ -2,7 +2,7 @@ import { addr, bytes, defineSchema, i32, str, u64 } from '@arkiv-network/sdk/sch
 
 import { arkiv } from './spec';
 
-// The three row types of spec/arkiv.md "Rows", column for column. Only the columns readers look rows
+// The row types of spec/arkiv.md "Rows" and "Exam Index", column for column. Only the columns readers look rows
 // up by are indexed. Every reader parses `body` and ignores the other columns where they disagree.
 
 /** One signed release log, exactly as the TEE returned it. */
@@ -30,4 +30,32 @@ export const relayHeartbeatSchema = defineSchema(arkiv.schemas.relayHeartbeat, {
   registry: addr().indexed(),
   entriesHash: str(),
   stage: str(),
+});
+
+/**
+ * One exam in one registry, for the exam index. Not readonly: its writer patches it as the exam
+ * moves on. Readers check every row against Sepolia.
+ */
+export const examSchema = defineSchema(arkiv.schemas.exam, {
+  examId: str().indexed(),
+  registry: addr().indexed(),
+  board: addr().indexed(),
+  chainId: u64(),
+  stage: str().indexed(),
+  examStart: u64().indexed(),
+  createdBlock: u64(),
+  criteriaHash: str(),
+  approvedListHash: str(),
+  paperHash: str(),
+  name: str(),
+});
+
+/** One entry of an exam's approved list, for the exam index. Readonly: the list is written once. */
+export const participantSchema = defineSchema(arkiv.schemas.participant, {
+  examId: str().indexed(),
+  registry: addr().indexed(),
+  role: str().indexed(),
+  owner: str().indexed(),
+  passkeyKeyHash: str().indexed(),
+  derivedKeyHash: str(),
 });

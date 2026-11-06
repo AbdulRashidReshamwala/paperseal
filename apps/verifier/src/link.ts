@@ -8,6 +8,10 @@ export type ExamLink = { kind: 'none' } | { kind: 'exam'; id: Hex } | { kind: 'n
 
 const ROUTE = /^\/(?:exam\/([^/]+)|(0x[^/]*))\/?$/;
 const NAME_ROUTE = /^\/name\/([^/]+)\/?$/;
+const HISTORY_ROUTE = /^\/exams\/?$/;
+
+/** Whether a route is the exam history, `#/exams`. */
+export const isHistoryRoute = (routePath: string): boolean => HISTORY_ROUTE.test(routePath);
 
 /** A path segment as typed. One that can't be decoded is kept as it is, and the name check refuses it. */
 function decoded(segment: string): string {
@@ -54,14 +58,19 @@ const subscribe = (listener: () => void) => {
 const currentHash = () => (globalThis.location as Location | undefined)?.hash ?? '';
 
 /**
- * The link in the address bar. The address itself is read on every hash change, so moving to
+ * The route in the address bar. The address itself is read on every hash change, so moving to
  * another exam, or to a bad link, is shown straight away and never waits on a reload. Without a
  * route in the address (as in a test with a memory router) the router's own location is used.
  */
-export function useExamLink(): ExamLink {
+export function useRoute(): { routePath: string; routeSearch: string } {
   const location = useLocation();
   const hash = useSyncExternalStore(subscribe, currentHash, () => '');
-  const route = routeOfHash(hash) ?? { routePath: location.pathname, routeSearch: location.search };
+  return routeOfHash(hash) ?? { routePath: location.pathname, routeSearch: location.search };
+}
+
+/** The exam the link in the address bar names. */
+export function useExamLink(): ExamLink {
+  const route = useRoute();
   return examLink({
     search: (globalThis.location as Location | undefined)?.search ?? '',
     ...route,

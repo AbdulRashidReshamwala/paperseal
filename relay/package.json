@@ -3,11 +3,12 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Mirrors an exam's public unlock evidence (release log and release token) to Arkiv, as in spec/arkiv.md \"Writers\".",
+  "description": "Mirrors an exam's public unlock evidence (release log and release token) and a registry's exam index to Arkiv, as in spec/arkiv.md \"Writers\" and \"Exam Index\".",
   "scripts": {
     "mirror": "node cli.mjs mirror",
     "watch": "node cli.mjs watch",
     "status": "node cli.mjs status",
+    "index": "node cli.mjs index",
     "dry-check": "node cli.mjs dry-check",
     "test": "vitest run",
     "lint": "eslint .",
@@ -15,6 +16,7 @@
   },
   "dependencies": {
     "@paperseal/arkiv": "workspace:*",
+    "@paperseal/chain": "workspace:*",
     "@paperseal/protocol": "workspace:*",
     "@paperseal/tee-client": "workspace:*",
     "viem": "2.57.16",

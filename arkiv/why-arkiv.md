@@ -14,7 +14,7 @@ On Arkiv:
 - **Anyone can read it, from a static page.** Rabdi's RPC answers browsers from any origin, so the verifier, which anyone can host, reads Arkiv directly with no backend of ours.
 - **Anyone can keep it alive.** `permissionlessExtension` lets a journalist or a court extend the evidence past 180 days without our permission.
 - **Anyone can be a writer.** A neutral party can run the relay too, and viewers add its address. Readers trust writers by `$creator` and check every row, so with two relays one going silent wouldn't stop the feed. The demo has only one writer, the board's own wallet, so this is the design rather than the demo.
-- **It's searchable the way people ask.** "Show me exam X's release logs from these writers" is one indexed query.
+- **It's searchable the way people ask.** "Show me exam X's release logs from these writers", "list this registry's exams by date" and "which exams is centre-1 on" are each one indexed query. Sepolia can only look up one exam by its ID.
 
 ## What We Kept Off Arkiv, and Why
 

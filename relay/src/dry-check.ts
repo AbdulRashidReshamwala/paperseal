@@ -1,11 +1,13 @@
 import { existsSync } from 'node:fs';
 
-import { arkiv, createArkivWriter, instanceKeyHash, releaseLogSchema, releaseTokenSchema } from '@paperseal/arkiv';
-import { chain } from '@paperseal/protocol';
+import { arkiv, createArkivWriter, instanceKeyHash, releaseLogSchema, releaseTokenSchema, type ExamIndexInput } from '@paperseal/arkiv';
+import type { ExamNameResult, ScanEventsResult } from '@paperseal/chain';
+import { chain, encodeApprovedList, setterOwner, toHex, type ApprovedListEntry } from '@paperseal/protocol';
 import { bytesToString, custom, type Address, type Hex } from 'viem';
 
-import { parseCommand, UsageError } from './args';
+import { defaultSepoliaRpc, parseCommand, UsageError, type IndexTarget } from './args';
 import { relayEnv } from './config';
+import { indexPass, newIndexState, type IndexRegistry, type IndexWriter } from './indexer';
 import { castAddressArgs, castPrivateKeyArgs } from './keystore';
 import { explorerLinks, mirrorPass, type RelayWriter } from './mirror';
 import { print } from './output';
@@ -63,6 +65,59 @@ function recordingWriter() {
   return { writer, calls };
 }
 
+const point = (byte: number) => {
+  const key = new Uint8Array(65).fill(byte);
+  key[0] = 4;
+  return key;
+};
+
+/** A list that passes the rules: one setter, then the neutral and centre key holders `threshold` asks for. */
+function sampleList(): Hex {
+  const setter = point(1);
+  const entries: ApprovedListEntry[] = [{ role: 1, passkeyPublicKey: setter, derivedPublicKey: new Uint8Array(), owner: setterOwner(setter) }];
+  for (let i = 0; i < 10; i += 1) {
+    entries.push({ role: i < 3 ? 2 : 3, passkeyPublicKey: point(10 + 2 * i), derivedPublicKey: point(11 + 2 * i), owner: `holder-${String(i)}` });
+  }
+  return toHex(encodeApprovedList(entries));
+}
+
+/** An index pass against an in-memory registry and a recording writer. No network, nothing sent. */
+async function offlineIndex(scan: ScanEventsResult, names: Record<string, ExamNameResult>) {
+  const upserts: ExamIndexInput[] = [];
+  const participants: { examId: Hex; count: number }[] = [];
+  const ZERO: Hex = `0x${'00'.repeat(32)}`;
+  const registry = {
+    board: () => Promise.resolve('0x2222222222222222222222222222222222222222' as Address),
+    scanEvents: () => Promise.resolve(scan),
+    getExam: (examId: Hex) => Promise.resolve({ createdBlock: 5n, settings: { examId, examStart: 1_800_000_000n, criteriaHash: ENTRIES_HASH } }),
+    getApprovedList: () => Promise.resolve({ listHash: ENTRIES_HASH, postedAt: 1n, postedBlock: 6n }),
+    getApprovedListEntries: () => Promise.resolve(sampleList()),
+  } as unknown as IndexRegistry;
+  const writer: IndexWriter = {
+    address: '0x1111111111111111111111111111111111111111',
+    upsertExam: (input) => {
+      upserts.push(input);
+      return Promise.resolve({ action: 'created', entityKey: ZERO });
+    },
+    mirrorParticipants: (input) => {
+      participants.push({ examId: input.examId, count: input.entries.length });
+      return Promise.resolve({ written: [], skipped: [], txHashes: [] });
+    },
+  };
+  const target: IndexTarget = {
+    registry: REGISTRY,
+    fromBlock: 10n,
+    toBlock: 20n,
+    rpcUrl: defaultSepoliaRpc,
+    rpcSource: 'default',
+    names: Object.keys(names),
+    everySeconds: undefined,
+  };
+  const resolveName = (name: string) => Promise.resolve(names[name] ?? { ok: false as const, failed: 'name' as const, reason: 'unknown', partial: {} });
+  const report = await indexPass(target, { registry, writer, resolveName, chainId: chain.chainId }, newIndexState(10n));
+  return { report, upserts, participants };
+}
+
 export async function dryCheck(): Promise<void> {
   await check('arguments: mirror, watch, status and dry-check parse; IDs are lowercased and addresses checksummed', () => {
     const mirror = parseCommand(['mirror', '--exam', EXAM.toUpperCase().replace('0X', '0x'), '--registry', REGISTRY.toLowerCase(), '--storage', 'https://s.example/b/']);
@@ -104,6 +159,83 @@ export async function dryCheck(): Promise<void> {
       expect(threw, `accepted ${argv.join(' ')}`);
     }
     return `${String(bad.length)} refused`;
+  });
+
+  await check('arguments: index and status --index parse; --every takes no --to-block', () => {
+    const one = parseCommand(['index', '--registry', REGISTRY.toLowerCase(), '--from-block', '10', '--to-block', '20', '--names', 'a.b.eth, c.b.eth'], {});
+    expect(one.command === 'index' && one.target.registry === REGISTRY && one.target.fromBlock === 10n && one.target.toBlock === 20n, 'index range');
+    expect(one.command === 'index' && one.target.names.join() === 'a.b.eth,c.b.eth' && one.target.everySeconds === undefined, '--names');
+    expect(one.command === 'index' && one.target.rpcSource === 'default' && one.target.rpcUrl === defaultSepoliaRpc, 'default RPC');
+    const env = parseCommand(['index', '--registry', REGISTRY, '--from-block', '0', '--every', '30'], { RELAY_SEPOLIA_RPC: 'https://env.example' });
+    expect(env.command === 'index' && env.target.rpcSource === 'RELAY_SEPOLIA_RPC' && env.target.everySeconds === 30, 'RELAY_SEPOLIA_RPC and --every');
+    const flag = parseCommand(['index', '--registry', REGISTRY, '--from-block', '0', '--rpc', 'https://flag.example'], { RELAY_SEPOLIA_RPC: 'https://env.example' });
+    expect(flag.command === 'index' && flag.target.rpcSource === '--rpc', '--rpc wins');
+    const status = parseCommand(['status', '--index', '--registry', REGISTRY]);
+    expect(status.command === 'status-index' && status.registry === REGISTRY, 'status --index');
+    for (const argv of [
+      ['index', '--registry', REGISTRY],
+      ['index', '--registry', REGISTRY, '--from-block', '5', '--to-block', '4'],
+      ['index', '--registry', REGISTRY, '--from-block', '5', '--to-block', '9', '--every', '5'],
+      ['status', '--index'],
+    ]) {
+      let threw = false;
+      try {
+        parseCommand(argv, {});
+      } catch (error) {
+        threw = error instanceof UsageError;
+      }
+      expect(threw, `accepted ${argv.join(' ')}`);
+    }
+    return 'index (range, names, RPC from --rpc / RELAY_SEPOLIA_RPC / default, --every), status --index; 4 refused';
+  });
+
+  await check('index: each exam\'s full row from its events, with ExamCreated before the range read from getExam', async () => {
+    const at = { txHash: ENTRIES_HASH };
+    const A: Hex = `0x${'a1'.repeat(32)}`;
+    const B: Hex = `0x${'b2'.repeat(32)}`;
+    const C: Hex = `0x${'c3'.repeat(32)}`;
+    const createdA = { ...at, block: 12n, examStart: 1_900_000_000n, criteriaHash: OTHER, criteria: '0x' } as never;
+    const scan: ScanEventsResult = {
+      fromBlock: 10n,
+      toBlock: 20n,
+      exams: [
+        { examId: A, created: createdA },
+        { examId: B, created: createdA, list: { ...at, block: 13n, listHash: KEY.slice(0, 66) as Hex, entries: sampleList() } },
+        { examId: C, created: null, build: { ...at, block: 14n, paperHash: OTHER } as never },
+      ],
+    };
+    const { upserts, participants } = await offlineIndex(scan, {});
+    const [a, b, c] = upserts;
+    if (!a || !b || !c) throw new Error(`${String(upserts.length)} exam rows, not 3`);
+    expect(a.stage === 'published' && a.approvedListHash === null && a.createdBlock === 12n && a.examStart === 1_900_000_000n, 'published');
+    expect(b.stage === 'listed' && b.approvedListHash === KEY.slice(0, 66) && b.paperHash === null, 'listed');
+    expect(c.stage === 'built' && c.createdBlock === 5n && c.examStart === 1_800_000_000n && c.approvedListHash === ENTRIES_HASH && c.paperHash === OTHER, 'built, filled in');
+    expect(upserts.every((u) => u.chainId === chain.chainId && u.name === null && u.registry === REGISTRY), 'chainId, registry, no name');
+    expect(participants.map((p) => `${p.examId.slice(0, 4)}:${String(p.count)}`).join() === '0xb2:11,0xc3:11', JSON.stringify(participants));
+    return 'published, listed, built (getExam + getApprovedList fill-in); 11 participants each for B and C';
+  });
+
+  await check('index: a name is set only if it passes and names this registry and exam; a bad list writes no participants', async () => {
+    const A: Hex = `0x${'a1'.repeat(32)}`;
+    const created = { txHash: ENTRIES_HASH, block: 12n, examStart: 1n, criteriaHash: OTHER, criteria: '0x' } as never;
+    const value = (name: string, examId: Hex, registry: Address): ExamNameResult => ({
+      ok: true,
+      value: { name, label: '', parent: '', examId, registry, board: REGISTRY, teeUrl: null, storageUrl: null, bucket: null, arkivWriters: null, arkivWritersIgnored: [] },
+    });
+    const { report, upserts, participants } = await offlineIndex(
+      { fromBlock: 10n, toBlock: 20n, exams: [{ examId: A, created, list: { txHash: ENTRIES_HASH, block: 13n, listHash: OTHER, entries: '0x00' } }] },
+      {
+        'wrong-registry.b.eth': value('wrong-registry.b.eth', A, '0x1111111111111111111111111111111111111111'),
+        'wrong-exam.b.eth': value('wrong-exam.b.eth', EXAM, REGISTRY),
+        'fails.b.eth': { ok: false, failed: 'forward', reason: 'b.eth points elsewhere', partial: {} },
+        'good.b.eth': value('good.b.eth', A, REGISTRY),
+      },
+    );
+    expect(upserts[0]?.name === 'good.b.eth', `name ${String(upserts[0]?.name)}`);
+    expect(report.names.filter((line) => line.startsWith('skipped')).length === 2, report.names.join('; '));
+    expect(report.notes.some((note) => note.startsWith('wrong-exam.b.eth')), 'no note for the name of another exam');
+    expect(participants.length === 0 && report.outcomes[0]?.participants.result === 'refused', 'participants written for a bad list');
+    return 'good.b.eth used; wrong registry and failing name skipped; other exam noted; bad list refused';
   });
 
   await check('storage: object URLs are <base>/<examId>/<name>, as apps/verifier builds them', () => {

@@ -13,9 +13,9 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 /**
  * Reads `load` now and again `everyMs` after each read finishes, so a slow source is never read
  * twice at once. Pass a stable function, and a new one to start over: nothing read from the old
- * source is ever shown for the new one.
+ * source is ever shown for the new one. A null `everyMs` reads once per `load`.
  */
-export function usePoll<T>(load: (() => Promise<T>) | null, everyMs: number): Polled<T> {
+export function usePoll<T>(load: (() => Promise<T>) | null, everyMs: number | null): Polled<T> {
   const [seen, setSeen] = useState<{ source: () => Promise<T>; polled: Polled<T> } | null>(null);
 
   useEffect(() => {
@@ -38,7 +38,7 @@ export function usePoll<T>(load: (() => Promise<T>) | null, everyMs: number): Po
           },
         )
         .finally(() => {
-          if (live) timer = setTimeout(read, everyMs);
+          if (live && everyMs !== null) timer = setTimeout(read, everyMs);
         });
     };
     read();

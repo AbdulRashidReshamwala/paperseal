@@ -13,7 +13,7 @@ import {
   type Step,
 } from '@paperseal/ui';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 
 import { teeStorageBucket } from './attest';
 import { loadChain, type ChainData } from './checks';
@@ -340,7 +340,17 @@ function ExamPicker({ current, invalid }: { current: boolean; invalid: boolean }
   );
 }
 
-function OwnConnection({ open }: { open: boolean }) {
+/** The way to the exam history, under the exam box. */
+function HistoryLink() {
+  return (
+    <p className="vf-more">
+      <Link to="/exams">See the exam history</Link>, or find the exams a person is listed for.
+    </p>
+  );
+}
+
+/** The viewer's own sources, saved in this browser. The exam history shows it too. */
+export function OwnConnection({ open }: { open: boolean }) {
   const { settings, apply, reset } = useConnections();
   const [draft, setDraft] = useState<SettingsValues>(settings);
   const [errors, setErrors] = useState<SettingsErrors>({});
@@ -465,10 +475,12 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
         {chosen ? (
           <Panel title="Check a different exam">
             <ExamPicker current invalid={false} />
+            <HistoryLink />
           </Panel>
         ) : (
           <Panel title="Choose an exam">
             <ExamPicker current={false} invalid={view.invalidLink} />
+            <HistoryLink />
           </Panel>
         )}
         <section className="ps-panel vf-self-host">

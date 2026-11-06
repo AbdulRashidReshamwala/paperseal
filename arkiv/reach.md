@@ -32,10 +32,11 @@ Four finished demo exams are mirrored now, at 2 entities each:
 | `0xb59a…ece2` | [`0x6b14…47bc`](https://rabdi.explorer.arkiv.network/entity/0x6b1439a2260242d1d484612ef10857f2dab03f455cb3a54bf2b8658e96c147bc) |
 | `0xe8a6…d212` | [`0x5068…ec84`](https://rabdi.explorer.arkiv.network/entity/0x5068de8588dee2f4134b48d2a7ea499e92b8dfb18806ff50aac93adeb301ec84) |
 
+The exam index is live too: 10 exams and 91 approved-list entries from the demo registry. Open `http://localhost:5172/#/exams` with the same settings to browse them, or search for `centre-1` under "Find exams by person". `ExamRegistry` can't list its own exams, so without this index nobody could browse a board's history without running their own indexer.
+
 ## After Mumbai
 
 The mirror is part of Paper Seal's design, not a side demo. The demo rows above were mirrored from public storage after those exams finished. For a live exam, the board runs `node relay/cli.mjs watch` during unlock, which writes each new signed snapshot and a heartbeat every minute. Next we plan to:
 
-- mirror an index of exams;
 - let neutral parties run their own relays and publish their writer addresses;
 - move to Arkiv's mainnet once it exists.

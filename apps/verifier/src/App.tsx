@@ -1,6 +1,9 @@
+import { HistoryPage } from './history-page';
+import { isHistoryRoute, useRoute } from './link';
 import { VerifierPage } from './page';
 
-/** One page: the exam's state decides what it shows, so there are no routes to choose between. */
+/** The exam's state decides what the page shows. `#/exams` lists the exams on the record instead. */
 export function App() {
-  return <VerifierPage />;
+  const route = useRoute();
+  return isHistoryRoute(route.routePath) ? <HistoryPage /> : <VerifierPage />;
 }

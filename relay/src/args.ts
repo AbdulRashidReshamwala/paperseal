@@ -10,10 +10,31 @@ export interface MirrorTarget {
   teeUrl: string | undefined;
 }
 
+/** Where the Sepolia RPC came from, for the header line. */
+export type RpcSource = '--rpc' | 'RELAY_SEPOLIA_RPC' | 'default';
+
+/** The public Sepolia RPC `index` uses without `--rpc` or `RELAY_SEPOLIA_RPC`. */
+export const defaultSepoliaRpc = 'https://ethereum-sepolia-rpc.publicnode.com';
+
+/** What `index` scans and writes. `names` are trimmed, without repeats, and not yet checked. */
+export interface IndexTarget {
+  registry: Address;
+  fromBlock: bigint;
+  /** Inclusive. Undefined: the latest block at each scan. */
+  toBlock: bigint | undefined;
+  rpcUrl: string;
+  rpcSource: RpcSource;
+  names: string[];
+  /** Undefined: one pass. */
+  everySeconds: number | undefined;
+}
+
 export type Command =
   | { command: 'mirror'; target: MirrorTarget }
   | { command: 'watch'; target: MirrorTarget; everySeconds: number; heartbeat: boolean }
   | { command: 'status'; examId: Hex; writer: Address | undefined; registry: Address | undefined }
+  | { command: 'status-index'; registry: Address; writer: Address | undefined }
+  | { command: 'index'; target: IndexTarget }
   | { command: 'dry-check' }
   | { command: 'help' };
 
@@ -34,6 +55,13 @@ export const usage = `Paper Seal relay: mirrors an exam's public unlock evidence
   node relay/cli.mjs status --exam <examId> [--registry <address>] [--writer <address>]
       Read-only: this exam's rows and heartbeats on Arkiv from one writer (default: the relay's own
       address), newest first, only for --registry when given.
+  node relay/cli.mjs status --index --registry <address> [--writer <address>]
+      Read-only: the exam-index rows for --registry from one writer.
+  node relay/cli.mjs index --registry <address> --from-block <n> [--to-block <n>] [--rpc <sepolia url>]
+                           [--names a.board.eth,b.board.eth] [--every <seconds>]
+      Mirrors the registry's exams (ExamCreated, ApprovedListPosted, BuildPosted) and their
+      approved lists to the Arkiv exam index. --every repeats it from the last block scanned.
+      Sepolia RPC: --rpc, else RELAY_SEPOLIA_RPC, else ${defaultSepoliaRpc}.
   node relay/cli.mjs dry-check
       Offline self-test of argument parsing and payload preparation. No network, no key.
 
@@ -78,6 +106,63 @@ export function parseEvery(value: string | undefined): number {
   return seconds;
 }
 
+/** A block number: a whole decimal number. */
+export function parseBlock(flag: string, value: string | undefined): bigint | undefined {
+  if (value === undefined) return undefined;
+  if (!/^\d+$/.test(value)) throw new UsageError(`${flag} must be a whole block number, got ${JSON.stringify(value)}`);
+  return BigInt(value);
+}
+
+/** Comma-separated names, trimmed, without empties or repeats. Each is checked in full later. */
+export function parseNames(value: string | undefined): string[] {
+  if (value === undefined) return [];
+  const names = [...new Set(value.split(',').map((name) => name.trim()).filter((name) => name !== ''))];
+  if (names.length === 0) throw new UsageError('--names needs at least one name, like jee-main-2026.board.eth');
+  return names;
+}
+
+/** `--rpc`, else `RELAY_SEPOLIA_RPC`, else the public default. */
+export function sepoliaRpc(flag: string | undefined, env: NodeJS.ProcessEnv): { rpcUrl: string; rpcSource: RpcSource } {
+  if (flag !== undefined) return { rpcUrl: parseRpcUrl('--rpc', flag), rpcSource: '--rpc' };
+  const fromEnv = env.RELAY_SEPOLIA_RPC?.trim();
+  if (fromEnv) return { rpcUrl: parseRpcUrl('RELAY_SEPOLIA_RPC', fromEnv), rpcSource: 'RELAY_SEPOLIA_RPC' };
+  return { rpcUrl: defaultSepoliaRpc, rpcSource: 'default' };
+}
+
+/** An http(s) URL. Unlike a base URL it may carry a path or query, where providers put their key. */
+function parseRpcUrl(flag: string, value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new UsageError(`${flag} must be an http(s) URL`);
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new UsageError(`${flag} must be an http(s) URL`);
+  return value;
+}
+
+const indexFlags = {
+  registry: { type: 'string' },
+  'from-block': { type: 'string' },
+  'to-block': { type: 'string' },
+  rpc: { type: 'string' },
+  names: { type: 'string' },
+  every: { type: 'string' },
+} as const;
+
+function indexTarget(values: Partial<Record<keyof typeof indexFlags, string>>, env: NodeJS.ProcessEnv): IndexTarget {
+  const registry = parseAddress('--registry', values.registry);
+  const fromBlock = parseBlock('--from-block', values['from-block']);
+  if (fromBlock === undefined) throw new UsageError('--from-block <n> is required: the block to start scanning at');
+  const toBlock = parseBlock('--to-block', values['to-block']);
+  if (toBlock !== undefined && toBlock < fromBlock) throw new UsageError('--to-block must not be before --from-block');
+  const everySeconds = values.every === undefined ? undefined : parseEvery(values.every);
+  if (everySeconds !== undefined && toBlock !== undefined) {
+    throw new UsageError('--every follows the chain as it grows, so it takes no --to-block');
+  }
+  return { registry, fromBlock, toBlock, ...sepoliaRpc(values.rpc, env), names: parseNames(values.names), everySeconds };
+}
+
 const mirrorFlags = {
   exam: { type: 'string' },
   registry: { type: 'string' },
@@ -104,7 +189,7 @@ function mirrorTarget(values: { exam?: string; registry?: string; storage?: stri
   return target;
 }
 
-export function parseCommand(argv: readonly string[]): Command {
+export function parseCommand(argv: readonly string[], env: NodeJS.ProcessEnv = process.env): Command {
   const [command, ...rest] = argv;
   switch (command) {
     case 'mirror':
@@ -121,7 +206,20 @@ export function parseCommand(argv: readonly string[]): Command {
       return { command, target: mirrorTarget(values), everySeconds: parseEvery(values.every), heartbeat: values['no-heartbeat'] !== true };
     }
     case 'status': {
-      const values = flags(rest, { exam: { type: 'string' }, registry: { type: 'string' }, writer: { type: 'string' } }) as Record<string, string>;
+      const values = flags(rest, { exam: { type: 'string' }, registry: { type: 'string' }, writer: { type: 'string' }, index: { type: 'boolean' } }) as {
+        exam?: string;
+        registry?: string;
+        writer?: string;
+        index?: boolean;
+      };
+      if (values.index === true) {
+        if (values.exam !== undefined) throw new UsageError('status --index lists a registry\'s exams, so it takes no --exam');
+        return {
+          command: 'status-index',
+          registry: parseAddress('--registry', values.registry),
+          writer: values.writer === undefined ? undefined : parseAddress('--writer', values.writer),
+        };
+      }
       return {
         command,
         examId: parseExamId(values.exam),
@@ -129,6 +227,8 @@ export function parseCommand(argv: readonly string[]): Command {
         registry: values.registry === undefined ? undefined : parseAddress('--registry', values.registry),
       };
     }
+    case 'index':
+      return { command, target: indexTarget(flags(rest, indexFlags) as Partial<Record<keyof typeof indexFlags, string>>, env) };
     case 'dry-check':
       flags(rest, {});
       return { command };

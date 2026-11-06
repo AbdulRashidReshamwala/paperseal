@@ -1,6 +1,6 @@
 # @paperseal/relay
 
-The Arkiv writer of [spec/arkiv.md](../spec/arkiv.md) "Writers", which the code calls the relay. It reads one exam's public unlock evidence from storage and/or the TEE and mirrors it to Arkiv's Rabdi testnet through [`@paperseal/arkiv`](../packages/arkiv). Arkiv is only a mirror: the relay copies signed evidence and checks no signature, and readers check every row's `body` and only trust rows whose `$creator` is a published writer. A relay can stay silent, but it can't make a check pass.
+The Arkiv writer of [spec/arkiv.md](../spec/arkiv.md) "Writers", which the code calls the relay. It reads one exam's public unlock evidence from storage and/or the TEE and mirrors it to Arkiv's Rabdi testnet through [`@paperseal/arkiv`](../packages/arkiv), and with `index` it writes a registry's exam index from its Sepolia events. Arkiv is only a mirror: the relay copies signed evidence and checks no signature, and readers check every row's `body` and only trust rows whose `$creator` is a published writer. A relay can stay silent, but it can't make a check pass.
 
 ## Commands
 
@@ -20,7 +20,16 @@ node relay/cli.mjs watch --exam <examId> --registry <ExamRegistry> [--storage <u
 # only rows for that ExamRegistry; without it, rows for every registry are shown.
 node relay/cli.mjs status --exam <examId> [--registry <ExamRegistry>] [--writer <address>]
 
-# Offline self-test: argument parsing, storage URLs, payload preparation, cast arguments.
+# Read-only: the exam-index rows for one ExamRegistry from one writer, by examStart: stage,
+# examStart as a date, name and entity key.
+node relay/cli.mjs status --index --registry <ExamRegistry> [--writer <address>]
+
+# The exam index (spec/arkiv.md "Exam Index"): scans the registry's events and writes one exam row
+# per exam and one participant row per approved-list entry. --every repeats it every N seconds.
+node relay/cli.mjs index --registry <ExamRegistry> --from-block <n> [--to-block <n>] [--rpc <sepolia url>] \
+  [--names a.board.eth,b.board.eth] [--every <seconds>]
+
+# Offline self-test: argument parsing, storage URLs, payload preparation, index input building, cast arguments.
 node relay/cli.mjs dry-check
 ```
 
@@ -45,6 +54,19 @@ Each pass starts with a summary line, ending in `(TEE stage <stage>)` only when 
 4. **Tokens first.** The storage token's instance key is the storage log's `instancePublicKey`, as spec/api.md "Storage" says. The TEE's token is mirrored only when the attestation's `instancePublicKey` is the key that signed the TEE's log, so it is the Unlock instance's token. Otherwise it is held.
 5. **Then logs.** A log is written only once a token for its signer is on Arkiv from this writer, because readers ignore a log whose signer no token attests. A newer TEE log and an older storage log are both written: readers show the verified log with the most entries.
 
+## The exam index
+
+`index` copies what `ExamRegistry`'s events already publish to the `paperseal.v1.exam` and `paperseal.v1.participant` rows of spec/arkiv.md "Exam Index". Readers check every row against Sepolia, so the index only helps people find exams.
+
+1. **Scan.** It reads `ExamCreated`, `ApprovedListPosted` and `BuildPosted` from `--from-block` to `--to-block` (default: the latest block) through `@paperseal/chain`'s `scanEvents`, at most `logChunkBlocks` (10000) blocks per log query. The Sepolia RPC is `--rpc`, else `RELAY_SEPOLIA_RPC`, else `https://ethereum-sepolia-rpc.publicnode.com`; the header says which. Only the RPC's origin is printed: any path, query or credentials are hidden and redacted from errors, since providers put keys there.
+2. **One full row per exam.** `stage` is `built` with a `BuildPosted`, else `listed` with an `ApprovedListPosted`, else `published`. `examStart`, `criteriaHash` and `createdBlock` come from `ExamCreated`, or from `getExam` when that event came before `--from-block`; `approvedListHash` from `ApprovedListPosted`, or from `getApprovedList` when only the build is in range; `paperHash` from `BuildPosted`; `board` from `board()`; `chainId` from `spec/constants.json`. `@paperseal/arkiv`'s `upsertExam` creates the row, patches what changed, or leaves it (`created`, `patched`, `unchanged`).
+3. **Names.** Each `--names` entry goes through `resolveExamName` (every check of "Exam Names" in spec/api.md). Its name is set only on the exam it resolves to, and only if its `addr` is `--registry`. Any other name is skipped, and the reason is printed. An exam without a verified name gets an empty name. A name the RPC couldn't read decides nothing: a new exam it would name is `held` (not written), so a row's name isn't cleared by an outage.
+4. **Participants.** For an exam with a list, the list bytes (from the event, else `getApprovedListEntries`, both already checked against the list hash) are decoded with `@paperseal/protocol`'s `decodeApprovedList`, the same rules every other reader applies, and passed to `mirrorParticipants`, which skips entries this writer already has. A list that fails is printed as `refused` and gets no participant rows.
+
+Each exam prints its action, stage and name, entity key and explorer link, transaction hashes, and participants written and skipped; the pass ends with a summary line. One pass (no `--every`) exits 1 if any exam failed or was held, or a list was refused or failed.
+
+With `--every <seconds>` (2 to 3600; no `--to-block`), `index` loops until Ctrl+C, each scan starting at the last `toBlock + 1`. What it has seen stays in memory, so a later `BuildPosted` builds on an earlier `ExamCreated` and list, and the stage never moves back (`upsertExam` refuses that too). A failed scan is tried again from the same block; a failed exam or participant write is tried again on the next pass even with no new event; an exam whose verified name changes is patched.
+
 ## Heartbeats
 
 Readers time the mirror's last sign of life from its newest heartbeat or log row (spec/arkiv.md "Reading", rule 4), and warn once it is older than `staleAfterSeconds` (120). So `watch` writes a `relay-heartbeat` row every `heartbeatSeconds` (60) from `spec/arkiv.json`, whether or not the log changed, on its own timer apart from `--every`. The first is written right after the first pass; if that pass already ends the watch, unlock is over and none is written. Heartbeats stop when the loop does, by the rules below.
@@ -63,14 +85,16 @@ Rows are created `readonly`, extendable by anyone, and live `lifetimeDays` (180)
 | --- | --- | --- |
 | `RELAY_KEYSTORE` | `paperseal-board` | Foundry keystore name under `~/.foundry/keystores` |
 | `RELAY_PASSWORD_FILE` | `~/.paperseal/board-keystore-password` | Password file path, passed to cast and never read by the relay |
+| `RELAY_SEPOLIA_RPC` | `https://ethereum-sepolia-rpc.publicnode.com` | Sepolia RPC for `index` when `--rpc` is not given |
 | `ARKIV_ACCESS_KEY` | unset | Arkiv Hub access key. Without it, `ARKIV_ACCESS_KEY=` in `~/.paperseal/arkiv-relay.env` is used if present, else the public RPC, which is rate limited |
 
-cast is found on `PATH`, else at `~/.foundry/bin/cast`. `status` and `dry-check` need no key. `status` without `--writer` runs `cast wallet address`, which prints only the address.
+cast is found on `PATH`, else at `~/.foundry/bin/cast`. `status` (with or without `--index`) and `dry-check` need no key. `status` without `--writer` runs `cast wallet address`, which prints only the address.
 
 ## Safety
 
+- **The index holds only what the registry's events already publish**: exam IDs, hashes, `examStart`, blocks, the board, an ENS name that passed every check, and approved-list entries as the spec's columns (role, `owner`, which for a setter is already its `setterOwner` hash, and SHA-256 hashes of the keys).
 - **Only already-public, signed evidence is mirrored**: the release log (`GET /v1/release/log` or `release-log.json`) and the Unlock instance's PKI attestation token (`release-token.jwt` or `GET /v1/attestation`). The relay reads nothing else, so it can't mirror anything else. Questions (even encrypted), setter receipts, keys or submission times, invite secrets, shares and anything not already public never go on Arkiv, because Arkiv is public and permanent. A heartbeat adds nothing else: the exam ID, the registry, the `entriesHash` of a log already public, and the stage the TEE's public `GET /v1/status` shows.
 - **The signing key stays in memory.** `mirror` and `watch` run `cast wallet private-key --account <name> --password-file <path>` with stdin closed, and pass its output straight to viem's `privateKeyToAccount`. The key is never printed, logged or written to disk. cast's stdout is never shown, even on failure, and anything key-shaped is cut from its stderr. The relay never opens the password file.
 - **The access key is not printed.** It rides in the RPC URL's path, so every line the relay prints, errors included, is redacted for it.
-- The relay sends Arkiv transactions only from `mirror` and `watch` (rows, and in `watch` heartbeats). Use a dedicated writer address, fund it with Rabdi testnet tGLM, and publish it next to the board's other settings so readers trust its rows.
+- The relay sends Arkiv transactions only from `mirror`, `watch` (rows, and heartbeats) and `index` (exam and participant rows). `index` signs with the same keystore and redacts the access key the same way; it sends nothing to Sepolia, only reads it. Use a dedicated writer address, fund it with Rabdi testnet tGLM, and publish it next to the board's other settings so readers trust its rows.
 - Two relays, or two runs of one, at once may both write a row. Readers ignore the duplicate.
