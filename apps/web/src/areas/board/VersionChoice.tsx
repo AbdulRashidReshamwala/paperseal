@@ -29,13 +29,13 @@ function Unreachable(props: { error: TeeReleasesError; retry: () => void }) {
 /** What the review row says about the version, in one sentence. */
 export function versionSummary(releases: Releases, chosen: string): string {
   const { list, selected, status, verified } = releases;
-  if (list.state === 'loading') return 'Loading the available versions.';
+  if (list.state === 'loading') return 'Finding the latest release';
   if (list.state === 'ready' && list.releases.length === 0) {
     return 'There is no version to use yet. Ask whoever looks after Paper Seal to publish one, then come back.';
   }
-  if (verified) return `${verified.version}, ${chosen ? 'the version you chose' : 'the newest version'}. It has been checked.`;
-  if (status?.state === 'checking') return `Checking version ${selected?.version ?? ''}.`;
-  return 'No version can be used yet.';
+  if (verified) return `${verified.version}, ${chosen ? 'your choice, verified' : 'the latest verified release'}`;
+  if (status?.state === 'checking') return `Verifying ${selected?.version ?? 'the release'}`;
+  return 'No verified release yet';
 }
 
 /** Why no version can be used, with what to do. Empty while everything is fine. */

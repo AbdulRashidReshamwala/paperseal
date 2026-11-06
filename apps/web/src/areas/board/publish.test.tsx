@@ -271,7 +271,7 @@ async function toVersion(env: PublishEnvironment) {
 /** The review, once the newest version has been checked. */
 async function toReview(env: PublishEnvironment) {
   await toVersion(env);
-  await screen.findByText(/It has been checked/);
+  await screen.findByText(/the latest verified release/);
   return button('Publish the exam');
 }
 
@@ -373,7 +373,7 @@ describe('the version, in the review', () => {
     });
     const { env } = environment();
     const publish = await toReview(env);
-    expect(screen.getByText(/v1\.1\.0, the newest version/)).toBeTruthy();
+    expect(screen.getByText(/v1\.1\.0, the latest verified release/)).toBeTruthy();
     expect(screen.queryByText('Choose the Paper Seal version')).toBeNull();
     expect(publish.disabled).toBe(false);
   });
@@ -386,7 +386,7 @@ describe('the version, in the review', () => {
     await toReview(env);
     expect(screen.getByText('Use a different version').closest('details')?.open).toBe(false);
     fireEvent.change(screen.getByLabelText('Version'), { target: { value: 'v1.0.0' } });
-    await screen.findByText(/v1\.0\.0, the version you chose/);
+    await screen.findByText(/v1\.0\.0, your choice, verified/);
   });
 
   it('skips a newest release whose tag points elsewhere, and says so', async () => {
@@ -396,7 +396,7 @@ describe('the version, in the review', () => {
     });
     const { env } = environment();
     await toReview(env);
-    expect(screen.getByText(/v1\.0\.0, the newest version/)).toBeTruthy();
+    expect(screen.getByText(/v1\.0\.0, the latest verified release/)).toBeTruthy();
     expect(screen.getByText(/Version v1\.1\.0 did not pass its check/)).toBeTruthy();
   });
 
@@ -441,7 +441,7 @@ describe('the version, in the review', () => {
 
     stubGithub();
     fireEvent.click(screen.getByText('Try again'));
-    await screen.findByText(/It has been checked/);
+    await screen.findByText(/the latest verified release/);
     expect(button('Publish the exam').disabled).toBe(false);
   });
 
@@ -449,7 +449,7 @@ describe('the version, in the review', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => undefined)));
     const { env: pending } = environment();
     await toVersion(pending);
-    expect(screen.getByText(/Loading the available versions/)).toBeTruthy();
+    expect(screen.getByText(/Finding the latest release/)).toBeTruthy();
     expect(button('Publish the exam').disabled).toBe(true);
     cleanup();
     localStorage.clear();
@@ -615,8 +615,8 @@ describe('step 2, review and publish', () => {
     expect(screen.getByText('3 of 3')).toBeTruthy();
     fireEvent.click(button('Continue'));
     expect(screen.getByRole('heading', { name: 'Preview and submit' })).toBeTruthy();
-    expect(screen.getByText(/centre-1\.paperseal-demo\.eth, centre-2/)).toBeTruthy();
-    expect(screen.getByText(/neutral-1\.paperseal-demo\.eth, neutral-2/)).toBeTruthy();
+    expect(screen.getByText('centre-1.paperseal-demo.eth')).toBeTruthy();
+    expect(screen.getByText('neutral-3.paperseal-demo.eth')).toBeTruthy();
     const saved = JSON.parse(localStorage.getItem('paperseal.board.drafts') ?? '[]') as { plan: { parties: unknown[] } }[];
     expect(saved[0]?.plan.parties).toHaveLength(10);
     expect(saved[0]?.plan.parties[0]).toEqual({ name: 'centre-1.paperseal-demo.eth', role: roles.centreKeyHolder });

@@ -15,12 +15,18 @@ import { explainError, publishExam, type PublishRequest } from './publishFlow';
 import type { Releases } from './releases';
 import { versionSummary, VersionEvidence, VersionPicker, VersionProblems } from './VersionChoice';
 
-/** The names chosen for these roles. */
-const partyNames = (parties: readonly ChosenParty[], wanted: readonly number[]): string =>
-  parties
-    .filter((party) => party.role !== null && wanted.includes(party.role))
-    .map((party) => party.name)
-    .join(', ');
+/** The names chosen for these roles, one chip each, so a long name never breaks across lines. */
+function PartyNames(props: { parties: readonly ChosenParty[]; roles: readonly number[] }) {
+  return (
+    <ul className="board-preview-names">
+      {props.parties
+        .filter((party) => party.role !== null && props.roles.includes(party.role))
+        .map((party) => (
+          <li key={party.name}>{party.name}</li>
+        ))}
+    </ul>
+  );
+}
 
 type Progress = { state: 'idle' } | { state: 'running'; stage: WalletStage } | { state: 'failed'; message: string };
 
@@ -103,9 +109,13 @@ export function ReviewStep(props: { releases: Releases; onBack: () => void }) {
                   At least {needs.questions} questions in total, and no setter writes more than {criteria.maxSetterPercent}% of a topic
                 </Row>
               ) : null}
-              <Row label="Centres">{partyNames(plan.parties, [roles.centreKeyHolder, roles.centre])}</Row>
-              <Row label="Neutral parties">{partyNames(plan.parties, [roles.neutral])}</Row>
-              <Row label="Paper Seal version">{versionSummary(props.releases, publish.version)}</Row>
+              <Row label="Centres">
+                <PartyNames parties={plan.parties} roles={[roles.centreKeyHolder, roles.centre]} />
+              </Row>
+              <Row label="Neutral parties">
+                <PartyNames parties={plan.parties} roles={[roles.neutral]} />
+              </Row>
+              <Row label="Software version">{versionSummary(props.releases, publish.version)}</Row>
             </Rows>
       </div>
       <div className="board-preview-more">

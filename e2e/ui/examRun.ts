@@ -268,7 +268,7 @@ describe('real exam through the screens', () => {
       });
       await other.click();
       await bp.locator('details', { has: other }).locator('select').selectOption({ label: RELEASE });
-      await bp.getByText(new RegExp(`^${RELEASE.replace(/\./g, '\\.')}, the version you chose`)).first().waitFor({ timeout: 90_000 });
+      await bp.getByText(new RegExp(`^${RELEASE.replace(/\./g, '\\.')}, your choice, verified`)).first().waitFor({ timeout: 90_000 });
       await board.shot(`${PREFIX}03-review`);
       await board.beat(3000);
       await bp.getByRole('button', { name: button.publish }).click();

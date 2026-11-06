@@ -132,7 +132,7 @@ describe('exam on a local anvil chain', () => {
       if (!githubOk) throw new Error('cannot publish without the live GitHub release list');
       await rec.say(`Step 2: choosing ${TAG}, an older version with a known commit and digest`);
       await versions.selectOption({ label: TAG });
-      await page.getByText(new RegExp(`^${TAG.replace('.', '\\.')}, the version you chose`)).first().waitFor({ timeout: 60_000 });
+      await page.getByText(new RegExp(`^${TAG.replace('.', '\\.')}, your choice, verified`)).first().waitFor({ timeout: 60_000 });
       await rec.check(`The app says the tag ${TAG} points at this commit, with the real commit and digest in the record`, async () => {
         await unfold(page, 'Exam record');
         const body = await rec.bodyText();
