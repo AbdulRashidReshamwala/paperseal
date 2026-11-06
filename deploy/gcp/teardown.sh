@@ -3,10 +3,26 @@
 # bucket WITH ALL ITS OBJECTS, and the service account with its role bindings.
 # It prints the list first and needs you to type the project ID to continue.
 # APIs stay enabled.
-# Usage: PROJECT_ID=... REGION=... ZONE=... [BUCKET=...] [DRY_RUN=1] ./teardown.sh
+#
+# Before that it reads https://$TEE_HOST/v1/status and refuses while an exam is
+# under way (from the first registration until released), or when the status
+# can't be read, unless given --force.
+#
+# If you created the bucket, service account, IP and firewall with deploy/tofu,
+# remove them with `tofu destroy` there instead, after stopping the VM.
+# Usage: PROJECT_ID=... REGION=... ZONE=... [BUCKET=...] [TEE_HOST=...] [DRY_RUN=1] ./teardown.sh [--force]
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+
+force=0
+for a in "$@"; do
+  case "$a" in
+    --force) force=1 ;;
+    *) die "unknown argument: $a" ;;
+  esac
+done
 init_common
+stage_guard "$force"
 
 cat <<LIST
 This will delete, in project $PROJECT_ID:

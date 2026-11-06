@@ -6,6 +6,9 @@
 
 die() { echo "error: $*" >&2; exit 1; }
 
+# deploy.json, when there is one, fills in any variable not already set.
+. "$(dirname "${BASH_SOURCE[0]}")/../config.sh"
+
 need_env() {
   local v
   for v in "$@"; do
@@ -46,6 +49,11 @@ origin_owner() {
 init_common() {
   need_env PROJECT_ID REGION ZONE
   case "$ZONE" in "$REGION"-*) ;; *) die "ZONE ($ZONE) is not in REGION ($REGION)" ;; esac
+  case "$INGRESS_KIND" in
+    cloudflare) ;;
+    gcp-lb) die "ingress.kind \"gcp-lb\" is not implemented (spec/deploy.md). Use \"cloudflare\"." ;;
+    *) die "unknown ingress kind: $INGRESS_KIND" ;;
+  esac
   : "${BUCKET:=${PROJECT_ID}-paperseal-exams}"
   SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
   if [ "$DRY_RUN" = 1 ]; then
@@ -69,4 +77,48 @@ run() {
 exists() {
   [ "$DRY_RUN" = 1 ] && return 1
   "$@" >/dev/null 2>&1
+}
+
+# stage_guard <force> refuses, unless force is 1, to go on while the TEE at
+# https://$TEE_HOST holds an exam: from the first registration until the exam
+# is released. Stopping it then destroys the in-memory question bank and keys
+# (spec/deploy.md, "One Command per Exam"). Stages are those of spec/api.md,
+# "TEE API". If the status can't be read, it refuses too, and says why.
+stage_guard() {
+  local force="$1" status stage regs n why=""
+  command -v jq >/dev/null || die "jq is needed to read the TEE's status"
+  if [ -z "${TEE_HOST:-}" ]; then
+    why="the TEE host is unknown: set TEE_HOST or ingress.teeHost in deploy.json"
+  elif ! status="$(curl -fsS --max-time 15 "https://$TEE_HOST/v1/status" 2>&1)"; then
+    why="could not read https://$TEE_HOST/v1/status: $status"
+  elif ! stage="$(jq -er '.stage | strings' <<<"$status" 2>/dev/null)"; then
+    why="https://$TEE_HOST/v1/status did not return a stage"
+  else
+    case "$stage" in
+      released|failed)
+        echo "TEE at $TEE_HOST is in stage $stage, safe to stop."; return 0 ;;
+      onboard)
+        # Safe only before anyone registered and before any list exists.
+        if jq -e '.approvedList' <<<"$status" >/dev/null 2>&1; then
+          why="stage onboard with an approved list"
+        elif ! regs="$(curl -fsS --max-time 15 "https://$TEE_HOST/v1/registrations" 2>&1)" \
+          || ! n="$(jq -er '.registrations | length' <<<"$regs" 2>/dev/null)"; then
+          why="stage onboard, and https://$TEE_HOST/v1/registrations could not be read"
+        elif [ "$n" = 0 ]; then
+          echo "TEE at $TEE_HOST is in stage onboard with no registrations, safe to stop."; return 0
+        else
+          why="stage onboard with $n registration(s)"
+        fi ;;
+      submit|lock|build|distribute|unlock)
+        why="stage $stage: the exam is under way" ;;
+      *)
+        why="unknown stage \"$stage\"" ;;
+    esac
+    why="TEE at $TEE_HOST: $why"
+  fi
+  if [ "$force" = 1 ]; then
+    echo "warning: $why. Going on because of --force." >&2
+    return 0
+  fi
+  die "$why. Stopping the TEE mid-exam destroys the exam, its question bank and keys. Pass --force to stop it anyway."
 }

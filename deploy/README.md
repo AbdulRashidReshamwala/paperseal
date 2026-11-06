@@ -1,6 +1,31 @@
 # Deploying Paper Seal
 
-Order of steps for a Sepolia demo with the TEE on Google Confidential Space. Nothing here needs a secret in a file: `gcloud` and `forge` use your own login and keystore.
+Order of steps for a Sepolia demo with the TEE on Google Confidential Space. Nothing here needs a secret in a file: `gcloud`, `tofu` and `forge` use your own login and keystore.
+
+## Quick start with deploy.json
+
+One file holds every operator setting ([spec/deploy.md](../spec/deploy.md)). Deploy `ExamRegistry` and publish a release first (steps 1 and 2 below), then:
+
+```sh
+cp deploy/deploy.example.json deploy/deploy.json    # edit it: project, hosts, registry. Not committed
+gcloud auth application-default login
+(cd deploy/tofu && tofu init && tofu apply)         # APIs, bucket, service account, IP, firewall
+deploy/doctor.sh                                    # one ok/fail/skip line per check
+# Point the Cloudflare A record for ingress.teeHost at `tofu output tee_ip` (step 4).
+# Publish the exam in the board app, then start its TEE with the on-chain settings:
+DRY_RUN=1 deploy/gcp/run-tee.sh --from-chain --exam 0x<examId>   # check, then run without DRY_RUN
+deploy/web-config.sh > apps/web/dist/config.json
+deploy/web-config.sh > apps/verifier/dist/config.json
+```
+
+- Choose `web.appHost` before anyone enrols: passkeys are bound to it, and changing it later locks every one out.
+- Every script reads `deploy/deploy.json`, or the file in `DEPLOY_JSON`. A variable you export (such as `PROJECT_ID` or `TEE_HOST`) still wins over the file, so the manual steps below keep working.
+- `run-tee.sh --from-chain` reads `getExam` from `chain.registry` with `cast` and uses exactly those settings and that image digest. It refuses an exam that isn't on-chain, or whose `rpcHost` is not `chain.rpcHost`.
+- `stop-tee.sh` and `teardown.sh` read `https://<teeHost>/v1/status` first and refuse mid-exam, or when the status can't be read, unless given `--force`.
+- `doctor.sh --exam 0x<examId>` also pulls that exam's image manifest anonymously.
+- `ingress.kind = "gcp-lb"` is not implemented yet. The tooling refuses it.
+
+See [tofu/README.md](tofu/README.md) to bring resources made by the old scripts into OpenTofu. The steps below are the manual way, and still work.
 
 Every GCP script takes `PROJECT_ID`, `REGION` and `ZONE` from the environment and prints its commands instead of running them when `DRY_RUN=1`.
 
@@ -55,7 +80,7 @@ A new GHCR package starts private and Actions cannot change that. The first time
 
 ## 3. Google Cloud
 
-Run in this order. Each is safe to run again.
+`deploy/tofu` now does this from `deploy.json` (see the quick start). The scripts still work, and print a deprecation note. Run in this order. Each is safe to run again.
 
 ```sh
 cd deploy/gcp
@@ -66,7 +91,7 @@ cd deploy/gcp
 
 The bucket is `${PROJECT_ID}-paperseal-exams` unless you set `BUCKET`. If an organisation policy blocks public buckets, allow them for this project first.
 
-Publish the exam in the board app first, so the on-chain settings exist. Then start the TEE with the same settings and the release's image digest:
+Publish the exam in the board app first, so the on-chain settings exist. Then start the TEE with `./run-tee.sh --from-chain --exam 0x...`, which reads them from the chain, or give the same settings and the release's image digest by hand:
 
 ```sh
 ./run-tee.sh \
@@ -85,7 +110,7 @@ Wait a minute or two, then check `curl -k https://<ip>:8080/v1/status` (`-k` bec
 
 Estimated cost of one `n2d-standard-2` Confidential VM in `asia-south2` running all month: roughly 75 to 100 US dollars, plus a few dollars for the static IP and disk. This is **not verified against Google's pricing page**: the page is rendered by script and could not be read when this was written. Check the [pricing calculator](https://cloud.google.com/products/calculator) (Compute Engine, N2D, Confidential VM, 2 vCPU, 8 GB) before you rely on the number.
 
-**Stop the VM after a demo:** `./stop-tee.sh`. Stopping ends the instance, so its in-memory question bank and keys are gone. Only stop it once the exam is released. The static IP is billed while reserved. `./teardown.sh` removes everything (VM, firewall rule, IP, bucket with all its files, service account). It prints the list and needs you to type the project ID.
+**Stop the VM after a demo:** `./stop-tee.sh`. Stopping ends the instance, so its in-memory question bank and keys are gone. Only stop it once the exam is released: it reads `GET /v1/status` on `TEE_HOST` and refuses from the first registration until the stage is `released` or `failed`, or when the status can't be read, unless given `--force`. `teardown.sh` checks the same way. The static IP is billed while reserved. `./teardown.sh` removes everything (VM, firewall rule, IP, bucket with all its files, service account). It prints the list and needs you to type the project ID.
 
 ## 4. DNS: `<your-tee-host>`
 

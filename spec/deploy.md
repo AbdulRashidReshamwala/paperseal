@@ -37,7 +37,7 @@ One file holds every operator setting. It matches [`deploy.schema.json`](deploy.
 
 `run-tee.sh --from-chain --exam <examId>` reads the exam with `getExam` from `chain.registry` and starts the VM with exactly those settings. It refuses if the exam isn't on-chain or its `rpcHost` differs from `chain.rpcHost`.
 
-`stop-tee.sh` and `teardown.sh` read `GET /v1/status` first. They refuse to stop a TEE whose stage is between `registered` and `unlocked` unless given `--force`, because stopping it then destroys the exam.
+`stop-tee.sh` and `teardown.sh` read `GET /v1/status` first. They refuse to stop a TEE that holds an exam in progress unless given `--force`, because stopping it then destroys the exam. Safe stages are `released`, `failed`, and `onboard` with no approved list and no registrations. Every other stage, an unknown stage and a status that can't be read are refused.
 
 `doctor.sh` reads `deploy.json` and reports, one line per check, `ok`, `fail` or `skip`, and exits 1 if any check failed:
 
