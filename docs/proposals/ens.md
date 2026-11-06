@@ -1,6 +1,6 @@
 # Proposal: ENS Names for Exams
 
-**Status:** proposed, 2026-11-06. Nothing here is implemented. If accepted, the behaviour moves to the [README](../../README.md) and the shared rules to `spec/`.
+**Status:** part 1, Verify by Name, is implemented: the behaviour is in the [README](../../README.md#exam-names), the rules in `spec/api.md` ("Exam Names") and `spec/ens.json`, and the setup in [ENS setup](../ens-setup.md). Its records are set by hand, so there is no `ExamResolver` yet. Parts 2 to 5 are still proposed, 2026-11-06.
 
 ## Summary
 

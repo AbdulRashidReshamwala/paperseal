@@ -1,4 +1,5 @@
 import type { ClaimCheck } from '@paperseal/attestation';
+import type { ExamNameCheck, ExamNameResult, ResolvedExamName } from '@paperseal/chain';
 import {
   decodeApprovedList,
   decodeCriteria,
@@ -39,7 +40,24 @@ import type { LogVerdict, ReleaseFileReport, ReleaseFilesReport, ReleaseProgress
  * its step and reaches the top of the page, and a step can only be done when `complete` says so.
  */
 
-export const REPOSITORY = 'AbdulRashidReshamwala/paperseal';
+export const defaultRepository = 'AbdulRashidReshamwala/paperseal';
+
+const repositoryPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
+/**
+ * The repository the code and build links point at: VITE_RELEASES_REPO, or the default. A fork
+ * sets it to its own `owner/name`, the same variable the board app reads its releases from.
+ */
+export function repository(
+  env: Record<string, string | undefined> = import.meta.env as Record<string, string | undefined>,
+): string {
+  const given = env.VITE_RELEASES_REPO?.trim();
+  if (!given) return defaultRepository;
+  if (!repositoryPattern.test(given)) throw new Error(`VITE_RELEASES_REPO must look like owner/name, not "${given}".`);
+  return given;
+}
+
+export const REPOSITORY = repository();
 
 export type Label = string | { code: string };
 
@@ -64,7 +82,7 @@ export type Item =
   | { kind: 'code'; text: string }
   | { kind: 'link'; href: string; text: string };
 
-export type StepId = 'published' | 'attested' | 'people' | 'locked' | 'sealed' | 'unlock' | 'open';
+export type StepId = 'name' | 'published' | 'attested' | 'people' | 'locked' | 'sealed' | 'unlock' | 'open';
 
 export interface CustodyStep {
   id: StepId;
@@ -76,6 +94,8 @@ export interface CustodyStep {
   /** The public clock round at that moment. */
   round: number | null;
   note: string;
+  /** A quiet line under the note. */
+  aside?: string;
   items: Item[];
   /** Every failed check here, as plain sentences. */
   failures: string[];
@@ -102,10 +122,20 @@ export interface Custody {
   withheld: boolean;
 }
 
+/** A `#/name/` route: the name as written, what reading it found, and the locators in use. */
+export interface NameView {
+  name: string;
+  result: Polled<ExamNameResult>;
+  /** What this view reads from: the name's records, or the viewer's own values where it sets none. */
+  used: { teeUrl: string; storageUrl: string; bucket: string };
+}
+
 export interface View {
   examId: Hex | null;
   /** The URL named something that is not an exam ID. */
   invalidLink: boolean;
+  /** Only on a name route. The exam ID and registry then come from the name, once it passes. */
+  name?: NameView;
   sources: { chain: boolean; storage: boolean; tee: boolean };
   records: Polled<Records>;
   live: Polled<LiveReport | Neutral>;
@@ -217,6 +247,9 @@ interface Draft {
   notApplicable?: boolean;
   /** Whether a viewer is waiting on this step now. A step whose proof comes later never blocks. */
   blocks?: boolean;
+  /** A failure here leaves every later step waiting. */
+  stops?: boolean;
+  aside?: string;
   at?: number | null;
   round?: number | null;
   note: string;
@@ -238,6 +271,9 @@ interface Context {
   /** `Fri 21:30, in 14 minutes`. */
   when: (seconds: number) => string;
 }
+
+/** A step's number as shown: a name route puts the Name step first, so the others move down one. */
+const stepNumber = (c: Context, withoutName: number) => withoutName + (c.view.name ? 1 : 0);
 
 const roundOf = (seconds: number | null) => (seconds === null ? null : roundAtSeconds(seconds) || null);
 
@@ -267,6 +303,114 @@ function settingsItems(exam: Exam, examId: Hex | null): Item[] {
   ];
 }
 
+/** The short titles of docs/ens-setup.md, one per check a name can fail. */
+const nameTitles: Record<ExamNameCheck, string> = {
+  name: 'Not a valid name',
+  registry: 'No exam record',
+  primaryName: 'Not the board’s name',
+  forward: 'Not confirmed by the board',
+  unreadable: "Can't read the name",
+};
+
+/** What each failure means to someone who is not technical. The exact reason stays in the evidence. */
+const nameFailures: Record<ExamNameCheck, string> = {
+  name: 'Check how the name is spelled.',
+  registry: 'This name does not lead to an exam on the public record.',
+  primaryName: 'This name does not belong to the exam board behind that record.',
+  forward: 'The exam board behind that record does not confirm this name.',
+  unreadable: 'The name could not be read.',
+};
+
+const sepoliaName = 'On Sepolia, a test network, anyone can register a similar name, so this check is only a demo.';
+
+/** Where one locator came from: the name's record, or the viewer's own value where it sets none. */
+function located(label: string, record: string | null, used: string, fallback: string): Item {
+  return {
+    kind: 'tag',
+    label,
+    tone: 'neutral',
+    tag: record !== null ? 'From the name' : fallback,
+    value: used || 'Not set',
+  };
+}
+
+/** What a failed read had already found, so a viewer can see where it went wrong. */
+function partialRows(partial: Partial<ResolvedExamName>): Item[] {
+  return [
+    ...(partial.examId ? [{ kind: 'hash' as const, label: 'Exam ID, the labelhash of the exam name', value: partial.examId }] : []),
+    ...(partial.registry ? [{ kind: 'hash' as const, label: 'Address record', value: partial.registry }] : []),
+    ...(partial.board ? [{ kind: 'hash' as const, label: 'Board, from the registry', value: partial.board }] : []),
+  ];
+}
+
+function nameStep(named: NameView): Draft {
+  const base = { id: 'name' as const, label: 'Name', stops: true, complete: false };
+  const unreadable = (message: string): Draft => ({
+    ...base,
+    aside: sepoliaName,
+    note: `${nameTitles.unreadable}. This page will try again.`,
+    items: [notChecked(nameTitles.unreadable, message)],
+  });
+  const { result } = named;
+  if (result.state === 'off') {
+    return {
+      ...base,
+      aside: sepoliaName,
+      note: 'Add where to read the public record under "Check it yourself" to check this name.',
+      items: [notChecked('Name', 'Needs a Sepolia RPC URL, which you can add under "Check it yourself".')],
+    };
+  }
+  if (result.state === 'loading') {
+    return { ...base, aside: sepoliaName, note: `Checking ${named.name}.`, items: [notChecked('Name', 'Reading')] };
+  }
+  if (result.state === 'error') return unreadable(`Could not be read: ${result.message}`);
+  const read = result.value;
+  if (!read.ok) {
+    if (read.failed === 'unreadable') return unreadable(`Could not be read: ${read.reason}`);
+    const title = nameTitles[read.failed];
+    return {
+      ...base,
+      note: title,
+      items: [{ kind: 'fact', label: 'Name', value: named.name }, fail(title, `${title}. ${nameFailures[read.failed]}`, read.reason), ...partialRows(read.partial)],
+    };
+  }
+  const value = read.value;
+  const { used } = named;
+  return {
+    ...base,
+    complete: true,
+    aside: sepoliaName,
+    note: `${value.name} belongs to the exam board behind this record.`,
+    items: [
+      { kind: 'check', label: 'Exam name, a valid ENS label', status: 'pass', detail: value.label },
+      { kind: 'hash', label: 'Exam ID, the labelhash of the exam name', value: value.examId },
+      { kind: 'check', label: 'Address record runs the ExamRegistry code for this board', status: 'pass', hash: value.registry },
+      { kind: 'hash', label: 'Board, from the registry', value: value.board },
+      { kind: 'check', label: "Board's primary name", status: 'pass', detail: value.parent },
+      { kind: 'check', label: `${value.parent} points back to the board, so verified both ways`, status: 'pass' },
+      { kind: 'heading', text: 'Where to look' },
+      located('TEE URL', value.teeUrl, used.teeUrl, 'From your settings'),
+      located('Storage URL', value.storageUrl, used.storageUrl, 'From your settings'),
+      located('Storage bucket', value.bucket, used.bucket, 'Built into this page'),
+      {
+        kind: 'text',
+        text: 'These records only say where to look. A wrong value makes the later checks fail, it can’t make them pass. Where the name sets none, this page uses your settings under "Check it yourself".',
+      },
+    ],
+  };
+}
+
+/** A step after a name that has not passed: nothing it would check has been read. */
+function held(draft: Draft): Draft {
+  return {
+    id: draft.id,
+    label: draft.label,
+    complete: false,
+    note: 'Waits for the exam name to pass.',
+    items: [notChecked(draft.label, 'Not checked until the exam name in step 1 passes')],
+  };
+}
+
 function publishedStep(c: Context): Draft {
   const { exam } = c;
   const seconds = exam ? Number(exam.createdAt) : null;
@@ -285,7 +429,8 @@ function publishedStep(c: Context): Draft {
   };
 }
 
-function publishedTokenItems(token: Records['token'] | null): Item[] {
+function publishedTokenItems(c: Context): Item[] {
+  const token = c.records?.token ?? null;
   if (!token) return [notChecked('Published proof', 'Not read yet')];
   if (token.kind !== 'ready') return [sourceGap('Published proof', token)];
   const { verdict: result, build } = token;
@@ -297,7 +442,7 @@ function publishedTokenItems(token: Records['token'] | null): Item[] {
       status: result.verified ? 'pass' : 'fail',
       ...(result.verified
         ? {}
-        : { quiet: recordFailed, failure: 'The paper is not signed by the same machine that proved it runs the published code. See step 5.' }),
+        : { quiet: recordFailed, failure: `The paper is not signed by the same machine that proved it runs the published code. See step ${String(stepNumber(c, 5))}.` }),
     },
     result.signature.ok
       ? { kind: 'check', label: "Token signature, up to Google's root", status: 'pass' }
@@ -405,7 +550,7 @@ function attestedStep(c: Context): Draft {
     note,
     items: [
       { kind: 'heading', text: 'Published proof' },
-      ...publishedTokenItems(token),
+      ...publishedTokenItems(c),
       ...liveTokenItems(c),
       { kind: 'heading', text: 'Security key hardware' },
       ...hardware,
@@ -781,7 +926,7 @@ function liveReleaseItems(c: Context): Item[] {
     heading,
     ...(trusted
       ? [{ kind: 'check' as const, label: 'The machine passed its check, so its answers can be trusted', status: 'pass' as const }]
-      : [{ kind: 'text' as const, tone: 'warn' as const, text: 'Not verified. The machine has not passed its check, so what it reports here is not evidence. See step 2.' }]),
+      : [{ kind: 'text' as const, tone: 'warn' as const, text: `Not verified. The machine has not passed its check, so what it reports here is not evidence. See step ${String(stepNumber(c, 2))}.` }]),
     ...stateItems,
     ...(live.log
       ? logItems(live.log, "Signed by the live TEE's attested key", 'Not checked, the log is not signed by the attested key')
@@ -960,8 +1105,10 @@ function settle(drafts: readonly Draft[]): CustodyStep[] {
   return drafts.map((draft, index) => {
     const failures = failuresOf(draft.items);
     let state: StepState;
-    if (failures.length > 0) state = 'failed';
-    else if (draft.complete) state = 'done';
+    if (failures.length > 0) {
+      state = 'failed';
+      if (draft.stops) holding = true;
+    } else if (draft.complete) state = 'done';
     else if (draft.notApplicable) state = 'not-applicable';
     else if (draft.blocks !== false && !holding) {
       state = 'current';
@@ -976,13 +1123,14 @@ function settle(drafts: readonly Draft[]): CustodyStep[] {
       at: Number.isFinite(draft.at) ? (draft.at ?? null) : null,
       round: draft.round ?? null,
       note: draft.note,
+      ...(draft.aside ? { aside: draft.aside } : {}),
       items: draft.items,
       failures,
     };
   });
 }
 
-const BEFORE_SEAL: readonly StepId[] = ['published', 'attested', 'people', 'locked', 'sealed'];
+const BEFORE_SEAL: readonly StepId[] = ['name', 'published', 'attested', 'people', 'locked', 'sealed'];
 
 function sealOf(c: Context, steps: readonly CustodyStep[]): SealState | null {
   const { proof } = c.view;
@@ -1003,6 +1151,15 @@ interface Words {
 /** Where things stand when no exam can be shown. Null once there is one. */
 function noExamWords(view: View): Words | null {
   const again = 'This page tries again by itself. You can also choose another source under "Check it yourself" below.';
+  if (view.name) {
+    const { result } = view.name;
+    if (result.state === 'off') return { headline: 'This page cannot read the public record yet.', next: 'Add where to read it under "Check it yourself" below. Nothing has been checked yet.' };
+    if (result.state === 'loading') return { headline: 'Checking the exam name.', next: 'This takes a few seconds. Keep this page open.' };
+    if (result.state === 'error' || (!result.value.ok && result.value.failed === 'unreadable')) {
+      return { headline: 'The exam name could not be read.', next: again };
+    }
+    if (!result.value.ok) return { headline: 'This name does not lead to a verified exam.', next: 'Ask your exam board for the right name. Nothing after the name has been checked.' };
+  }
   if (view.invalidLink) return { headline: 'This link does not name an exam.', next: 'Ask your exam board for the right link, or enter the exam ID below.' };
   if (!view.examId) return { headline: 'Choose an exam to check.', next: 'Enter the exam ID below, or open the link your exam board shared.' };
   if (!view.sources.chain) return { headline: 'This page cannot read the public record yet.', next: 'Add where to read it under "Check it yourself" below. Nothing has been checked yet.' };
@@ -1065,7 +1222,10 @@ function verdictLine(c: Context, steps: readonly CustodyStep[], failures: readon
 }
 
 /** The whole chain of custody, as it stands at this moment. */
-export function custody(view: View): Custody {
+export function custody(given: View): Custody {
+  // On a name route the name comes first, and nothing read for the exam counts until it passes.
+  const named = given.name ? nameStep(given.name) : null;
+  const view: View = named && !named.complete ? { ...given, records: { state: 'off' }, live: { state: 'off' }, proof: null } : given;
   const records = view.records.state === 'ready' ? view.records.value : null;
   const chain = records?.chain ?? null;
   const exam = chain?.exam ?? null;
@@ -1091,7 +1251,7 @@ export function custody(view: View): Custody {
   const logReady = records?.log.kind === 'ready';
   // Nothing in storage at the end round: no copy of the key exists, so the unlock never happened.
   const unlockOff = proof?.state === 'sealed' && !logReady;
-  const steps = settle([
+  const examSteps = [
     publishedStep(c),
     attestedStep(c),
     peopleStep(c),
@@ -1099,7 +1259,8 @@ export function custody(view: View): Custody {
     sealedStep(c),
     unlockStep(c, unlockOff),
     openStep(c),
-  ]);
+  ];
+  const steps = settle(named ? [named, ...(named.complete ? examSteps : examSteps.map(held))] : examSteps);
 
   const failures = steps.flatMap((step) => step.failures.map((message) => ({ step: step.number, label: step.label, message })));
   const seal = sealOf(c, steps);

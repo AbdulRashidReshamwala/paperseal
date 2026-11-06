@@ -46,7 +46,7 @@ export function CreateStep(props: { eyebrow: string; onContinue: () => void }) {
           <Panel title="The exam">
             <Input
               label="Exam name"
-              hint="The name cannot be changed once the exam is published. Each exam needs its own name."
+              hint="Use lowercase letters, digits and hyphens, like jee-main-2026. The name cannot be changed once the exam is published. Each exam needs its own name."
               error={whenTyped(plan.name, blueprint.nameError)}
               value={plan.name}
               onChange={(name) => {

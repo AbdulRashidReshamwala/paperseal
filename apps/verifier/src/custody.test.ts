@@ -1,9 +1,10 @@
+import type { ExamNameCheck, ExamNameResult } from '@paperseal/chain';
 import { describe, expect, beforeAll, it, vi } from 'vitest';
 import { roundTimeSeconds, sortReleaseFiles, storageNames, toHex, type Hex } from '@paperseal/protocol';
 
 import { checkPublishedToken, checkRecordToken, type Build, type FreshVerdict } from './attest';
 import { approvedEntries, checkManifest, holdersOf } from './commitments';
-import { clockTime, custody, inWords, type Custody, type CustodyStep, type Item, type StepId, type View } from './custody';
+import { clockTime, custody, inWords, repository, type Custody, type CustodyStep, type Item, type NameView, type StepId, type View } from './custody';
 import { buildWorld, examId, random, registryAddress, type World } from './fixtures';
 import type { LiveReport, ProofRun, Records } from './load';
 import type { ProofChecks, ProofState } from './proof';
@@ -106,9 +107,9 @@ interface Scene {
   proof?: ProofRun;
 }
 
-function scene({ round = LOCK - 1, chain, records, live, proof }: Scene = {}): Custody {
+function sceneView({ round = LOCK - 1, chain, records, live, proof }: Scene = {}): View {
   const value = { ...fullRecords, ...records, chain: { ...fullRecords.chain, ...chain } };
-  const view: View = {
+  return {
     examId,
     invalidLink: false,
     sources: { chain: true, storage: true, tee: live !== undefined },
@@ -119,8 +120,9 @@ function scene({ round = LOCK - 1, chain, records, live, proof }: Scene = {}): C
     proof: proof ?? null,
     timeZone: 'UTC',
   };
-  return custody(view);
 }
+
+const scene = (over: Scene = {}): Custody => custody(sceneView(over));
 
 const step = (result: Custody, id: StepId): CustodyStep => {
   const found = result.steps.find((s) => s.id === id);
@@ -706,6 +708,78 @@ describe('key files listed in the signed log', () => {
   });
 });
 
+describe('step 1 on a name route, the name', () => {
+  const name = 'jee-main-2026.board.eth';
+  const used = { teeUrl: '', storageUrl: 'https://files.example/bucket', bucket: 'bucket' };
+  const passed: ExamNameResult = {
+    ok: true,
+    value: { name, label: 'jee-main-2026', parent: 'board.eth', examId, registry: registryAddress, board: `0x${'bb'.repeat(20)}`, teeUrl: null, storageUrl: 'https://files.example/bucket', bucket: null },
+  };
+  const named = (result: NameView['result'], over: Scene = {}) =>
+    custody({ ...sceneView(over), name: { name, result, used } });
+
+  it('passes first, and the exam then runs as usual', () => {
+    const result = named({ state: 'ready', value: passed, readAt: 0 }, { round: END, proof: opened() });
+    expect(result.steps.map((s) => s.id)).toEqual(['name', 'published', 'attested', 'people', 'locked', 'sealed', 'unlock', 'open']);
+    expect(states(result)).toEqual(Array(8).fill('done'));
+    expect(result.seal).toBe('open');
+    expect(checks(step(result, 'name')).map((c) => [c.label, c.status])).toEqual([
+      ['Exam name, a valid ENS label', 'pass'],
+      ['Address record runs the ExamRegistry code for this board', 'pass'],
+      ["Board's primary name", 'pass'],
+      ['board.eth points back to the board, so verified both ways', 'pass'],
+    ]);
+    const tags = step(result, 'name').items.filter((item) => item.kind === 'tag');
+    expect(tags.map((item) => item.kind === 'tag' && [item.label, item.tag])).toEqual([
+      ['TEE URL', 'From your settings'],
+      ['Storage URL', 'From the name'],
+      ['Storage bucket', 'Built into this page'],
+    ]);
+    expect(step(result, 'name').aside).toMatch(/Sepolia/);
+  });
+
+  it.each([
+    ['name', 'Not a valid name'],
+    ['registry', 'No exam record'],
+    ['primaryName', 'Not the board’s name'],
+    ['forward', 'Not confirmed by the board'],
+  ] as [ExamNameCheck, string][])('a failed %s check fails it, holds every later step and shows no seal', (check, title) => {
+    const value: ExamNameResult = { ok: false, failed: check, reason: 'Because.', partial: { name } };
+    const result = named({ state: 'ready', value, readAt: 0 }, { round: END, proof: opened() });
+    expect(step(result, 'name').state).toBe('failed');
+    expect(result.failures).toEqual([{ step: 1, label: 'Name', message: expect.stringMatching(new RegExp(`^${title}\\. `)) as string }]);
+    expect(states(result).slice(1)).toEqual(Array(7).fill('waiting'));
+    expect(result.steps.slice(1).flatMap(checks).filter((c) => c.status === 'pass')).toEqual([]);
+    expect(result.headline).toBe('This name does not lead to a verified exam.');
+    expect(result.paper).toBe(null);
+    expect(result.seal).toBe(null);
+  });
+
+  it('counts its own step in the references that name a later one', () => {
+    const live = liveReport(false);
+    const text = (result: Custody) =>
+      result.steps.flatMap((s) => s.items).flatMap((item) => (item.kind === 'text' ? [item.text] : []));
+    const plain = custody(sceneView({ live }));
+    const namedView = named({ state: 'ready', value: passed, readAt: 0 }, { live });
+    expect(text(plain).filter((line) => line.includes('See step 2'))).not.toEqual([]);
+    expect(text(namedView).filter((line) => line.includes('See step 3'))).not.toEqual([]);
+    expect(text(namedView).filter((line) => line.includes('See step 2'))).toEqual([]);
+  });
+
+  it.each([
+    ['not connected', { state: 'off' }, 'This page cannot read the public record yet.'],
+    ['reading', { state: 'loading' }, 'Checking the exam name.'],
+    ["can't read ENS", { state: 'error', message: 'RPC down' }, 'The exam name could not be read.'],
+  ] as const)('%s is neutral, with no Pass and no seal', (_, polled, headline) => {
+    const result = custody({ ...sceneView(), examId: null, records: { state: 'off' }, name: { name, result: polled, used } });
+    expect(result.headline).toBe(headline);
+    expect(step(result, 'name').state).toBe('current');
+    expect(result.failures).toEqual([]);
+    expect(result.seal).toBe(null);
+    expect(result.steps.flatMap(checks).filter((c) => c.status === 'pass')).toEqual([]);
+  });
+});
+
 describe('before there is an exam to show', () => {
   const base: View = {
     examId: null,
@@ -749,5 +823,13 @@ describe('words', () => {
     const now = Date.UTC(2026, 10, 6, 12) / 1000;
     expect(clockTime(now + 3600, now, 'UTC')).toBe('13:00');
     expect(clockTime(now + 86_400, now, 'UTC')).toBe('Sat 7 Nov, 12:00');
+  });
+});
+
+describe('repository', () => {
+  it('defaults and can be overridden by a fork', () => {
+    expect(repository({})).toBe('AbdulRashidReshamwala/paperseal');
+    expect(repository({ VITE_RELEASES_REPO: ' me/fork ' })).toBe('me/fork');
+    expect(() => repository({ VITE_RELEASES_REPO: 'bad repo' })).toThrow();
   });
 });

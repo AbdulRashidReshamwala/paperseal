@@ -1,4 +1,4 @@
-import { decodeCriteria, fromHex, type Hex } from '@paperseal/protocol';
+import { decodeCriteria, examNameProblem, fromHex, type Hex } from '@paperseal/protocol';
 
 import { boardSend, checkDeployment, connectChain } from './chainio';
 import { deployed, rpcHost } from './config';
@@ -8,7 +8,7 @@ import { loadState, saveState, type PublishedExam } from './state';
 import { stamp } from './util';
 
 /*
- * `publish --release v0.2.0 [--repo owner/name] [--name "Exam name"]`
+ * `publish --release v0.2.0 [--repo owner/name] [--name exam-name]`
  *
  * Reads the release, computes the schedule from now, runs checkSchedule, creates the exam from the
  * board keystore through cast, reads it back and prints the exact run-tee.sh arguments.
@@ -24,8 +24,14 @@ const at = (unix: number) => `${new Date(unix * 1000).toISOString()} (${String(u
 
 export async function publish(argv: string[]): Promise<void> {
   const tag = option(argv, 'release') ?? argv.find((a) => /^v\d+\.\d+\.\d+$/.test(a));
-  if (!tag) throw new Error('usage: publish --release v<major>.<minor>.<patch> [--repo owner/name] [--name "Exam name"]');
+  if (!tag) throw new Error('usage: publish --release v<major>.<minor>.<patch> [--repo owner/name] [--name exam-name]');
   const repo = option(argv, 'repo') ?? deployed.releasesRepo;
+  const name = option(argv, 'name') ?? examName();
+  const nameProblem = examNameProblem(name);
+  if (nameProblem) {
+    console.error(`--name ${JSON.stringify(name)}: ${nameProblem}`);
+    process.exit(1);
+  }
 
   const existing = loadState();
   if (existing.exam && existing.run?.status === 'running') {
@@ -39,7 +45,6 @@ export async function publish(argv: string[]): Promise<void> {
   const io = connectChain();
   console.log(`checking the deployment: ${await checkDeployment(io)}`);
 
-  const name = option(argv, 'name') ?? examName();
   const schedule = computeSchedule(Math.floor(Date.now() / 1000));
   const built = plan(name, schedule); // runs checkSchedule
   console.log('checkSchedule passed');

@@ -61,6 +61,9 @@ export interface Records {
 
 const neutral = (message: string): Neutral => ({ kind: 'neutral', message });
 
+/** Left out, the checks use the build-time `teeStorageBucket`. */
+const bucketOf = (bucket: string | undefined) => (bucket === undefined ? {} : { bucket });
+
 /** One file that can't be read leaves the other checks standing. */
 const guarded = async <T>(read: () => Promise<T | Neutral>): Promise<Sourced<T>> => {
   try {
@@ -80,14 +83,14 @@ function issuedAt(token: string): number | null {
   }
 }
 
-async function readToken(chain: ChainData, storage: StorageReader, examId: Hex, registry: Hex) {
+async function readToken(chain: ChainData, storage: StorageReader, examId: Hex, registry: Hex, bucket?: string) {
   const { exam, build } = chain;
   if (!exam) return neutral('The exam is not on the public record yet.');
   if (!build) return neutral('The paper is not recorded yet, so there is nothing to check the proof against.');
   const bytes = await storage.get(storageNames.token);
   if (!bytes) return neutral(`${storageNames.token} is not in storage yet. It is written before the Build.`);
   const token = utf8Text(bytes).trim();
-  const verdict = await checkPublishedToken({ token, exam, build, examId, registry });
+  const verdict = await checkPublishedToken({ token, exam, build, examId, registry, ...bucketOf(bucket) });
   return { kind: 'ready' as const, verdict, build, issuedAt: issuedAt(token) };
 }
 
@@ -104,7 +107,7 @@ async function readManifest(chain: ChainData, storage: StorageReader, examId: He
   };
 }
 
-async function readLog(chain: ChainData, storage: StorageReader, examId: Hex, registry: Hex): Promise<LogResult | Neutral> {
+async function readLog(chain: ChainData, storage: StorageReader, examId: Hex, registry: Hex, bucket?: string): Promise<LogResult | Neutral> {
   const { exam, entries } = chain;
   const bytes = await storage.get(storageNames.releaseLog);
   if (!bytes) return neutral(`${storageNames.releaseLog} is not in storage yet. The TEE writes it at unlock.`);
@@ -123,6 +126,7 @@ async function readLog(chain: ChainData, storage: StorageReader, examId: Hex, re
           examId,
           registry,
           instancePublicKey: log.instancePublicKey,
+          ...bucketOf(bucket),
         })
       : null;
   const list = approvedEntries(entries);
@@ -158,14 +162,16 @@ export async function loadRecords(args: {
   storage: StorageReader | null;
   examId: Hex;
   registry: Hex;
+  /** The bucket the TEE must name, from an exam name. `teeStorageBucket` when left out. */
+  bucket?: string;
 }): Promise<Records> {
-  const { storage, examId, registry } = args;
+  const { storage, examId, registry, bucket } = args;
   const chain = await args.chain();
   const off: Off = { kind: 'off' };
   const [token, manifest, log] = await Promise.all([
-    storage ? guarded(() => readToken(chain, storage, examId, registry)) : off,
+    storage ? guarded(() => readToken(chain, storage, examId, registry, bucket)) : off,
     storage ? guarded(() => readManifest(chain, storage, examId)) : off,
-    storage ? guarded(() => readLog(chain, storage, examId, registry)) : off,
+    storage ? guarded(() => readLog(chain, storage, examId, registry, bucket)) : off,
   ]);
   return { chain, token, manifest, log };
 }
@@ -193,13 +199,14 @@ export async function loadLive(args: {
   chain: () => ChainData | null;
   examId: Hex;
   registry: Hex;
+  bucket?: string;
 }): Promise<LiveReport | Neutral> {
-  const { tee, examId, registry } = args;
+  const { tee, examId, registry, bucket } = args;
   const chain = args.chain();
   const exam = chain?.exam;
   if (!exam) return neutral('The exam is not on the public record yet.');
   const [fresh, status, log] = await Promise.all([
-    attempt(() => checkFreshToken({ tee, exam, examId, registry })),
+    attempt(() => checkFreshToken({ tee, exam, examId, registry, ...bucketOf(bucket) })),
     attempt(() => tee.status()),
     tee.releaseLog().catch(() => null),
   ]);

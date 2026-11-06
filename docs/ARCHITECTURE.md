@@ -9,11 +9,11 @@ How the design in the [README](../README.md) maps onto this repository. The READ
 | `spec/` | JSON, Markdown | Values and wire formats shared by every language |
 | `contracts/` | Solidity, Foundry | `ExamRegistry` |
 | `tee/` | Go | The Confidential Space workload and its reproducible image |
-| `packages/protocol` | TypeScript | Types and constants from `spec/`, including domain tags and hash encoding through ABI encoding with viem |
+| `packages/protocol` | TypeScript | Types and constants from `spec/`, including domain tags, hash encoding through ABI encoding with viem, and the exam-name rule (`examNameProblem`, `spec/ens.json`) |
 | `packages/crypto` | TypeScript | HPKE, AES-256-GCM, XOR and timelock decrypt |
 | `packages/keys` | TypeScript | The key interface over WebAuthn PRF |
 | `packages/attestation` | TypeScript | Confidential Space token checks |
-| `packages/chain` | TypeScript | `ExamRegistry` reads and writes through viem |
+| `packages/chain` | TypeScript | `ExamRegistry` reads and writes through viem, and the on-chain ENS name check (`resolveExamName`) |
 | `packages/tee-client` | TypeScript | Typed client for the TEE HTTP API |
 | `packages/ui` | React | Shared components, tokens and the Chromium gate |
 | `apps/web` | React | The board-hosted app, with a route area per signed-in role |
@@ -30,7 +30,7 @@ Each signed-in role has a code-split route area in `apps/web`:
 
 The README names separate setter and centre apps. One app is simpler to host and keeps one passkey domain. Keyholder routes still never import paper or `K_priv` handling, and a lint rule or test enforces that.
 
-`apps/verifier` covers the public checks, live unlock status and the post-exam proof, with no sign-in. It exists to check the board, so the board must not be the only party serving it. It is a static build with relative paths that anyone can host, it uses no passkeys, and viewers can set their own RPC and TEE URLs. The TEE must allow cross-origin reads on its public routes for this to work.
+`apps/verifier` covers the public checks, live unlock status and the post-exam proof, with no sign-in. It exists to check the board, so the board must not be the only party serving it. It is a static build with relative paths that anyone can host, it uses no passkeys, and viewers can set their own RPC and TEE URLs. The TEE must allow cross-origin reads on its public routes for this to work. `#/name/<ENS name>` checks an exam by name first ("Exam Names" in `spec/api.md`): it reads ENS through the viewer's RPC, with CCIP-Read off, and saves nothing it resolves.
 
 ## Dependency Rules
 
@@ -39,7 +39,8 @@ The README names separate setter and centre apps. One app is simpler to host and
 - `packages/protocol` depends on nothing internal. All other packages may depend on it.
 - `packages/crypto` holds no key state. `packages/keys` is the only code that touches WebAuthn.
 - Shamir splitting and rebuilding exist only in `tee/`. No browser code handles `K_priv` shares beyond decrypting and forwarding its own.
-- The `ExamRegistry` ABI is generated from `contracts/` and copied into `packages/chain` by `make abi`. It is never edited by hand.
+- The `ExamRegistry` ABI and runtime bytecode are generated from `contracts/` and copied into `packages/chain` by `make abi`. They are never edited by hand.
+- Only `packages/chain` reads ENS, and only the verifier uses it. `tee/` and `contracts/` never read ENS.
 
 ## Lifecycle Ownership
 

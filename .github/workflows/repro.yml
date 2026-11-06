@@ -102,9 +102,17 @@ jobs:
     permissions:
       contents: write
       packages: write
-    env:
-      IMAGE: ghcr.io/abdulrashidreshamwala/paperseal-tee
     steps:
+      # The image is named after the repository owner, so a fork publishes to
+      # its own ghcr.io/<owner>/paperseal-tee with no edit. GHCR names must be
+      # lowercase and the owner can be mixed case.
+      - name: Name the image
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          owner="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')"
+          echo "IMAGE=ghcr.io/$owner/paperseal-tee" >> "$GITHUB_ENV"
+
       # actions/checkout v4.2.2
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:

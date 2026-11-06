@@ -172,7 +172,7 @@ describe('ExamRegistry on anvil', () => {
   it('createExam through packages/chain, then getExam and getCriteria match', async () => {
     const wallet = createWalletClient({ account: devAccount, chain: sepolia, transport: http(rpcUrl) });
     const registry = createExamRegistry({ address: registryAddress, rpcUrl, wallet });
-    const request = requestFor('Integration exam A');
+    const request = requestFor('integration-exam-a');
     expect(await registry.board()).toBe(devAccount.address);
     expect(await registry.getExam(request.examId)).toBeNull();
 
@@ -200,22 +200,22 @@ describe('ExamRegistry on anvil', () => {
   });
 
   it('the app publish flow sends from the board and reads back what it wrote', async () => {
-    const request = requestFor('Integration exam B');
+    const request = requestFor('integration-exam-b');
     const outcome = await publishExam(environment(), request);
     expect(outcome.matches).toBe(true);
     expect(outcome.rows.every((row) => row.match)).toBe(true);
   });
 
   it('refuses to publish the same exam twice', async () => {
-    await expect(publishExam(environment(), requestFor('Integration exam B'))).rejects.toThrow(/already published/);
+    await expect(publishExam(environment(), requestFor('integration-exam-b'))).rejects.toThrow(/already published/);
   });
 
   it('explains the contract revert for a wrong unlock round before anything is sent', async () => {
-    const request = requestFor('Integration exam C', 1);
+    const request = requestFor('integration-exam-c', 1);
     const error = await publishExam(environment(), request).catch((e: unknown) => e);
-    expect(explainError(error)).toMatch(/The unlock round must be \d+, the first round at or after T − Δ, but \d+ was sent\./);
+    expect(explainError(error)).toMatch(/The release time was not accepted/);
     const registry = createExamRegistry({ address: registryAddress, rpcUrl });
-    expect(await registry.getExam(examIdFromName('Integration exam C'))).toBeNull();
+    expect(await registry.getExam(examIdFromName('integration-exam-c'))).toBeNull();
   });
 
   it('refuses an account that is not the board', async () => {
@@ -229,7 +229,7 @@ describe('ExamRegistry on anvil', () => {
           : rpc(method, params as unknown[]),
     } as EIP1193Provider;
     await expect(
-      publishExam({ ...environment(), getProvider: () => provider }, requestFor('Integration exam D')),
-    ).rejects.toThrow(/not the board address/);
+      publishExam({ ...environment(), getProvider: () => provider }, requestFor('integration-exam-d')),
+    ).rejects.toThrow(/not the exam board’s account/);
   });
 });

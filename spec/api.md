@@ -6,7 +6,7 @@ Formats shared by the TEE, contracts and apps. Change this file first, then ever
 
 - Bytes are lowercase hex with a `0x` prefix in JSON.
 - Integers that can exceed 2^53, including drand rounds, are decimal strings in JSON.
-- `examId` is 32 bytes, the `keccak256` of the exam's human-readable name.
+- `examId` is 32 bytes, the `keccak256` of the exam's human-readable name. The name must be one normalised ENS label (see [Exam Names](#exam-names)), so `examId` is also its ENS `labelhash`.
 - Every signed or hashed message is `SHA-256(abi.encode(string tag, field, ...))`, using Solidity's standard ABI encoding, not `abi.encodePacked`. `tag` is the domain tag from `constants.json`, and the fields follow in the listed order with the listed types. Use a library for this: `abi.encode` in Solidity, viem in TypeScript and go-ethereum's `accounts/abi` in Go.
 - Hashes are SHA-256 unless a field says otherwise. On-chain identifiers use `keccak256`.
 - TEE signatures are ECDSA over P-256 with SHA-256, encoded as 64-byte `r || s` with low `s`.
@@ -226,6 +226,30 @@ Unlock may run on a different instance from the Build, so the log names its sign
 
 After decoding, readers also apply `limits.entries`, `limits.topics`, `limits.ownerBytes` and `limits.topicNameBytes`. `ExamRegistry` rejects oversized `entries` and `criteria` by length alone, and still doesn't decode them.
 
+## Exam Names
+
+An exam's human-readable name is one ENS label that is already normalised under ENSIP-15: `normalize(name)` returns `name` unchanged and it holds no `.`. So `jee-main-2026` is a name, but `Maths 2026`, `JEE-Main-2026` and `jee.main` are not. A name that normalises to something else would hash to a different `examId` than the one ENS finds, so the board app refuses it rather than fixing it. `spec/fixtures/exam-names.json` lists valid and invalid names with their `examId`.
+
+A board may give an exam an ENS name `<name>.<parent>`, where `parent` is the board address's primary name, so anyone can check the exam by name. This is optional and only helps people find the exam: the TEE and `ExamRegistry` never read ENS, and every value a name supplies is checked again by the usual checks. The exam name has these records, with the text keys in `spec/ens.json`:
+
+| Record | Holds |
+| --- | --- |
+| `addr` (ETH) | The `ExamRegistry` address |
+| `text` `ens.records.tee` | The TEE URL |
+| `text` `ens.records.storage` | The public storage URL |
+| `text` `ens.records.bucket` | The storage bucket the TEE was started with |
+
+A reader checks a name with the viewer's own RPC, on-chain only (`ens.ccipRead` is `false`, so no offchain gateway is asked), and fails unless all of these hold:
+
+1. The whole name is normalised, its first label is a valid exam name, and that label's `labelhash` is the `examId` used for every other check.
+2. The name's `addr` record is set, and the code at that address is exactly `ExamRegistry`'s deployed bytecode with its `board` immutable filled in by the address `board()` returns. The CBOR metadata that solc appends to the end of the code is left out of the comparison. Its length is the code's last two bytes, plus those two bytes. It never runs, and it hashes the source including comments, so a comment edit would otherwise change it. After deployment, only that board can write to a contract running this code. Answering `board()` alone isn't enough, because any contract can return the real board's address. Code can't show how storage was set at deployment, because a custom constructor can fill it before returning this code, so whoever can set the name's `addr` record must be trusted as much as the board.
+3. That board address's primary name, read by reverse resolution, is exactly `parent`.
+4. `parent`'s own `addr` record is that board address, so the primary name is verified both ways.
+
+A read that needs an offchain gateway fails at its check, rather than being retried as an RPC outage. Every chain read on a name route, including the later `ExamRegistry` reads, has CCIP-Read off. `ExamRegistry` never asks for an offchain lookup, so this costs nothing.
+
+The TEE, storage and bucket records only say where to look. A wrong value makes the later checks fail; it can't make them pass. A TEE or storage record that isn't an `http` or `https` URL fails check 2, the same rule the verifier's own settings have. This build reads ENS on Sepolia only, the chain in `constants.json`. On Sepolia anyone can register a look-alike parent, so the check means something only once the reader supports a mainnet name.
+
 ## TEE Lifecycle
 
 The TEE runs each stage by itself, with no board calls, so it needs no board login. It serves HTTPS on port 8080 directly, with a self-signed P-256 certificate generated in memory at startup and never written to disk, so Cloudflare's connection to the origin is never downgraded to plain HTTP. The certificate is valid for `tee.abdulrashid.dev` and any host, and has no trust role: apps trust the attestation and HPKE, not this certificate. TLS 1.2 is the minimum version.
@@ -256,7 +280,7 @@ All bodies are JSON. Every route allows any origin, without credentials. Bytes f
 | `POST /v1/release/share` | `{passkeyPublicKey, challenge, sealed}` | `{}` |
 | `GET /v1/release/log` | None | `{examId, entries, entriesHash, files: [{name, sha256}], filesHash, teeSignature, instancePublicKey}` |
 
-`release.released` lists the passkey public keys of holders whose shares were accepted. In an outbox message, `examId` sits at the top level, and `fields` holds the other `build` message fields, with `selected` and `bankSize` as decimal strings. `stage` is one of `onboard`, `submit`, `lock`, `build`, `distribute`, `unlock`, `released`, `failed`. `register`'s passkey signature covers the `registration` message.
+`release.released` lists the passkey public keys of holders whose shares were accepted. In an outbox message, `examId` sits at the top level, and `fields` holds the other `build` message fields, with `selected` and `bankSize` as decimal strings. `stage` is one of `onboard`, `submit`, `lock`, `build`, `distribute`, `unlock`, `released`, `failed`. `register`'s passkey signature covers the `registration` message. `register` refuses an `owner` that is empty, not valid UTF-8 or longer than `limits.ownerBytes`, the same limit readers apply to the approved list, so every registration fits on the list.
 
 `GET /v1/release/log` answers `503` with code `delivery_pending` between the threshold and the delivery being prepared, because a log at the threshold must list its files. Once prepared, it answers with the same bytes as `release-log.json`.
 

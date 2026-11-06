@@ -1,4 +1,4 @@
-import type { Criteria } from '@paperseal/protocol';
+import { ens, type Criteria, type Hex } from '@paperseal/protocol';
 
 import { evaluateBlueprint, evaluateSchedule, parseLocalTime, type BlueprintInput, type ScheduleInput, type TopicInput } from './form';
 
@@ -163,6 +163,41 @@ export function verifierUrl(
   } catch {
     return null;
   }
+}
+
+/** Stands in for a value the session doesn't know, so the board can see what to fill in. */
+export const examNamePlaceholder = '<exam name>';
+export const parentPlaceholder = '<your-name>.eth';
+
+export interface EnsRecord {
+  /** How the ENS app names the record. */
+  record: string;
+  /** Null when this app has no value for it. */
+  value: string | null;
+  /** The setting that supplies the value, for when it is missing. */
+  setting: string;
+}
+
+/**
+ * The records an exam's ENS name holds, from "Exam Names" in spec/api.md, filled with the values
+ * this app itself uses, so the board copies what its exam actually runs on.
+ */
+export function ensRecords(
+  registryAddress: Hex | null,
+  env: Record<string, string | undefined> = import.meta.env as Record<string, string | undefined>,
+): EnsRecord[] {
+  const given = (value: string | undefined) => value?.trim().replace(/\/+$/, '') || null;
+  return [
+    { record: 'ETH address', value: registryAddress, setting: 'VITE_REGISTRY_ADDRESS' },
+    { record: `Text ${ens.records.tee}`, value: given(env.VITE_TEE_URL), setting: 'VITE_TEE_URL' },
+    { record: `Text ${ens.records.storage}`, value: given(env.VITE_STORAGE_URL), setting: 'VITE_STORAGE_URL' },
+    { record: `Text ${ens.records.bucket}`, value: env.VITE_TEE_STORAGE_BUCKET?.trim() || null, setting: 'VITE_TEE_STORAGE_BUCKET' },
+  ];
+}
+
+/** The verifier's page for a name, `<verifier>/#/name/<name>`. */
+export function verifierNameUrl(verifier: string, name: string): string {
+  return `${verifier.replace(/\/+$/, '')}/#/name/${name}`;
 }
 
 export type DraftStep = 'create' | 'review';

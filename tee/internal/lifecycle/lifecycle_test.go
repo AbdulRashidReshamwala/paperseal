@@ -587,6 +587,25 @@ func TestRegisterChangedInviteTagFailsTheSignature(t *testing.T) {
 	}
 }
 
+// Register bounds the owner as the approved list does, so an owner it accepts
+// can't fail the list later.
+func TestRegisterBoundsTheOwnerByTheSpec(t *testing.T) {
+	w := newWorld(t)
+	_, _, h := w.machine()
+	c := client{t, h}
+	n := spec.C.Limits.OwnerBytes
+	// The owner is signed, so each case signs its own.
+	p := w.holders[0]
+	p.owner = strings.Repeat("a", n+1)
+	if code, why := c.register(p, nil); code != http.StatusBadRequest || why != "invalid_owner" {
+		t.Errorf("%d bytes: %d %s", n+1, code, why)
+	}
+	p.owner = strings.Repeat("a", n)
+	if code, why := c.register(p, nil); code != http.StatusOK {
+		t.Errorf("%d bytes: %d %s", n, code, why)
+	}
+}
+
 func TestRegisterRejectsABadInviteTag(t *testing.T) {
 	w := newWorld(t)
 	_, _, h := w.machine()

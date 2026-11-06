@@ -1,3 +1,4 @@
+import { resolveExamName, type ExamNameResult } from '@paperseal/chain';
 import { requireHardwareAttestation, type Hex, type Paper } from '@paperseal/protocol';
 import {
   Button,
@@ -13,6 +14,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router';
 
+import { teeStorageBucket } from './attest';
 import { loadChain, type ChainData } from './checks';
 import { clockTime, custody, dayTime, REPOSITORY, type Custody, type CustodyStep, type Failure } from './custody';
 import { Evidence } from './evidence';
@@ -23,6 +25,7 @@ import { usePoll, type Polled } from './poll';
 import { createStorage } from './storage';
 import {
   defaultSettings,
+  endpoints,
   isExamId,
   useConnections,
   validateSettings,
@@ -35,14 +38,52 @@ export const RECORDS_POLL_MS = 15_000;
 /** Each read of the live TEE also checks a fresh attestation, so it is not read more often than this. */
 export const LIVE_POLL_MS = 10_000;
 
+/**
+ * Reads the exam name on a `#/name/` route, with the viewer's own RPC and nothing else. An RPC that
+ * can't answer has decided nothing, so it is read again like any other source, and a later blip
+ * keeps the last good read.
+ */
+function useExamName(name: string | null, rpcUrl: string, everyMs: number): Polled<ExamNameResult> | undefined {
+  const load = useMemo(() => {
+    if (name === null || !rpcUrl) return null;
+    return async () => {
+      const result = await resolveExamName(name, { rpcUrl });
+      if (!result.ok && result.failed === 'unreadable') throw new Error(result.reason);
+      return result;
+    };
+  }, [name, rpcUrl]);
+  const polled = usePoll(load, everyMs);
+  return name === null ? undefined : polled;
+}
+
 function useExamView(pollMs: { records: number; live: number; proofRetry?: number }) {
-  const { tee, registry, drand, settings, examId: savedExam } = useConnections();
+  const connections = useConnections();
+  const { drand, settings, examId: savedExam } = connections;
   const link = useExamLink();
-  const examId: Hex | null = link.kind === 'exam' ? link.id : link.kind === 'invalid' ? null : savedExam;
-  const storage = useMemo(
-    () => (settings.storageUrl && examId ? createStorage(settings.storageUrl, examId) : null),
-    [settings.storageUrl, examId],
+  const name = useExamName(link.kind === 'name' ? link.name : null, settings.rpcUrl, pollMs.records);
+  const resolved = name?.state === 'ready' && name.value.ok ? name.value.value : null;
+
+  // On a name route the name supplies the registry and exam, and any TEE, storage and bucket it
+  // sets, for this view only. Nothing is loaded until it passes, and nothing is saved.
+  const onName = name !== undefined;
+  const examId: Hex | null = onName
+    ? (resolved?.examId ?? null)
+    : link.kind === 'exam'
+      ? link.id
+      : link.kind === 'invalid'
+        ? null
+        : savedExam;
+  const teeUrl = onName ? (resolved ? (resolved.teeUrl ?? settings.teeUrl) : '') : settings.teeUrl;
+  const storageUrl = onName ? (resolved ? (resolved.storageUrl ?? settings.storageUrl) : '') : settings.storageUrl;
+  const registryAddress = onName ? (resolved?.registry ?? '') : settings.registryAddress;
+  const bucket = resolved?.bucket ?? teeStorageBucket;
+  const named = useMemo(
+    () => (onName ? endpoints({ rpcUrl: settings.rpcUrl, teeUrl, storageUrl, registryAddress, examId: examId ?? '' }) : null),
+    [onName, settings.rpcUrl, teeUrl, storageUrl, registryAddress, examId],
   );
+  const tee = named ? named.tee : connections.tee;
+  const registry = named ? named.registry : connections.registry;
+  const storage = useMemo(() => (storageUrl && examId ? createStorage(storageUrl, examId) : null), [storageUrl, examId]);
 
   const latest = useLatestRound(drand);
   const now = useNow();
@@ -50,8 +91,8 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
   const loadRecordsNow = useMemo(() => {
     const chain = loadChain(registry, examId);
     if (!chain || !registry || !examId) return null;
-    return () => loadRecords({ chain, storage, examId, registry: registry.address as Hex });
-  }, [registry, examId, storage]);
+    return () => loadRecords({ chain, storage, examId, registry: registry.address as Hex, bucket });
+  }, [registry, examId, storage, bucket]);
   const records = usePoll(loadRecordsNow, pollMs.records);
 
   const chain = records.state === 'ready' ? records.value.chain : null;
@@ -63,8 +104,8 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
   const examPublished = chain?.exam != null;
   const loadLiveNow = useMemo(() => {
     if (!tee || !registry || !examId || !examPublished) return null;
-    return () => loadLive({ tee, chain: () => chainRef.current, examId, registry: registry.address as Hex });
-  }, [tee, registry, examId, examPublished]);
+    return () => loadLive({ tee, chain: () => chainRef.current, examId, registry: registry.address as Hex, bucket });
+  }, [tee, registry, examId, examPublished, bucket]);
   const live = usePoll(loadLiveNow, pollMs.live);
 
   const proof = useProof({
@@ -81,6 +122,7 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
   return {
     examId,
     invalidLink: link.kind === 'invalid',
+    ...(link.kind === 'name' && name ? { name: { name: link.name, result: name, used: { teeUrl, storageUrl, bucket } } } : {}),
     sources: { chain: registry !== null, storage: storage !== null, tee: tee !== null },
     records,
     live,
@@ -160,23 +202,31 @@ function When({ step, now }: { step: CustodyStep; now: number }) {
 
 function toStep(step: CustodyStep, now: number): Step {
   const when = <When step={step} now={now} />;
+  const note =
+    step.failures.length > 0 ? (
+      <span className="vf-step-failures">
+        {step.failures.map((failure) => (
+          <Check key={failure} status="fail">
+            {failure}
+          </Check>
+        ))}
+      </span>
+    ) : (
+      step.note
+    );
   return {
     id: step.id,
     label: `${String(step.number)}. ${step.label}`,
     state: step.state,
     ...(step.at === null ? {} : { when }),
-    note:
-      step.failures.length > 0 ? (
-        <span className="vf-step-failures">
-          {step.failures.map((failure) => (
-            <Check key={failure} status="fail">
-              {failure}
-            </Check>
-          ))}
-        </span>
-      ) : (
-        step.note
-      ),
+    note: step.aside ? (
+      <>
+        {note}
+        <span className="vf-aside">{step.aside}</span>
+      </>
+    ) : (
+      note
+    ),
     evidence: <Evidence items={step.items} />,
   };
 }
@@ -222,14 +272,22 @@ function Freshness({ records }: { records: Polled<Records> }) {
   );
 }
 
-function ExamPicker({ current, invalid }: { current: Hex | null; invalid: boolean }) {
+function ExamPicker({ current, invalid }: { current: boolean; invalid: boolean }) {
   const navigate = useNavigate();
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string>();
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    const id = draft.trim().toLowerCase();
+    // A name is passed on as typed: the name check refuses one that is not already normalised.
+    const name = draft.trim();
+    if (name.includes('.')) {
+      setError(undefined);
+      setDraft('');
+      void navigate(`/name/${encodeURIComponent(name)}`);
+      return;
+    }
+    const id = name.toLowerCase();
     if (!isExamId(id)) {
       setError('Enter an exam ID: 0x followed by 64 letters or digits.');
       return;
@@ -242,8 +300,12 @@ function ExamPicker({ current, invalid }: { current: Hex | null; invalid: boolea
   return (
     <form className="vf-picker" onSubmit={submit}>
       <Field
-        label="Exam ID"
-        hint={current ? 'To check a different exam, enter its ID here.' : 'Your exam board publishes this, usually as a link to this page.'}
+        label="Exam ID or name"
+        hint={
+          current
+            ? 'To check a different exam, enter its ID or its name, such as jee-main-2026.board.eth.'
+            : 'Your exam board publishes this, usually as a link to this page. It is an ID, or a name such as jee-main-2026.board.eth.'
+        }
         value={draft}
         error={error ?? (invalid ? 'This link does not hold a valid exam ID. Ask your exam board for the right one.' : undefined)}
         onChange={setDraft}
@@ -327,7 +389,13 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
   const view = useExamView(props.pollMs ?? { records: RECORDS_POLL_MS, live: LIVE_POLL_MS });
   const result = custody(view);
   const start = view.records.state === 'ready' ? view.records.value.chain.exam?.settings.examStart : undefined;
-  const exam = start === undefined ? undefined : `Exam on ${dayTime(Number(start))}`;
+  const on = start === undefined ? undefined : dayTime(Number(start));
+  // The name shows only once it has passed, so the header never vouches for a name that failed.
+  const passedName = result.steps.find((step) => step.id === 'name')?.state === 'done' ? view.name?.name : undefined;
+  const exam = passedName ? (on ? `${passedName}, on ${on}` : passedName) : on ? `Exam on ${on}` : undefined;
+  const chosen = view.examId !== null || view.name !== undefined;
+  // A name that failed a check needs no other connection, only one that could not be read does.
+  const needsConnection = view.name ? ['off', 'error'].includes(view.name.result.state) : !view.sources.chain;
   return (
     <div className="ps-shell vf-page">
       <RoleHeader role="Public record" {...(exam ? { exam } : {})} note="Anyone can check this" />
@@ -355,16 +423,15 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
         <Stepper steps={result.steps.map((step) => toStep(step, view.now))} evidenceLabel="Show the evidence" />
         <Freshness records={view.records} />
         {result.paper ? <PaperView paper={result.paper} /> : null}
-        {view.examId === null ? null : (
+        {chosen ? (
           <Panel title="Check a different exam">
-            <ExamPicker current={view.examId} invalid={false} />
+            <ExamPicker current invalid={false} />
+          </Panel>
+        ) : (
+          <Panel title="Choose an exam">
+            <ExamPicker current={false} invalid={view.invalidLink} />
           </Panel>
         )}
-        {view.examId === null ? (
-          <Panel title="Choose an exam">
-            <ExamPicker current={null} invalid={view.invalidLink} />
-          </Panel>
-        ) : null}
         <section className="ps-panel vf-self-host">
           <h2>Check it yourself</h2>
           <p>
@@ -375,7 +442,7 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
             </a>
             . Your choices stay in this browser.
           </p>
-          <OwnConnection open={!view.sources.chain} />
+          <OwnConnection open={needsConnection} />
         </section>
       </main>
     </div>

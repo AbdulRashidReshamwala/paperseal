@@ -8,7 +8,10 @@ import {
   fromHex,
   InviteError,
   inviteTag,
+  limits,
+  maxOwnerBytes,
   newInviteSecret,
+  ownerProblem,
   registrationMatchesInvite,
   setterOwner,
   toHex,
@@ -90,11 +93,24 @@ describe('invite links', () => {
     ['an empty owner', good.replace(/owner=[^&]*/, 'owner=')],
     ['a padded owner', good.replace('owner=Ada+Lovelace', 'owner=+Ada')],
     ['a control character in the owner', good.replace('Ada', 'A%00da')],
-    ['a long owner', good.replace(/owner=[^&]*/, `owner=${'a'.repeat(257)}`)],
+    ['a long owner', good.replace(/owner=[^&]*/, `owner=${'a'.repeat(limits.ownerBytes + 1)}`)],
     ['an owner on a setter', `${encodeInviteFragment(setter)}&owner=x`],
   ];
   it.each(bad)('refuses %s', (_name, fragment) => {
     expect(() => decodeInviteFragment(fragment)).toThrow(InviteError);
+  });
+
+  it('allows an owner of exactly limits.ownerBytes and refuses one byte more, the approved list cap', () => {
+    expect(maxOwnerBytes).toBe(limits.ownerBytes);
+    expect(ownerProblem('a'.repeat(limits.ownerBytes))).toBeNull();
+    expect(() => checkInvite({ ...holder, owner: 'a'.repeat(limits.ownerBytes) })).not.toThrow();
+    expect(ownerProblem('a'.repeat(limits.ownerBytes + 1))).toBe(`The name is longer than ${String(limits.ownerBytes)} bytes.`);
+    expect(() => checkInvite({ ...holder, owner: 'a'.repeat(limits.ownerBytes + 1) })).toThrow(InviteError);
+  });
+
+  it('counts owner bytes, not characters', () => {
+    expect(ownerProblem('é'.repeat(limits.ownerBytes / 2))).toBeNull();
+    expect(ownerProblem('é'.repeat(limits.ownerBytes / 2 + 1))).toMatch(/longer than/);
   });
 
   it('checks an invite before encoding it', () => {

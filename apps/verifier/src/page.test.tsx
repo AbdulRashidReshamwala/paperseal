@@ -1,21 +1,46 @@
 // @vitest-environment jsdom
+import type { ExamNameCheck, ExamNameResult, ResolvedExamName } from '@paperseal/chain';
 import { decodeApprovedList, fromHex, toHex } from '@paperseal/protocol';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from './App';
+import { teeStorageBucket } from './attest';
 import { VerifierPage } from './page';
 import { buildWorld, examId, offlineQuicknet, registryAddress, type World } from './fixtures';
 import { SettingsProvider, type Settings } from './settings';
 
 let chainData: unknown;
+/** Every registry and exam the page set out to read, in order. */
+let chainReads: { registry: string; examId: unknown }[] = [];
 
 // The chain is the one thing these tests stub whole: everything read from it is built with real encodings.
 vi.mock('./checks', async (original) => ({
   ...(await original<typeof import('./checks')>()),
-  loadChain: (registry: unknown, id: unknown) => (registry && id ? () => Promise.resolve(chainData) : null),
+  loadChain: (registry: { address: string } | null, id: unknown) => {
+    if (!registry || !id) return null;
+    chainReads.push({ registry: registry.address, examId: id });
+    return () => Promise.resolve(chainData);
+  },
 }));
+
+/** What reading an exam name comes to. Null runs the real checks, which need no RPC for a name they refuse. */
+let nameAnswer: ((name: string) => ExamNameResult) | null = null;
+let nameReads: { name: string; rpcUrl: string | undefined }[] = [];
+vi.mock('@paperseal/chain', async (original) => {
+  const real = await original<typeof import('@paperseal/chain')>();
+  return {
+    ...real,
+    resolveExamName: (name: string, options: { rpcUrl?: string }) => {
+      nameReads.push({ name, rpcUrl: options.rpcUrl });
+      return nameAnswer ? Promise.resolve(nameAnswer(name)) : real.resolveExamName(name, options);
+    },
+  };
+});
+
+/** The bucket each record and fresh token was checked against. */
+let buckets: (string | undefined)[] = [];
 
 /** Whether `release-token.jwt` counts as verified. The test PKI does not lead to Google's root, so by default it does not. */
 let tokenVerified = false;
@@ -25,16 +50,20 @@ vi.mock('./attest', async (original) => {
   const real = await original<typeof import('./attest')>();
   return {
     ...real,
-    checkFreshToken: () =>
-      Promise.resolve({
+    checkFreshToken: (args: { bucket?: string }) => {
+      buckets.push(args.bucket);
+      return Promise.resolve({
         trusted: freshTrusted,
         signature: { ok: freshTrusted, ...(freshTrusted ? {} : { error: new Error('not Google') }) },
         instanceKey: { ok: true },
         claims: [],
         instancePublicKey: `0x04${'dd'.repeat(64)}`,
-      }),
-    checkRecordToken: (args: Parameters<typeof real.checkRecordToken>[0]) =>
-      tokenVerified ? Promise.resolve({ verified: true, signature: { ok: true }, claims: [] }) : real.checkRecordToken(args),
+      });
+    },
+    checkRecordToken: (args: Parameters<typeof real.checkRecordToken>[0]) => {
+      buckets.push(args.bucket);
+      return tokenVerified ? Promise.resolve({ verified: true, signature: { ok: true }, claims: [] }) : real.checkRecordToken(args);
+    },
   };
 });
 
@@ -97,6 +126,10 @@ afterEach(() => {
   vi.restoreAllMocks();
   tokenVerified = false;
   freshTrusted = false;
+  chainReads = [];
+  nameAnswer = null;
+  nameReads = [];
+  buckets = [];
 });
 
 describe('one page', () => {
@@ -545,4 +578,177 @@ describe('updating', () => {
     expect((step.querySelector('details') as HTMLDetailsElement).open).toBe(true);
   });
 
+});
+
+describe('verify by name', () => {
+  const name = 'jee-main-2026.board.eth';
+  const board = `0x${'bb'.repeat(20)}` as const;
+  // The saved exam and registry are not the name's, so a read of the saved ones would show.
+  const saved = { registryAddress: `0x${'99'.repeat(20)}`, examId: `0x${'33'.repeat(32)}` };
+  const passed = (over: Partial<ResolvedExamName> = {}): ExamNameResult => ({
+    ok: true,
+    value: { name, label: 'jee-main-2026', parent: 'board.eth', examId, registry: registryAddress, board, teeUrl: null, storageUrl: null, bucket: null, ...over },
+  });
+  const failed = (check: ExamNameCheck): ExamNameResult => ({ ok: false, failed: check, reason: 'The record says otherwise.', partial: { name } });
+  const noteOf = (step: HTMLElement) => step.querySelector('.ps-step-note')?.textContent ?? '';
+
+  it('passes the Name step first, then reads the chain with the name\'s registry and exam', async () => {
+    const world = await buildWorld();
+    arrange(world);
+    nameAnswer = () => passed();
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
+    open(1000, saved, `/name/${name}`);
+    const step = await findStep(/^1\. Name$/);
+    await waitFor(() => {
+      expect(stateOf(step)).toBe('done');
+    });
+    expect(nameReads[0]).toEqual({ name, rpcUrl: settings.rpcUrl });
+    expect(screen.getByRole('list', { name: 'Steps for this exam' }).children).toHaveLength(8);
+    await findStep(/^2\. Exam published$/);
+    expect(chainReads.length).toBeGreaterThan(0);
+    expect(chainReads.every((read) => read.registry === registryAddress && read.examId === examId)).toBe(true);
+    expect(noteOf(step)).toMatch(/belongs to the exam board/);
+    expect(within(step).getByText(/a Sepolia name|On Sepolia/)).toBeTruthy();
+    expect(within(step).getByText('board.eth')).toBeTruthy();
+    expect(within(step).getAllByText('From your settings')).toHaveLength(2);
+    expect(within(step).getByText('Built into this page')).toBeTruthy();
+    expect(await screen.findByText(`${name}, on`, { exact: false })).toBeTruthy();
+    // The name's values are for this view only.
+    expect(setItem).not.toHaveBeenCalled();
+  });
+
+  it("reads the name's TEE, storage and bucket in place of the viewer's own", async () => {
+    const world = await buildWorld();
+    arrange(world);
+    const storageFetch = vi.mocked(fetch).getMockImplementation() as (i: string | URL | Request) => Promise<Response>;
+    const urls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request) => {
+        const url = String(input);
+        urls.push(url);
+        if (url.startsWith('https://tee.name.example/')) return Promise.resolve(new Response('no', { status: 404 }));
+        return storageFetch(url.replace('https://names.example/bucket/', 'https://files.example/bucket/'));
+      }),
+    );
+    nameAnswer = () => passed({ teeUrl: 'https://tee.name.example', storageUrl: 'https://names.example/bucket', bucket: 'name-bucket' });
+    open(1000, { ...saved, teeUrl: 'https://tee.example' }, `/name/${name}`);
+    const step = await findStep(/^1\. Name$/);
+    await waitFor(() => {
+      expect(stateOf(step)).toBe('done');
+    });
+    expect(within(step).getAllByText('From the name')).toHaveLength(3);
+    await waitFor(() => {
+      expect(urls.some((url) => url.startsWith(`https://names.example/bucket/${examId}/`))).toBe(true);
+      expect(urls.some((url) => url.startsWith('https://tee.name.example/'))).toBe(true);
+      expect(buckets.length).toBeGreaterThan(0);
+    });
+    expect(urls.some((url) => url.startsWith('https://files.example/') || url.startsWith('https://tee.example/'))).toBe(false);
+    expect(new Set(buckets)).toEqual(new Set(['name-bucket']));
+  });
+
+  it("falls back to the viewer's own TEE and storage, and the built-in bucket, where the name sets none", async () => {
+    const world = await buildWorld();
+    arrange(world);
+    nameAnswer = () => passed();
+    open(1000, saved, `/name/${name}`);
+    await findStep(/^1\. Name$/);
+    await waitFor(() => {
+      expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).startsWith(`https://files.example/bucket/${examId}/`))).toBe(true);
+      expect(buckets.length).toBeGreaterThan(0);
+    });
+    expect(new Set(buckets)).toEqual(new Set([teeStorageBucket]));
+  });
+
+  it.each([
+    ['name', 'Not a valid name'],
+    ['registry', 'No exam record'],
+    ['primaryName', 'Not the board’s name'],
+    ['forward', 'Not confirmed by the board'],
+  ] as [ExamNameCheck, string][])('a failed %s check fails the Name step, stops the rest and shows no seal', async (check, title) => {
+    const world = await buildWorld();
+    arrange(world);
+    nameAnswer = () => failed(check);
+    open(1000, saved, `/name/${name}`);
+    const step = await findStep(/^1\. Name$/);
+    await waitFor(() => {
+      expect(stateOf(step)).toBe('failed');
+    });
+    expect(noteOf(step)).toContain(`${title}. `);
+    expect(noteOf(step)).not.toContain('The record says otherwise');
+    expect((await screen.findByRole('alert')).textContent).toMatch(new RegExp(`Step 1, Name\\. ${title}`));
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('This name does not lead to a verified exam.');
+    expect(stateOf(stepNamed(/^2\. Exam published$/))).toBe('waiting');
+    expect(document.querySelector('.ps-seal')).toBeNull();
+    expect(chainReads).toEqual([]);
+    expect(screen.queryByText(name, { exact: false, selector: '.ps-role-exam' })).toBeNull();
+  });
+
+  it('refuses a name that is not normalised, as typed, with the real check', async () => {
+    open(1000, saved, '/name/JEE-Main-2026.board.eth');
+    const step = await findStep(/^1\. Name$/);
+    await waitFor(() => {
+      expect(stateOf(step)).toBe('failed');
+    });
+    expect(noteOf(step)).toMatch(/Not a valid name\. Check how the name is spelled/);
+    expect(chainReads).toEqual([]);
+  });
+
+  it("can't read ENS: neutral, no seal and no chain read, and it tries again", async () => {
+    const world = await buildWorld();
+    arrange(world);
+    nameAnswer = () => failed('unreadable');
+    render(
+      <SettingsProvider initial={{ ...settings, ...saved }} drand={offlineQuicknet(1000)}>
+        <MemoryRouter initialEntries={[`/name/${name}`]}>
+          <VerifierPage pollMs={{ records: 20, live: 20, proofRetry: 20 }} />
+        </MemoryRouter>
+      </SettingsProvider>,
+    );
+    const step = await findStep(/^1\. Name$/);
+    await waitFor(() => {
+      expect(noteOf(step)).toMatch(/^Can't read the name\./);
+    });
+    expect(stateOf(step)).toBe('current');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('The exam name could not be read.');
+    expect(document.querySelector('.ps-seal')).toBeNull();
+    expect(chainReads).toEqual([]);
+    const reads = nameReads.length;
+    act(() => {
+      nameAnswer = () => passed();
+    });
+    await waitFor(() => {
+      expect(stateOf(step)).toBe('done');
+    });
+    expect(nameReads.length).toBeGreaterThan(reads);
+    await waitFor(() => {
+      expect(chainReads.length).toBeGreaterThan(0);
+    });
+  });
+
+  it('reads nothing without an RPC URL, and asks for one', () => {
+    nameAnswer = () => passed();
+    open(1000, { ...saved, rpcUrl: '' }, `/name/${name}`);
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('This page cannot read the public record yet.');
+    expect(nameReads).toEqual([]);
+    expect(chainReads).toEqual([]);
+  });
+
+  it('opens a name someone types, as typed', async () => {
+    const world = await buildWorld();
+    arrange(world);
+    nameAnswer = () => passed();
+    open(1000, { examId: '' });
+    expect(screen.getByText(/a name such as jee-main-2026\.board\.eth/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText(/^Exam ID or name/), { target: { value: ` ${name} ` } });
+    fireEvent.click(screen.getByRole('button', { name: 'Open this exam' }));
+    await findStep(/^1\. Name$/);
+    expect(nameReads[0]?.name).toBe(name);
+    fireEvent.change(screen.getByLabelText(/^Exam ID or name/), { target: { value: 'Maths-2026.Board.eth' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Open this exam' }));
+    await waitFor(() => {
+      expect(nameReads.at(-1)?.name).toBe('Maths-2026.Board.eth');
+    });
+  });
 });
