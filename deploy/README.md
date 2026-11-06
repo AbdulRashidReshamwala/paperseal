@@ -105,6 +105,7 @@ Set at build time for `apps/web` and `apps/verifier` (viewers can change them in
 | `VITE_EXAM_ID` | the published exam ID, as a fallback |
 | `VITE_STORAGE_URL` | `https://storage.googleapis.com/<BUCKET>` |
 | `VITE_TEE_STORAGE_BUCKET` | `<BUCKET>`, the one environment value the token check allows |
+| `VITE_SWARM_API_URL` | a read-only Swarm gateway for backups (`swarm.defaultApiUrl` in `spec/arkiv.json`, the viewer's own Bee node, when unset). The verifier only reads `GET /bzz/...` from it |
 | `VITE_RELEASES_REPO` | your fork as `owner/name`, so the apps read TEE releases from it (upstream's `AbdulRashidReshamwala/paperseal` when unset) |
 
 Demo ENS name on Sepolia: `paperseal-demo.eth`, owned by the board wallet, with a placeholder exam name `demo.paperseal-demo.eth` that carries the registry, TEE and storage records.

@@ -31,9 +31,9 @@ Evidence rows expire after 180 days, which covers results, rechecks and appeals,
 ## Run It
 
 ```bash
-node relay/cli.mjs mirror --exam 0x422205bde8135878ece4ccb921496e30076b32e14f48fb2886e3fa3f5181f295 --registry 0x6a9f017F374630EcB84e8E3816B1eE9F8Fa2dBE8 --storage https://storage.googleapis.com/paperseal-demo-paperseal-exams
+node relay/cli.mjs mirror --exam 0x83b30c31827789be7213e71731864d40ea7a89b92844ab09070cd132cccfd4c3 --registry 0xc25F7e0004f0E9B77581CFf6B4B5Ae8b120658eb --storage https://storage.googleapis.com/paperseal-demo-paperseal-exams
 ```
 
 ```bash
-node relay/cli.mjs status --exam 0x422205bde8135878ece4ccb921496e30076b32e14f48fb2886e3fa3f5181f295 --writer 0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b
+node relay/cli.mjs status --exam 0x83b30c31827789be7213e71731864d40ea7a89b92844ab09070cd132cccfd4c3 --writer 0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b
 ```
