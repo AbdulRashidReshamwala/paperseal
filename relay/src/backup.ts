@@ -235,7 +235,7 @@ export function parseReleaseLogStrict(bytes: Uint8Array): StrictReleaseLog {
   return { examId: top.examId, entries, entriesHash: top.entriesHash, files, filesHash: top.filesHash, teeSignature: top.teeSignature, instancePublicKey: top.instancePublicKey };
 }
 
-/** The settings the TEE must have been started with: the chain's values, with this registry. As apps/verifier/src/attest.ts `examSettings`. */
+/** The settings the TEE must have been started with: the chain's values, with this registry. As packages/verify/src/attest.ts `examSettings`. */
 export function examSettings(exam: Exam, registry: Hex): ExamSettings {
   const s = exam.settings;
   return {
@@ -253,7 +253,7 @@ export function examSettings(exam: Exam, registry: Hex): ExamSettings {
 }
 
 /**
- * `release-token.jwt`, checked as apps/verifier/src/attest.ts `checkRecordToken` checks it: a
+ * `release-token.jwt`, checked as packages/verify/src/attest.ts `checkRecordToken` checks it: a
  * published record, so the claims run in `published` mode with no expiry, the `eat_nonce` must
  * bind `instancePublicKey` to the exam, and the signature must chain to Google's pinned root.
  * Returns the failure, or null.

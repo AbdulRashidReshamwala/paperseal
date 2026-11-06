@@ -20,6 +20,7 @@
     "@paperseal/swarm": "workspace:*",
     "@paperseal/tee-client": "workspace:*",
     "@paperseal/ui": "workspace:*",
+    "@paperseal/verify": "workspace:*",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "react-router": "8.5.1",

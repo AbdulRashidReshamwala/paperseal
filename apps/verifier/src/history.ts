@@ -1,11 +1,12 @@
 import { participantRoles, type ArkivReader, type ExamRow, type ParticipantRow } from '@paperseal/arkiv';
 import { OnChainBytesError, type ExamNameResult, type ExamRegistry } from '@paperseal/chain';
 import { ApprovedListError, decodeApprovedList, fromHex, type Hex } from '@paperseal/protocol';
+import { sameHex } from '@paperseal/verify';
 import { isAddressEqual, sha256, type Address } from 'viem';
 
-import { sameHex } from './checks';
 import { roleNames } from './custody';
-import { roundReached } from './load';
+import { roundReached, withinTime } from './load';
+import { READ_TIMEOUT_MS } from './poll';
 import { isExamId } from './settings';
 
 /*
@@ -142,6 +143,32 @@ export async function verifiedName(
 
 const READS_AT_ONCE = 4;
 
+/** A read of Arkiv tries this often, and each try gets this long. */
+const ARKIV_TRIES = 3;
+const ARKIV_TRY_MS = 10_000;
+/** The wait before the second try, doubled for each try after it. */
+const ARKIV_BACKOFF_MS = 2000;
+const arkivTooSlow = 'Arkiv took too long to answer.';
+const registryTooSlow = 'The public record took too long to answer.';
+
+/**
+ * Reads Arkiv, trying again after a pause when a try fails or doesn't answer, and gives up within
+ * `READ_TIMEOUT_MS`. A node that is limiting requests can hold one open for as long as its
+ * Retry-After says, so a try has its own time limit. Only the last failure reaches the page.
+ */
+export async function readArkiv<T>(read: () => Promise<T>): Promise<T> {
+  const giveUpAt = Date.now() + READ_TIMEOUT_MS;
+  for (let tried = 1; ; tried += 1) {
+    try {
+      return await withinTime(read(), Math.min(ARKIV_TRY_MS, giveUpAt - Date.now()), arkivTooSlow);
+    } catch (error) {
+      const pause = ARKIV_BACKOFF_MS * 2 ** (tried - 1);
+      if (tried >= ARKIV_TRIES || Date.now() + pause >= giveUpAt) throw error;
+      await new Promise((resolve) => setTimeout(resolve, pause));
+    }
+  }
+}
+
 function countOf(encoded: Hex): number | null {
   try {
     return decodeApprovedList(fromHex(encoded)).length;
@@ -164,7 +191,7 @@ export async function loadExamHistory(args: {
   const { reader, registry, writers, checkName } = args;
   const ignored: IgnoredExamRows = { notOnChain: 0, differs: 0, malformed: 0, names: 0 };
   if (writers.length === 0) return { exams: [], unread: [], rows: 0, ignored };
-  const rows = await reader.examRows(registry.address, writers);
+  const rows = await readArkiv(() => reader.examRows(registry.address, writers));
 
   const byExam = new Map<Hex, ExamRow[]>();
   for (const row of rows) {
@@ -176,11 +203,13 @@ export async function loadExamHistory(args: {
     byExam.set(id, [...(byExam.get(id) ?? []), row]);
   }
 
-  // One read for every exam. Without it the exams still show, with their copies not read.
-  const copyRows = await (reader.copyRows ? reader.copyRows(registry.address, writers) : Promise.resolve(null)).catch(() => null);
+  // One read for every exam, and none with no exams. It is tried once: without it the exams still
+  // show, with their copies not read, and a limited node isn't asked harder for an extra.
+  const copyRead = byExam.size > 0 ? reader.copyRows?.(registry.address, writers) : undefined;
+  const copyRows = await (copyRead ? withinTime(copyRead, ARKIV_TRY_MS, arkivTooSlow).catch(() => null) : null);
 
   const unread: UnreadExam[] = [];
-  const checked = await eachLimited([...byExam], READS_AT_ONCE, async ([examId, examRows]): Promise<HistoryExam | null> => {
+  const checkOne = async ([examId, examRows]: [Hex, ExamRow[]]): Promise<HistoryExam | null> => {
     // One exam whose reads fail is shown as not read yet, and never stops the others.
     let reads;
     try {
@@ -219,7 +248,13 @@ export async function loadExamHistory(args: {
           }
         : null,
     };
-  });
+  };
+  const checked = await eachLimited([...byExam], READS_AT_ONCE, (item) =>
+    withinTime(checkOne(item), READ_TIMEOUT_MS, registryTooSlow).catch((error: unknown) => {
+      unread.push({ examId: item[0], reason: reasonOf(error) });
+      return null;
+    }),
+  );
 
   const exams = checked
     .filter((exam): exam is HistoryExam => exam !== null)
@@ -310,7 +345,7 @@ export async function findParticipant(args: {
   const { reader, registry, writers, owner } = args;
   const ignored: IgnoredParticipantRows = { notOnList: 0, badList: 0, malformed: 0 };
   if (writers.length === 0 || owner === '') return { exams: [], unchecked: [], rows: 0, ignored };
-  const rows = await reader.participantRows({ registry: registry.address, owner }, writers);
+  const rows = await readArkiv(() => reader.participantRows({ registry: registry.address, owner }, writers));
 
   const byExam = new Map<Hex, ParticipantRow[]>();
   for (const row of rows) {
@@ -323,7 +358,7 @@ export async function findParticipant(args: {
   }
 
   const unchecked: UnreadExam[] = [];
-  const found = await eachLimited([...byExam], READS_AT_ONCE, async ([examId, examRows]): Promise<ParticipantExam[]> => {
+  const checkOne = async ([examId, examRows]: [Hex, ParticipantRow[]]): Promise<ParticipantExam[]> => {
     const entries = await listedEntries(registry, examId);
     if (entries !== null && 'unread' in entries) {
       unchecked.push({ examId, reason: entries.unread });
@@ -352,7 +387,13 @@ export async function findParticipant(args: {
       () => null,
     );
     return [...roles].map((role) => ({ examId, role, examStart, built }));
-  });
+  };
+  const found = await eachLimited([...byExam], READS_AT_ONCE, (item) =>
+    withinTime(checkOne(item), READ_TIMEOUT_MS, registryTooSlow).catch((error: unknown): ParticipantExam[] => {
+      unchecked.push({ examId: item[0], reason: reasonOf(error) });
+      return [];
+    }),
+  );
 
   const start = (exam: ParticipantExam) => exam.examStart ?? -1n;
   const exams = found

@@ -1,23 +1,29 @@
+import { looksLikeEnsName } from '@paperseal/protocol';
 import type { TeeClient } from '@paperseal/tee-client';
-import { LoadingSeal, Page, RoleHeader, Stage } from '@paperseal/ui';
-import { useEffect, useMemo, type ReactNode } from 'react';
+import { Button, LoadingSeal, Page, RoleHeader, Stage } from '@paperseal/ui';
+import { Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router';
 import type { Hex } from '@paperseal/protocol';
 
 import { Area, type AreaScreen } from '../../shared/Area';
 import { useCurrentExamId } from '../../shared/currentExam';
+import { demoPanel } from '../../shared/demoKeys';
 import { TEE_STATUS_POLL_MS } from '../../shared/TeeStatus';
 import './board.css';
-import { BoardFormProvider, useBoardForm, useEvaluated, useReader } from './BoardForm';
+import { shortExamId } from '../../shared/examName';
+import { BoardFormProvider, useBoardForm, useEvaluated, useReader, useVerifiedName } from './BoardForm';
 import { BoardHome } from './BoardHome';
 import { BuildStep } from './BuildStep';
 import { DetailsStep, TopicsStep } from './CreateStep';
 import { DraftShell, ExamShell } from './DraftFrame';
+import { ExamNameCard } from './ExamNameCard';
 import { decideStep, readSnapshot, type Snapshot } from './examState';
 import { usePoll } from './hooks';
 import { MachineCheck } from './MachineCheck';
 import { PeopleStep } from './PeopleStep';
-import { Fold } from './Parts';
+import { openExamName, type ExamNameRoute } from './nameFlow';
+import { loadParties, type ChosenParty } from './parties';
+import { Fold, Problem } from './Parts';
 import { PartyStep } from './PartyStep';
 import { centresProblem, draftScreen, furthestStep, neutralsProblem, plainWords } from './plan';
 import type { PublishEnvironment } from './publishFlow';
@@ -29,6 +35,8 @@ import { StatusStep } from './StatusStep';
 import { WaitStep } from './WaitStep';
 
 const step = (n: number) => `Step ${String(n)} of 6`;
+
+const DemoPanel = demoPanel<{ examId: Hex; snapshot: Snapshot; parties: readonly ChosenParty[] }>();
 
 /** The pages before there is an exam. They live in the browser until the exam is published. */
 function Draft(props: { review: boolean }) {
@@ -126,6 +134,37 @@ function Waiting(props: { title: string; lede?: string; next: string; details?: 
 
 const asExamId = (text: string | null | undefined): Hex | null => (text && /^0x[0-9a-fA-F]{64}$/.test(text) ? (text.toLowerCase() as Hex) : null);
 
+/**
+ * An ENS name in the exam route. The exam it opens is known only once the name passes every check, and
+ * a name verified earlier this session opens at once, so swapping a hex URL for the name loses nothing.
+ */
+function useNamedExam(param: string | undefined) {
+  const { environment, verifiedNames, noteVerifiedName } = useBoardForm();
+  const name = param && !asExamId(param) && looksLikeEnsName(param) ? param : null;
+  const examId = name ? (verifiedNames.get(name) ?? null) : null;
+  const [refused, setRefused] = useState<{ name: string; result: Extract<ExamNameRoute, { ok: false }> } | null>(null);
+  const [round, setRound] = useState(0);
+
+  useEffect(() => {
+    if (!name || examId) return;
+    let live = true;
+    void openExamName(environment, name).then((result) => {
+      if (!live) return;
+      if (result.ok) noteVerifiedName(name, result.examId);
+      else setRefused({ name, result });
+    });
+    return () => {
+      live = false;
+    };
+  }, [environment, examId, name, noteVerifiedName, round]);
+
+  const retry = useCallback(() => {
+    setRefused(null);
+    setRound((n) => n + 1);
+  }, []);
+  return { name, examId, refused: refused?.name === name ? refused.result : null, retry };
+}
+
 /*
  * What a route asks for. `new` is the create page with an empty form (and an exam named in `?exam=`), `review` its review, `draft`
  * a saved draft named in the route, `exam` the exam named in the route and `current` an old link to
@@ -137,16 +176,19 @@ type Mode = 'new' | 'review' | 'draft' | 'exam' | 'current';
 function BoardFlow(props: { mode: Mode }) {
   const navigate = useNavigate();
   const form = useBoardForm();
+  const { noteVerifiedName } = form;
   const params = useParams();
   const [search] = useSearchParams();
   const stored = useCurrentExamId();
   const { mode } = props;
   // `?exam=` on the start page names an exam too, so a link to one still works.
-  const examId = asExamId(mode === 'exam' ? params.examId : mode === 'current' ? stored : mode === 'new' ? search.get('exam') : null);
+  const named = useNamedExam(mode === 'exam' ? params.examId : undefined);
+  const examId = named.name ? named.examId : asExamId(mode === 'exam' ? params.examId : mode === 'current' ? stored : mode === 'new' ? search.get('exam') : null);
   const { reader, value, problem, pending, reload } = useExamState(examId);
   const decided = value ? decideStep(value) : null;
+  const verifiedName = useVerifiedName(examId);
   const page = (children: ReactNode) => (
-    <Page header={<RoleHeader role="Exam board" {...(form.examName ? { exam: form.examName } : {})} />}>{children}</Page>
+    <Page header={<RoleHeader role="Exam board" {...(examId ? { exam: verifiedName ?? shortExamId(examId) } : {})} />}>{children}</Page>
   );
   const withLink = (children: ReactNode) =>
     page(
@@ -171,6 +213,18 @@ function BoardFlow(props: { mode: Mode }) {
           form.dismissHeld();
         }}
       />,
+    );
+  }
+  if (named.name && !examId) {
+    if (!named.refused) return page(<LoadingSeal />);
+    return withLink(
+      <Stage
+        title="This exam could not be opened"
+        {...(named.refused.retry ? { action: <Button onClick={named.retry}>Try again</Button> } : {})}
+        next="Open the exam from your list, or ask whoever sent you this link to check the name."
+      >
+        <Problem>{named.refused.message}</Problem>
+      </Stage>,
     );
   }
   if (mode === 'draft' && form.draftMissing) return <Navigate to="/board" replace />;
@@ -209,11 +263,22 @@ function BoardFlow(props: { mode: Mode }) {
       />,
     );
   }
+  // Once the name passes, it replaces the ID in the address. The route stays this component, so nothing reloads.
+  const verifiedAs = (name: string) => {
+    noteVerifiedName(name, examId);
+    if (named.name !== name) void navigate(`/board/exam/${name}`, { replace: true });
+  };
   const onExam = (children: ReactNode) =>
     withLink(
       <ExamShell>
         <MachineCheck examId={examId} snapshot={value} />
+        <ExamNameCard key={examId} examId={examId} routeName={named.name} onVerified={verifiedAs} />
         {children}
+        {DemoPanel ? (
+          <Suspense fallback={null}>
+            <DemoPanel examId={examId} snapshot={value} parties={loadParties(examId)} />
+          </Suspense>
+        ) : null}
       </ExamShell>,
     );
   if (decided === 'people') return onExam(<PeopleStep examId={examId} snapshot={value} onPosted={reload} />);

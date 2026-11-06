@@ -1,12 +1,11 @@
 import { arkiv } from '@paperseal/arkiv';
 import { ownerEnsName, roles, roundTimeSeconds, storageNames, toHex, type ApprovedListEntry, type Hex } from '@paperseal/protocol';
 import type { Tone } from '@paperseal/ui';
+import { approvedEntries, releaseTokenName } from '@paperseal/verify';
 
-import { approvedEntries } from './commitments';
 import { nameUnchecked, nameWords, roleNames, type Custody, type PartyName, type View } from './custody';
 import { ARKIV_STALE_AFTER_SECONDS, isValidLog, roundReached, type ArkivReport, type LiveReport, type Records, type Release } from './load';
 import type { Polled } from './poll';
-import { releaseTokenName } from './storage';
 import { swarmLogPassed, type SwarmCopy, type SwarmReport } from './swarm';
 
 /*

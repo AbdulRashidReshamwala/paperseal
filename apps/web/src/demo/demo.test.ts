@@ -3,12 +3,12 @@ import type { EnsLookup } from '@paperseal/chain';
 import { createWebAuthnKeys } from '@paperseal/keys';
 import { plantedKey, plantedRecords } from '@paperseal/keys/demo';
 import { fromHex, hashMessage, utf8ToBytes, type Hex } from '@paperseal/protocol';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ensRecords } from '../../../../e2e/demo/cards';
 import { ownerNameOf, roster } from '../../../../e2e/live/roster';
 import { demoCredentials } from './credentials';
-import { activePersona, changePersona, personas, type Persona } from './personas';
+import { activePersona, changePersona, personas, scopeStorage, type Persona } from './personas';
 import { newUserAction, setTouchEnabled, touchEnabled, touchForShow } from './touch';
 import { registerName } from '../shared/RegisterByName';
 
@@ -22,8 +22,13 @@ function realKey(result: (options: { signal?: AbortSignal }) => Promise<unknown>
   return key;
 }
 
+beforeAll(() => {
+  scopeStorage();
+});
+
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
   newUserAction();
 });
 
@@ -32,9 +37,12 @@ afterEach(() => {
 });
 
 describe('personas', () => {
-  it('are the roster, plus the exam board', () => {
-    expect(personas.map(({ id }) => id)).toEqual(['board', ...roster.map(({ name }) => name)]);
+  it('are the roster, plus the exam board and enough setters for a limit of 20 percent', () => {
+    const others = roster.filter(({ kind }) => kind !== 'setter').map(({ name }) => name);
+    expect(personas.map(({ id }) => id)).toEqual(['board', 'setter-1', 'setter-2', 'setter-3', 'setter-4', 'setter-5', ...others]);
     for (const entry of roster) expect(person(entry.name).owner).toBe(ownerNameOf(entry));
+    expect(person('setter-5').keyed).toBe(true);
+    expect(person('setter-5').path).toBe('/setter');
   });
 
   it('start on a page for their role', () => {
@@ -51,6 +59,13 @@ describe('personas', () => {
     expect(localStorage.getItem('paperseal.board.drafts')).toBeNull();
     changePersona(person('board'));
     expect(localStorage.getItem('paperseal.board.drafts')).toBe('[1]');
+  });
+
+  it('keeps a person per tab, so one tab switching leaves another alone', () => {
+    const otherTab = { getItem: vi.fn(() => 'centre-2') } as unknown as Storage;
+    changePersona(person('setter-1'));
+    expect(activePersona().id).toBe('setter-1');
+    expect(activePersona(otherTab).id).toBe('centre-2');
   });
 
   it('keeps each person’s credentials, registrations and drafts away from the others', () => {

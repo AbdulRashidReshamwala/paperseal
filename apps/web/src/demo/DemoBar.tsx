@@ -1,6 +1,6 @@
 import { useEffect, useState, type ChangeEvent } from 'react';
 
-import { activeKey, activePersona, becomePersona, personas } from './personas';
+import { activePersona, becomePersona, personas } from './personas';
 import { newUserAction, setTouchEnabled, touchEnabled } from './touch';
 
 /** The bar across the top of every page in demo mode: who you are, and whether to ask for a touch. */
@@ -11,14 +11,8 @@ export default function DemoBar() {
   useEffect(() => {
     // Capture, so a click counts as a new action before the page's own handler starts a ceremony.
     document.addEventListener('click', newUserAction, true);
-    // Storage holds one person at a time, so another tab has to follow a switch.
-    const follow = (event: StorageEvent) => {
-      if (event.key === activeKey) globalThis.location.reload();
-    };
-    globalThis.addEventListener('storage', follow);
     return () => {
       document.removeEventListener('click', newUserAction, true);
-      globalThis.removeEventListener('storage', follow);
     };
   }, []);
 

@@ -55,7 +55,7 @@ export function WaitStep(props: { snapshot: Snapshot }) {
         closed
           ? 'Questions have closed. Paper Seal is building the paper. You do not need to do anything.'
           : stage === 'onboard'
-            ? 'Your list of people is posted. Setters can start sending questions in about 20 minutes.'
+            ? 'Your list of people is posted. Setters can start sending questions soon.'
             : 'Setters are sending questions. You do not need to do anything now.'
       }
       next={

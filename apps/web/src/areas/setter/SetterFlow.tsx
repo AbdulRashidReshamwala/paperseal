@@ -1,10 +1,11 @@
 import type { Criteria, Hex, Stage as ExamStage } from '@paperseal/protocol';
 import { Button, LoadingSeal, Page, RoleHeader, Stage, useLoaded } from '@paperseal/ui';
+import { useExamTitle } from '../../shared/NamedExam';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { useMachineElsewhere } from '../../shared/machineExam';
 import { credentialIsForInvite, useInvite } from '../../shared/invite';
-import { Register, Trouble } from '../../shared/Register';
+import { Register, SetterRegistered, Trouble } from '../../shared/Register';
 import { Closed } from './Closed';
 import { Composer, emptyOptions, type Draft } from './Composer';
 import type { ConfirmOutcome } from './confirm';
@@ -116,6 +117,7 @@ function Quiet(props: { title: string; lede?: string; next: string; detail?: str
 export function SetterFlow() {
   const session = useSession();
   const { env, examId, credential, outcome, confirmed, status, statusError, checking, runConfirm } = session;
+  const title = useExamTitle(examId);
 
   // Above every screen, so a re-check or the bank closing never loses what is being written. It is
   // held in memory only: a question's text is never stored.
@@ -210,14 +212,12 @@ export function SetterFlow() {
         );
       case 'waiting':
         return (
-          <Quiet
-            title="Nothing to do yet"
-            lede={
+          <SetterRegistered
+            next={
               stage === 'onboard'
-                ? 'Your security key is registered. Your exam board has sent the list of people for this exam. Questions open soon, usually within about 20 minutes.'
-                : 'Your security key is registered. Your exam board has not sent the list of people for this exam yet.'
+                ? 'Questions open once your exam board has sent the list of people for this exam. This page opens for writing by itself.'
+                : 'Your exam board is still setting up this exam. This page opens for writing by itself.'
             }
-            next="This page opens for writing by itself. You can close it and come back to this link later, in this same browser. To use a different security key, ask your exam board for a new invitation link."
           />
         );
       case 'write': {
@@ -247,5 +247,5 @@ export function SetterFlow() {
     }
   };
 
-  return <Page header={<RoleHeader role="Setter" />}>{loaded ? body() : <LoadingSeal />}</Page>;
+  return <Page header={<RoleHeader role="Setter" exam={title} />}>{loaded ? body() : <LoadingSeal />}</Page>;
 }

@@ -50,5 +50,6 @@ export function resolveDefaults(env: ViteEnv = viteEnv, config: WebConfig = runt
     examId: pick(env.VITE_EXAM_ID, config.examId),
     arkivWriters: pick(env.VITE_ARKIV_WRITERS, config.arkivWriters),
     swarmApiUrl: pick(env.VITE_SWARM_API_URL, config.swarmApiUrl, swarm.defaultApiUrl),
+    releaseTag: pick(env.VITE_RELEASE_TAG, config.releaseTag),
   };
 }

@@ -4,6 +4,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { equalBytes, fromHex, toHex, utf8ToBytes } from './bytes';
 import { roles, setterOwner, type ApprovedListEntry } from './encoding';
 import { limits } from './constants';
+import { looksLikeEnsName } from './ens';
 import type { Hex } from './types';
 
 /*
@@ -31,6 +32,8 @@ export interface Invite {
   examId: Hex;
   role: InviteRole;
   inviteSecret: Hex;
+  /** The exam's ENS name, a hint for the page's title only. It must verify, and the invite does not depend on it. */
+  name?: string;
 }
 
 export class InviteError extends Error {
@@ -80,6 +83,7 @@ export function checkInvite(invite: Invite): void {
 
 const joinPrefix = '#/join?';
 const linkKeys = ['exam', 'role', 'secret'];
+const optionalLinkKeys = ['name'];
 
 /** The fragment of an invite link, `#/join?...`. Validates first. */
 export function encodeInviteFragment(invite: Invite): string {
@@ -88,6 +92,7 @@ export function encodeInviteFragment(invite: Invite): string {
   params.set('exam', invite.examId);
   params.set('role', invite.role);
   params.set('secret', invite.inviteSecret);
+  if (invite.name) params.set('name', invite.name);
   return `${joinPrefix}${params.toString()}`;
 }
 
@@ -109,15 +114,18 @@ export function decodeInviteFragment(fragment: string): Invite {
     seen.set(key, value);
   }
   for (const key of seen.keys()) {
-    if (!linkKeys.includes(key)) throw new InviteError(`The link has an unexpected part, ${key}.`);
+    if (!linkKeys.includes(key) && !optionalLinkKeys.includes(key)) throw new InviteError(`The link has an unexpected part, ${key}.`);
   }
   for (const key of linkKeys) {
     if (!seen.has(key)) throw new InviteError(`The link is missing ${key}.`);
   }
-  const invite = {
+  const name = seen.get('name');
+  const invite: Invite = {
     examId: seen.get('exam') as Hex,
     role: seen.get('role') as InviteRole,
     inviteSecret: seen.get('secret') as Hex,
+    // Only a hint, so a damaged one is dropped and the invite still works.
+    ...(name && looksLikeEnsName(name) ? { name } : {}),
   };
   checkInvite(invite);
   return invite;

@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import { build } from 'vite';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { credentialsOption, demoBar } from './shared/demoKeys';
+import { credentialsOption, demoBar, demoPanel } from './shared/demoKeys';
 
 /*
  * Demo keys sign with a public seed, and that must never be possible in a real build. These tests are
@@ -44,13 +44,14 @@ describe('demo keys', () => {
   it('are off in the default mode, even with the flag set', () => {
     vi.stubEnv('VITE_DEMO_KEYS', '1');
     expect(demoBar()).toBeNull();
+    expect(demoPanel()).toBeNull();
     expect(credentialsOption()).toEqual({});
   });
 
   it('leave no trace in a production build', async () => {
     const text = await production();
     expect(text.length).toBeGreaterThan(1000);
-    for (const trace of ['Acting as', 'data-demo-label', 'paperseal-demo.persona', 'paperseal-demo.touch', 'demo-keys', 'VITE_DEMO_KEYS', 'public seed', 'Demo keys']) {
+    for (const trace of ['Acting as', 'data-demo-label', 'paperseal-demo.persona', 'paperseal-demo.touch', 'demo-keys', 'VITE_DEMO_KEYS', 'public seed', 'Demo keys', 'Register everyone else', 'Add questions for everyone else', 'Release the rest']) {
       expect(text).not.toContain(trace);
     }
   }, 180_000);

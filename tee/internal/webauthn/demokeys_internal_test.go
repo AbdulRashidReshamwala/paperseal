@@ -121,6 +121,41 @@ func TestDemoKeysPassVerify(t *testing.T) {
 	}
 }
 
+// Every setter in demo mode registers the same way, each with their own key.
+func TestDemoSettersPassVerify(t *testing.T) {
+	raw, err := os.ReadFile("../../../spec/fixtures/demo-keys.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f struct {
+		Setter       demoRequest   `json:"setter"`
+		OtherSetters []demoRequest `json:"otherSetters"`
+	}
+	if err := json.Unmarshal(raw, &f); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.OtherSetters) != 4 {
+		t.Fatalf("the fixture has %d other setters, want 4", len(f.OtherSetters))
+	}
+	seen := map[string]bool{string(f.Setter.PasskeyPublicKey): true}
+	for i, setter := range f.OtherSetters {
+		if seen[string(setter.PasskeyPublicKey)] {
+			t.Errorf("setter %d shares a key with another setter", i+2)
+		}
+		seen[string(setter.PasskeyPublicKey)] = true
+		message := registrationMessage(t, setter)
+		if err := Verify(setter.PasskeyPublicKey, TypeGet, message, setter.assertion()); err != nil {
+			t.Errorf("setter %d: %v", i+2, err)
+		}
+		if err := checkAttestedKey(setter.AttestationObject, setter.PasskeyPublicKey); err != nil {
+			t.Errorf("setter %d: %v", i+2, err)
+		}
+		if err := Verify(f.Setter.PasskeyPublicKey, TypeGet, message, setter.assertion()); !errors.Is(err, ErrBad) {
+			t.Errorf("setter %d: accepted under another setter's key: %v", i+2, err)
+		}
+	}
+}
+
 func TestDemoKeysAreForLocalhost(t *testing.T) {
 	_, setter, _, _, _ := demoFixture(t)
 	rpHash := sha256.Sum256([]byte("localhost"))

@@ -18,7 +18,8 @@ const alias = Object.fromEntries([
  * stub TEE, stub storage). `ui/live.ui-live.ts` is the real run against the deployed TEE and Sepolia;
  * it is not part of `pnpm ui`, see the `ui:live` script. `ui/mock.ui-mock.ts` is the same script against a
  * mock sealed machine and a local chain (`ui:mock`), for fast recordings that say "Mock data" on every screen.
- * `ui/demoKeys.ui-demo.ts` is a whole exam in one tab with demo keys, on the same mock world (`ui:demo`).
+ * `ui/demoKeys.ui-demo.ts` is a whole exam in one tab with demo keys, on the same mock world (`ui:demo`), and
+ * `ui/demoPanel.ui-demo.ts` is the same with one setter and one centre by hand and the board's buttons for the rest.
  */
 export default defineConfig({
   resolve: { alias },

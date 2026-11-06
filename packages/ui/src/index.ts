@@ -7,6 +7,7 @@ export * from './KeyTouch';
 export * from './MockLabel';
 export * from './LoadingSeal';
 export * from './Logo';
+export * from './Registered';
 export * from './Seal';
 export * from './Stage';
 export * from './Stepper';

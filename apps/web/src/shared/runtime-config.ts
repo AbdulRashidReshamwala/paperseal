@@ -18,6 +18,7 @@ const settings = {
   VITE_TEE_STORAGE_BUCKET: 'storageBucket',
   VITE_RELEASES_REPO: 'repository',
   VITE_EXAM_ID: 'examId',
+  VITE_ARKIV_WRITERS: 'arkivWriters',
 } as const satisfies Record<string, keyof WebConfig>;
 
 /**

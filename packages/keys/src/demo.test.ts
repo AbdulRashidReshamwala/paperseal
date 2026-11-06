@@ -49,11 +49,13 @@ async function fixture() {
   const questionHash = new Uint8Array(32).fill(0x9a);
   const question = hashMessage('questionSubmission', { examId, challenge, questionHash });
   const release = hashMessage('shareRelease', { examId, challenge });
+  const others = await Promise.all(['setter-2', 'setter-3', 'setter-4', 'setter-5'].map(async (label) => (await keysOf(label)).keys.register({ role: 'setter', challenge, inviteSecret })));
   return {
     origin,
     rpId,
     examId: toHex(examId),
     setter: registered.request,
+    otherSetters: others.map(({ request }) => request),
     byName: named.request,
     question: {
       passkeyPublicKey: registered.request.passkeyPublicKey,

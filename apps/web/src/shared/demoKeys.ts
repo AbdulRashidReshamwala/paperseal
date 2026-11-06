@@ -17,6 +17,13 @@ import type { GatedRole } from './RolePage';
 
 const on = (import.meta.env.MODE === 'demo-keys' || import.meta.env.MODE === 'mock') && import.meta.env.VITE_DEMO_KEYS === '1';
 
+/** Gives each tab its own person's storage. Runs before the app first reads storage. Nothing outside demo mode. */
+export async function prepareDemo(): Promise<void> {
+  if (!on) return;
+  const { scopeStorage } = await import('../demo/personas');
+  scopeStorage();
+}
+
 /** The bar across the top of the app. Null outside demo mode. */
 export function demoBar(): LazyExoticComponent<ComponentType> | null {
   if (!on) return null;
@@ -27,6 +34,15 @@ export function demoBar(): LazyExoticComponent<ComponentType> | null {
 export function demoGate(): LazyExoticComponent<ComponentType<{ role: GatedRole; children: ReactNode }>> | null {
   if (!on) return null;
   return lazy(() => import('../demo/PersonaGate'));
+}
+
+/**
+ * The board's panel for doing everyone else's part. Null outside demo mode. The caller names its props,
+ * because this file sits in the entry bundle and may not import a board type.
+ */
+export function demoPanel<Props extends object>(): LazyExoticComponent<ComponentType<Props>> | null {
+  if (!on) return null;
+  return lazy(() => import('../demo/BoardPanel') as unknown as Promise<{ default: ComponentType<Props> }>);
 }
 
 /** The `credentials` option for `createWebAuthnKeys`, empty outside demo mode, so the browser's real one applies. */

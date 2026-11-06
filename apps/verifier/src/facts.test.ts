@@ -2,15 +2,13 @@ import type { EnsLookup } from '@paperseal/chain';
 import { roundTimeSeconds, type Hex } from '@paperseal/protocol';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
-import { createBackupCache } from './backup';
-import type { ChainData } from './checks';
+import { createBackupCache, createStorage, type ChainData } from '@paperseal/verify';
+import { buildWorld, examId, registryAddress, registryMatches, storageBucket, type World } from '@paperseal/verify/fixtures';
 import { custody, type View } from './custody';
 import { copies, duration, people, timeline, type Copy, type PieceId } from './facts';
-import { buildWorld, examId, registryAddress, registryMatches, type World } from './fixtures';
 import { findVersion, readBoardName, readExamName } from './identity';
 import { loadRecords, type ArkivReport, type Records } from './load';
 import type { Polled } from './poll';
-import { createStorage } from './storage';
 import { loadSwarm, type BackupRow, type SwarmReport } from './swarm';
 
 let world: World;
@@ -40,7 +38,7 @@ beforeAll(async () => {
     criteria: world.criteriaHex,
     entries: world.entriesHex,
   } as ChainData;
-  records = await loadRecords({ chain: () => Promise.resolve(chain), storage: storageOf(world.files), examId, registry: registryAddress, trustedRoot: world.pki.root });
+  records = await loadRecords({ chain: () => Promise.resolve(chain), storage: storageOf(world.files), examId, registry: registryAddress, bucket: storageBucket, trustedRoot: world.pki.root });
 });
 
 const viewOf = (over: Partial<View> = {}): View => ({
@@ -71,6 +69,7 @@ async function audit(files: ReadonlyMap<string, Uint8Array> | Error | null, rows
     writers: [writer],
     examId,
     registry: registryAddress,
+    bucket: storageBucket,
     trustedRoot: world.pki.root,
   });
 }
@@ -310,6 +309,10 @@ describe('identity', () => {
     const empty = { examRows: () => Promise.resolve([{ examId, name: '' }]) } as never;
     expect(await readExamName({ ...args, reader: empty })).toEqual({ name: null, failed: 0 });
     const down = { examRows: () => Promise.reject(new Error('429')) } as never;
-    expect(await readExamName({ ...args, reader: down })).toMatchObject({ name: null, unread: '429' });
+    vi.useFakeTimers();
+    const read = readExamName({ ...args, reader: down });
+    await vi.advanceTimersByTimeAsync(6000);
+    vi.useRealTimers();
+    expect(await read).toMatchObject({ name: null, unread: '429' });
   });
 });

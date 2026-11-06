@@ -6,7 +6,7 @@ import { Field, KeyTouch, LoadingSeal, Stage, type KeyTouchState, useLoaded } fr
 import { useState } from 'react';
 
 import { useCurrentExamId } from './currentExam';
-import { loadEnrolments, loadPartyName, savePartyName } from './enrolment';
+import { loadEnrolments, loadPartyName, savePartyName, type Enrolment } from './enrolment';
 import { listEntryForName } from './holder';
 import { useMachineElsewhere } from './machineExam';
 import { directoryName, nameLookup, useDirectory } from './names';
@@ -39,6 +39,8 @@ export interface NameRegisterInput {
   registry: Pick<ExamRegistry, 'getApprovedListEntries'> | null;
   examId: Hex;
   owner: string;
+  /** The keys enrolled here. By default, this browser's. */
+  enrolments?: readonly Enrolment[];
 }
 
 /** A name that can't register, in words. `retry`: reading again may help. */
@@ -85,7 +87,7 @@ export async function registerName(input: NameRegisterInput): Promise<Omit<Store
   const already = await held();
   if (already) return credentialFor(owner, records.credentialId, already.passkeyPublicKey);
 
-  const enrolment = loadEnrolments().find((item) => item.credentialId === records.credentialId);
+  const enrolment = (input.enrolments ?? loadEnrolments()).find((item) => item.credentialId === records.credentialId);
   const registration = await keys.registerByName({
     owner,
     examId: fromHex(examId),

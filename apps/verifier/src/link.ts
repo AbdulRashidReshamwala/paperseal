@@ -1,5 +1,5 @@
 import type { Hex } from '@paperseal/protocol';
-import { useSyncExternalStore } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { useLocation } from 'react-router';
 
 import { isExamId } from './settings';
@@ -68,11 +68,51 @@ export function useRoute(): { routePath: string; routeSearch: string } {
   return routeOfHash(hash) ?? { routePath: location.pathname, routeSearch: location.search };
 }
 
-/** The exam the link in the address bar names. */
+/**
+ * The exam the link in the address bar names. The page query counts only while the address has no
+ * route of its own, so the header's `#/` goes home from a `?exam=` link.
+ */
 export function useExamLink(): ExamLink {
   const route = useRoute();
-  return examLink({
-    search: (globalThis.location as Location | undefined)?.search ?? '',
-    ...route,
-  });
+  const here = globalThis.location as Location | undefined;
+  return examLink({ search: here && !routeOfHash(here.hash) ? here.search : '', ...route });
+}
+
+/**
+ * The share form of an address whose hash names an exam: `<page>?exam=<id>`, with the hash dropped,
+ * because the part after `#` never reaches a server (spec/agent-verification.md, "Share Links").
+ * Null when the hash names no valid exam, so `#/exams`, `#/name/...` and bad links stay as they are.
+ */
+export function shareUrl(href: string): string | null {
+  const url = new URL(href);
+  const route = routeOfHash(url.hash);
+  if (!route || isHistoryRoute(route.routePath)) return null;
+  const link = examLink({ search: url.search, ...route });
+  if (link.kind !== 'exam') return null;
+  url.searchParams.set('exam', link.id);
+  url.hash = '';
+  return url.href;
+}
+
+/** The address with `?exam=` dropped, because `#/name/...` is the link people see. Null with none to drop. */
+export function nameUrl(href: string): string | null {
+  const url = new URL(href);
+  if (!url.searchParams.has('exam')) return null;
+  url.searchParams.delete('exam');
+  return url.href;
+}
+
+/**
+ * Keeps the address bar on the link people should see, without a reload: the share form for an exam
+ * opened by ID, and a name with no `?exam=` left over from before the page moved to it.
+ */
+export function useShareAddress(link: ExamLink): void {
+  const key = link.kind === 'exam' ? link.id : link.kind === 'name' ? link.name : null;
+  const named = link.kind === 'name';
+  useEffect(() => {
+    const location = globalThis.location as Location | undefined;
+    if (key === null || !location) return;
+    const next = named ? nameUrl(location.href) : shareUrl(location.href);
+    if (next !== null && next !== location.href) globalThis.history.replaceState(globalThis.history.state, '', next);
+  }, [key, named]);
 }

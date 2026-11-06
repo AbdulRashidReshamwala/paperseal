@@ -3,11 +3,11 @@ import { createExamRegistry } from '@paperseal/chain';
 import { quicknetClient, type ChainClient } from '@paperseal/crypto';
 import type { Hex } from '@paperseal/protocol';
 import { createTeeClient } from '@paperseal/tee-client';
+import { createStorage } from '@paperseal/verify';
 import { createContext, use, useMemo, useState, type ReactNode } from 'react';
 import { getAddress, isAddress } from 'viem';
 
 import { resolveDefaults } from './runtime-config';
-import { createStorage } from './storage';
 
 /** Who this viewer trusts. Stored in their browser, so the board can't choose for them. */
 export interface Settings {

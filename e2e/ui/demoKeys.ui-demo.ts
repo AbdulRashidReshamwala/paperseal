@@ -113,7 +113,7 @@ describe('demo keys, one tab', () => {
     // ---------------------------------------------------------------- the bar
     await page.goto(web.url);
     await page.getByLabel('Acting as').waitFor();
-    expect(await acting.locator('option').allInnerTexts()).toEqual(['Exam board', ...setters, ...keyHolders, ...centres]);
+    expect(await acting.locator('option').allInnerTexts()).toEqual(['Exam board', ...setters, 'Setter 3', 'Setter 4', 'Setter 5', ...keyHolders, ...centres]);
     await actor.shot('demo-00-bar');
 
     // ---------------------------------------------------------------- the board publishes, with its wallet
@@ -183,7 +183,7 @@ describe('demo keys, one tab', () => {
       await page.goto(links[index] ?? '');
       const before = touches();
       await page.getByRole('button', { name: button.register }).click({ timeout: 60_000 });
-      await actor.see(/security key is registered|Nothing to do yet/, 60_000);
+      await actor.see(/You.re registered|Nothing to do yet/, 60_000);
       // A create and a get, on one click.
       expect(touches() - before).toBe(1);
     }
@@ -205,7 +205,7 @@ describe('demo keys, one tab', () => {
 
     // Back to someone who already registered: their own state is back.
     await become('Centre 1', '/centre');
-    await actor.see(/Nothing to do yet|You are registered|list of people/, 60_000);
+    await actor.see(/Nothing to do yet|You.re registered|list of people/, 60_000);
     await page.waitForTimeout(3000);
     expect(await page.getByRole('button', { name: button.registerByName }).count()).toBe(0);
 

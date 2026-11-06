@@ -4,6 +4,7 @@ import { useEffect, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
 import { setCurrentExamId } from './currentExam';
+import { rememberExamNameHint } from './examName';
 import { holdInvite, rolePaths } from './invite';
 
 /*
@@ -32,6 +33,7 @@ export default function Join() {
     if ('invite' in read) {
       holdInvite(read.invite);
       setCurrentExamId(read.invite.examId);
+      if (read.invite.name) rememberExamNameHint(read.invite.examId, read.invite.name);
       void navigate(rolePaths[read.invite.role], { replace: true });
     } else {
       void navigate('/join', { replace: true, state: { problem: read.problem } });

@@ -1,4 +1,4 @@
-import { createEnsLookup, createExamRegistry, examRegistryAbi, OnChainBytesError, type EnsLookup, type ExamRegistry } from '@paperseal/chain';
+import { createEnsLookup, createExamRegistry, examRegistryAbi, OnChainBytesError, type EnsLookup, type ExamNameRecords, type ExamRegistry } from '@paperseal/chain';
 import { chain, decodeCriteria, fromHex, type Criteria, type Hex } from '@paperseal/protocol';
 import {
   BaseError,
@@ -16,6 +16,7 @@ import { appEnv } from '../../shared/runtime-config';
 import { currentAccount, injectedProvider, switchToSepolia, walletChainId, walletClientFor, type EIP1193Provider } from '../../shared/wallet';
 import { withDetails } from './details';
 import type { PublishFields, ScheduleSettings } from './form';
+import { examNameValues } from './plan';
 
 /*
  * The Publish step. Every check runs before anything is sent, and the result is
@@ -32,6 +33,8 @@ export interface PublishEnvironment {
   createRegistry: ((wallet?: WalletClient) => ExamRegistry) | null;
   /** Reads of ENS names, on chain only and over the same RPC. Null when it is not set, so names are left unread. */
   ensLookup?: EnsLookup | null;
+  /** What this app's exams write to their ENS names, besides the registry. Empty when left out. */
+  examNameValues?: Omit<ExamNameRecords, 'registry'>;
 }
 
 export function defaultEnvironment(
@@ -46,6 +49,7 @@ export function defaultEnvironment(
     createRegistry:
       rpcUrl && address ? (wallet) => createExamRegistry({ address, rpcUrl, ...(wallet ? { wallet } : {}) }) : null,
     ensLookup: rpcUrl ? createEnsLookup({ rpcUrl }) : null,
+    examNameValues: examNameValues(env),
   };
 }
 

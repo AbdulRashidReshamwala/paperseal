@@ -14,6 +14,7 @@ const config: WebConfig = {
   examId: `0x${'22'.repeat(32)}`,
   arkivWriters: `0x${'ef'.repeat(20)}`,
   swarmApiUrl: 'https://bee.board.example',
+  releaseTag: 'v1.2.3',
 };
 
 const memoryStorage = (initial: Record<string, string> = {}) => {
@@ -46,6 +47,7 @@ describe('config.json at runtime', () => {
       examId: config.examId,
       arkivWriters: config.arkivWriters,
       swarmApiUrl: config.swarmApiUrl,
+      releaseTag: config.releaseTag,
     });
     expect(repository({}, config)).toBe('board/paperseal');
   });
@@ -92,5 +94,21 @@ describe('config.json at runtime', () => {
     expect(loadSettings(saved).storageBucket).toBe('viewer-bucket');
     const broken = memoryStorage({ 'paperseal.verifier.settings': JSON.stringify({ ...defaultSettings, storageBucket: 'Not/A/Bucket' }) });
     expect(loadSettings(broken).storageBucket).toBe(config.storageBucket);
+  });
+
+  it('feeds env.ts, so the copy button names the release in config.json', async () => {
+    for (const name of ['VITE_RELEASE_TAG', 'VITE_TEE_STORAGE_BUCKET']) vi.stubEnv(name, '');
+    vi.resetModules();
+    const fresh = await import('./runtime-config');
+    fresh.setRuntimeConfig(config);
+    const env = await import('./env');
+    expect(env.releaseTag).toBe('v1.2.3');
+    expect(env.teeStorageBucket).toBe(config.storageBucket);
+  });
+
+  it('rejects a malformed bucket in the Connection settings', async () => {
+    const { defaultSettings, validateSettings } = await import('./settings');
+    expect(validateSettings({ ...defaultSettings, storageBucket: 'Not A Bucket' })).toHaveProperty('storageBucket');
+    expect(validateSettings({ ...defaultSettings, storageBucket: 'my-exam-bucket' })).not.toHaveProperty('storageBucket');
   });
 });
