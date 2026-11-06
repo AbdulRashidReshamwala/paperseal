@@ -1624,8 +1624,11 @@ const BEFORE_SEAL: readonly StepId[] = ['name', 'published', 'attested', 'people
 function sealOf(c: Context, steps: readonly CustodyStep[]): SealState | null {
   const { proof } = c.view;
   const opened = proof?.ok === true ? proof.result.state : null;
-  if (opened === 'opened') return 'open';
-  if (opened === 'failed') return 'opening';
+  // The seal breaks only for a real problem. Before there is a paper there is no seal to break.
+  if (opened === 'failed') return 'broken';
+  if (c.build && steps.some((step) => step.state === 'failed')) return 'broken';
+  // Open is a seal of approval, so it waits for the last check.
+  if (opened === 'opened') return steps.find((step) => step.id === 'open')?.state === 'done' ? 'open' : 'opening';
   // A seal says the paper was built and sealed as promised, so all of that has to have been shown.
   if (!steps.filter((step) => BEFORE_SEAL.includes(step.id)).every((step) => step.state === 'done')) return null;
   if (opened === 'sealed') return 'sealed';

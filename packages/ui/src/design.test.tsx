@@ -206,6 +206,7 @@ describe('Seal', () => {
     ['sealed', 'Sealed'],
     ['opening', 'Opening'],
     ['open', 'Open'],
+    ['broken', 'Broken'],
   ])('names the %s state in words', (state, word) => {
     const html = renderToString(<Seal state={state} />);
     expect(html).toContain(`data-state="${state}"`);
