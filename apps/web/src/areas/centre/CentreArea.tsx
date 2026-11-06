@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import type { ReleaseContext } from '../../release/flow';
 import { Gate, TechnicalDetail } from '../../release/Gate';
+import { useExamTitle } from '../../shared/NamedExam';
 import { useHolderProgress, type HolderProgress, type ProgressActions } from '../../release/progress';
 import { ReleaseCount, ReleaseStage, releaseContext } from '../../release/ReleaseStage';
 import { HandOutStage } from './HandOut';
@@ -70,6 +71,7 @@ export function CentreView(props: {
   handOutStepMs?: number;
 }) {
   const { progress, actions, context, files, open, justReleased } = props;
+  const title = useExamTitle(progress.examId);
   // Handing out is a demonstration kept in this page's memory, next to the paper.
   const handOut = useHandOut(props.handOutStepMs);
   const [handingOut, setHandingOut] = useState(false);
@@ -228,7 +230,7 @@ export function CentreView(props: {
   }
 
   return (
-    <Page header={<RoleHeader role="Exam centre" {...(progress.credential ? { note: progress.credential.owner } : {})} />}>
+    <Page header={<RoleHeader role="Exam centre" exam={title} {...(progress.credential ? { note: progress.credential.owner } : {})} />}>
       <div className="centre-noprint">
         {seal ? (
           <div className="centre-seal">

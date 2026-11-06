@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 
 import type { ReleaseContext } from '../../release/flow';
 import { Gate } from '../../release/Gate';
+import { useExamTitle } from '../../shared/NamedExam';
 import { useHolderProgress, type HolderProgress, type ProgressActions } from '../../release/progress';
 import { ReleaseCount, ReleaseStage, releaseContext } from '../../release/ReleaseStage';
 import { keyholderStage } from './stage';
@@ -20,6 +21,7 @@ export function KeyholderView(props: {
   onReleased: () => void;
 }) {
   const { progress, actions, context, justReleased } = props;
+  const title = useExamTitle(progress.examId);
   const stage = keyholderStage(progress, justReleased);
   const status = progress.status.value;
   const round = progress.chain.value?.unlockRound ?? null;
@@ -95,7 +97,7 @@ export function KeyholderView(props: {
     }
   }
 
-  return <Page header={<RoleHeader role="Key holder" />}>{body()}</Page>;
+  return <Page header={<RoleHeader role="Key holder" exam={title} />}>{body()}</Page>;
 }
 
 export default function KeyholderArea() {

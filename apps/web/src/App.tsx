@@ -40,6 +40,7 @@ const areas: { role: GatedRole; path: string; label: string; plain: string; Area
 
 // Lazy too, because it brings the chain client with it. It decides before an area's code is asked for.
 const RoleGate = lazy(() => import('./shared/RoleGate'));
+const NamedExam = lazy(() => import('./shared/NamedExam'));
 const Join = lazy(() => import('./shared/Join'));
 const Enrol = lazy(() => import('./shared/Enrol'));
 const ExamPage = lazy(() => import('./shared/ExamPage'));
@@ -103,9 +104,16 @@ export function App() {
         <Route path="/join" element={<Screen key="join"><Join /></Screen>} />
         <Route path="/enrol" element={<Screen key="enrol"><Enrol /></Screen>} />
         <Route path="/exam" element={<Screen key="exam"><ExamPage /></Screen>} />
-        {areas.map(({ role, path, Area }) => (
-          <Route key={path} path={`${path}/*`} element={<Screen key={path}><RoleGate role={role}><Area /></RoleGate></Screen>} />
-        ))}
+        {areas.map(({ role, path, label, Area }) => {
+          const gated = <RoleGate role={role}><Area /></RoleGate>;
+          return (
+            <Route
+              key={path}
+              path={`${path}/*`}
+              element={<Screen key={path}>{role === 'board' ? gated : <NamedExam role={label} path={path}>{gated}</NamedExam>}</Screen>}
+            />
+          );
+        })}
       </Routes>
     </Suspense>
   );

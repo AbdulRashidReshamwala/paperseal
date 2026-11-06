@@ -9,7 +9,8 @@ import { Area, type AreaScreen } from '../../shared/Area';
 import { useCurrentExamId } from '../../shared/currentExam';
 import { TEE_STATUS_POLL_MS } from '../../shared/TeeStatus';
 import './board.css';
-import { BoardFormProvider, useBoardForm, useEvaluated, useReader } from './BoardForm';
+import { shortExamId } from '../../shared/examName';
+import { BoardFormProvider, useBoardForm, useEvaluated, useReader, useVerifiedName } from './BoardForm';
 import { BoardHome } from './BoardHome';
 import { BuildStep } from './BuildStep';
 import { DetailsStep, TopicsStep } from './CreateStep';
@@ -181,8 +182,9 @@ function BoardFlow(props: { mode: Mode }) {
   const examId = named.name ? named.examId : asExamId(mode === 'exam' ? params.examId : mode === 'current' ? stored : mode === 'new' ? search.get('exam') : null);
   const { reader, value, problem, pending, reload } = useExamState(examId);
   const decided = value ? decideStep(value) : null;
+  const verifiedName = useVerifiedName(examId);
   const page = (children: ReactNode) => (
-    <Page header={<RoleHeader role="Exam board" {...(form.examName ? { exam: form.examName } : {})} />}>{children}</Page>
+    <Page header={<RoleHeader role="Exam board" {...(examId ? { exam: verifiedName ?? shortExamId(examId) } : {})} />}>{children}</Page>
   );
   const withLink = (children: ReactNode) =>
     page(
