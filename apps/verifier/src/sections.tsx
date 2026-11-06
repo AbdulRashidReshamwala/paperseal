@@ -1,11 +1,12 @@
 import { chain as chainSpec, type Hex } from '@paperseal/protocol';
-import { Badge, Button, CopyButton, Hash, Mono, Panel, Row, Rows, type Tone } from '@paperseal/ui';
-import { Fragment, type ReactNode } from 'react';
+import { Badge, Button, Hash, Row, Rows } from '@paperseal/ui';
+import type { ReactNode } from 'react';
 
 import { dayTime, REPOSITORY, sepoliaName, utcTime, vouchNote, type View } from './custody';
 import { etherscan, sourceWords, stateWords, type Copies, type Copy, type Moment, type People, type Person, type Piece } from './facts';
 import type { BoardName, ExamNameRead, Version } from './identity';
 import type { Polled } from './poll';
+import { evidenceTable } from './record';
 
 function Out({ href, children }: { href: string; children: ReactNode }) {
   return (
@@ -15,7 +16,7 @@ function Out({ href, children }: { href: string; children: ReactNode }) {
   );
 }
 
-function Fold({ summary, children }: { summary: string; children: ReactNode }) {
+export function Fold({ summary, children }: { summary: string; children: ReactNode }) {
   return (
     <details className="vf-connection vf-fold">
       <summary>{summary}</summary>
@@ -24,197 +25,254 @@ function Fold({ summary, children }: { summary: string; children: ReactNode }) {
   );
 }
 
-const boardBadge: Record<BoardName['state'], { tone: Tone; word: string } | null> = {
+/** A record section: its heading and one line on what it holds. The page's contents link to its id. */
+export function Section({ id, title, intro, children }: { id: string; title: string; intro: ReactNode; children: ReactNode }) {
+  return (
+    // Focusable from script only, so the contents can move a keyboard or screen reader here.
+    <section id={id} className="vf-section" aria-labelledby={`${id}-title`} tabIndex={-1}>
+      <h2 id={`${id}-title`}>{title}</h2>
+      <p className="vf-intro">{intro}</p>
+      {children}
+    </section>
+  );
+}
+
+/** A state in words, in its tone's colour. The word carries it; the colour only helps a scan. */
+function Toned({ tone, children }: { tone: string; children: ReactNode }) {
+  return (
+    <span className="vf-toned" data-tone={tone}>
+      {children}
+    </span>
+  );
+}
+
+const boardBadge: Record<BoardName['state'], { tone: string; word: string } | null> = {
   confirmed: { tone: 'ok', word: 'Name confirmed both ways' },
   unconfirmed: { tone: 'warn', word: 'Name not confirmed' },
   none: null,
   unread: { tone: 'neutral', word: 'Not read' },
 };
 
-function BoardRow({ board, name }: { board: Hex; name: Polled<BoardName> }) {
+function BoardValue({ board, name }: { board: Hex; name: Polled<BoardName> }) {
   const read = name.state === 'ready' ? name.value : null;
   const badge = read ? boardBadge[read.state] : null;
   return (
-    <Row label="Exam board">
-      {read && 'name' in read ? <strong>{read.name}</strong> : null}
-      {badge ? <Badge tone={badge.tone}>{badge.word}</Badge> : null}
-      <Out href={`${etherscan}/address/${board}`}>
-        <Mono>{board}</Mono>
-      </Out>
+    <>
+      <span className="vf-line">
+        {read && 'name' in read ? <strong>{read.name}</strong> : null}
+        {badge ? <Toned tone={badge.tone}>{badge.word}</Toned> : null}
+      </span>
+      <span className="vf-line">
+        <Hash value={board} label="exam board account" />
+        <Out href={`${etherscan}/address/${board}`}>Open on Etherscan</Out>
+      </span>
       {read?.state === 'none' ? <span className="vf-aside">This board has no ENS name.</span> : null}
-    </Row>
+    </>
   );
 }
 
-export interface IdentityProps {
-  examId: Hex;
+/** The exam's name, shown only when one is listed: a name that passed, failed or could not be read. */
+function examNameValue(examName: Polled<ExamNameRead>, openedName: string | null): ReactNode {
+  const name = openedName ?? (examName.state === 'ready' ? examName.value.name : null);
+  const failed = examName.state === 'ready' ? examName.value.failed : 0;
+  // A read that failed says nothing about whether the exam has a name.
+  const unread = examName.state === 'ready' && examName.value.unread !== undefined;
+  if (name) {
+    return (
+      <>
+        <strong>{name}</strong>
+        <span className="vf-aside">{sepoliaName} The board’s own name and address are what vouch for it.</span>
+      </>
+    );
+  }
+  if (failed > 0) {
+    return (
+      <>
+        <span>No name is listed for this exam.</span>
+        <span className="vf-aside">A listed name did not pass its checks, so it is not shown.</span>
+      </>
+    );
+  }
+  return unread ? <span>Could not be read</span> : null;
+}
+
+function PersonLine({ person, zone, role, verified }: { person: Person; zone: string | undefined; role?: boolean; verified: boolean }) {
+  // Only a checked record can show that someone has not released. Without one, this says nothing.
+  const release = person.released ? `Released ${dayTime(person.released.at, zone)}` : verified ? 'No release recorded' : null;
+  return (
+    <li>
+      <span className="vf-line">
+        <span className="vf-name">{person.name}</span>
+        <Toned tone={person.state.tone}>{person.state.word}</Toned>
+      </span>
+      {person.releases && release ? <span className="vf-when">{release}</span> : null}
+      {role ? <span className="vf-aside">{person.role}</span> : null}
+      {person.state.note ? <span className="vf-aside">{person.state.note}</span> : null}
+    </li>
+  );
+}
+
+export interface PeopleProps {
+  found: People;
+  zone: string | undefined;
   board: Hex | null;
-  registry: Hex;
-  commit: Hex;
-  imageDigest: Hex;
   boardName: Polled<BoardName>;
   examName: Polled<ExamNameRead>;
   /** A name this page already opened and checked. */
   openedName: string | null;
-  version: Polled<Version>;
-  /** The address to share for this exam. */
-  shareLink: string;
 }
 
-/** Who ran this exam, and what it ran on. */
-export function IdentitySection(props: IdentityProps) {
-  const { board, registry, commit, imageDigest, version, examName } = props;
-  const name = props.openedName ?? (examName.state === 'ready' ? examName.value.name : null);
-  const found = version.state === 'ready' && version.value.state === 'found' ? version.value : null;
-  const failed = examName.state === 'ready' ? examName.value.failed : 0;
-  // A read that failed says nothing about whether the exam has a name.
-  const noName = examName.state === 'loading' ? 'Reading' : examName.state === 'ready' && examName.value.unread !== undefined ? 'Could not be read' : 'No name is listed for this exam.';
-  const plainCommit = commit.slice(2);
-  return (
-    <Panel title="Who ran this exam">
-      <Rows>
-        {board ? <BoardRow board={board} name={props.boardName} /> : null}
-        <Row label="Exam name">
-          {name ? <strong>{name}</strong> : <span>{noName}</span>}
-          {!name && failed > 0 ? <span className="vf-aside">A listed name did not pass its checks, so it is not shown.</span> : null}
-        </Row>
-        <Row label="Sealed machine">
-          {found ? (
-            <>
-              <strong>{found.version}</strong> <Out href={found.url}>Read the release</Out>
-            </>
-          ) : (
-            <span>{version.state === 'loading' ? 'Finding the release.' : 'No published release was matched.'}</span>
-          )}
-        </Row>
-        <Row label="Share this exam">
-          <span className="vf-link">
-            <Mono>{props.shareLink}</Mono>
-          </span>
-          <CopyButton text={props.shareLink}>Copy link</CopyButton>
-        </Row>
-      </Rows>
-      {name ? <p className="vf-aside">{sepoliaName} The board’s own name and address are what vouch for it.</p> : null}
-      <Fold summary="Show the exam record and code">
-        <Rows>
-          <Row label="Exam ID">
-            <Hash value={props.examId} label="This exam's ID" />
-          </Row>
-          <Row label="Exam record">
-            <Hash value={registry} label="Exam record" />
-            <Out href={`${etherscan}/address/${registry}`}>Open on Etherscan</Out>
-          </Row>
-          <Row label="Chain">Sepolia, chain {chainSpec.chainId}</Row>
-          <Row label="Code version, the commit">
-            <Hash value={commit} label="Commit" />
-            <Out href={`https://github.com/${REPOSITORY}/commit/${plainCommit}`}>Read this code</Out>
-          </Row>
-          <Row label="Software image">
-            <Hash value={imageDigest} label="Software image" />
-          </Row>
-        </Rows>
-      </Fold>
-    </Panel>
-  );
-}
-
-function PersonRow({ person, zone }: { person: Person; zone: string | undefined }) {
-  return (
-    <Row label={person.name}>
-      <Badge tone={person.state.tone}>{person.state.word}</Badge>
-      {person.releases ? (
-        person.released ? (
-          <span>Released {dayTime(person.released.at, zone)}</span>
-        ) : (
-          <span>No release recorded</span>
-        )
-      ) : null}
-      {person.state.note ? <span className="vf-aside">{person.state.note}</span> : null}
-    </Row>
-  );
-}
-
-/** The list of people for this exam, as people. Setters only ever appear as codes. */
-export function PeopleSection({ found, zone }: { found: People; zone: string | undefined }) {
+/** Who ran the exam and who was on its list, as people. Setters only ever appear as codes. */
+export function PeopleSection({ found, zone, board, boardName, examName, openedName }: PeopleProps) {
   const released = [...found.holders, ...found.centres].filter((person) => person.released);
+  const nameValue = examNameValue(examName, openedName);
   return (
-    <Panel title="People on this exam">
-      <h3 className="vf-evidence-heading">Key holders</h3>
-      {found.holders.length > 0 ? (
-        <Rows>
-          {found.holders.map((person) => (
-            <PersonRow key={person.key} person={person} zone={zone} />
-          ))}
-        </Rows>
-      ) : (
-        <p className="ps-empty">No key holders are on the list.</p>
-      )}
-      <Fold summary={`Show the ${String(found.centres.length)} centres`}>
-        <Rows>
-          {found.centres.map((person) => (
-            <Fragment key={person.key}>
-              <PersonRow person={person} zone={zone} />
-              <Row label={<span className="vf-aside">{person.role}</span>}>{''}</Row>
-            </Fragment>
-          ))}
-        </Rows>
-      </Fold>
-      <Fold summary={`Show the ${String(found.setters.length)} setters, listed by code`}>
-        <p className="vf-evidence-text">Setters are never named. Each one is listed by a code.</p>
-        <Rows>
-          {found.setters.map((code, at) => (
-            <Row key={code} label={`Setter ${String(at + 1)}`}>
-              <Hash value={code} label={`Setter ${String(at + 1)}`} />
-            </Row>
-          ))}
-        </Rows>
-      </Fold>
-      {released.length > 0 ? (
-        <Fold summary="Show when each release came in">
-          <Rows>
-            {released.map((person) => (
-              <Row key={person.key} label={person.name}>
-                <span>Public clock round {String(person.released?.round)}</span>
-                <span>{utcTime(person.released?.at ?? 0)}</span>
-              </Row>
-            ))}
-          </Rows>
+    <Section id="vf-people" title="People" intro="Who could take part. No one person can open the paper.">
+      <dl className="vf-ledger">
+        {board ? (
+          <div>
+            <dt>Exam board</dt>
+            <dd>
+              <BoardValue board={board} name={boardName} />
+            </dd>
+          </div>
+        ) : null}
+        {nameValue ? (
+          <div>
+            <dt>Exam name</dt>
+            <dd>{nameValue}</dd>
+          </div>
+        ) : null}
+        <div>
+          <dt>Key holders</dt>
+          <dd>
+            {found.holders.length > 0 ? (
+              <ul className="vf-names">
+                {found.holders.map((person) => (
+                  <PersonLine key={person.key} person={person} zone={zone} verified={found.verified} />
+                ))}
+              </ul>
+            ) : (
+              <span className="ps-empty">No key holders are on the list.</span>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt>Centres</dt>
+          <dd>
+            <Fold summary={`Show the ${String(found.centres.length)} centres`}>
+              <ul className="vf-names">
+                {found.centres.map((person) => (
+                  <PersonLine key={person.key} person={person} zone={zone} role verified={found.verified} />
+                ))}
+              </ul>
+            </Fold>
+          </dd>
+        </div>
+        <div>
+          <dt>Setters</dt>
+          <dd>
+            <Fold summary={`Show the ${String(found.setters.length)} setters, listed by code`}>
+              <p className="vf-evidence-text">Setters are never named. Each one is listed by a code.</p>
+              <Rows>
+                {found.setters.map((code, at) => (
+                  <Row key={code} label={`Setter ${String(at + 1)}`}>
+                    <Hash value={code} label={`Setter ${String(at + 1)}`} />
+                  </Row>
+                ))}
+              </Rows>
+            </Fold>
+          </dd>
+        </div>
+        {released.length > 0 ? (
+          <div>
+            <dt>Release times</dt>
+            <dd>
+              <Fold summary="Show when each release came in">
+                <Rows>
+                  {released.map((person) => (
+                    <Row key={person.key} label={person.name}>
+                      <span>Public clock round {String(person.released?.round)}</span>
+                      <span>{utcTime(person.released?.at ?? 0)}</span>
+                    </Row>
+                  ))}
+                </Rows>
+              </Fold>
+            </dd>
+          </div>
+        ) : null}
+      </dl>
+      <p className="vf-aside">{found.verified ? 'Release times come from the signed record of releases.' : 'No signed record of releases has been checked yet.'}</p>
+      {found.names.length > 0 ? (
+        <Fold summary="About these names">
+          <p className="vf-evidence-text">
+            {vouchNote(found.names)} {sepoliaName}
+          </p>
         </Fold>
       ) : null}
-      <p className="vf-aside">
-        {found.verified ? 'Release times come from the signed record of releases.' : 'No signed record of releases has been checked yet.'}{' '}
-        {found.names.length > 0 ? `${vouchNote(found.names)} ${sepoliaName}` : ''}
-      </p>
-    </Panel>
+    </Section>
   );
 }
 
-/** The exam's times, as they happened. */
-export function TimelineSection({ moments, zone }: { moments: readonly Moment[]; zone: string | undefined }) {
+/** The sealed machine's release, for the proof of the step that published the exam. */
+export function MachineRow({ version }: { version: Polled<Version> }) {
+  const found = version.state === 'ready' && version.value.state === 'found' ? version.value : null;
+  // Only an answer from GitHub can show that no release matches.
+  const unread = version.state === 'error' || (version.state === 'ready' && version.value.state === 'unread');
   return (
-    <Panel title="When it happened">
+    <Rows>
+      <Row label="Sealed machine">
+        {found ? (
+          <>
+            <strong>{found.version}</strong> <Out href={found.url}>Read the release</Out>
+          </>
+        ) : (
+          <span>{version.state === 'loading' ? 'Finding the release.' : unread ? 'The list of releases could not be read.' : 'No published release was matched.'}</span>
+        )}
+      </Row>
+    </Rows>
+  );
+}
+
+/** The exam's own record and the code it ran, for anyone who wants to look them up. */
+export function RecordFold(props: { examId: Hex; registry: Hex; commit: Hex; imageDigest: Hex }) {
+  const { registry, commit, imageDigest } = props;
+  return (
+    <Fold summary="Show the exam record and code">
+      <Rows>
+        <Row label="Exam ID">
+          <Hash value={props.examId} label="This exam's ID" />
+        </Row>
+        <Row label="Exam record">
+          <Hash value={registry} label="Exam record" />
+          <Out href={`${etherscan}/address/${registry}`}>Open on Etherscan</Out>
+        </Row>
+        <Row label="Chain">Sepolia, chain {chainSpec.chainId}</Row>
+        <Row label="Code version, the commit">
+          <Hash value={commit} label="Commit" />
+          <Out href={`https://github.com/${REPOSITORY}/commit/${commit.slice(2)}`}>Read this code</Out>
+        </Row>
+        <Row label="Software image">
+          <Hash value={imageDigest} label="Software image" />
+        </Row>
+      </Rows>
+    </Fold>
+  );
+}
+
+/** Every moment's exact time and public clock round. The plain times are on the steps above. */
+export function ClockFold({ moments }: { moments: readonly Moment[] }) {
+  return (
+    <Fold summary="Show public clock rounds and exact times">
       <Rows>
         {moments.map((moment) => (
-          <Row key={moment.id} label={moment.label} muted={!moment.happened}>
-            <span>
-              {dayTime(moment.at, zone)}
-              {moment.happened ? '' : ', due'}
-            </span>
-            {moment.note ? <span className="vf-aside">{moment.note}</span> : null}
+          <Row key={moment.id} label={moment.label}>
+            <span>{utcTime(moment.at)}</span>
+            {moment.round === null ? null : <span>Round {String(moment.round)}</span>}
           </Row>
         ))}
       </Rows>
-      <Fold summary="Show public clock rounds and exact times">
-        <Rows>
-          {moments.map((moment) => (
-            <Row key={moment.id} label={moment.label}>
-              <span>{utcTime(moment.at)}</span>
-              {moment.round === null ? null : <span>Round {String(moment.round)}</span>}
-            </Row>
-          ))}
-        </Rows>
-      </Fold>
-    </Panel>
+    </Fold>
   );
 }
 
@@ -253,58 +311,103 @@ function PieceBlock({ piece, zone }: { piece: Piece; zone: string | undefined })
   );
 }
 
-/** Where every piece of evidence lives, and which copy this page used. */
-export function CopiesSection({ found, zone, view, onRetry }: { found: Copies; zone: string | undefined; view: Pick<View, 'now'>; onRetry: () => void }) {
-  const { feed } = found;
-  const failed = feed.state === 'unread' || found.pieces.some((piece) => piece.copies.some((copy) => copy.state === 'unread'));
+/** Each piece against each place that keeps it, in the same words as the details below it. */
+function EvidenceTable({ found }: { found: Copies }) {
+  const table = evidenceTable(found);
   return (
-    <Panel title="Where the evidence lives">
-      <p className="vf-evidence-text">
-        No single place has to be trusted. Each copy is checked against the public record, so a copy can go missing but can’t pass with changed contents.
-      </p>
-      {found.pieces.map((piece) => (
-        <PieceBlock key={piece.id} piece={piece} zone={zone} />
-      ))}
-      {failed ? (
-        <p className="vf-more">
-          <Button onClick={onRetry}>Read again</Button>
-        </p>
-      ) : null}
-      <h3 className="vf-evidence-heading">The relay that writes these copies</h3>
-      <Rows>
-        <Row label="Feed">{feed.text}</Row>
-        <Row label="Latest heartbeat">
-          {feed.heartbeat ? (
-            <span>
-              {dayTime(feed.heartbeat.at, zone)}
-              {feed.heartbeat.stage ? `, at the ${feed.heartbeat.stage} stage, as it says` : ''}
-            </span>
-          ) : (
-            <span>None kept. A heartbeat lasts a day.</span>
-          )}
-        </Row>
-        {feed.lastWrite === undefined ? null : (
-          <Row label="Last wrote">
-            <span>{dayTime(feed.lastWrite, zone)}</span>
-            <span className="vf-aside">{view.now - feed.lastWrite < 120 ? 'Just now.' : null}</span>
-          </Row>
-        )}
-      </Rows>
-    </Panel>
+    <table className="vf-matrix">
+      <caption className="ps-sr">Where each piece of evidence is kept, and whether that copy is checked</caption>
+      <thead>
+        <tr>
+          <td />
+          {table.sources.map((source) => (
+            <th key={source.id} scope="col">
+              {source.label}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {table.rows.map((row) => (
+          <tr key={row.id}>
+            <th scope="row">{row.label}</th>
+            {row.cells.map((cell, at) =>
+              cell.kind === 'none' ? (
+                <td key={table.sources[at]?.id} className="vf-none">
+                  <span aria-hidden="true">–</span>
+                  <span className="ps-sr">Not kept here</span>
+                </td>
+              ) : (
+                <td key={table.sources[at]?.id} data-tone={cell.tone}>
+                  {cell.word}
+                  {cell.used ? <span className="vf-used">used here</span> : null}
+                </td>
+              ),
+            )}
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
-/** Three plain facts under the headline, for a viewer who reads nothing else. */
-export function Glance({ items }: { items: readonly { label: string; value: string }[] }) {
-  if (items.length === 0) return null;
+export interface EvidenceProps {
+  found: Copies;
+  zone: string | undefined;
+  view: Pick<View, 'now'>;
+  onRetry: () => void;
+  /** The exam's own record and code, once the record is read. */
+  record: ReactNode;
+}
+
+/** Where every piece of evidence lives, and which copy this page used. */
+export function EvidenceSection({ found, zone, view, onRetry, record }: EvidenceProps) {
+  const { feed } = found;
+  // Only an answer from the feed can show that no heartbeat is kept.
+  const feedAnswered = !['off', 'reading', 'unread'].includes(feed.state);
+  const failed = feed.state === 'unread' || found.pieces.some((piece) => piece.copies.some((copy) => copy.state === 'unread'));
   return (
-    <dl className="vf-glance">
-      {items.map((item) => (
-        <div key={item.label}>
-          <dt>{item.label}</dt>
-          <dd>{item.value}</dd>
-        </div>
-      ))}
-    </dl>
+    <Section
+      id="vf-evidence"
+      title="Evidence"
+      intro="No single place has to be trusted. Each copy is checked against the public record, so a copy can go missing but can’t pass with changed contents."
+    >
+      <EvidenceTable found={found} />
+      <p className="vf-legend">
+        The exam record on Sepolia holds the fingerprint every copy must match, not the files. “Used here” marks the copy this page read, and “–” means that
+        place does not keep it.
+      </p>
+      <Fold summary="Show every copy in detail">
+        {found.pieces.map((piece) => (
+          <PieceBlock key={piece.id} piece={piece} zone={zone} />
+        ))}
+        {failed ? (
+          <p className="vf-more">
+            <Button onClick={onRetry}>Read again</Button>
+          </p>
+        ) : null}
+        <h3 className="vf-evidence-heading">The relay that writes these copies</h3>
+        <Rows>
+          <Row label="Feed">{feed.text}</Row>
+          <Row label="Latest heartbeat">
+            {feed.heartbeat ? (
+              <span>
+                {dayTime(feed.heartbeat.at, zone)}
+                {feed.heartbeat.stage ? `, at the ${feed.heartbeat.stage} stage, as it says` : ''}
+              </span>
+            ) : (
+              <span>{feedAnswered ? 'None kept. A heartbeat lasts a day.' : 'Not read.'}</span>
+            )}
+          </Row>
+          {feed.lastWrite === undefined ? null : (
+            <Row label="Last wrote">
+              <span>{dayTime(feed.lastWrite, zone)}</span>
+              <span className="vf-aside">{view.now - feed.lastWrite < 120 ? 'Just now.' : null}</span>
+            </Row>
+          )}
+        </Rows>
+      </Fold>
+      {record}
+    </Section>
   );
 }

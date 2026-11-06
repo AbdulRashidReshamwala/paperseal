@@ -39,7 +39,7 @@
 .pv-specimen > h3 {
   margin: 0 0 var(--ps-space-3);
   font-family: var(--ps-sans);
-  font-size: var(--ps-text-small);
+  font-size: var(--ps-text-meta);
   font-weight: 600;
   letter-spacing: 0.07em;
   color: var(--ps-ink-soft);
@@ -62,7 +62,7 @@
 }
 
 .pv-swatch {
-  font-size: var(--ps-text-small);
+  font-size: var(--ps-text-meta);
 }
 
 .pv-swatch span {

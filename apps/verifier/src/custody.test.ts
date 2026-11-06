@@ -326,6 +326,8 @@ describe('the code at the registry address', () => {
     expect(published.items).toContainEqual(expect.objectContaining({ kind: 'check', label: 'The exam record runs the published ExamRegistry code', status: 'pass' }));
     expect(published.items).toContainEqual(expect.objectContaining({ kind: 'hash', value: boardAddress }));
     expect(published.aside).toContain(boardAddress);
+    // The page shortens it to a copyable hash, so the sentence fits on a phone.
+    expect(published.asideHash).toEqual({ value: boardAddress, label: 'exam board account' });
   });
 
   it.each([
@@ -633,6 +635,7 @@ describe('step 6, unlock', () => {
     const s = step(scene({ records: { log: { kind: 'neutral', message: 'no log' } } }), 'unlock');
     expect(s.state).toBe('current');
     expect(s.note).toMatch(/^Opens to centres at/);
+    expect(s.releases).toBeUndefined();
     expect(s.items).toContainEqual(expect.objectContaining({ kind: 'countdown', round: UNLOCK }));
   });
 
@@ -647,6 +650,8 @@ describe('step 6, unlock', () => {
     const result = scene({ round: UNLOCK + 1 });
     expect(step(result, 'unlock').state).toBe('done');
     expect(step(result, 'unlock').note).toBe('8 of the 8 needed key holders have released.');
+    // The page's summary reads the same count as the note, so the two can't disagree.
+    expect(step(result, 'unlock').releases).toEqual({ count: 8, required: 8 });
     expect(result.headline).toMatch(/^Key holders have released their parts. The paper opens to everyone at/);
   });
 
@@ -656,6 +661,7 @@ describe('step 6, unlock', () => {
     const result = scene({ round: UNLOCK + 1, records: { log: { ...log, token: null, verdict: { ...log.verdict, signature: 'absent' } } } });
     expect(step(result, 'unlock').state).toBe('current');
     expect(step(result, 'unlock').note).toMatch(/not verified/);
+    expect(step(result, 'unlock').releases).toBeUndefined();
     const rows = step(result, 'unlock').items.filter((item) => item.kind === 'tag' && item.tag === 'Released');
     expect(rows).toHaveLength(8);
     for (const row of rows) expect(row).toMatchObject({ tone: 'neutral' });
@@ -696,6 +702,7 @@ describe('step 6, unlock', () => {
     expect(s.note).toMatch(/may have released/);
     const known = step(scene({ round: UNLOCK, records: { log: { kind: 'neutral', message: 'no log' } }, live: { ...liveReport(true), progress } }), 'unlock');
     expect(known.note).toBe('Unlocked. 3 of the 8 needed key holders have released.');
+    expect(known.releases).toEqual({ count: 3, required: 8 });
   });
 
   it('not applicable when no paper was sealed', () => {
