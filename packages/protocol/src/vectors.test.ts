@@ -10,16 +10,21 @@ import {
   encodeCriteria,
   encodeRelease,
   encodeReleaseEntries,
+  encodePaper,
   entriesHash,
   fromHex,
+  parsePaper,
   pad,
   parseManifest,
   releaseEntryFromWire,
+  saltedPaperHash,
   selectedCount,
   storageManifestHash,
   toHex,
   unpad,
   utf8ToBytes,
+  type Hex,
+  type Question,
   type ReleaseEntryWire,
 } from './index';
 
@@ -39,10 +44,29 @@ interface Vectors {
   release: { share: string; signature: string; authenticatorData: string; clientDataJSON: string; encoded: string };
   releaseEntries: { entries: ReleaseEntryWire[]; preimage: string; entriesHash: string };
   manifest: { manifest: string; storageManifestHash: string };
+  paper: { name: string; examId: Hex; questions: Question[]; bytes: string; seed: string; saltedPaperHash: string }[];
 }
 
 const path = resolve(import.meta.dirname, '../../../tee/testdata/vectors.json');
 const vectors = JSON.parse(readFileSync(path, 'utf8')) as Vectors;
+
+describe('tee/ vectors: paper', () => {
+  it('has written, multiple choice and awkward-character cases', () => {
+    expect(vectors.paper.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it.each(vectors.paper)('$name: encodes to the same bytes, parses back, and has the same salted hash', (vector) => {
+    const paper = { examId: vector.examId, questions: vector.questions };
+    expect(toHex(utf8ToBytes(JSON.stringify(paper)))).toBe(vector.bytes);
+    expect(toHex(saltedPaperHash(fromHex(vector.seed), fromHex(vector.bytes)))).toBe(vector.saltedPaperHash);
+    expect(toHex(encodePaper(paper))).toBe(vector.bytes);
+    const parsed = parsePaper(fromHex(vector.bytes));
+    expect(parsed).toEqual(paper);
+    vector.questions.forEach((q, i) => {
+      expect('options' in (parsed.questions[i] ?? {})).toBe('options' in q);
+    });
+  });
+});
 
 describe('tee/ vectors: padding', () => {
   it.each(vectors.padding)('size $size, $data', ({ data, size, padded }) => {

@@ -17,6 +17,7 @@ import {
   entriesHash,
   fromHex,
   hashMessage,
+  limits,
   pad,
   padPaper,
   padQuestion,
@@ -146,6 +147,71 @@ describe('questions and papers', () => {
     ['not JSON', '{topic'],
   ])('rejects a question with %s', (_name, json) => {
     expect(() => parseQuestion(json)).toThrow();
+  });
+
+  it('encodes a written question to the same bytes as before, with no options key', () => {
+    const encoded = encodeQuestion({ topic: 'algebra', text: 'x² = 4?' });
+    expect(new TextDecoder().decode(encoded)).toBe('{"topic":"algebra","text":"x² = 4?"}');
+  });
+
+  it('round-trips a multiple choice question in key order, keeping the option order', () => {
+    const question = { topic: 'algebra', text: 'x² = 4?', options: ['2', '-2', 'Both', 'Neither'] };
+    const encoded = encodeQuestion(question);
+    expect(new TextDecoder().decode(encoded)).toBe(
+      '{"topic":"algebra","text":"x² = 4?","options":["2","-2","Both","Neither"]}',
+    );
+    expect(parseQuestion(encoded, criteria)).toEqual(question);
+    // Key order is fixed by the encoder, whatever order the caller built the object in.
+    const shuffled = { options: question.options, text: question.text, topic: question.topic };
+    expect(encodeQuestion(shuffled)).toEqual(encoded);
+  });
+
+  it('accepts the minimum and the maximum number of options', () => {
+    const many = (n: number) => Array.from({ length: n }, (_, i) => `option ${String(i)}`);
+    for (const n of [limits.questionOptionsMin, limits.questionOptionsMax]) {
+      const question = { topic: 'algebra', text: 'q', options: many(n) };
+      expect(parseQuestion(encodeQuestion(question))).toEqual(question);
+    }
+  });
+
+  it.each([
+    ['null options', '{"topic":"a","text":"b","options":null}', 'must be a list'],
+    ['an empty list', '{"topic":"a","text":"b","options":[]}', 'between'],
+    ['one option', '{"topic":"a","text":"b","options":["x"]}', 'between'],
+    ['too many options', `{"topic":"a","text":"b","options":${JSON.stringify(Array.from({ length: limits.questionOptionsMax + 1 }, (_, i) => String(i)))}}`, 'between'],
+    ['a blank option', '{"topic":"a","text":"b","options":["x"," \\t "]}', 'blank'],
+    ['an empty option', '{"topic":"a","text":"b","options":["x",""]}', 'blank'],
+    ['a duplicate option', '{"topic":"a","text":"b","options":["x","y","x"]}', 'more than once'],
+    ['a non-string option', '{"topic":"a","text":"b","options":["x",2]}', 'must be a string'],
+    ['options as a string', '{"topic":"a","text":"b","options":"xy"}', 'must be a list'],
+    ['options before text', '{"topic":"a","options":["x","y"]}', 'exactly'],
+  ])('refuses a question with %s', (_name, json, message) => {
+    expect(() => parseQuestion(json)).toThrow(message);
+  });
+
+  it('refuses to encode invalid options, including an undefined options key', () => {
+    const base = { topic: 'algebra', text: 'q' };
+    expect(() => encodeQuestion({ ...base, options: [] })).toThrow('between');
+    expect(() => encodeQuestion({ ...base, options: ['a'] })).toThrow('between');
+    expect(() => encodeQuestion({ ...base, options: ['a', ' '] })).toThrow('blank');
+    expect(() => encodeQuestion({ ...base, options: ['a', 'a'] })).toThrow('more than once');
+    expect(() => encodeQuestion({ ...base, options: undefined } as never)).toThrow('must be a list');
+    expect(() => encodeQuestion({ ...base, options: null } as never)).toThrow('must be a list');
+  });
+
+  it('round-trips a paper that mixes written and multiple choice questions', () => {
+    const questions = [
+      { topic: 'algebra', text: 'a', options: ['1', '2'] },
+      { topic: 'geometry', text: 'b' },
+      { topic: 'geometry', text: 'c', options: ['x', 'y', 'z'] },
+    ];
+    const encoded = encodePaper({ examId: examId as `0x${string}`, questions });
+    const parsed = parsePaper(encoded, criteria);
+    expect(parsed).toEqual({ examId, questions });
+    expect('options' in (parsed.questions[1] ?? {})).toBe(false);
+    expect(() =>
+      parsePaper(`{"examId":"${examId}","questions":[{"topic":"algebra","text":"a","options":["1","1"]}]}`),
+    ).toThrow('paper question 0');
   });
 
   it('rejects invalid UTF-8 and a byte order mark', () => {

@@ -63,6 +63,8 @@ describe('limits', () => {
       topics: 64,
       ownerBytes: 128,
       topicNameBytes: 64,
+      questionOptionsMin: 2,
+      questionOptionsMax: 6,
     });
   });
 });

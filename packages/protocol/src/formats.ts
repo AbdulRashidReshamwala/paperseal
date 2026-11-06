@@ -2,7 +2,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { decodeAbiParameters, encodeAbiParameters, type AbiParameter } from 'viem';
 
 import { equalBytes, fromHex, toHex } from './bytes';
-import { padding } from './constants';
+import { limits, padding } from './constants';
 import type { Criteria } from './encoding';
 import type { DecimalString, Hex } from './types';
 
@@ -56,10 +56,15 @@ export class FormatError extends Error {
   }
 }
 
-/** A question is the JSON `{"topic": string, "text": string}`. */
+/**
+ * A question is the JSON `{"topic": string, "text": string}`, or with `options` for a multiple
+ * choice question. A written question has no `options` key. The correct answer is never part of it.
+ */
 export interface Question {
   topic: string;
   text: string;
+  /** `limits.questionOptionsMin` to `limits.questionOptionsMax` distinct, non-blank strings, in the setter's order. */
+  options?: string[];
 }
 
 /** The paper is the JSON `{"examId": hex, "questions": Question[]}`. */
@@ -102,8 +107,27 @@ function exactObject(value: unknown, keys: readonly string[], what: string): Rec
   return value as Record<string, unknown>;
 }
 
+/** The options of a multiple choice question, checked against "Paper Format" in spec/api.md. */
+function optionsFrom(value: unknown, what: string): string[] {
+  if (!Array.isArray(value)) throw new FormatError(`${what} options must be a list`);
+  const { questionOptionsMin: min, questionOptionsMax: max } = limits;
+  if (value.length < min || value.length > max) {
+    throw new FormatError(`${what} needs between ${String(min)} and ${String(max)} options`);
+  }
+  const seen = new Set<string>();
+  return value.map((option: unknown, i) => {
+    if (typeof option !== 'string') throw new FormatError(`${what} option ${String(i + 1)} must be a string`);
+    if (option.trim() === '') throw new FormatError(`${what} option ${String(i + 1)} is blank`);
+    if (seen.has(option)) throw new FormatError(`${what} has the option ${JSON.stringify(option)} more than once`);
+    seen.add(option);
+    return option;
+  });
+}
+
 function questionFrom(value: unknown, what: string, criteria?: Pick<Criteria, 'topics'>): Question {
-  const object = exactObject(value, ['topic', 'text'], what);
+  // `options` is the one optional key, and a present `options` is never ignored, even undefined or null.
+  const multipleChoice = typeof value === 'object' && value !== null && 'options' in value;
+  const object = exactObject(value, multipleChoice ? ['topic', 'text', 'options'] : ['topic', 'text'], what);
   const { topic, text } = object;
   if (typeof topic !== 'string' || typeof text !== 'string') {
     throw new FormatError(`${what} topic and text must be strings`);
@@ -111,7 +135,8 @@ function questionFrom(value: unknown, what: string, criteria?: Pick<Criteria, 't
   if (criteria && !criteria.topics.some((t) => t.name === topic)) {
     throw new FormatError(`${what} topic ${JSON.stringify(topic)} is not a criteria topic`);
   }
-  return { topic, text };
+  // Key order is topic, text, options.
+  return multipleChoice ? { topic, text, options: optionsFrom(object.options, what) } : { topic, text };
 }
 
 /** Strict parse. With `criteria`, `topic` must name one of its topics. */
