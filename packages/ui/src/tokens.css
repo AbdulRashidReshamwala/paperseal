@@ -205,13 +205,12 @@ a:hover {
   flex: none;
 }
 
-.ps-logo-sheet,
-.ps-logo[data-tone='mono'] .ps-logo-wax {
-  fill: currentColor;
-}
-
 .ps-logo-wax {
   fill: var(--ps-wax);
+}
+
+.ps-logo[data-tone='mono'] .ps-logo-wax {
+  fill: currentColor;
 }
 
 .ps-role-name {

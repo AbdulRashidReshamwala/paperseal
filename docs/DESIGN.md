@@ -125,14 +125,14 @@ Motion is for the seal and for waiting on a security key. Under `prefers-reduced
 
 ### `Logo` and `Wordmark`
 
-The mark is an exam paper with its corner folded down and closed by wax. The paper is pure geometry on a 32-unit grid: every horizontal and vertical edge lands on a whole pixel at 16px and 32px, and the fold is an exact 45 degrees. The wax's uneven edge is the only organic line.
+The mark is a wax seal with a near-black `PS` monogram. It comes in two forms, chosen by size. Below 48px it is flat: one wax-coloured blob with the `PS` knocked out, drawn inline from `LOGO_SEAL` in `src/logoPaths.ts`. From 48px up it is the realistic bright seal in `src/assets/seal.svg`. The brand sources and earlier versions are in `presentation/assets/logo`, and v3 is the chosen one.
 
-- `Logo` is the mark alone. `size` is in pixels, and multiples of 16 are the crispest. `title` is its accessible name, "Paper Seal" by default. Set `decorative` when the words sit beside it.
-- `Wordmark` is the mark with "Paper Seal" in Libre Caslon Text. `size` is the mark's height and the words scale with it. The words are its accessible name.
-- The sheet is `currentColor` and the wax is `--ps-wax`, so it works on either theme. `tone="mono"` makes both `currentColor`, for stamps, print and anywhere a second colour isn't available.
-- Don't redraw it, outline it, add a shadow or put the seal's `PS` on it. `Seal` tells the state of an exam. `Logo` only says whose page this is.
+- `Logo` is the mark alone. `size` is in pixels. `title` is its accessible name, "Paper Seal" by default. Set `decorative` when the words sit beside it.
+- `Wordmark` is the mark with "Paper Seal" in Libre Caslon Text. `size` is the mark's height and the words scale with it, so it follows the same size rule. The words are its accessible name.
+- `tone` picks the flat mark's colour. The default fills it with `--ps-wax`, so it works on either theme. `tone="mono"` fills it with `currentColor`, for stamps, print and anywhere a second colour isn't available, and always uses the flat mark, whatever the size.
+- Don't redraw it, outline it, recolour the realistic seal or add a shadow to the flat one. `Seal` shows the state of an exam with its own word and states, and is never used as a brand mark. `Logo` only says whose page this is.
 
-`apps/*/public` holds `favicon.svg`, on a paper tile so the fold survives a dark browser tab, with `favicon-32.png` and `apple-touch-icon.png` rendered from it. `src/logo.test.tsx` checks that `favicon.svg` repeats the paths in `src/logoPaths.ts` exactly. If the mark changes, regenerate both PNGs.
+`apps/*/public` holds `favicon.svg`, the flat `LOGO_SEAL` path on a paper tile in a brighter wax red, with `favicon-32.png` and `apple-touch-icon.png` rendered from it. `src/logo.test.tsx` checks that `favicon.svg` contains `LOGO_SEAL` exactly. If the mark changes, regenerate both PNGs.
 
 ### `RoleHeader`
 

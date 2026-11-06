@@ -5,7 +5,7 @@ import { renderToString } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 
 import { AppShell, ChromiumGate, Logo, Page, RoleHeader, Wordmark } from './index';
-import { LOGO_SHEET, LOGO_WAX } from './logoPaths';
+import { LOGO_SEAL } from './logoPaths';
 
 const root = join(import.meta.dirname, '..', '..', '..');
 
@@ -39,10 +39,33 @@ describe('Logo', () => {
     expect(css).toMatch(/\.ps-logo\[data-tone='mono'\] \.ps-logo-wax {\s+fill: currentColor;/);
   });
 
-  it('keeps its edges on the grid, so 16px and 32px stay crisp', () => {
-    expect(LOGO_SHEET.startsWith('M4 2H15L28 15V30H4ZM6 4V28H26V16H')).toBe(true);
-    const fold = { run: 28 - 15, rise: 15 - 2 };
-    expect(fold.run).toBe(fold.rise);
+  it('draws the flat mark as one closed evenodd path on the 32 grid', () => {
+    expect(LOGO_SEAL.startsWith('M')).toBe(true);
+    expect(LOGO_SEAL.endsWith('Z')).toBe(true);
+    const numbers = (LOGO_SEAL.match(/-?\d*\.?\d+/g) ?? []).map(Number);
+    expect(numbers.length).toBeGreaterThan(20);
+    expect(numbers.every((n) => n >= 0 && n <= 32)).toBe(true);
+    const html = renderToString(<Logo size={16} />);
+    expect(html).toContain('viewBox="0 0 32 32"');
+    expect(html).toContain('fill-rule="evenodd"');
+    expect(html).toContain(`d="${LOGO_SEAL}"`);
+  });
+
+  it('shows the realistic seal as an image from 48px, named by its title', () => {
+    const html = renderToString(<Logo size={96} title="Seal" />);
+    expect(html).toContain('<img');
+    expect(html).toContain('width="96"');
+    expect(html).toContain('alt="Seal"');
+    expect(html).toContain('class="ps-logo"');
+    const hidden = renderToString(<Logo size={48} decorative />);
+    expect(hidden).toContain('alt=""');
+    expect(hidden).toContain('aria-hidden="true"');
+  });
+
+  it('keeps the mono tone flat at any size', () => {
+    const html = renderToString(<Logo size={96} tone="mono" />);
+    expect(html).toContain('<svg');
+    expect(html).not.toContain('<img');
   });
 });
 
@@ -77,8 +100,7 @@ describe.each(['web', 'verifier'])('apps/%s icons', (app) => {
 
   it('repeats the exact paths of the mark', () => {
     const svg = readFileSync(join(publicDir, 'favicon.svg'), 'utf8');
-    expect(svg).toContain(`d="${LOGO_SHEET}"`);
-    expect(svg).toContain(`d="${LOGO_WAX}"`);
+    expect(svg).toContain(`d="${LOGO_SEAL}"`);
   });
 
   it.each([

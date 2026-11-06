@@ -1,14 +1,17 @@
 import { useId } from 'react';
 
-import { LOGO_SHEET, LOGO_WAX } from './logoPaths';
+import sealUrl from './assets/seal.svg';
+import { LOGO_SEAL } from './logoPaths';
+
+/** From this size up, the realistic wax seal is shown. Below it, the flat mark. */
+const REALISTIC_FROM = 48;
 
 /**
- * The mark: an exam paper with its corner folded down and closed by wax. The sheet is
- * `currentColor`, so it follows the text around it. The wax is `--ps-wax`, or `currentColor` with
- * `tone="mono"`. It is drawn to be crisp at multiples of 16px.
+ * The mark: a wax seal stamped "PS". Under 48px, and always with `tone="mono"`, it is the flat
+ * single-path mark, filled with `--ps-wax` or `currentColor`. From 48px up it is the realistic seal.
  */
 export function Logo(props: {
-  /** Width and height in pixels. Prefer 16, 32, 48 or 64. */
+  /** Width and height in pixels. Prefer 16, 32, 48, 96. */
   size?: number;
   tone?: 'colour' | 'mono';
   /** The accessible name. */
@@ -18,12 +21,18 @@ export function Logo(props: {
 }) {
   const { size = 32, tone = 'colour', title = 'Paper Seal' } = props;
   const titleId = useId();
+  if (size >= REALISTIC_FROM && tone !== 'mono') {
+    return props.decorative ? (
+      <img className="ps-logo" data-tone={tone} src={sealUrl} width={size} height={size} alt="" aria-hidden="true" />
+    ) : (
+      <img className="ps-logo" data-tone={tone} src={sealUrl} width={size} height={size} alt={title} />
+    );
+  }
   const name = props.decorative ? { 'aria-hidden': true } : { role: 'img', 'aria-labelledby': titleId };
   return (
     <svg className="ps-logo" data-tone={tone} viewBox="0 0 32 32" width={size} height={size} {...name}>
       {props.decorative ? null : <title id={titleId}>{title}</title>}
-      <path className="ps-logo-sheet" fillRule="evenodd" d={LOGO_SHEET} />
-      <path className="ps-logo-wax" d={LOGO_WAX} />
+      <path className="ps-logo-wax" fillRule="evenodd" d={LOGO_SEAL} />
     </svg>
   );
 }

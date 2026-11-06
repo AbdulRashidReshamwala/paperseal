@@ -213,18 +213,18 @@ function Preview() {
         ))}
       </div>
 
-      <Section title="Logo" intro="A sheet with its corner folded down and closed by wax. Geometry for the paper, an uneven edge for the wax, and nothing else.">
+      <Section title="Logo" intro="A wax seal stamped PS. Flat and inline below 48px, the realistic seal from 48px up. Monochrome is always the flat mark.">
         <div className="pv-specimens">
           <Specimen title="Ink and seal red">
             <div className="pv-logos">
-              {[16, 32, 48, 128, 200].map((size) => (
+              {[16, 32, 48, 96].map((size) => (
                 <Logo key={size} size={size} title={`Paper Seal logo at ${size.toString()}px`} />
               ))}
             </div>
           </Specimen>
           <Specimen title="Monochrome">
             <div className="pv-logos">
-              {[16, 32, 48, 128].map((size) => (
+              {[16, 32, 48, 96].map((size) => (
                 <Logo key={size} size={size} tone="mono" title={`Monochrome logo at ${size.toString()}px`} />
               ))}
             </div>
