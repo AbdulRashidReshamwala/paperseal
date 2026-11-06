@@ -201,6 +201,15 @@ a:hover {
   white-space: nowrap;
 }
 
+.ps-home {
+  display: inline-flex;
+  text-decoration: none;
+}
+
+.ps-home:hover .ps-wordmark {
+  color: var(--ps-seal-ink);
+}
+
 .ps-logo {
   flex: none;
 }
