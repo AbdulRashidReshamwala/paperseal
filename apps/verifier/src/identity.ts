@@ -2,7 +2,7 @@ import { resolveExamName, type EnsLookup } from '@paperseal/chain';
 import type { Hex } from '@paperseal/protocol';
 import { isAddressEqual, type Address } from 'viem';
 
-import { verifiedName, type HistoryReader } from './history';
+import { readArkiv, verifiedName, type HistoryReader } from './history';
 
 /*
  * Who ran an exam, for the page's Identity section. A name here is a label: no check depends on it.
@@ -52,7 +52,7 @@ export async function readExamName(args: {
   const { reader, writers, examId, registry, rpcUrl } = args;
   if (!reader || writers.length === 0) return { name: null, failed: 0 };
   try {
-    const rows = await reader.examRows(registry, writers);
+    const rows = await readArkiv(() => reader.examRows(registry, writers));
     const names = [...new Set(rows.filter((row) => row.examId === examId && row.name !== '').map((row) => row.name))];
     const ignored = { notOnChain: 0, differs: 0, malformed: 0, names: 0 };
     const name = await verifiedName(names, examId, registry, (candidate) => resolveExamName(candidate, { rpcUrl }), ignored);

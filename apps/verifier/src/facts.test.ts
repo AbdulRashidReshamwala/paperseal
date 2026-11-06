@@ -309,6 +309,10 @@ describe('identity', () => {
     const empty = { examRows: () => Promise.resolve([{ examId, name: '' }]) } as never;
     expect(await readExamName({ ...args, reader: empty })).toEqual({ name: null, failed: 0 });
     const down = { examRows: () => Promise.reject(new Error('429')) } as never;
-    expect(await readExamName({ ...args, reader: down })).toMatchObject({ name: null, unread: '429' });
+    vi.useFakeTimers();
+    const read = readExamName({ ...args, reader: down });
+    await vi.advanceTimersByTimeAsync(6000);
+    vi.useRealTimers();
+    expect(await read).toMatchObject({ name: null, unread: '429' });
   });
 });
