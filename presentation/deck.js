@@ -26,5 +26,6 @@ addEventListener('keydown', (e) => {
   if (e.key === 'r') show(i, true); // replay this slide's animation
 });
 deck.addEventListener('click', (e) => show(e.clientX < innerWidth / 3 ? i - 1 : i + 1));
+if (location.search.includes('static')) deck.classList.add('static'); // ?static shows every slide finished, no animation
 fit();
 show(i, true);
