@@ -703,7 +703,7 @@ function entryRows(bytes: Uint8Array, names?: View['partyNames']): { items: Item
           const ens = ownerEnsName(entry.owner);
           return ens
             ? ensRows(entry, ens, names)
-            : [{ kind: 'fact', label: roleNames[entry.role] ?? `Unknown role ${String(entry.role)}`, value: entry.owner }];
+            : [{ kind: 'tag', label: roleNames[entry.role] ?? `Unknown role ${String(entry.role)}`, value: entry.owner, tone: 'warn', tag: 'Not an ENS name' }];
         }),
         ...(named ? [{ kind: 'text', text: `${ensNote} ${sepoliaName}` } as const] : []),
       ],
@@ -712,6 +712,27 @@ function entryRows(bytes: Uint8Array, names?: View['partyNames']): { items: Item
     const message = (error as Error).message;
     return { entries: null, items: [fail('List decode', 'The approved list on the public record can’t be read.', message)] };
   }
+}
+
+/**
+ * Key holders and centres on the list whose `owner` is not an ENS name. Paper Seal asks for one (spec/api.md,
+ * "Party Names"), but the contract does not check it, so an older exam or a board that skipped the app can
+ * list one. It is a thing to ask about and never a failed check.
+ */
+function notEnsNames(chain: ChainData | null): number {
+  if (!chain?.entries) return 0;
+  try {
+    return decodeApprovedList(fromHex(chain.entries)).filter((entry) => entry.role !== roles.setter && ownerEnsName(entry.owner) === null).length;
+  } catch {
+    return 0;
+  }
+}
+
+function notEnsNameWarning(chain: ChainData | null): string | null {
+  const count = notEnsNames(chain);
+  if (count === 0) return null;
+  const who = count === 1 ? 'One key holder or centre on the list is' : `${String(count)} key holders or centres on the list are`;
+  return `${who} not named by an ENS name, so ${count === 1 ? 'that name' : 'those names'} can't be checked. This does not fail the exam, but ask your exam board why.`;
 }
 
 function peopleStep(c: Context): Draft {
@@ -1445,7 +1466,7 @@ export function custody(given: View): Custody {
   return {
     steps,
     failures,
-    warnings: [...(given.name && differentRegistry(given.name) ? [otherRegistry] : []), ...(buildWarning(c) ? [buildWarning(c) as string] : [])],
+    warnings: [...(given.name && differentRegistry(given.name) ? [otherRegistry] : []), ...(buildWarning(c) ? [buildWarning(c) as string] : []), ...(notEnsNameWarning(chain) ? [notEnsNameWarning(chain) as string] : [])],
     seal,
     noSeal: build ? 'Not confirmed yet' : 'Not sealed yet',
     headline: words.headline,
