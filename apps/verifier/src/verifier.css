@@ -44,12 +44,6 @@
   border-radius: 8px;
 }
 
-.vf-demo {
-  margin-top: var(--ps-space-2) !important;
-  font-weight: 600;
-  color: var(--ps-pending);
-}
-
 .vf-zone,
 .vf-fresh {
   margin: var(--ps-space-2) 0 0;

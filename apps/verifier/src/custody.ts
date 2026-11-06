@@ -694,12 +694,11 @@ function attestedStep(c: Context): Draft {
     },
   ];
   const complete = published?.verdict.verified === true;
-  const demo = requireHardwareAttestation ? '' : ' This is a demonstration: its security keys are simulated.';
   const note = published?.verdict.verified
-    ? `A proof signed by Google says Paper Seal runs the published code.${demo}`
+    ? 'A proof signed by Google says Paper Seal runs the published code.'
     : build
-      ? `The lasting proof has not been checked yet.${demo}`
-      : `Not recorded yet. The proof is published together with the paper.${demo}`;
+      ? 'The lasting proof has not been checked yet.'
+      : 'Not recorded yet. The proof is published together with the paper.';
   const at = published?.issuedAt ?? null;
   return {
     id: 'attested',

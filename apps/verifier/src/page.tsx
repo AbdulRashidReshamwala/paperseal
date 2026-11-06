@@ -1,7 +1,7 @@
 import { createArkivReader } from '@paperseal/arkiv';
 import { checkPasskeyName, createEnsLookup, resolveExamName, type ExamNameResult, type PasskeyNameResult } from '@paperseal/chain';
 import { createSwarmClient } from '@paperseal/swarm';
-import { ownerEnsName, requireHardwareAttestation, roles, toHex, type Hex, type Paper } from '@paperseal/protocol';
+import { ownerEnsName, roles, toHex, type Hex, type Paper } from '@paperseal/protocol';
 import {
   Button,
   Check,
@@ -335,9 +335,6 @@ function Head({ view, zone }: { view: Custody; zone: string }) {
         <h1 className="ps-stage-title">{view.headline}</h1>
         <div className="ps-stage-lede">
           <p>{view.verdict}</p>
-          {requireHardwareAttestation ? null : (
-            <p className="vf-demo">This is a demonstration. The security keys are simulated.</p>
-          )}
         </div>
         <p className="ps-stage-next">
           <span className="ps-stage-next-label">What happens next</span>

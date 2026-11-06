@@ -391,9 +391,8 @@ describe('step 2, the sealed machine', () => {
     expect(result.failures).toEqual([]);
   });
 
-  it('warns about demo mode and fills in the rebuild command', () => {
+  it('fills in the rebuild command', () => {
     const s = step(scene(), 'attested');
-    expect(s.note).toMatch(/security keys are simulated/);
     expect(s.items).toContainEqual({
       kind: 'code',
       text: expect.stringMatching(new RegExp(`repro.yml .*-f commit=${world.exam.commitHash.slice(2)} -f expected_digest=sha256:${world.exam.imageDigest.slice(2)}`)) as string,

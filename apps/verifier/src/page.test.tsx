@@ -270,9 +270,8 @@ describe('step evidence', () => {
     expect(within(step).getByText(/Demo mode/)).toBeTruthy();
   });
 
-  it('step 2 and the top of the page say the exam is a demonstration, with nothing connected', () => {
+  it('step 2 still lists demo mode in its evidence, with nothing connected', () => {
     open(1000, { rpcUrl: '', storageUrl: '', registryAddress: '', examId: '' });
-    expect(screen.getByText('This is a demonstration. The security keys are simulated.')).toBeTruthy();
     expect(screen.getByText(/Demo mode/)).toBeTruthy();
   });
 
