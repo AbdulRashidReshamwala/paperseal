@@ -3,6 +3,7 @@ import {
   ContractFunctionRevertedError,
   custom,
   encodeErrorResult,
+  getAddress,
   HttpRequestError,
   parseAbi,
   RpcRequestError,
@@ -10,15 +11,20 @@ import {
   type Hex,
 } from 'viem';
 import { sepolia } from 'viem/chains';
-import { ens } from '@paperseal/protocol';
+import { ens, registryCode as registryPin, passkeyRecordValue } from '@paperseal/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  checkPasskeyName,
   createEnsLookup,
   examRegistryAbi,
+  checkRegistryCode,
+  examRegistryBoard,
   examRegistryRuntime,
   isExamRegistryCode,
   parseArkivWriters,
+  readDirectory,
+  readPartyRecords,
   resolveExamName,
   type EnsLookup,
 } from './index';
@@ -26,6 +32,8 @@ import {
 const name = 'jee-main-2026.paperseal-mumbai.eth';
 const parent = 'paperseal-mumbai.eth';
 const examId: Hex = '0xa8ec8fb4eda3d90b6190127d877227895bcd634a849e7f3a355311ed10637556';
+import sampleCode from '../../../spec/fixtures/registry-code.json';
+
 const registry: Address = '0x00000000000000000000000000000000000000aa';
 const board: Address = '0x00000000000000000000000000000000000000bB';
 const records: Record<string, string> = {
@@ -76,6 +84,43 @@ const needsGateway = () =>
     new ContractFunctionRevertedError({ abi: [], data: offchainLookup, functionName: 'resolveWithGateways' }),
     { abi: [], functionName: 'resolveWithGateways', contractAddress: universalResolver },
   );
+
+describe('the code pin in spec/registry.json', () => {
+  const sample = sampleCode as { board: Address; code: Hex };
+  const sampleBoard = getAddress(sample.board);
+
+  it('matches the code `make abi` wrote, and ignores its metadata', () => {
+    expect(examRegistryBoard(sample.code)).toBe(sampleBoard);
+    expect(isExamRegistryCode(sample.code, sampleBoard)).toBe(true);
+    expect(checkRegistryCode(sample.code)).toEqual({ state: 'match', board: sampleBoard });
+    // A build from other comments differs only in the metadata's hash, near the end of the code.
+    const flipped = `${sample.code.slice(0, -40)}${sample.code.slice(-40, -38) === '00' ? 'ff' : '00'}${sample.code.slice(-38)}` as Hex;
+    expect(examRegistryBoard(flipped)).toBe(sampleBoard);
+  });
+
+  it('matches the code `make abi` generated, and any board', () => {
+    expect(examRegistryBoard(registryCode(board))?.toLowerCase()).toBe(board.toLowerCase());
+    expect(registryPin.boardOffsets).toEqual(examRegistryRuntime.boardOffsets);
+  });
+
+  it('tells no code from other code', () => {
+    expect(checkRegistryCode(undefined)).toEqual({ state: 'none' });
+    expect(checkRegistryCode('0x')).toEqual({ state: 'none' });
+    expect(checkRegistryCode('0x6080')).toEqual({ state: 'different' });
+    expect(checkRegistryCode(examRegistryRuntime.bytecode)).toEqual({ state: 'different' });
+  });
+
+  it('refuses code whose board words disagree, or do not hold an address', () => {
+    const [first] = registryPin.boardOffsets;
+    const at = 2 + (first ?? 0) * 2;
+    const word = (digits: string) => (sample.code.slice(0, at) + digits + sample.code.slice(at + 64)) as Hex;
+    expect(examRegistryBoard(word(`${'0'.repeat(24)}${'ab'.repeat(20)}`))).toBeNull();
+    expect(examRegistryBoard(word('ff'.repeat(32)))).toBeNull();
+    let dirty: string = sample.code;
+    for (const offset of registryPin.boardOffsets) dirty = `${dirty.slice(0, 2 + offset * 2)}ff${dirty.slice(4 + offset * 2)}`;
+    expect(examRegistryBoard(dirty as Hex)).toBeNull();
+  });
+});
 
 describe('isExamRegistryCode', () => {
   // The live Sepolia registry 0x3Cb1AD8BCeB9bAeCE0000E6C4D5b9d7c283dc043 matches exactly with its board
@@ -297,6 +342,15 @@ describe('resolveExamName', () => {
     });
   });
 
+  it('fails registry when a TEE or storage record is not a web address', async () => {
+    for (const bad of ['javascript:alert(1)', 'file:///etc/passwd', 'not a url']) {
+      const result = await resolveExamName(name, {
+        lookup: lookup({ text: (_, key) => Promise.resolve(key === ens.records.storage ? bad : records[key] ?? null) }),
+      });
+      expect(result, bad).toMatchObject({ ok: false, failed: 'registry', reason: expect.stringContaining('not a web address') as string });
+    }
+  });
+
   it('gives null for unset text records', async () => {
     const result = await resolveExamName(name, {
       lookup: lookup({ text: (_, key) => Promise.resolve(key === ens.records.tee ? '' : null) }),
@@ -423,5 +477,127 @@ describe('createEnsLookup', () => {
     expect(() => createEnsLookup({})).toThrow('rpcUrl or transport');
     expect(() => createEnsLookup({ rpcUrl: '' })).toThrow('rpcUrl or transport');
     await expect(resolveExamName(name, {})).rejects.toThrow('rpcUrl or transport');
+  });
+});
+
+describe('checkPasskeyName', () => {
+  const holderName = 'dr-rao.maths-board.eth';
+  const key: Hex = `0x04${'ab'.repeat(64)}`;
+  const otherKey: Hex = `0x04${'cd'.repeat(64)}`;
+  const withRecord = (value: string | null) => lookup({ text: (n, k) => Promise.resolve(n === holderName && k === ens.records.passkey ? value : null) });
+
+  it('confirms a record that is the hash of the passkey, whatever its case or edge spaces', async () => {
+    const value = passkeyRecordValue(key);
+    expect(await checkPasskeyName(holderName, key, { lookup: withRecord(value) })).toMatchObject({ state: 'confirmed', expected: value });
+    expect(await checkPasskeyName(holderName, key, { lookup: withRecord(` ${value.toUpperCase().replace('0X', '0x')}\n`) })).toMatchObject({
+      state: 'confirmed',
+    });
+  });
+
+  it('reads the paperseal.passkey record', async () => {
+    const asked: string[] = [];
+    await checkPasskeyName(holderName, key, { lookup: lookup({ text: (_, k) => (asked.push(k), Promise.resolve(null)) }) });
+    expect(asked).toEqual(['paperseal.passkey']);
+  });
+
+  it('is a mismatch for another key, and missing when nothing is set', async () => {
+    expect(await checkPasskeyName(holderName, key, { lookup: withRecord(passkeyRecordValue(otherKey)) })).toMatchObject({
+      state: 'mismatch',
+      found: passkeyRecordValue(otherKey),
+    });
+    expect(await checkPasskeyName(holderName, key, { lookup: withRecord(null) })).toMatchObject({ state: 'missing', found: null });
+    expect(await checkPasskeyName(holderName, key, { lookup: withRecord('  ') })).toMatchObject({ state: 'missing' });
+  });
+
+  it('is refused, and asks no gateway, when the read needs one or reverts', async () => {
+    const offchain = () => Promise.reject(needsGateway());
+    expect(await checkPasskeyName(holderName, key, { lookup: lookup({ text: offchain }) })).toMatchObject({
+      state: 'refused',
+      reason: expect.stringContaining('needs an offchain gateway') as string,
+    });
+    expect(await checkPasskeyName(holderName, key, { lookup: lookup({ text: () => Promise.reject(reverted()) }) })).toMatchObject({
+      state: 'refused',
+    });
+  });
+
+  it('is unreadable when the RPC fails, and never throws', async () => {
+    const down = () => Promise.reject(new HttpRequestError({ url: 'https://rpc.example.org', status: 503 }));
+    expect(await checkPasskeyName(holderName, key, { lookup: lookup({ text: down }) })).toMatchObject({ state: 'unreadable' });
+  });
+
+  it('is invalid for a plain name or a name that is not normalised, and reads nothing', async () => {
+    const text = vi.fn(() => Promise.resolve(null));
+    for (const bad of ['Dr Rao', 'Dr-Rao.maths-board.eth', 'plain']) {
+      expect(await checkPasskeyName(bad, key, { lookup: lookup({ text }) }), bad).toMatchObject({ state: 'invalid' });
+    }
+    expect(text).not.toHaveBeenCalled();
+  });
+
+  it('asks only the viewer RPC with no gateway, through the real lookup', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch');
+    const transport = custom({
+      request: ({ method }: { method: string }) => {
+        if (method === 'eth_chainId') return Promise.resolve('0xaa36a7');
+        throw new RpcRequestError({
+          body: { method },
+          error: { code: 3, message: 'execution reverted', data: offchainLookup },
+          url: 'https://rpc.example.org',
+        });
+      },
+    });
+    expect(await checkPasskeyName(holderName, key, { transport })).toMatchObject({ state: 'refused' });
+    expect(fetch).not.toHaveBeenCalled();
+    await expect(Promise.resolve().then(() => checkPasskeyName(holderName, key, {}))).rejects.toThrow(/own RPC/);
+  });
+});
+
+describe('readPartyRecords', () => {
+  const texts = (values: Record<string, string | null>): { lookup: EnsLookup } => ({
+    lookup: { text: (_name: string, key: string) => Promise.resolve(values[key] ?? null) } as unknown as EnsLookup,
+  });
+  const failing = (error: unknown): { lookup: EnsLookup } => ({ lookup: { text: () => Promise.reject(error as Error) } as unknown as EnsLookup });
+  const passkey = `0x${'ab'.repeat(32)}`;
+
+  it('finds both records, and tidies them', async () => {
+    expect(await readPartyRecords('dr-rao.eth', texts({ [ens.records.passkey]: ` ${passkey.toUpperCase().replace('0X', '0x')} `, [ens.records.credential]: '0xAB' }))).toEqual({
+      state: 'found',
+      name: 'dr-rao.eth',
+      passkey,
+      credentialId: '0xab',
+    });
+  });
+
+  it('needs both records', async () => {
+    expect(await readPartyRecords('dr-rao.eth', texts({ [ens.records.passkey]: passkey }))).toMatchObject({ state: 'missing' });
+    expect(await readPartyRecords('dr-rao.eth', texts({ [ens.records.credential]: '0xab' }))).toMatchObject({ state: 'missing' });
+    expect(await readPartyRecords('dr-rao.eth', texts({ [ens.records.passkey]: passkey, [ens.records.credential]: 'nope' }))).toMatchObject({ state: 'refused' });
+  });
+
+  it('says when it could not read, and never throws', async () => {
+    expect(await readPartyRecords('dr-rao.eth', failing(new HttpRequestError({ url: 'https://rpc.example.org', status: 503 })))).toMatchObject({ state: 'unreadable' });
+    expect(await readPartyRecords('Dr Rao', texts({}))).toMatchObject({ state: 'invalid' });
+  });
+});
+
+describe('readDirectory', () => {
+  const holding = (value: string | null): { lookup: EnsLookup } => ({ lookup: { text: () => Promise.resolve(value) } as unknown as EnsLookup });
+
+  it('reads the names with one text lookup', async () => {
+    const text = vi.fn(() => Promise.resolve('["a.paperseal-demo.eth"]'));
+    expect(await readDirectory('paperseal-demo.eth', { lookup: { text } as unknown as EnsLookup })).toEqual({
+      state: 'found',
+      name: 'paperseal-demo.eth',
+      names: ['a.paperseal-demo.eth'],
+    });
+    expect(text).toHaveBeenCalledTimes(1);
+    expect(text).toHaveBeenCalledWith('paperseal-demo.eth', ens.records.directory);
+  });
+
+  it('tells an empty directory from a broken one, and an outage from both', async () => {
+    expect(await readDirectory('paperseal-demo.eth', holding(null))).toMatchObject({ state: 'none' });
+    expect(await readDirectory('paperseal-demo.eth', holding('not a list'))).toMatchObject({ state: 'malformed' });
+    expect(
+      await readDirectory('paperseal-demo.eth', { lookup: { text: () => Promise.reject(new HttpRequestError({ url: 'https://rpc.example.org', status: 503 })) } as unknown as EnsLookup }),
+    ).toMatchObject({ state: 'unreadable' });
   });
 });

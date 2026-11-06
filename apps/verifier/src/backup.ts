@@ -96,7 +96,7 @@ export interface BackedStorage extends StorageReader {
   /** What the backup was used for so far. */
   use: () => BackupUse;
   /**
-   * An unlock file, which nothing hashes (spec/arkiv.md "Backups", "Reading", rule 3). The bucket's
+   * An unlock file, which no manifest lists (spec/arkiv.md "Backups", "Reading", rule 3). The bucket's
    * copy is judged and its verdict stands, pass or fail. Without one, each backup copy is judged in
    * turn, newest row first, and the first that passes is used. A copy that fails is only recorded
    * as rejected. Null when no copy passes, which is "not read" and never a failure.
@@ -105,9 +105,9 @@ export interface BackedStorage extends StorageReader {
 }
 
 /**
- * Files written at unlock. No manifest lists them, and nothing on-chain or in the release log
- * hashes `key-priv.tlock` or `key-priv/*` (spec/api.md "Storage"). A copy from a backup is used
- * only once it passes the page's own checks, through `checked`.
+ * Files written at unlock. No manifest lists them; the signed release log lists the `key-priv`
+ * files' hashes (spec/api.md "Storage"). A copy from a backup is used only once it passes the
+ * page's own checks, through `checked`.
  */
 export const isUnlockFile = (name: string) =>
   name === storageNames.releaseLog || name === releaseTokenName || name === storageNames.keyPriv || name.startsWith('key-priv/');

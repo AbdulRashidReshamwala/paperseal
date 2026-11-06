@@ -18,6 +18,10 @@ import { sameHex, type CheckResult } from './checks';
 export const isHolder = (entry: ApprovedListEntry) =>
   entry.role === roles.neutral || entry.role === roles.centreKeyHolder;
 
+/** Centres get their own copy of the key at unlock, whether or not they hold a part of it. */
+export const isCentre = (entry: ApprovedListEntry) =>
+  entry.role === roles.centreKeyHolder || entry.role === roles.centre;
+
 export interface HolderRef {
   owner: string;
   role: number;

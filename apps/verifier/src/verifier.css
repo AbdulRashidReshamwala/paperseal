@@ -26,6 +26,18 @@
   list-style: none;
 }
 
+/* Worth asking about, and quieter than the alarm: nothing here failed a check. */
+.vf-warnings {
+  display: grid;
+  gap: var(--ps-space-2);
+  padding: var(--ps-space-3) 0;
+  margin: 0 0 var(--ps-space-5);
+  font-weight: 600;
+  color: var(--ps-pending);
+  list-style: none;
+  border-block: 1px solid var(--ps-pending);
+}
+
 .vf-demo {
   margin-top: var(--ps-space-2) !important;
   font-weight: 600;

@@ -68,7 +68,7 @@ function manifestBytes(files: Record<string, Uint8Array> = buildFiles, exam: Hex
   return utf8(JSON.stringify({ examId: exam, files: listed }));
 }
 
-type LogJson = { examId: string; entries: { passkeyPublicKey: string; shareHash: string; round: string }[]; entriesHash: string; teeSignature: string; instancePublicKey: string };
+type LogJson = { examId: string; entries: { passkeyPublicKey: string; shareHash: string; round: string }[]; entriesHash: string; files: { name: string; sha256: string }[]; filesHash: string; teeSignature: string; instancePublicKey: string };
 const realLog = (): LogJson => JSON.parse(realReleaseLog) as LogJson;
 
 /** The real release log, or one changed by `edit`. Re-encoded only when edited, so the default is the exact stored bytes. */
@@ -85,7 +85,7 @@ const p256Order = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc63
 /** A low-s `r || s` over the `releaseLog` message for `log`, by a fresh key that no token attests. */
 async function signedByAnotherKey(log: LogJson): Promise<{ signature: Hex; publicKey: Hex }> {
   const pair = await subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
-  const message = encodeMessage('releaseLog', { examId: fromHex(log.examId as Hex), entriesHash: fromHex(log.entriesHash as Hex) });
+  const message = encodeMessage('releaseLog', { examId: fromHex(log.examId as Hex), entriesHash: fromHex(log.entriesHash as Hex), filesHash: fromHex(log.filesHash as Hex) });
   const raw = new Uint8Array(await subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, new Uint8Array(message)));
   const s = BigInt(toHex(raw.subarray(32)));
   if (s > p256Order / 2n) raw.set(fromHex(`0x${(p256Order - s).toString(16).padStart(64, '0')}`), 32);

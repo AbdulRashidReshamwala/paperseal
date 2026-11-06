@@ -13,6 +13,7 @@ import {
   encodeMessage,
   entriesHash,
   equalBytes,
+  filesHash,
   fromHex,
   padding,
   parseManifest,
@@ -23,6 +24,7 @@ import {
   type ExamSettings,
   type Manifest,
   type ReleaseEntryWire,
+  type ReleaseFileWire,
 } from '@paperseal/protocol';
 import { checkCollectionPath, type CollectionFile, type PostageBatch, type SwarmClient } from '@paperseal/swarm';
 import { readAge } from 'tlock-js/age/age-reader-writer.js';
@@ -182,6 +184,8 @@ export interface StrictReleaseLog {
   examId: Hex;
   entries: ReleaseEntryWire[];
   entriesHash: Hex;
+  files: ReleaseFileWire[];
+  filesHash: Hex;
   teeSignature: Hex;
   instancePublicKey: Hex;
 }
@@ -205,9 +209,10 @@ export function parseReleaseLogStrict(bytes: Uint8Array): StrictReleaseLog {
   } catch {
     throw new Error('it is not UTF-8 JSON');
   }
-  const top = exactKeys(raw, ['examId', 'entries', 'entriesHash', 'teeSignature', 'instancePublicKey'], 'the release log');
+  const top = exactKeys(raw, ['examId', 'entries', 'entriesHash', 'files', 'filesHash', 'teeSignature', 'instancePublicKey'], 'the release log');
   if (!hexOf(top.examId, 32)) throw new Error('its examId is not 32 bytes of lowercase 0x hex');
   if (!hexOf(top.entriesHash, 32)) throw new Error('its entriesHash is not 32 bytes of lowercase 0x hex');
+  if (!hexOf(top.filesHash, 32)) throw new Error('its filesHash is not 32 bytes of lowercase 0x hex');
   if (!hexOf(top.teeSignature, 64)) throw new Error('its teeSignature is not 64 bytes of lowercase 0x hex');
   if (!hexOf(top.instancePublicKey, 65) || !top.instancePublicKey.startsWith('0x04')) {
     throw new Error('its instancePublicKey is not an uncompressed P-256 key in lowercase 0x hex');
@@ -220,7 +225,14 @@ export function parseReleaseLogStrict(bytes: Uint8Array): StrictReleaseLog {
     if (typeof entry.round !== 'string' || !/^(0|[1-9][0-9]*)$/.test(entry.round)) throw new Error(`entry ${String(i)} round is not a decimal string`);
     return { passkeyPublicKey: entry.passkeyPublicKey, shareHash: entry.shareHash, round: entry.round };
   });
-  return { examId: top.examId, entries, entriesHash: top.entriesHash, teeSignature: top.teeSignature, instancePublicKey: top.instancePublicKey };
+  if (!Array.isArray(top.files)) throw new Error('its files is not an array');
+  const files = top.files.map((raw: unknown, i): ReleaseFileWire => {
+    const file = exactKeys(raw, ['name', 'sha256'], `release log file ${String(i)}`);
+    if (typeof file.name !== 'string' || file.name === '') throw new Error(`file ${String(i)} name is not a string`);
+    if (!hexOf(file.sha256, 32)) throw new Error(`file ${String(i)} sha256 is not 32 bytes of lowercase 0x hex`);
+    return { name: file.name, sha256: file.sha256 };
+  });
+  return { examId: top.examId, entries, entriesHash: top.entriesHash, files, filesHash: top.filesHash, teeSignature: top.teeSignature, instancePublicKey: top.instancePublicKey };
 }
 
 /** The settings the TEE must have been started with: the chain's values, with this registry. As apps/verifier/src/attest.ts `examSettings`. */
@@ -395,10 +407,26 @@ async function unlockFiles(target: BackupTarget, deps: PrepareDeps, got: UnlockG
   const tokenFailure = await releaseTokenFailure({ token: tokenText, exam, examId: target.examId, registry, instancePublicKey: log.instancePublicKey, bucket: target.bucket.name });
   if (tokenFailure !== null) refuse(releaseFiles.token, new Error(`it does not attest the release log's instancePublicKey ${short(log.instancePublicKey)} for this exam: ${tokenFailure}`));
 
+  // filesHash, recomputed from the files as listed: a list out of order or with a repeat is refused.
+  let listed: Uint8Array;
+  try {
+    listed = filesHash(log.files.map((file) => ({ name: file.name, sha256: fromHex(file.sha256) })));
+  } catch (error) {
+    return refuse(releaseFiles.log, new Error(`its files can't be hashed: ${errorText(error)}`));
+  }
+  if (!equalBytes(listed, fromHex(log.filesHash))) refuse(releaseFiles.log, new Error('its filesHash does not match its files'));
+  const listedSha = new Map(log.files.map((file) => [file.name, file.sha256]));
+  /** A key-priv file must be the one the signed log lists, with its hash. */
+  const listedCheck = (name: string, bytes: Uint8Array) => {
+    const want = listedSha.get(name);
+    if (want === undefined) refuse(name, new Error('the signed release log does not list it'));
+    else if (sha256Hex(bytes) !== want) refuse(name, new Error(`its hash ${short(sha256Hex(bytes))} is not the ${short(want)} the signed release log lists`));
+  };
+
   // The log's teeSignature, under the key the token attests.
   let signed: boolean;
   try {
-    const message = encodeMessage('releaseLog', { examId: fromHex(log.examId), entriesHash: fromHex(log.entriesHash) });
+    const message = encodeMessage('releaseLog', { examId: fromHex(log.examId), entriesHash: fromHex(log.entriesHash), filesHash: listed });
     signed = await verifyTeeSignature(fromHex(log.instancePublicKey), fromHex(log.teeSignature), message);
   } catch (error) {
     return refuse(releaseFiles.log, new Error(`its teeSignature could not be checked: ${errorText(error)}`));
@@ -409,7 +437,7 @@ async function unlockFiles(target: BackupTarget, deps: PrepareDeps, got: UnlockG
   checks.push({
     file: releaseFiles.log,
     result: 'checked',
-    detail: `exam ${short(target.examId)}, ${String(log.entries.length)} entr${log.entries.length === 1 ? 'y' : 'ies'}, no unknown fields, entriesHash recomputed, teeSignature valid under the attested ${short(log.instancePublicKey)}`,
+    detail: `exam ${short(target.examId)}, ${String(log.entries.length)} entr${log.entries.length === 1 ? 'y' : 'ies'}, no unknown fields, entriesHash and filesHash recomputed, teeSignature valid under the attested ${short(log.instancePublicKey)}`,
   });
   files.push({ path: releaseFiles.token, bytes: tokenBytes });
   checks.push({
@@ -418,7 +446,7 @@ async function unlockFiles(target: BackupTarget, deps: PrepareDeps, got: UnlockG
     detail: `Google PKI signature; claims bound to the on-chain exam, bucket ${target.bucket.name} (${target.bucket.source}); eat_nonce attests the log's signer`,
   });
 
-  // key-priv.tlock: nothing hashes it, but it must be a quicknet tlock sealed to the exam's endRound.
+  // key-priv.tlock: the file the signed log lists, and a quicknet tlock sealed to the exam's endRound.
   const tlock = got.tlock ?? refuse(storageNames.keyPriv, new Error('missing'));
   const endRound = String(exam.settings.endRound);
   let round: string;
@@ -428,20 +456,27 @@ async function unlockFiles(target: BackupTarget, deps: PrepareDeps, got: UnlockG
     return refuse(storageNames.keyPriv, error);
   }
   if (round !== endRound) refuse(storageNames.keyPriv, new Error(`it is sealed to round ${round}, not the exam's endRound ${endRound}`));
+  listedCheck(storageNames.keyPriv, tlock);
   files.push({ path: storageNames.keyPriv, bytes: tlock });
-  checks.push({ file: storageNames.keyPriv, result: 'unhashed', detail: `a quicknet tlock for endRound ${endRound}; no hash commits to it, and opening it checks it` });
+  checks.push({ file: storageNames.keyPriv, result: 'checked', detail: `a quicknet tlock for endRound ${endRound}, with the hash the signed release log lists` });
 
   // key-priv/<derivedPublicKey>.bin: one per centre, each exactly an HPKE keyPriv sealing a 32-byte key.
   for (const [name, bytes] of got.keyPriv) {
     if (bytes === null) refuse(name, new Error('missing, but there is one per approved centre (roles 3 and 4)'));
     else if (bytes.length !== keyPrivBytes) {
       refuse(name, new Error(`it is ${String(bytes.length)} bytes, not the ${String(keyPrivBytes)} of an HPKE keyPriv sealing a 32-byte key`));
-    } else files.push({ path: name, bytes });
+    } else {
+      listedCheck(name, bytes);
+      files.push({ path: name, bytes });
+    }
+  }
+  if (log.files.length !== got.keyPriv.length + 1) {
+    refuse(releaseFiles.log, new Error(`it lists ${String(log.files.length)} files, not key-priv.tlock and one per approved centre (${String(got.keyPriv.length + 1)})`));
   }
   checks.push({
     file: 'key-priv/*',
-    result: 'unhashed',
-    detail: `${String(got.keyPriv.length)} file${got.keyPriv.length === 1 ? '' : 's'}, one per centre (roles 3 and 4) on the on-chain approved list, each ${String(keyPrivBytes)} bytes (enc ${String(HPKE_ENC_BYTES)} + key ${String(specCrypto.keyBytes)} + tag ${String(aeadTagBytes)}); no hash commits to them, and opening them checks them`,
+    result: 'checked',
+    detail: `${String(got.keyPriv.length)} file${got.keyPriv.length === 1 ? '' : 's'}, one per centre (roles 3 and 4) on the on-chain approved list, each ${String(keyPrivBytes)} bytes (enc ${String(HPKE_ENC_BYTES)} + key ${String(specCrypto.keyBytes)} + tag ${String(aeadTagBytes)}), each with the hash the signed release log lists`,
   });
   return { files, checks };
 }

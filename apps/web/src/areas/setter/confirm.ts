@@ -15,6 +15,7 @@ import {
   type Hex,
 } from '@paperseal/protocol';
 import type { StatusResponse, TeeClient } from '@paperseal/tee-client';
+import { rootOption } from '../../shared/mockMode';
 
 /*
  * The Confirm step of "Question Submission" in the README. Nothing may be encrypted until the
@@ -167,6 +168,7 @@ export async function confirmTee(deps: ConfirmDeps): Promise<ConfirmOutcome> {
     verdict = await (deps.verifyToken ?? checkToken)(attestation.token, expected, {
       mode: 'live',
       now: deps.now?.() ?? Math.floor(Date.now() / 1000),
+      ...rootOption(),
     });
   } catch (error) {
     return blocked('attestation', `The attestation token could not be checked: ${errorText(error)}`);

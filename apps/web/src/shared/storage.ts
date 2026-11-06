@@ -39,7 +39,7 @@ export function storageFetcher(
   };
 }
 
-async function sha256(bytes: Uint8Array): Promise<Uint8Array> {
+export async function sha256(bytes: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', new Uint8Array(bytes)));
 }
 

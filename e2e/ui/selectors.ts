@@ -1,8 +1,8 @@
 import type { Page } from 'playwright-core';
 
 /*
- * The one place that knows the app's words. A separate change is rewriting the copy in apps/ and
- * packages/ui, so every exact string the suite relies on is here, and tests use these names. Prefer
+ * The one place that knows the app's words, so every exact string the suite relies on is here, and
+ * tests use these names. Prefer
  * roles (button, heading, radio, textbox) with a name from this file over text matches in a test.
  *
  * Exact-text selectors that cannot be avoided are the ones whose label IS the control's name:
@@ -12,23 +12,30 @@ import type { Page } from 'playwright-core';
 export const text = {
   // Board
   createHeading: 'Create the exam',
-  versionHeading: 'Choose what the sealed machine runs',
-  reviewHeading: 'Review and publish',
-  peopleHeading: 'Bring people in',
-  publishedHeading: 'The exam is published',
-  recordBuildHeading: 'Record the sealed paper',
-  wrongAccount: /not the board address/i,
+  reviewHeading: 'Preview and submit',
+  peopleHeading: 'Choose who takes part',
+  /** The stamp above the invites once the read-back matched. */
+  publishedStamp: 'Published',
+  recordBuildHeading: 'The paper is ready',
+  wrongAccount: /not the exam board.s account/i,
   // Shared
   keyRegisteredHeading: 'Your security key is registered',
+  keyCardHeading: 'Your key card',
+  alreadySetUpHeading: 'This security key is already set up',
   linkProblemHeading: /This invitation link doesn.t work/,
   openLinkHeading: 'Open your invitation link',
   endedHeading: 'This exam has ended',
+  nothingToDoYet: 'Nothing to do yet',
+  cantConnect: /Can.t connect right now/,
+  paperSealStopped: 'Paper Seal has stopped',
+  waitingForPaperSeal: 'Waiting for Paper Seal',
   // Setter
   writeHeading: 'Write a question',
-  composerBlockedHeading: /We can.t confirm this is the genuine sealed system/,
+  composerBlockedHeading: /We can.t take your questions yet/,
   // Release
-  releaseHeading: 'Release your share',
-  releaseFailedHeading: 'Your share was not released',
+  releaseHeading: 'Release your part of the key',
+  releaseFailedHeading: 'Your part of the key was not sent',
+  keyHolderDone: /Done\. You can close this tab/,
 };
 
 export const field = {
@@ -39,30 +46,33 @@ export const field = {
   topicName: (n: number) => `Topic ${String(n)} name`,
   topicQuestions: (n: number) => `Topic ${String(n)} questions`,
   maxPercent: 'Most of a topic one setter can write, in percent',
-  bankMultiple: 'Question bank size, as a multiple of the questions used',
+  bankMultiple: 'How many questions to collect, compared with the questions used',
   questionsClose: 'Questions close',
-  rpcHost: 'Public record provider',
-  inviteRole: 'Role',
-  inviteName: /Name for the approved list|Your own note/,
+  rpcHost: 'Public record address',
+  inviteNote: /^A note for yourself/,
+  partyName: /^Your name/,
   option: (letter: string) => `Option ${letter}`,
   examId: 'Exam ID',
+  /** The select inside "Use a different version". */
+  version: 'Version',
 };
 
 export const button = {
   continue: 'Continue',
   addTopic: 'Add topic',
   publish: 'Publish the exam',
-  bringPeople: 'Bring people in',
   addInvite: 'Add invite',
+  copyExamLink: 'Copy the exam link',
   copyLink: /^Copy link$|^Copied$/,
-  reissue: /Reissue/,
+  reissue: /Make a new link/,
   postList: 'Post the list',
-  postBuild: 'Post to the public record',
-  useVersion: /^Use v\d/,
+  postBuild: 'Post the paper’s record',
   register: /Register your security key/,
+  enrol: 'Set up your security key',
+  registerByName: 'Register with your security key',
   seal: /Seal this question|Send this question again/,
-  release: /Release my share/,
-  unlock: /Open the paper|Unlock the paper/,
+  release: /Release my part of the key/,
+  unlock: /Open the paper/,
   addOption: 'Add an option',
   removeOption: (letter: string) => `Remove option ${letter}`,
   openExam: 'Open this exam',
@@ -87,6 +97,18 @@ export async function unfold(page: Page, summary: string): Promise<void> {
   if ((await summaryEl.locator('xpath=..').getAttribute('open')) === null) await summaryEl.click();
 }
 
+/** The centres page, then the neutral parties page, typing each name so no directory is needed. */
+export async function choosePeople(page: Page, centres: readonly string[], neutrals: readonly string[]): Promise<void> {
+  const add = async (name: string) => {
+    await page.getByLabel("Add a name that isn't listed").fill(name);
+    await page.getByRole('button', { name: 'Add name' }).click();
+  };
+  for (const name of centres) await add(name);
+  await page.getByRole('button', { name: button.continue }).click();
+  for (const name of neutrals) await add(name);
+  await page.getByRole('button', { name: button.continue }).click();
+}
+
 /** A `Hash` carries its whole value in its title, behind a button named "Copy <label>: ...". */
 export async function hashOf(page: Page, label: string): Promise<string> {
   return (await page.getByRole('button', { name: `Copy ${label}: ` }).first().getAttribute('title')) ?? '';
@@ -103,8 +125,8 @@ export async function stepStates(page: Page): Promise<{ label: string; state: st
 }
 
 export const verifierText = {
-  pickerError: 'Enter a 32-byte ID starting with 0x.',
-  invalidLink: 'The link did not hold a valid exam ID.',
+  pickerError: 'Enter an exam ID: 0x followed by 64 letters or digits.',
+  invalidLink: 'This link does not hold a valid exam ID.',
   openExam: 'Open this exam',
 };
 
@@ -121,5 +143,12 @@ export const composer = {
 export const centre = {
   openPaper: /^Open the paper$/,
   paperOpenHeading: 'The paper is open',
+  handOut: 'Hand out the paper',
+  handOutHeading: 'Hand out the paper',
+  sendToRooms: 'Send to the rooms',
+  addRoom: 'Add a room',
+  demoLabel: 'Demo: nothing is sent to any room',
+  copiesFor: (room: string) => `Copies for ${room}`,
+  sentInDemo: 'Marked as sent (demo)',
   printPaper: 'Print the paper',
 };

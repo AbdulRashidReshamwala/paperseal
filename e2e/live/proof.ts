@@ -4,10 +4,12 @@ import {
   encodeMessage,
   entriesHash,
   equalBytes,
+  filesHash,
   fromHex,
   encodePaper,
   parsePaper,
   releaseEntryFromWire,
+  releaseFileFromWire,
   roles,
   roundTimeSeconds,
   saltedPaperHash,
@@ -25,7 +27,7 @@ import type { ReleaseLogResponse } from '@paperseal/tee-client';
 
 import { connectChain } from './chainio';
 import { loadState } from './state';
-import { fetchListedFile, fetchManifest, NotFoundError, sha256, storageFetcher, type VerifiedManifest } from './storage';
+import { fetchListedFile, fetchManifest, NotFoundError, sha256, storageFetcher, type FetchFile, type VerifiedManifest } from './storage';
 import { chainSettings, checkPublishedToken } from './tee';
 import { errorText, poll, retryTransient, sleep } from './util';
 
@@ -80,15 +82,17 @@ export async function openPaper(input: OpenInput): Promise<{ paperBytes: Uint8Ar
   }
 }
 
-/** The log's own checks: its exam, entriesHash, and the signature under the instance key it names. */
+/** The log's own checks: its exam, entriesHash, filesHash, and the signature under the instance key it names. */
 export async function verifySignedLog(log: ReleaseLogResponse, examId: Hex): Promise<void> {
   if (log.examId.toLowerCase() !== examId.toLowerCase()) throw new Error('the log names a different exam');
   const entries = log.entries.map(releaseEntryFromWire);
   if (!equalBytes(entriesHash(entries), fromHex(log.entriesHash))) throw new Error('entriesHash is not the hash of the entries');
+  // Not sorted first: filesHash refuses files out of order or repeated, and a log with either fails here.
+  if (!equalBytes(filesHash(log.files.map(releaseFileFromWire)), fromHex(log.filesHash))) throw new Error('filesHash is not the hash of the files');
   const signed = await verifyTeeSignature(
     fromHex(log.instancePublicKey),
     fromHex(log.teeSignature),
-    encodeMessage('releaseLog', { examId: fromHex(log.examId), entriesHash: fromHex(log.entriesHash) }),
+    encodeMessage('releaseLog', { examId: fromHex(log.examId), entriesHash: fromHex(log.entriesHash), filesHash: fromHex(log.filesHash) }),
   );
   if (!signed) throw new Error('the log signature does not verify under its instance key');
 }
@@ -107,6 +111,23 @@ export function checkLogHolders(log: ReleaseLogResponse, listEntries: Hex, manif
     if (file?.shareHash !== entry.shareHash) throw new Error(`the logged share hash for ${holder.owner} differs from the manifest`);
     if (BigInt(entry.round) < BigInt(unlockRound)) throw new Error(`the log has round ${entry.round} before the unlock round`);
   }
+}
+
+/**
+ * The files of a verified log: exactly key-priv.tlock and one key-priv file per centre on the
+ * on-chain list (roles 3 and 4), each stored with the SHA-256 the log lists. Returns how many.
+ */
+export async function checkLogFiles(log: ReleaseLogResponse, listEntries: Hex, fetchFile: FetchFile): Promise<number> {
+  const centres = decodeApprovedList(fromHex(listEntries)).filter((e) => e.role === roles.centreKeyHolder || e.role === roles.centre);
+  const expected = new Set<string>([storageNames.keyPriv, ...centres.map((e) => storageNames.centreKeyPriv(e.derivedPublicKey))]);
+  const listed = new Set(log.files.map((file) => file.name));
+  const missing = [...expected].filter((name) => !listed.has(name));
+  const extra = [...listed].filter((name) => !expected.has(name));
+  if (missing.length > 0 || extra.length > 0) throw new Error(`the log's files differ from the approved list: missing ${missing.join(', ') || 'none'}; extra ${extra.join(', ') || 'none'}`);
+  for (const file of log.files) {
+    if (toHex(await sha256(await fetchFile(file.name))) !== file.sha256) throw new Error(`stored ${file.name} does not match its hash in the log`);
+  }
+  return log.files.length;
 }
 
 /** No names are published: the list shows only the hash of each setter's passkey, and anyone recomputes it. */
@@ -219,11 +240,12 @@ export async function proof(): Promise<void> {
     });
 
     const listEntries = await io.read(() => io.registry.getApprovedListEntries(examId));
-    await check('release-log.json is signed, and names the threshold of holders from the on-chain list with their manifest share hashes', async () => {
+    await check('release-log.json is signed, names the threshold of holders from the on-chain list with their manifest share hashes, and lists exactly key-priv.tlock and each centre\'s key-priv file with their stored hashes', async () => {
       if (!listEntries) throw new Error('the approved list is not readable from the chain');
       const log = JSON.parse(text(await fetchFile(storageNames.releaseLog))) as ReleaseLogResponse;
       await verifySignedLog(log, examId);
       checkLogHolders(log, listEntries, listed, settings.unlockRound);
+      const files = await checkLogFiles(log, listEntries, fetchFile);
       const released = run?.released ?? [];
       if (released.length > 0 && JSON.stringify(log.entries.map((e) => e.passkeyPublicKey)) !== JSON.stringify(released.map((r) => r.passkeyPublicKey))) {
         throw new Error('the log differs from the releases in the state file');
@@ -231,7 +253,7 @@ export async function proof(): Promise<void> {
       const token = text(await fetchFile('release-token.jwt'));
       const tokenFailures = await checkPublishedToken(env, token, log.instancePublicKey);
       if (tokenFailures.length > 0) throw new Error(`release-token.jwt: ${tokenFailures.join('; ')}`);
-      return `${String(log.entries.length)} entries, signature, entriesHash, share hashes and release-token.jwt verified, signer ${log.instancePublicKey}`;
+      return `${String(log.entries.length)} entries, ${String(files)} files, signature, entriesHash, filesHash, share hashes, stored file hashes and release-token.jwt verified, signer ${log.instancePublicKey}`;
     });
 
     await check('each setter on the on-chain list is only the hash of its own passkey', () => {

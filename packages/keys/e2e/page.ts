@@ -68,19 +68,26 @@ const api = {
         clientDataJSON: toHex(k.clientDataJSON),
       };
     }),
-  getPublicKey: (credentialIdHex: string) => attempt(async () => toHex(await keys.getPublicKey(fromHex(credentialIdHex)))),
+  getPublicKey: (credentialIdHex: string, examIdHex: string) => attempt(async () => toHex(await keys.getPublicKey(fromHex(credentialIdHex), fromHex(examIdHex)))),
   decryptShare: (credentialIdHex: string, examIdHex: string, sealedHex: string) =>
     attempt(async () => toHex(await keys.decryptShare(fromHex(credentialIdHex), fromHex(examIdHex), fromHex(sealedHex)))),
   openKeyPriv: (credentialIdHex: string, examIdHex: string, sealedHex: string) =>
     attempt(async () => toHex(await keys.openKeyPriv(fromHex(credentialIdHex), fromHex(examIdHex), fromHex(sealedHex)))),
-  register: (owner: string | null, role: 'holder' | 'setter', challengeHex: string, inviteSecretHex: string) =>
+  register: (challengeHex: string, inviteSecretHex: string) =>
     attempt(async () => {
-      const challenge = fromHex(challengeHex);
-      const inviteSecret = fromHex(inviteSecretHex);
-      const r = await keys.register(
-        role === 'setter' || owner === null ? { role: 'setter', challenge, inviteSecret } : { role, owner, challenge, inviteSecret },
-      );
+      const r = await keys.register({ role: 'setter', challenge: fromHex(challengeHex), inviteSecret: fromHex(inviteSecretHex) });
       return { credentialId: toHex(r.credentialId), owner: r.owner, request: r.request };
+    }),
+  registerByName: (owner: string, examIdHex: string, credentialIdHex: string, passkey: string, challengeHex: string) =>
+    attempt(async () => {
+      const r = await keys.registerByName({
+        owner,
+        examId: fromHex(examIdHex),
+        credentialId: fromHex(credentialIdHex),
+        passkey: passkey as `0x${string}`,
+        challenge: () => Promise.resolve(fromHex(challengeHex)),
+      });
+      return { request: r.request };
     }),
   sign: (credentialIdHex: string, messageHex: string) =>
     attempt(async () => {

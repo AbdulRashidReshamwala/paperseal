@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createExamRegistry, examRegistryAbi } from '@paperseal/chain';
-import { criteriaHash, encodeCriteria, examIdFromName, firstRoundAtOrAfter, toHex } from '@paperseal/protocol';
+import { criteriaHash, encodeCriteria, examIdFromName, firstRoundAtOrAfter, roles, toHex } from '@paperseal/protocol';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { createPublicClient, decodeFunctionData, type Address, type Hex } from 'viem';
 import { sepolia } from 'viem/chains';
@@ -210,7 +210,7 @@ describe('publishExam with a stub wallet', () => {
   });
 });
 
-function renderBoard(env: PublishEnvironment, path = '/board') {
+function renderBoard(env: PublishEnvironment, path = '/board/new') {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
@@ -234,18 +234,38 @@ function fillCreate(host: string | null = 'rpc.example.org') {
   type('Date and time of the exam', picker(times.examStart));
   type('Length, in minutes', '180');
   type('Minutes before the exam', times.delta);
-  type('Topic 1 name', 'Mechanics');
-  type('Topic 1 questions', '5');
   type('Questions close', picker(times.lock));
   if (host !== null) type('Public record address', host);
+}
+
+/** The topics page, reached from a complete first page. */
+function fillTopics() {
+  fireEvent.click(button('Continue'));
+  type('Topic 1 name', 'Mechanics');
+  type('Topic 1 questions', '5');
+}
+
+const addName = (party: string) => {
+  type("Add a name that isn't listed", party);
+  fireEvent.click(button('Add name'));
+};
+
+/** From the topics page, choosing everyone the two people pages need. */
+function toPreview() {
+  fireEvent.click(button('Continue'));
+  for (let n = 1; n <= 7; n += 1) addName(`centre-${String(n)}.paperseal-demo.eth`);
+  fireEvent.click(button('Continue'));
+  for (let n = 1; n <= 3; n += 1) addName(`neutral-${String(n)}.paperseal-demo.eth`);
+  fireEvent.click(button('Continue'));
 }
 
 /** Step 1 done and the review open, before the version has been checked. */
 async function toVersion(env: PublishEnvironment) {
   renderBoard(env);
   fillCreate();
-  fireEvent.click(button('Continue'));
-  await screen.findByText('Review and publish');
+  fillTopics();
+  toPreview();
+  await screen.findByRole('heading', { name: 'Preview and submit' });
 }
 
 /** The review, once the newest version has been checked. */
@@ -260,9 +280,9 @@ describe('step 1, create the exam', () => {
     const { env } = environment();
     renderBoard(env);
     expect(screen.getByText('Create the exam')).toBeTruthy();
-    expect(screen.queryByRole('navigation')).toBeNull();
+    expect(screen.getByRole('navigation', { name: 'Pages of this form' })).toBeTruthy();
     expect(button('Continue').disabled).toBe(true);
-    expect(screen.getByText(/Still needed: the exam name, the date and time, the topics/)).toBeTruthy();
+    expect(screen.getByText(/Still needed: the exam name, the date and time\./)).toBeTruthy();
     fillCreate();
     expect(button('Continue').disabled).toBe(false);
   });
@@ -271,6 +291,7 @@ describe('step 1, create the exam', () => {
     const { env } = environment();
     renderBoard(env);
     fillCreate();
+    fillTopics();
     fireEvent.click(screen.getByText('Add topic'));
     type('Topic 2 name', 'Mechanics');
     type('Topic 2 questions', '3');
@@ -285,17 +306,32 @@ describe('step 1, create the exam', () => {
     expect(screen.getByText('Advanced').closest('details')?.open).toBe(true);
   });
 
-  it('refuses a name that is not one ENS label, and says what it should be, without changing it', () => {
+  it('works out the ENS name from what the board types, and shows it', () => {
     const { env } = environment();
     renderBoard(env);
     fillCreate();
-    expect(screen.getByText(/This is also the start of the exam's ENS name/)).toBeTruthy();
-    type('Exam name', 'JEE-Main-2026');
-    expect(screen.getByText('The exam name must already be in normalised form. Did you mean jee-main-2026?')).toBeTruthy();
-    expect((field('Exam name') as HTMLInputElement).value).toBe('JEE-Main-2026');
-    expect(button('Continue').disabled).toBe(true);
-    type('Exam name', 'jee-main-2026');
+    expect(screen.getByText(/Type it however you like, such as JEE Main 2026/)).toBeTruthy();
+    type('Exam name', 'JEE Main 2026!');
+    expect(screen.getByText('jee-main-2026')).toBeTruthy();
+    expect((field('Exam name') as HTMLInputElement).value).toBe('JEE Main 2026!');
     expect(button('Continue').disabled).toBe(false);
+    type('Exam name', '!!!');
+    expect(screen.getByText('Use at least one letter or digit.')).toBeTruthy();
+    expect(button('Continue').disabled).toBe(true);
+  });
+
+  it('takes only digits in the number fields', () => {
+    const { env } = environment();
+    renderBoard(env);
+    fillCreate();
+    type('Length, in minutes', '12a');
+    expect((field('Length, in minutes') as HTMLInputElement).value).toBe('12');
+    type('Minutes before the exam', 'abc');
+    expect((field('Minutes before the exam') as HTMLInputElement).value).toBe('');
+    type('Minutes before the exam', times.delta);
+    fillTopics();
+    type('Topic 1 questions', 'aaa');
+    expect((field('Topic 1 questions') as HTMLInputElement).value).toBe('');
   });
 
   it('refuses a lock after the release, in plain words', () => {
@@ -312,9 +348,9 @@ describe('step 1, create the exam', () => {
     renderBoard(env);
     type('Exam name', name);
     type('Date and time of the exam', picker(times.examStart));
-    type('Topic 1 name', 'Mechanics');
-    type('Topic 1 questions', '5');
     expect(screen.getByText(/^Questions close /)).toBeTruthy();
+    type('Public record address', 'rpc.example.org');
+    fillTopics();
     expect(screen.getByText(/at least 20 questions from at least 5 setters/)).toBeTruthy();
     expect(screen.queryByText(/round/i)).toBeNull();
   });
@@ -444,13 +480,18 @@ describe('step 2, review and publish', () => {
     expect(screen.getByText('Topic: Mechanics')).toBeTruthy();
     fireEvent.click(publish);
 
-    expect(await screen.findByRole('heading', { name: 'Invite people' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Choose who takes part' })).toBeTruthy();
     expect(screen.queryByText('The exam is published')).toBeNull();
     expect(screen.getByText('Published')).toBeTruthy();
     expect(node.sent).toHaveLength(1);
     expect(getCurrentExamId()).toBe(examId);
     // The draft is gone once it has become an exam.
+    expect(JSON.parse(localStorage.getItem('paperseal.board.drafts') ?? '[]')).toEqual([]);
     expect(localStorage.getItem('paperseal.board.draft')).toBeNull();
+    // Everyone chosen on the draft's pages carries over to the exam.
+    expect(JSON.parse(localStorage.getItem(`paperseal.parties.${examId}`) ?? '[]')).toHaveLength(10);
+    // The exam is kept with its name, so the board can open it again later.
+    expect(JSON.parse(localStorage.getItem('paperseal.board.exams') ?? '[]')).toEqual([{ id: examId, name, addedAt: expect.any(Number) as number }]);
   });
 
   it('asks the wallet for an account as part of the same action', async () => {
@@ -465,7 +506,7 @@ describe('step 2, review and publish', () => {
     } as typeof node.provider;
     const publish = await toReview({ ...env, getProvider: () => provider });
     fireEvent.click(publish);
-    await screen.findByRole('heading', { name: 'Invite people' });
+    await screen.findByRole('heading', { name: 'Choose who takes part' });
     expect(shared).toBe(true);
   });
 
@@ -501,30 +542,18 @@ describe('step 2, review and publish', () => {
   it('keeps the form through a reload, and not after publishing', async () => {
     const { env } = environment();
     await toReview(env);
-    expect(JSON.parse(localStorage.getItem('paperseal.board.draft') ?? 'null')).toMatchObject({ draftStep: 'review', plan: { name } });
+    const saved = JSON.parse(localStorage.getItem('paperseal.board.drafts') ?? '[]') as { id: string }[];
+    expect(saved).toHaveLength(1);
+    expect(saved[0]).toMatchObject({ draftStep: 'review', plan: { name } });
     cleanup();
-    renderBoard(env);
-    expect(await screen.findByText('Review and publish')).toBeTruthy();
-    fireEvent.click(button('Change the details'));
+    renderBoard(env, `/board/draft/${saved[0]?.id ?? ''}`);
+    expect(await screen.findByRole('heading', { name: 'Preview and submit' })).toBeTruthy();
+    fireEvent.click(button(/Name, date and time/));
     expect((field('Exam name') as HTMLInputElement).value).toBe(name);
   });
 
-  it('holds a restored draft to the exam name rule, keeping the name as typed', async () => {
-    const { env } = environment();
-    await toReview(env);
-    const saved = JSON.parse(localStorage.getItem('paperseal.board.draft') ?? 'null') as { plan: { name: string } };
-    saved.plan.name = 'Physics-2027';
-    localStorage.setItem('paperseal.board.draft', JSON.stringify(saved));
-    cleanup();
-    renderBoard(env);
-    expect(await screen.findByText('The exam name must already be in normalised form. Did you mean physics-2027?')).toBeTruthy();
-    expect(screen.queryByText('Review and publish')).toBeNull();
-    expect((field('Exam name') as HTMLInputElement).value).toBe('Physics-2027');
-    expect(button('Continue').disabled).toBe(true);
-  });
-
   it('starts empty when the saved form is damaged or storage is unavailable', () => {
-    localStorage.setItem('paperseal.board.draft', '{"plan":{"name":3}}');
+    localStorage.setItem('paperseal.board.drafts', '[{"id":"a","plan":{"name":3}}]');
     const { env } = environment();
     renderBoard(env);
     expect((field('Exam name') as HTMLInputElement).value).toBe('');
@@ -546,8 +575,52 @@ describe('step 2, review and publish', () => {
   it('goes back to the details without losing them', async () => {
     const { env } = environment();
     await toReview(env);
-    fireEvent.click(button('Change the details'));
+    fireEvent.click(button('Back'));
+    expect(screen.getByRole('heading', { name: 'Choose the neutral parties' })).toBeTruthy();
+    fireEvent.click(button(/Name, date and time/));
     expect((field('Exam name') as HTMLInputElement).value).toBe(name);
+  });
+
+  it('keeps pages ahead closed until the ones before them are complete', () => {
+    const { env } = environment();
+    renderBoard(env);
+    expect(button(/Topics/).disabled).toBe(true);
+    expect(button(/Preview and submit/).disabled).toBe(true);
+    fillCreate();
+    expect(button(/Topics/).disabled).toBe(false);
+    expect(button(/Preview and submit/).disabled).toBe(true);
+  });
+
+  it('holds each people page until it has everyone the list needs, and keeps them in the draft', () => {
+    const { env } = environment();
+    renderBoard(env);
+    fillCreate();
+    fillTopics();
+    fireEvent.click(button('Continue'));
+    expect(screen.getByRole('heading', { name: 'Choose the centres' })).toBeTruthy();
+    expect(button('Continue').disabled).toBe(true);
+    expect(button(/Neutral parties/).disabled).toBe(true);
+    expect(screen.getByText('Still needed: 7 more centres holding part of the key.')).toBeTruthy();
+    for (let n = 1; n <= 6; n += 1) addName(`centre-${String(n)}.paperseal-demo.eth`);
+    expect(screen.getByText('6 of 7')).toBeTruthy();
+    expect(screen.getByText('Still needed: 1 more centre holding part of the key.')).toBeTruthy();
+    expect(button('Continue').disabled).toBe(true);
+    addName('centre-7.paperseal-demo.eth');
+    fireEvent.click(button('Continue'));
+    expect(screen.getByRole('heading', { name: 'Choose the neutral parties' })).toBeTruthy();
+    expect(screen.queryByText('centre-1.paperseal-demo.eth')).toBeNull();
+    expect(button('Continue').disabled).toBe(true);
+    expect(button(/Preview and submit/).disabled).toBe(true);
+    for (let n = 1; n <= 3; n += 1) addName(`neutral-${String(n)}.paperseal-demo.eth`);
+    expect(screen.getByText('3 of 3')).toBeTruthy();
+    fireEvent.click(button('Continue'));
+    expect(screen.getByRole('heading', { name: 'Preview and submit' })).toBeTruthy();
+    expect(screen.getByText(/centre-1\.paperseal-demo\.eth, centre-2/)).toBeTruthy();
+    expect(screen.getByText(/neutral-1\.paperseal-demo\.eth, neutral-2/)).toBeTruthy();
+    const saved = JSON.parse(localStorage.getItem('paperseal.board.drafts') ?? '[]') as { plan: { parties: unknown[] } }[];
+    expect(saved[0]?.plan.parties).toHaveLength(10);
+    expect(saved[0]?.plan.parties[0]).toEqual({ name: 'centre-1.paperseal-demo.eth', role: roles.centreKeyHolder });
+    expect(saved[0]?.plan.parties[9]).toEqual({ name: 'neutral-3.paperseal-demo.eth', role: roles.neutral });
   });
 
   it('shows rounds and hashes only in the exam record', async () => {

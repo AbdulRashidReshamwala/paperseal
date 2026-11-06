@@ -129,6 +129,9 @@ export function strangerKey(): Hex {
 
 export { inviteTag };
 
+/** Key holders and centres are named by ENS name only (spec/api.md, "Party Names"). */
+export const demoParent = 'paperseal-demo.eth';
+
 /**
  * A list that passes `checkApprovedList`: 1 setter, 3 neutral parties, 7 centres with a share and 1
  * without. `real` replaces entries by role slot with keys that live in a window. Everyone else is a
@@ -146,9 +149,9 @@ export function listWith(real: Partial<Record<'setter' | 'neutral' | 'centreHold
   };
   const out: ApprovedListEntry[] = [];
   out.push(entry(roles.setter, '', real.setter?.passkeyPublicKey));
-  for (let i = 1; i <= 3; i++) out.push(i === 1 && real.neutral ? entry(roles.neutral, real.neutral.owner ?? 'Neutral 1', real.neutral.passkeyPublicKey, real.neutral.derivedPublicKey) : entry(roles.neutral, `Neutral ${String(i)}`));
-  for (let i = 1; i <= 7; i++) out.push(i === 1 && real.centreHolder ? entry(roles.centreKeyHolder, real.centreHolder.owner ?? 'Centre 1', real.centreHolder.passkeyPublicKey, real.centreHolder.derivedPublicKey) : entry(roles.centreKeyHolder, `Centre ${String(i)}`));
-  out.push(real.centre ? entry(roles.centre, real.centre.owner ?? 'Centre 8', real.centre.passkeyPublicKey, real.centre.derivedPublicKey) : entry(roles.centre, 'Centre 8'));
+  for (let i = 1; i <= 3; i++) out.push(i === 1 && real.neutral ? entry(roles.neutral, real.neutral.owner ?? `neutral-1.${demoParent}`, real.neutral.passkeyPublicKey, real.neutral.derivedPublicKey) : entry(roles.neutral, `neutral-${String(i)}.${demoParent}`));
+  for (let i = 1; i <= 7; i++) out.push(i === 1 && real.centreHolder ? entry(roles.centreKeyHolder, real.centreHolder.owner ?? `centre-1.${demoParent}`, real.centreHolder.passkeyPublicKey, real.centreHolder.derivedPublicKey) : entry(roles.centreKeyHolder, `centre-${String(i)}.${demoParent}`));
+  out.push(real.centre ? entry(roles.centre, real.centre.owner ?? `centre-8.${demoParent}`, real.centre.passkeyPublicKey, real.centre.derivedPublicKey) : entry(roles.centre, `centre-8.${demoParent}`));
   return out;
 }
 
@@ -158,12 +161,19 @@ export async function postBuildDirect(chain: Chain, examId: Hex, criteriaHash: H
   const client = createPublicClient({ chain: sepolia, transport: http(chain.rpcUrl) });
   const list = (await client.readContract({ address: chain.registry, abi: chain.abi, functionName: 'getApprovedList', args: [examId] })) as { listHash: Hex };
   const filler = (n: number): Hex => `0x${'ab'.repeat(n)}`;
+  // Made-up bytes, but a real round: the registry only needs it nonzero, and a reader compares it with the exam's rounds.
+  const exam = (await client.readContract({ address: chain.registry, abi: chain.abi, functionName: 'getExam', args: [examId] })) as { settings: { lockRound: bigint } };
   const wallet = createWalletClient({ account: chain.board, chain: sepolia, transport: http(chain.rpcUrl) });
   const hash = await wallet.writeContract({
     address: chain.registry,
     abi: chain.abi,
     functionName: 'postBuild',
-    args: [examId, list.listHash, filler(32), filler(32), filler(32), 6, 24, criteriaHash, filler(64), `0x04${'cd'.repeat(64)}`],
+    args: [
+      examId,
+      { approvedListHash: list.listHash, paperHash: filler(32), storageManifestHash: filler(32), saltedPaperHash: filler(32), selected: 6, bankSize: 24, criteriaHash, builtRound: exam.settings.lockRound },
+      filler(64),
+      `0x04${'cd'.repeat(64)}`,
+    ],
   });
   await waitMined(chain, hash);
   return hash;

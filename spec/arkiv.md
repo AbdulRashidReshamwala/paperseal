@@ -147,7 +147,7 @@ The board's bucket holds every file an exam needs: the encrypted paper, `K_pub`'
 One Swarm collection per exam, holding the exam's storage files under the same names as in the bucket (`api.md`, "Storage"):
 
 - **Before unlock:** `manifest.json` and every file it lists. The manifest must hash to the Build's `storageManifestHash` on Sepolia, and each file must match its `sha256` in the manifest.
-- **After unlock:** a second collection that also holds `release-log.json`, `release-token.jwt`, `key-priv.tlock` and `key-priv/*`. The signed release log covers `release-log.json` itself, and `release-token.jwt` binds the log's signer to the exam. Nothing on-chain or in the log hashes `key-priv.tlock` or `key-priv/*`. A backup gives them availability only. They are still safe to take from one: each is authenticated encryption, so a changed copy fails to open, and the paper's salted hash check catches any wrong key.
+- **After unlock:** a second collection that also holds `release-log.json`, `release-token.jwt`, `key-priv.tlock` and `key-priv/*`. The signed release log covers `release-log.json` itself, and `release-token.jwt` binds the log's signer to the exam. The signed log lists the hash of `key-priv.tlock` and of each `key-priv/*` (`files`, covered by `filesHash`), so a backup copy is checked against that list. Each is also authenticated encryption, and the paper's salted hash check catches any wrong key.
 
 Every file is already public, and already encrypted or signed, so it is uploaded as a plain, unencrypted Swarm collection. An encrypted Swarm reference contains its own decryption key, so one never goes on Arkiv.
 
@@ -173,6 +173,7 @@ A backup row is `readonly`. It lives for `lifetimeDays`, and anyone can extend i
 A backup writer reads `manifest.json` from public storage. It checks the manifest against the Build's `storageManifestHash`, downloads each file it lists, and checks each one against the manifest's `sha256`. For `unlock`, it checks each unlock file as far as anything can be checked before the end round:
 - `release-token.jwt` passes the same check readers apply to it (Google's PKI signature and the claims bound to the on-chain exam), and attests the log's `instancePublicKey`.
 - `release-log.json` parses with no unknown fields, is for this exam, has an `entriesHash` that recomputes from its entries, and has a valid `teeSignature` under that attested key.
+- The log's `filesHash` matches its `files`, which list exactly `key-priv.tlock` and one `key-priv/*` per approved centre, and each file has the hash listed.
 - `key-priv.tlock` is a timelock ciphertext for the exam's `endRound`.
 - There is one `key-priv/<derivedPublicKey>.bin` per approved centre (list roles 3 and 4), each exactly the size of an HPKE `keyPriv` sealing a 32-byte key.
 

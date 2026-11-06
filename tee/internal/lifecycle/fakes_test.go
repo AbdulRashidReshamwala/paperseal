@@ -17,6 +17,8 @@ const webauthnBackup = 0x08
 type toggleBeacon struct {
 	inner timelock.Beacon
 	bad   *badBeacon
+	// latestErrs is how many Latest calls fail before one works.
+	latestErrs *int
 }
 
 func (b *toggleBeacon) Randomness(ctx context.Context, round uint64) ([]byte, error) {
@@ -26,7 +28,13 @@ func (b *toggleBeacon) Randomness(ctx context.Context, round uint64) ([]byte, er
 	return b.inner.Randomness(ctx, round)
 }
 
-func (b *toggleBeacon) Latest(ctx context.Context) (uint64, error) { return b.inner.Latest(ctx) }
+func (b *toggleBeacon) Latest(ctx context.Context) (uint64, error) {
+	if b.latestErrs != nil && *b.latestErrs > 0 {
+		*b.latestErrs--
+		return 0, errors.New("relay unreachable")
+	}
+	return b.inner.Latest(ctx)
+}
 
 // unattested is a launcher that isn't there.
 type unattested struct{}

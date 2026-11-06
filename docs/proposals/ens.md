@@ -1,6 +1,6 @@
 # Proposal: ENS Names for Exams
 
-**Status:** part 1, Verify by Name, is implemented: the behaviour is in the [README](../../README.md#exam-names), the rules in `spec/api.md` ("Exam Names") and `spec/ens.json`, and the setup in [ENS setup](../ens-setup.md). Its records are set by hand, so there is no `ExamResolver` yet. Parts 2 to 5 are still proposed, 2026-11-06.
+**Status:** part 1, Verify by Name, is implemented: the behaviour is in the [README](../../README.md#exam-names), the rules in `spec/api.md` ("Exam Names") and `spec/ens.json`, and the setup in [ENS setup](../ens-setup.md). Its records are set by hand, so there is no `ExamResolver` yet. Part 3, neutral parties using their own names, is implemented for Sepolia as a demo: the behaviour is in the [README](../../README.md#party-names) and the rules in `spec/api.md` ("Party Names"), and a key holder's record is `paperseal.passkey`. Parts 2, 4 and 5 are still proposed, 2026-11-06.
 
 ## Summary
 
@@ -18,7 +18,7 @@ The README says the board announces its contract address on its official site, "
 | --- | --- | --- | --- |
 | 1 | Verify by name | People can check an exam without an address, and the name supplies the contract, exam, TEE and storage settings | `spec/`, `packages/chain`, `apps/verifier` |
 | 2 | `ExamResolver` | Every exam gets a name with no per-exam transaction and no second copy of its data | One new contract. `ExamRegistry` doesn't change |
-| 3 | Neutral parties use their own names | The board can't invent an identity with an existing history | `spec/`, Go, Solidity and TypeScript |
+| 3 (done, Sepolia) | Neutral parties use their own names | The board can't invent an identity with an existing history | `spec/`, Go, Solidity and TypeScript |
 | 4 | Append-only exam namespace | The board can't later change what an exam name points to | ENS configuration, after the checks below |
 | 5 | Pinned verifier | A locked contenthash on an IPFS build means the verifier code can't be swapped later | Publishing step |
 
@@ -45,6 +45,10 @@ Parts 1 to 3 could mostly work on ENSv1. These parts are new in v2:
 - **Per-name registries:** the board can run a separate registry for exams.
 - **Per-name roles:** a low-risk operations key could add exams while the main board key stays offline.
 - **Permanent role removal:** this is what makes parts 4 and 5 possible.
+
+### Neutral Parties Use Their Own Names
+
+Key holders and centres are invited by ENS name only, which becomes their `owner`, and there are no plain names. The verifier shows any other owner on a list (an older exam, or a board that skipped the app) as "Not an ENS name", a warning that never fails the exam. Setters never have one. A neutral key holder sets the text record `paperseal.passkey` on their own name to `setterOwner(passkeyPublicKey)`, the existing public hash of their security key, so `spec/constants.json` (also embedded in the TEE) gains no tag. A centre may use a board-issued subname with no record, which is a label only. The board app and verifier read the record on chain with CCIP-Read off. It stays out of the TEE and `ExamRegistry`, and a name that can't be confirmed never fails an exam. The code doesn't depend on ENSv2: it reads through viem's Universal Resolver, which may still run ENSv1.
 
 ## Non-Goals
 

@@ -25,6 +25,7 @@ var (
 	bytes32Type = abiType("bytes32")
 	bytesType   = abiType("bytes")
 	uint32Type  = abiType("uint32")
+	uint64Type  = abiType("uint64")
 )
 
 func abiType(name string) abi.Type {
@@ -53,6 +54,9 @@ func Bytes(name string, b []byte) Field { return Field{name, bytesType, b} }
 
 // Uint32 is a count, such as selected or bankSize.
 func Uint32(name string, v uint32) Field { return Field{name, uint32Type, v} }
+
+// Uint64 is a drand round, such as builtRound.
+func Uint64(name string, v uint64) Field { return Field{name, uint64Type, v} }
 
 // Message is a tagged list of fields with its encoding.
 type Message struct {
@@ -135,10 +139,19 @@ func SetterOwner(passkeyPublicKey []byte) (Message, error) {
 		Bytes("passkeyPublicKey", passkeyPublicKey))
 }
 
+// PRFInput is the WebAuthn PRF input for one exam. Only apps use it, because the
+// TEE never derives a key. It is here so the Go vectors pin the bytes.
+func PRFInput(examID [32]byte) (Message, error) {
+	return New("prfInput", spec.C.DomainTags.PRFInput,
+		Bytes("prfSalt", []byte(spec.C.WebAuthn.PRFSalt)),
+		Bytes32("examId", examID))
+}
+
 // Registration is the message a passkey signs at registration. A setter
 // registers a passkey only, so derivedPublicKey is empty for setters and a
 // valid public key for everyone else. inviteTag is opaque here: only the board
-// can recompute it, as in "Invites" in spec/api.md.
+// can recompute it, as in "Invites" in spec/api.md, and it is zero for a
+// registration by name.
 func Registration(derivedPublicKey, holderID, challenge []byte, inviteTag [32]byte) (Message, error) {
 	if len(derivedPublicKey) != 0 {
 		if err := checkKeys("registration", derivedPublicKey); err != nil {
@@ -196,6 +209,7 @@ type BuildFields struct {
 	Selected            uint32
 	BankSize            uint32
 	CriteriaHash        [32]byte
+	BuiltRound          uint64 // The newest verified drand round when the paper was sealed.
 }
 
 // Build commits to the approved list, the stored files and the selection.
@@ -208,7 +222,8 @@ func Build(f BuildFields) Message {
 		Bytes32("saltedPaperHash", f.SaltedPaperHash),
 		Uint32("selected", f.Selected),
 		Uint32("bankSize", f.BankSize),
-		Bytes32("criteriaHash", f.CriteriaHash)))
+		Bytes32("criteriaHash", f.CriteriaHash),
+		Uint64("builtRound", f.BuiltRound)))
 }
 
 // SaltedPaper is the preimage of build.saltedPaperHash. The plaintext is never
@@ -233,11 +248,13 @@ func ShareRelease(examID [32]byte, challenge []byte) (Message, error) {
 		Bytes("challenge", challenge))
 }
 
-// ReleaseLog commits to the signed release log.
-func ReleaseLog(examID, entriesHash [32]byte) Message {
+// ReleaseLog commits to the signed release log: the accepted releases and the
+// hash of each key-priv file.
+func ReleaseLog(examID, entriesHash, filesHash [32]byte) Message {
 	return must(New("releaseLog", spec.C.DomainTags.ReleaseLog,
 		Bytes32("examId", examID),
-		Bytes32("entriesHash", entriesHash)))
+		Bytes32("entriesHash", entriesHash),
+		Bytes32("filesHash", filesHash)))
 }
 
 // must is for messages with only fixed-width fields, which New can't fail to

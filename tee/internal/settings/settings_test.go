@@ -4,6 +4,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"paperseal/tee/internal/spec"
 )
 
 // With genesisTime 1692803367 and periodSeconds 3, exam-start 1800000000 is
@@ -15,7 +17,7 @@ func valid() map[string]string {
 		"delta":         "1800",
 		"lock-round":    "100",
 		"unlock-round":  "35731612",
-		"end-round":     "18446744073709551615",
+		"end-round":     "35732300",
 		"criteria-hash": "0x" + strings.Repeat("22", 32),
 		"rpc-host":      "rpc.example.com",
 		"registry":      "0x" + strings.Repeat("33", 20),
@@ -47,7 +49,7 @@ func TestParse(t *testing.T) {
 	if e.ExamID[0] != 0x11 || e.CriteriaHash[31] != 0x22 || e.Registry[19] != 0x33 {
 		t.Errorf("hex values not parsed: %+v", e)
 	}
-	if e.LockRound != 100 || e.UnlockRound != 35731612 || e.EndRound != 1<<64-1 {
+	if e.LockRound != 100 || e.UnlockRound != 35731612 || e.EndRound != 35732300 {
 		t.Errorf("rounds not parsed: %+v", e)
 	}
 	if e.ExamStart != 1800000000 || e.Delta != 1800 || e.ChainID != 11155111 || e.RPCHost != "rpc.example.com" {
@@ -110,6 +112,46 @@ func TestEndRoundIsProducedAfterExamStart(t *testing.T) {
 				t.Fatal("round not after exam start accepted")
 			}
 		})
+	}
+}
+
+func TestScheduleBounds(t *testing.T) {
+	maxDelta := spec.C.Schedule.MaxDeltaSeconds
+	// 1800000000 is exactly round 35732212, so this is the last end round in bounds.
+	lastEnd := 35732212 + spec.C.Schedule.MaxEndAfterStartSeconds/3
+	cases := []struct {
+		name  string
+		delta uint64
+		end   uint64
+		ok    bool
+	}{
+		{"both at the bound", maxDelta, lastEnd, true},
+		{"delta one over", maxDelta + 1, lastEnd, false},
+		{"end one round over", 1800, lastEnd + 1, false},
+		{"an end round never produced", 1800, 1<<64 - 1, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m := valid()
+			m["delta"] = fmtUint(c.delta)
+			m["unlock-round"] = fmtUint(unlockRoundFor(1800000000 - c.delta))
+			m["end-round"] = fmtUint(c.end)
+			_, err := Parse(args(m))
+			if c.ok && err != nil {
+				t.Fatal(err)
+			}
+			if !c.ok && err == nil {
+				t.Fatal("accepted")
+			}
+		})
+	}
+}
+
+// A huge exam start can't wrap the bound round by round.
+func TestLastRoundWithinDoesNotOverflow(t *testing.T) {
+	at := uint64(1<<64 - 1)
+	if got := lastRoundWithin(at, spec.C.Schedule.MaxEndAfterStartSeconds); got < (at-uint64(spec.C.Drand.GenesisTime))/3 {
+		t.Fatalf("wrapped to %d", got)
 	}
 }
 

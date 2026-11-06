@@ -31,7 +31,7 @@ export function KeyholderView(props: {
           <Stage
             title={progress.chain.value?.buildPosted ? 'Nothing to do yet. Your part of the key is safe.' : 'Nothing to do yet.'}
             {...(progress.chain.value?.buildPosted ? {} : { lede: 'The paper is not sealed yet, so there is nothing to release yet.' })}
-            next="When the paper unlocks, this page asks you to release your part of the key with one touch of your security key. You can close this page until then. Open it again in this same browser, and keep your security key with you."
+            next="When the paper unlocks, this page asks you to release your part of the key with one touch of your security key. You can close this page until then, and keep your security key with you."
           >
             {round !== null ? <Countdown at={roundTimeSeconds(round) * 1000} round={round} label="Release opens in" /> : null}
           </Stage>

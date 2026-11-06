@@ -26,16 +26,22 @@ forge script script/Deploy.s.sol --rpc-url sepolia --broadcast --account <keysto
 
 Keep the printed address as `REGISTRY`. A new board address needs a new deployment.
 
+Every reader checks the code at this address against `spec/registry.json`. If the contract's code changed, run `make abi` and commit the result, which updates the pin everywhere, then tag a new TEE version, because the pin is in the attested image. A new board or a comment edit doesn't change the pin. To check a deployment, read-only:
+
+```sh
+LIVE_REGISTRY=<REGISTRY> node e2e/live/cli.mjs registry-check
+```
+
 ### Verify the source on Etherscan
 
-Needs `ETHERSCAN_API_KEY` and `REGISTRY_ADDRESS` in `contracts/.env` (gitignored). Check out the commit that was deployed first; the compiler settings come from `foundry.toml` (solc 0.8.30, optimizer 200 runs, `prague`, no via-ir), and the constructor argument is `BOARD_ADDRESS`.
+Needs `ETHERSCAN_API_KEY` and `REGISTRY_ADDRESS` in `contracts/.env` (gitignored). Check out the commit that was deployed first; the compiler settings come from `foundry.toml` (solc 0.8.34, optimizer 200 runs, `prague`, no via-ir), and the constructor argument is `BOARD_ADDRESS`.
 
 ```sh
 contracts/script/verify.sh              # uses REGISTRY_ADDRESS
 contracts/script/verify.sh 0x...        # or pass the address
 ```
 
-It uses the Etherscan V2 API with chain id 11155111, waits for the result and never prints the key. It is safe to run again: an already verified contract is skipped. The current Sepolia deployment (`0x6a9f017F374630EcB84e8E3816B1eE9F8Fa2dBE8`) was built from commit `2ae6cf3`.
+It uses the Etherscan V2 API with chain id 11155111, waits for the result and never prints the key. It is safe to run again: an already verified contract is skipped. The current Sepolia deployment (`0xc25F7e0004f0E9B77581CFf6B4B5Ae8b120658eb`) was built from commit `ce53d85` with solc 0.8.34. Two earlier ones are retired: `0x78EB44959E7ed5d6A45Fb2863c0624c8f2ce9c85`, abandoned before the Build had `builtRound`, and the first (`0x6a9f017F374630EcB84e8E3816B1eE9F8Fa2dBE8`, commit `2ae6cf3`) is retired and only holds the demo exam used by one verifier test.
 
 ## 2. Tag a version
 
@@ -101,3 +107,8 @@ Set at build time for `apps/web` and `apps/verifier` (viewers can change them in
 | `VITE_TEE_STORAGE_BUCKET` | `<BUCKET>`, the one environment value the token check allows |
 | `VITE_RELEASES_REPO` | your fork as `owner/name`, so the apps read TEE releases from it (upstream's `AbdulRashidReshamwala/paperseal` when unset) |
 
+Demo ENS name on Sepolia: `paperseal-demo.eth`, owned by the board wallet, with a placeholder exam name `demo.paperseal-demo.eth` that carries the registry, TEE and storage records.
+
+## Party names
+
+`deploy/ens/records.mjs` prints the `cast send` commands that put a key card on a name and list the names in the directory. It sends nothing. See section 4 of [docs/ens-setup.md](../docs/ens-setup.md).

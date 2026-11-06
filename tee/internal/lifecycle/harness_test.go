@@ -49,11 +49,15 @@ type fakeChain struct {
 	created     bool
 	list        *chainread.List
 	build       *chainread.Build
+	examErr     error // Exam fails with this, as the RPC reader does on its first read.
 }
 
 func (c *fakeChain) Exam(context.Context) (chainread.ExamRecord, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.examErr != nil {
+		return chainread.ExamRecord{}, c.examErr
+	}
 	if !c.created {
 		return chainread.ExamRecord{}, chainread.ErrNotPosted
 	}

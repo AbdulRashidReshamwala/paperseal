@@ -1,14 +1,14 @@
 import type { ExamNameCheck, ExamNameResult } from '@paperseal/chain';
 import { describe, expect, beforeAll, it, vi } from 'vitest';
-import { roundTimeSeconds, type Hex } from '@paperseal/protocol';
+import { chain as chainSpec, roundTimeSeconds, sortReleaseFiles, storageNames, toHex, type Hex } from '@paperseal/protocol';
 
 import { checkPublishedToken, checkRecordToken, type Build, type FreshVerdict } from './attest';
 import { approvedEntries, checkManifest, holdersOf } from './commitments';
 import { clockTime, custody, inWords, repository, utcTime, type Custody, type CustodyStep, type Item, type NameView, type StepId, type View } from './custody';
-import { buildWorld, examId, registryAddress, type World } from './fixtures';
+import { boardAddress, buildWorld, examId, random, registryAddress, registryMatches, type World } from './fixtures';
 import type { ArkivReport, LiveReport, ProofRun, Records } from './load';
 import type { ProofChecks, ProofState } from './proof';
-import { checkReleaseLog, parseReleaseLog, releaseProgress } from './unlock';
+import { checkReleaseFiles, checkReleaseLog, parseReleaseLog, releaseProgress } from './unlock';
 
 // The rounds of a fixture exam, with its times in the past or future as each test needs.
 const LOCK = 100;
@@ -25,14 +25,35 @@ const file = (name: string) => {
   return bytes;
 };
 
+/** A published log checked for real, the way `readLog` does, against `replace`d stored files. */
+async function checkedLog(w: World, replace: Record<string, Uint8Array | null> = {}, entries: Hex | null = w.entriesHex): Promise<Records['log']> {
+  const stored = w.files.get('release-log.json');
+  if (!stored) throw new Error('no log');
+  const parsed = parseReleaseLog(stored);
+  const list = approvedEntries(entries);
+  const token = await checkRecordToken({
+    exam: w.exam,
+    examId,
+    registry: registryAddress,
+    trustedRoot: w.pki.root,
+    token: text(w.files.get('release-token.jwt')),
+    instancePublicKey: parsed.instancePublicKey,
+  });
+  return {
+    kind: 'ready',
+    verdict: await checkReleaseLog(parsed, examId, parsed.instancePublicKey),
+    token,
+    progress: list ? releaseProgress(holdersOf(list), parsed.entries.map((entry) => entry.passkeyPublicKey)) : null,
+    files: await checkReleaseFiles(parsed, list, w.storage(replace)),
+  };
+}
+
 /** Every record checked for real, against the fixture's own root in place of Google's. */
 async function checkedRecords(): Promise<Records> {
   const { exam, build, pki } = world;
-  const chain = { exam, build, list: { listHash: build.approvedListHash }, criteria: world.criteriaHex, entries: world.entriesHex } as Records['chain'];
+  const chain = { registryCode: registryMatches, exam, build, list: { listHash: build.approvedListHash }, criteria: world.criteriaHex, entries: world.entriesHex } as Records['chain'];
   const args = { exam, examId, registry: registryAddress, trustedRoot: pki.root };
   const list = approvedEntries(world.entriesHex);
-  const parsed = parseReleaseLog(file('release-log.json'));
-  const token = await checkRecordToken({ ...args, token: text(file('release-token.jwt')), instancePublicKey: parsed.instancePublicKey });
   return {
     chain,
     token: { kind: 'ready', verdict: await checkPublishedToken({ ...args, token: world.token, build }), build, issuedAt: 1_800_000_000 },
@@ -42,12 +63,7 @@ async function checkedRecords(): Promise<Records> {
       build,
       owners: Object.fromEntries((list ? holdersOf(list) : []).map((h) => [h.derivedPublicKey, h.owner])),
     },
-    log: {
-      kind: 'ready',
-      verdict: await checkReleaseLog(parsed, examId, parsed.instancePublicKey),
-      token,
-      progress: releaseProgress(holdersOf(list ?? []), parsed.entries.map((entry) => entry.passkeyPublicKey)),
-    },
+    log: await checkedLog(world),
   };
 }
 
@@ -206,9 +222,98 @@ describe('step 1, exam published', () => {
   it('current, and nothing passes, when the exam is not published', () => {
     const result = scene({ chain: { exam: null, list: null, build: null, criteria: null, entries: null }, records: notReadyFiles });
     expect(step(result, 'published').state).toBe('current');
-    expect(result.steps.flatMap(checks).filter((c) => c.status === 'pass')).toEqual([]);
+    // The address itself is checked, but nothing about an exam.
+    expect(result.steps.flatMap(checks).filter((c) => c.status === 'pass').map((c) => c.label)).toEqual(['The exam record runs the published ExamRegistry code']);
     expect(result.headline).toBe('This exam is not on the public record.');
     expect(result.seal).toBe(null);
+  });
+});
+
+describe('the code at the registry address', () => {
+  const nothing = { exam: null, list: null, build: null, criteria: null, entries: null };
+
+  it('passes, and shows the board its code holds', () => {
+    const result = scene();
+    const published = step(result, 'published');
+    expect(published.items).toContainEqual(expect.objectContaining({ kind: 'check', label: 'The exam record runs the published ExamRegistry code', status: 'pass' }));
+    expect(published.items).toContainEqual(expect.objectContaining({ kind: 'hash', value: boardAddress }));
+    expect(published.aside).toContain(boardAddress);
+  });
+
+  it.each([
+    ['different', 'not a Paper Seal exam record'],
+    ['none', 'no exam record at this address'],
+  ] as const)('fails the first step and holds the rest when it is %s', (state, words) => {
+    const result = scene({ chain: { ...nothing, registryCode: { state } }, records: notReadyFiles });
+    expect(step(result, 'published').state).toBe('failed');
+    expect(result.failures.map((failure) => failure.message).join()).toContain(words);
+    expect(result.headline).toBe('This is not a Paper Seal exam record.');
+    expect(result.verdict).toContain('Do not rely on this exam');
+    expect(result.steps.slice(1).every((one) => one.state === 'waiting')).toBe(true);
+    expect(result.seal).toBeNull();
+  });
+});
+
+describe('how the public record is read', () => {
+  it('shows chain.readBlock with the setting beside it', () => {
+    const rows = step(scene(), 'attested').items;
+    expect(rows).toContainEqual(expect.objectContaining({ kind: 'tag', label: { code: 'chain.readBlock' }, tag: chainSpec.readBlock }));
+  });
+});
+
+describe('schedule bounds', () => {
+  it('fail the first step', () => {
+    const { settings } = world.exam;
+    const long = scene({ chain: { exam: { ...world.exam, settings: { ...settings, delta: 86_401n } } } });
+    expect(step(long, 'published').state).toBe('failed');
+    expect(long.failures.map((failure) => failure.message)).toContain('The paper reaches centres too long before the exam. Paper Seal does not allow a gap this long.');
+    const never = scene({ chain: { exam: { ...world.exam, settings: { ...settings, endRound: 2n ** 64n - 1n } } } });
+    expect(never.failures.map((failure) => failure.message)).toContain('This exam ends too long after it starts, so the paper may never open to everyone.');
+    expect(step(never, 'published').items).toContainEqual(expect.objectContaining({ value: expect.stringContaining('too far away') }));
+  });
+
+  it('pass for an exam inside them', () => {
+    expect(step(scene(), 'published').items).toContainEqual(expect.objectContaining({ label: 'Exam times are within the allowed limits', status: 'pass' }));
+  });
+});
+
+describe('a Build posted after the unlock time', () => {
+  const unlockAt = () => roundTimeSeconds(Number(world.exam.settings.unlockRound));
+  const posted = (postedAt: number) => scene({ chain: { build: { ...world.build, postedAt: BigInt(postedAt) } as Build } });
+  const sealedAt = (builtRound: bigint, postedAt = 1) =>
+    scene({ chain: { build: { ...world.build, builtRound, postedAt: BigInt(postedAt) } as Build } });
+
+  it('warns that it was sealed in time and posted late, and fails nothing', () => {
+    const on = posted(unlockAt());
+    expect(on.warnings).toEqual([]);
+    const late = posted(unlockAt() + 1);
+    expect(late.warnings).toEqual([expect.stringContaining('sealed in time but recorded after its unlock time')]);
+    expect(late.failures).toEqual(on.failures);
+    expect(step(late, 'sealed').state).toBe(step(on, 'sealed').state);
+    expect(step(late, 'sealed').items).toContainEqual(expect.objectContaining({ kind: 'text', tone: 'warn' }));
+  });
+
+  it('shows when it was sealed, with the round', () => {
+    const items = step(scene(), 'sealed').items;
+    expect(items).toContainEqual(expect.objectContaining({ kind: 'fact', label: 'Sealed' }));
+    expect(items).toContainEqual(expect.objectContaining({ label: expect.stringContaining('Paper sealed, round 150') }));
+    expect(items).toContainEqual(expect.objectContaining({ label: 'Sealed after questions closed', status: 'pass' }));
+    expect(scene().warnings).toEqual([]);
+  });
+
+  it('fails a Build sealed before the lock round', () => {
+    const early = sealedAt(world.exam.settings.lockRound - 1n);
+    expect(step(early, 'sealed').state).toBe('failed');
+    expect(early.failures).toEqual([expect.objectContaining({ message: expect.stringContaining('sealed before questions closed') })]);
+    expect(step(sealedAt(world.exam.settings.lockRound), 'sealed').state).toBe('done');
+  });
+
+  it('gives a stronger warning for a Build sealed at or after the unlock round, and not the late one', () => {
+    for (const round of [world.exam.settings.unlockRound, world.exam.settings.unlockRound + 5n]) {
+      const result = sealedAt(round, unlockAt() + 100);
+      expect(result.warnings).toEqual([expect.stringContaining('at or after the unlock time')]);
+      expect(result.failures).toEqual(scene().failures);
+    }
   });
 });
 
@@ -513,7 +618,7 @@ describe('step 6, the copy on Arkiv', () => {
                 writtenAt: newestAt ?? 0,
                 entries: count,
                 instancePublicKey: world.releaseLog.instancePublicKey,
-                verdict: { examId: 'pass', entriesHash: 'pass', signature: 'pass' },
+                verdict: { examId: 'pass', entriesHash: 'pass', filesHash: 'pass', signature: 'pass' },
                 progress: progressOf(count),
               },
         ignored: { tokens: 0, unreadable: 0, unattested: 0, failed: 0 },
@@ -760,6 +865,134 @@ describe('step 7, exam ends and paper opens', () => {
   });
 });
 
+describe('key files listed in the signed log', () => {
+  const unlocked = (records: Partial<Records>) => scene({ round: UNLOCK, records });
+  const centreCopy = (w: World) => {
+    const centre = w.entries.find((entry) => entry.role === 4);
+    if (!centre) throw new Error('no centre');
+    return { name: storageNames.centreKeyPriv(centre.derivedPublicKey), owner: centre.owner };
+  };
+  const failing = (result: Custody) => result.failures.map((failure) => failure.message);
+
+  it('passes each file, names each centre, and only then finishes the step', async () => {
+    const result = unlocked({ log: await checkedLog(world) });
+    const s = step(result, 'unlock');
+    expect(s.state).toBe('done');
+    expect(result.failures).toEqual([]);
+    const rows = checks(s).filter((c) => typeof c.label === 'object');
+    expect(rows).toHaveLength(9);
+    expect(rows.every((row) => row.status === 'pass')).toBe(true);
+    expect(rows.find((row) => row.detail === `recipient ${centreCopy(world).owner}`)).toBeTruthy();
+    expect(checks(s).find((c) => c.label === 'filesHash matches the files')?.status).toBe('pass');
+  });
+
+  it('fails a swapped centre copy', async () => {
+    const { name, owner } = centreCopy(world);
+    const result = unlocked({ log: await checkedLog(world, { [name]: random(120) }) });
+    expect(step(result, 'unlock').state).toBe('failed');
+    expect(failing(result)).toEqual([`The copy of the key for ${owner} was changed after it was recorded.`]);
+    expect(result.verdict).toMatch(/^One check failed/);
+  });
+
+  it('fails a centre copy missing from storage', async () => {
+    const { name, owner } = centreCopy(world);
+    const result = unlocked({ log: await checkedLog(world, { [name]: null }) });
+    expect(step(result, 'unlock').state).toBe('failed');
+    expect(failing(result)).toEqual([`The copy of the key for ${owner} was removed from the public files.`]);
+  });
+
+  it('fails a centre copy the signed log leaves out', async () => {
+    // `key-priv.tlock` sorts first, so the second file is a centre's copy.
+    const w = await buildWorld({ logFiles: (files) => files.filter((_, i) => i !== 1) });
+    const result = unlocked({ log: await checkedLog(w) });
+    expect(step(result, 'unlock').state).toBe('failed');
+    expect(failing(result)).toHaveLength(1);
+    expect(failing(result)[0]).toMatch(/^The copy of the key for .* is not in the signed log\.$/);
+  });
+
+  it('fails an extra file in the signed log, even one that is really stored', async () => {
+    const stranger = `key-priv/${toHex(random(65))}.bin`;
+    const w = await buildWorld({ logFiles: (files) => sortReleaseFiles([...files, { name: stranger, sha256: random(32) }]) });
+    const result = unlocked({ log: await checkedLog(w) });
+    expect(step(result, 'unlock').state).toBe('failed');
+    expect(failing(result)).toEqual(['The signed log lists a copy of the key for someone who is not on the approved list.']);
+  });
+
+  it('fails a log at the threshold that lists no files', async () => {
+    const w = await buildWorld({ logFiles: () => [] });
+    const result = unlocked({ log: await checkedLog(w) });
+    expect(step(result, 'unlock').state).toBe('failed');
+    expect(failing(result)).toContain('The file that opens the paper is not in the signed log.');
+  });
+
+  it('fails a swapped key-priv.tlock', async () => {
+    const result = unlocked({ log: await checkedLog(world, { [storageNames.keyPriv]: random(40) }) });
+    expect(step(result, 'unlock').state).toBe('failed');
+    expect(failing(result)).toEqual(['The file that opens the paper was changed after it was recorded.']);
+  });
+
+  it('is not a failure below the threshold, with no files listed, and never a pass', async () => {
+    const w = await buildWorld({ unlocked: false });
+    const result = unlocked({ log: await checkedLog(w) });
+    const s = step(result, 'unlock');
+    expect(result.failures).toEqual([]);
+    expect(s.state).toBe('current');
+    expect(checks(s).find((c) => c.label === 'Key files match the signed log')).toMatchObject({ status: 'not-checked', detail: expect.stringMatching(/^Not unlocked yet/) as string });
+  });
+
+  it('checks nothing against a log that has not passed, and does not finish', () => {
+    const log = fullRecords.log;
+    if (log.kind !== 'ready') throw new Error('expected a log');
+    const s = step(unlocked({ log: { ...log, files: null } }), 'unlock');
+    expect(s.state).toBe('current');
+    expect(checks(s).find((c) => c.label === 'Key files match the signed log')?.status).toBe('not-checked');
+  });
+
+  it('is not a pass while a stored file can not be read', async () => {
+    const { name } = centreCopy(world);
+    const log = await checkedLog(world);
+    if (log.kind !== 'ready' || !log.files) throw new Error('expected a report');
+    const parsed = parseReleaseLog(file('release-log.json'));
+    const flaky = { url: () => '', get: (n: string) => (n === name ? Promise.reject(new Error('error 500')) : world.storage().get(n)) };
+    const report = await checkReleaseFiles(parsed, approvedEntries(world.entriesHex), flaky);
+    const result = unlocked({ log: { ...log, files: report } });
+    expect(report.check).toBe('absent');
+    expect(result.failures).toEqual([]);
+    expect(step(result, 'unlock').state).toBe('current');
+  });
+
+  it('can not pass with no approved list to compare names with', async () => {
+    const log = await checkedLog(world, {}, null);
+    if (log.kind !== 'ready') throw new Error('expected a log');
+    expect(log.files?.names).toBe('absent');
+    expect(log.files?.check).toBe('absent');
+    expect(step(unlocked({ log }), 'unlock').state).toBe('current');
+  });
+
+  it('fails a list of files that does not match filesHash', async () => {
+    const log = await checkedLog(world);
+    if (log.kind !== 'ready') throw new Error('expected a log');
+    const result = unlocked({ log: { ...log, verdict: { ...log.verdict, filesHash: 'fail' } } });
+    expect(step(result, 'unlock').state).toBe('failed');
+    expect(failing(result)).toEqual(['The list of key files has been changed after it was signed.']);
+  });
+
+  it('can not read as a pass once the paper is open', async () => {
+    const { name } = centreCopy(world);
+    const result = scene({ round: END, proof: opened(), records: { log: await checkedLog(world, { [name]: random(120) }) } });
+    expect(step(result, 'open').state).toBe('done');
+    expect(result.headline).toBe('The paper is open, but it did not pass every check.');
+    expect(result.verdict).toMatch(/^One check failed/);
+  });
+
+  it('puts a removed key file at the top of the page, not only a paper that would not open', () => {
+    const message = 'The file that opens the paper (key-priv.tlock) was removed from the public files after the unlock recorded it.';
+    const result = scene({ round: END, proof: { ok: true, result: { state: 'failed', step: 'files', message } } });
+    expect(step(result, 'open').state).toBe('failed');
+    expect(failing(result)).toContain(message);
+  });
+});
+
 describe('step 1 on a name route, the name', () => {
   const name = 'jee-main-2026.board.eth';
   const used = { teeUrl: '', storageUrl: 'https://files.example/bucket', bucket: 'bucket' };
@@ -768,7 +1001,34 @@ describe('step 1 on a name route, the name', () => {
     value: { name, label: 'jee-main-2026', parent: 'board.eth', examId, registry: registryAddress, board: `0x${'bb'.repeat(20)}`, teeUrl: null, storageUrl: 'https://files.example/bucket', bucket: null, arkivWriters: null, arkivWritersIgnored: [] },
   };
   const named = (result: NameView['result'], over: Scene = {}) =>
-    custody({ ...sceneView(over), name: { name, result, used } });
+    custody({ ...sceneView(over), name: { name, result, used, configuredRegistry: '' } });
+
+  describe('with a registry other than the one this page is set up to read', () => {
+    const other = `0x${'cd'.repeat(20)}`;
+    const set = (result: NameView['result'], configuredRegistry: string) => custody({ ...sceneView(), name: { name, result, used, configuredRegistry } });
+    const ready: NameView['result'] = { state: 'ready', value: passed, readAt: 0 };
+
+    it('warns on the main view, and keeps the Sepolia line', () => {
+      const result = set(ready, other);
+      expect(result.warnings).toEqual([expect.stringContaining('different exam record')]);
+      expect(step(result, 'name').aside).toContain('Sepolia');
+      expect(step(result, 'name').state).toBe('done');
+      expect(step(result, 'name').items).toContainEqual(expect.objectContaining({ kind: 'hash', value: other }));
+    });
+
+    it('warns too when the name went on to fail', () => {
+      const failed: ExamNameResult = { ok: false, failed: 'primaryName', reason: 'no', partial: { registry: registryAddress } };
+      const result = set({ state: 'ready', value: failed, readAt: 0 }, other);
+      expect(result.warnings).toHaveLength(1);
+      expect(step(result, 'name').aside).toContain('Sepolia');
+    });
+
+    it('says nothing when they match in any case, or none is set', () => {
+      expect(set(ready, registryAddress.toUpperCase().replace('0X', '0x')).warnings).toEqual([]);
+      expect(set(ready, '').warnings).toEqual([]);
+      expect(set({ state: 'loading' }, other).warnings).toEqual([]);
+    });
+  });
 
   it('passes first, and the exam then runs as usual', () => {
     const result = named({ state: 'ready', value: passed, readAt: 0 }, { round: END, proof: opened() });
@@ -783,28 +1043,23 @@ describe('step 1 on a name route, the name', () => {
     ]);
     const tags = step(result, 'name').items.filter((item) => item.kind === 'tag');
     expect(tags.map((item) => item.kind === 'tag' && [item.label, item.tag])).toEqual([
-      ['Live machine address, the TEE URL', 'Your own choice'],
-      ['Where the public files are kept, the storage URL', 'From the name'],
-      ['File store bucket', 'Built into this page'],
+      ['TEE URL', 'From your settings'],
+      ['Storage URL', 'From the name'],
+      ['Storage bucket', 'Built into this page'],
     ]);
-    expect(step(result, 'name').aside).toMatch(/test network/);
+    expect(step(result, 'name').aside).toMatch(/Sepolia/);
   });
 
   it.each([
     ['name', 'Not a valid name'],
-    ['registry', 'No registry'],
-    ['primaryName', 'Primary name differs'],
-    ['forward', 'Not verified both ways'],
+    ['registry', 'No exam record'],
+    ['primaryName', 'Not the board’s name'],
+    ['forward', 'Not confirmed by the board'],
   ] as [ExamNameCheck, string][])('a failed %s check fails it, holds every later step and shows no seal', (check, title) => {
     const value: ExamNameResult = { ok: false, failed: check, reason: 'Because.', partial: { name } };
     const result = named({ state: 'ready', value, readAt: 0 }, { round: END, proof: opened() });
     expect(step(result, 'name').state).toBe('failed');
-    expect(result.failures).toHaveLength(1);
-    expect(result.failures[0]).toMatchObject({ step: 1, label: 'Exam name' });
-    // The plain sentence leads, and the reader's own reason stays in the folded detail.
-    expect(result.failures[0]?.message).toMatch(new RegExp(`^${title}\\. \\w`));
-    expect(result.failures[0]?.message).not.toContain('Because.');
-    expect(checks(step(result, 'name')).find((c) => c.status === 'fail')?.detail).toBe('Because.');
+    expect(result.failures).toEqual([{ step: 1, label: 'Name', message: expect.stringMatching(new RegExp(`^${title}\\. `)) as string }]);
     expect(states(result).slice(1)).toEqual(Array(7).fill('waiting'));
     expect(result.steps.slice(1).flatMap(checks).filter((c) => c.status === 'pass')).toEqual([]);
     expect(result.headline).toBe('This name does not lead to a verified exam.');
@@ -812,12 +1067,23 @@ describe('step 1 on a name route, the name', () => {
     expect(result.seal).toBe(null);
   });
 
+  it('counts its own step in the references that name a later one', () => {
+    const live = liveReport(false);
+    const text = (result: Custody) =>
+      result.steps.flatMap((s) => s.items).flatMap((item) => (item.kind === 'text' ? [item.text] : []));
+    const plain = custody(sceneView({ live }));
+    const namedView = named({ state: 'ready', value: passed, readAt: 0 }, { live });
+    expect(text(plain).filter((line) => line.includes('See step 2'))).not.toEqual([]);
+    expect(text(namedView).filter((line) => line.includes('See step 3'))).not.toEqual([]);
+    expect(text(namedView).filter((line) => line.includes('See step 2'))).toEqual([]);
+  });
+
   it.each([
     ['not connected', { state: 'off' }, 'This page cannot read the public record yet.'],
     ['reading', { state: 'loading' }, 'Checking the exam name.'],
     ["can't read ENS", { state: 'error', message: 'RPC down' }, 'The exam name could not be read.'],
   ] as const)('%s is neutral, with no Pass and no seal', (_, polled, headline) => {
-    const result = custody({ ...sceneView(), examId: null, records: { state: 'off' }, name: { name, result: polled, used } });
+    const result = custody({ ...sceneView(), examId: null, records: { state: 'off' }, name: { name, result: polled, used, configuredRegistry: '' } });
     expect(result.headline).toBe(headline);
     expect(step(result, 'name').state).toBe('current');
     expect(result.failures).toEqual([]);

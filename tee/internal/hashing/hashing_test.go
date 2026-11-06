@@ -43,6 +43,7 @@ type value struct {
 
 func b32(b byte) value    { return value{fixed: bytes.Repeat([]byte{b}, 32)} }
 func u32(n uint32) value  { return value{fixed: word(uint64(n))} }
+func u64(n uint64) value  { return value{fixed: word(n)} }
 func dyn(b []byte) value  { return value{dynamic: b} }
 func text(s string) value { return dyn([]byte(s)) }
 
@@ -195,16 +196,16 @@ func TestSignedMessageLayouts(t *testing.T) {
 			[]value{text("paperseal/v1/question-receipt"), b32(1), dyn(k), b32(2)}},
 		{"build", Build(BuildFields{
 			ExamID: fill(1), ApprovedListHash: fill(2), PaperHash: fill(3), StorageManifestHash: fill(4),
-			SaltedPaperHash: fill(5), Selected: 20, BankSize: 240, CriteriaHash: fill(6),
-		}), []value{text("paperseal/v1/build"), b32(1), b32(2), b32(3), b32(4), b32(5), u32(20), u32(240), b32(6)}},
+			SaltedPaperHash: fill(5), Selected: 20, BankSize: 240, CriteriaHash: fill(6), BuiltRound: 35732267,
+		}), []value{text("paperseal/v1/build"), b32(1), b32(2), b32(3), b32(4), b32(5), u32(20), u32(240), b32(6), u64(35732267)}},
 		{"saltedPaperHash", msg(SaltedPaper(fill(1), []byte{0xaa})),
 			[]value{text("paperseal/v1/paper-hash"), b32(1), dyn([]byte{0xaa})}},
 		{"shareHash", msg(ShareHash([]byte{0xaa})),
 			[]value{text("paperseal/v1/share-hash"), dyn([]byte{0xaa})}},
 		{"shareRelease", msg(ShareRelease(fill(1), []byte{0xaa})),
 			[]value{text("paperseal/v1/share-release"), b32(1), dyn([]byte{0xaa})}},
-		{"releaseLog", ReleaseLog(fill(1), fill(2)),
-			[]value{text("paperseal/v1/release-log"), b32(1), b32(2)}},
+		{"releaseLog", ReleaseLog(fill(1), fill(2), fill(3)),
+			[]value{text("paperseal/v1/release-log"), b32(1), b32(2), b32(3)}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

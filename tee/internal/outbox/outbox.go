@@ -28,6 +28,7 @@ type Message struct {
 	Selected            uint32
 	BankSize            uint32
 	CriteriaHash        [32]byte
+	BuiltRound          uint64
 	TEESignature        [64]byte
 	InstancePublicKey   []byte
 }

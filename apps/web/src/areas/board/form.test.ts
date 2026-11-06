@@ -54,7 +54,7 @@ describe('evaluateBlueprint', () => {
     ['a space', 'Maths 2026', /lowercase letters, digits and hyphens, like jee-main-2026/],
     ['capitals', 'JEE-Main-2026', /Did you mean jee-main-2026\?/],
     ['a dot', 'jee.main', /can't contain a dot/],
-    ['nothing', '', /Enter a name for the exam/],
+    ['nothing', '', /Enter a name/],
   ])('refuses a name with %s, as one ENS label must', (_label, name, message) => {
     const result = evaluateBlueprint(blueprint({ name }));
     expect(result.nameError).toMatch(message);
@@ -116,6 +116,9 @@ describe('evaluateSchedule', () => {
   it('rejects a lock time after unlock, an end before T, and a past lock time', () => {
     expect(evaluateSchedule({ ...input, lockTime: '2027-03-14 09:20' }, now).scheduleError).toMatch(/Questions must close before/);
     expect(evaluateSchedule({ ...input, endTime: '2027-03-14 09:00' }, now).scheduleError).toBeTruthy();
+    expect(evaluateSchedule({ ...input, deltaMinutes: '1441' }, now).scheduleError).toMatch(/at most 24 hours before the exam/);
+    expect(evaluateSchedule({ ...input, deltaMinutes: '1440', lockTime: '2027-03-13 08:00' }, now).settings).not.toBeNull();
+    expect(evaluateSchedule({ ...input, endTime: '2027-03-21 10:00' }, now).scheduleError).toMatch(/within 7 days of its start/);
     expect(evaluateSchedule(input, parseLocalTime('2027-03-02 00:00') ?? 0).scheduleError).toMatch(/in the past/);
     expect(evaluateSchedule({ ...input, deltaMinutes: '0' }, now).errors.deltaMinutes).toBeTruthy();
   });

@@ -1,5 +1,5 @@
 import { examIdFromName, roundTimeSeconds, type Hex } from '@paperseal/protocol';
-import { Check, Countdown, CopyButton, Panel, Row, Rows, Stage, type SealState } from '@paperseal/ui';
+import { Check, Countdown, CopyButton, Row, Rows, Stage, type SealState } from '@paperseal/ui';
 import { Link } from 'react-router';
 
 import { useCurrentExamId } from '../../shared/currentExam';
@@ -9,7 +9,7 @@ import { ExamRecord } from './ExamRecord';
 import type { Snapshot } from './examState';
 import { useNow } from './hooks';
 import { sayOf } from './details';
-import { CopyValue } from './Parts';
+import { Fold } from './Parts';
 import {
   ensRecords,
   examNamePlaceholder,
@@ -26,6 +26,20 @@ export function sealStateAt(nowMs: number, unlockMs: number, endMs: number): Sea
   return nowMs < endMs ? 'opening' : 'open';
 }
 
+/** A value shown in full, with a button that copies it once it is known. */
+function RecordValue(props: { what: string; known: boolean; value: string }) {
+  return (
+    <span className="board-link">
+      <span className="ps-mono">{props.value}</span>
+      {props.known ? (
+        <CopyButton text={props.value} aria-label={`Copy ${props.what}`}>
+          Copy
+        </CopyButton>
+      ) : null}
+    </span>
+  );
+}
+
 /**
  * The records to set for an optional ENS name, from "Exam Names" in spec/api.md. Nothing here reads
  * ENS: the board sets the name itself, and the verifier checks it. `examName` is null when this
@@ -34,18 +48,20 @@ export function sealStateAt(nowMs: number, unlockMs: number, endMs: number): Sea
 function EnsName(props: { examName: string | null; registryAddress: Hex | null; verifier: string | null }) {
   const label = props.examName ?? examNamePlaceholder;
   return (
-    <Panel title="Give this exam an ENS name (optional)">
+    <Fold summary="Give this exam an ENS name (optional)">
       <p className="board-note">
-        Using the board wallet, set these records for <span className="ps-mono">{label}.&lt;your primary name&gt;</span> on
-        your name's resolver. With ENS v2 there is nothing to create first. Anyone can then check this exam by its name on
-        the public page. See docs/ens-setup.md.
+        Anyone can then check this exam by its name on the public page. With the board wallet, set these records for{' '}
+        <span className="ps-mono">{label}.&lt;your primary name&gt;</span> on your name's resolver. With ENS v2 there is
+        nothing to create first. See docs/ens-setup.md.
       </p>
       <Rows>
-        <Row label="Subname">{props.examName ? <CopyValue what="subname" value={props.examName} /> : <span className="ps-mono">{label}</span>}</Row>
+        <Row label="Subname">
+          <RecordValue what="subname" known={props.examName !== null} value={label} />
+        </Row>
         {ensRecords(props.registryAddress).map((entry) => (
           <Row key={entry.record} label={entry.record}>
             {entry.value ? (
-              <CopyValue what={entry.record} value={entry.value} />
+              <RecordValue what={entry.record} known value={entry.value} />
             ) : (
               <Check status="not-checked">{`Not set up yet. Ask whoever installed Paper Seal to set ${entry.setting}.`}</Check>
             )}
@@ -57,7 +73,7 @@ function EnsName(props: { examName: string | null; registryAddress: Hex | null; 
           </Row>
         ) : null}
       </Rows>
-    </Panel>
+    </Fold>
   );
 }
 
@@ -125,7 +141,7 @@ export function StatusStep(props: { eyebrow: string; snapshot: Snapshot }) {
       <EnsName examName={named} registryAddress={environment.registryAddress} verifier={verifierUrl()} />
       <ExamRecord snapshot={snapshot} />
       <p className="board-quiet">
-        <Link to="/board/blueprint">Set up another exam</Link>
+        <Link to="/board/new">Set up another exam</Link>
       </p>
     </Stage>
   );

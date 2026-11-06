@@ -19,8 +19,6 @@ describe('keyholderStage', () => {
     ['no key is registered here and the exam has ended', { credential: null, ended: true }, 'ended'],
     ['no key is registered here and the record has not answered', { credential: null, chain: { value: null, error: null, settled: false } }, 'loading'],
     ['no key is registered here and the record is down', { credential: null, chain: { value: null, error: 'down', settled: true } }, 'register'],
-    ['a new invitation is open after the exam has ended', { registering: true, ended: true }, 'ended'],
-    ['a new invitation is open before it ends', { registering: true }, 'register'],
     ['the public record has not answered', { chain: { value: null, error: null, settled: false } }, 'loading'],
     ['the public record is down', { chain: { value: null, error: 'down', settled: true } }, 'unreachable'],
     ['the exam is not published', { chain: chain(facts(roles.neutral, { unlockRound: null })) }, 'no-exam'],
@@ -112,7 +110,6 @@ describe('KeyholderView', () => {
     view({ chain: chain(facts(roles.neutral, { listPosted: false, entry: null })) });
     expect(screen.getByRole('heading', { name: 'You are registered. Nothing to do yet.' })).toBeTruthy();
     expect(screen.queryByRole('button')).toBeNull();
-    expect(screen.getByText(/ask your exam board for a new invitation link/)).toBeTruthy();
   });
 
   it('names the person when their key is not on the list', () => {

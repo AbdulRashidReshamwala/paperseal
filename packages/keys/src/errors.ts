@@ -3,6 +3,8 @@ export type KeyErrorCode =
   | 'prf_unavailable'
   | 'ceremony_failed'
   | 'unsupported_key'
+  | 'already_enrolled'
+  | 'wrong_key'
   | 'malformed_authenticator_data';
 
 export class KeyError extends Error {

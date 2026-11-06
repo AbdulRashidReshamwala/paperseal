@@ -43,7 +43,7 @@ describe('Register by role', () => {
   it('asks a setter for no name and says it is never published', async () => {
     const keys = makeKeys();
     const onRegistered = vi.fn();
-    render(<Register role="setter" examId={examId} tee={makeTee()} keys={keys} invite={invite('setter')} onRegistered={onRegistered} />);
+    render(<Register examId={examId} tee={makeTee()} keys={keys} invite={invite('setter')} onRegistered={onRegistered} />);
     expect(screen.queryByRole('textbox')).toBeNull();
     expect(screen.getByText(/Your name is not published/)).toBeTruthy();
     expect(screen.getAllByRole('button')).toHaveLength(1);
@@ -55,29 +55,10 @@ describe('Register by role', () => {
     expect(loadCredential(examId, 'setter')?.owner).toBe(setterOwner(fromHex(passkey)));
   });
 
-  it.each(['keyholder', 'centre'] as const)('tells a %s who they register as, with one button and nothing to type', async (role) => {
-    const keys = makeKeys();
-    render(<Register role={role} examId={examId} tee={makeTee()} keys={keys} invite={invite(role, 'Centre One')} />);
-    expect(screen.queryByRole('textbox')).toBeNull();
-    expect(screen.getByText(/Centre One/)).toBeTruthy();
-    expect(screen.getAllByRole('button')).toHaveLength(1);
-    expect(screen.getByText(/public list for this exam/)).toBeTruthy();
-
-    fireEvent.click(button());
-    expect(await screen.findByText('Your security key is registered')).toBeTruthy();
-    expect(screen.getByText('Registered as Centre One.')).toBeTruthy();
-    expect(keys.register).toHaveBeenCalledWith({
-      role: 'holder',
-      owner: 'Centre One',
-      challenge: fromHex(challenge),
-      inviteSecret: fromHex(inviteSecret),
-    });
-  });
-
   it('remembers nothing if the sealed system refuses, and explains in plain words', async () => {
     const tee = makeTee();
     tee.register.mockRejectedValueOnce(new TeeApiError(403, 'closed', 'registration is closed'));
-    render(<Register role="setter" examId={examId} tee={tee} keys={makeKeys()} invite={invite('setter')} />);
+    render(<Register examId={examId} tee={tee} keys={makeKeys()} invite={invite('setter')} />);
     fireEvent.click(button());
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toContain('Contact your exam board');
@@ -90,13 +71,13 @@ describe('Register by role', () => {
     const keys = makeKeys();
     keys.register.mockRejectedValueOnce(new DOMException('cancelled', 'NotAllowedError'));
     Object.defineProperty(navigator, 'credentials', { value: {}, configurable: true });
-    render(<Register role="setter" examId={examId} tee={makeTee()} keys={keys} invite={invite('setter')} />);
+    render(<Register examId={examId} tee={makeTee()} keys={keys} invite={invite('setter')} />);
     fireEvent.click(button());
     expect(await screen.findByText('No security key answered')).toBeTruthy();
   });
 
   it('says so when there is no exam or sealed system to register with', () => {
-    render(<Register role="setter" examId={null} tee={null} keys={makeKeys()} />);
+    render(<Register examId={null} tee={null} keys={makeKeys()} />);
     expect(screen.getByText(/isn’t connected to an exam yet/)).toBeTruthy();
     expect(screen.queryByRole('button')).toBeNull();
   });

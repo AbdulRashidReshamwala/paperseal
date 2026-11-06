@@ -11,8 +11,9 @@ import { CentreView } from './CentreArea';
 import type { Downloaded } from './download';
 import { centreStage, sealFor, type CentreInputs } from './stage';
 import { isUnavailable, type Files } from './useDownload';
+import { readCheckedLog, type CheckedLog } from './logCheck';
 import { EARLY_TTL_MS, refusalFor, useOpenPaper, type OpenPaper } from './useOpenPaper';
-import { PaperHashMismatchError, prepareUnlock, unlockPaper, UnlockError } from './unlock';
+import { KeyFileChangedError, PaperHashMismatchError, prepareUnlock, unlockPaper, UnlockError } from './unlock';
 import { StorageVerificationError } from '../../shared/storage';
 
 vi.mock('../../shared/registry', () => ({
@@ -24,6 +25,11 @@ vi.mock('../../shared/config', () => ({ storageUrl: 'https://storage.example', t
 vi.mock('../../shared/holder', () => ({
   listEntryFor: vi.fn(() => Promise.resolve({ role: 3, derivedPublicKey: new Uint8Array(65).fill(1) })),
   useHolderCredential: vi.fn(),
+}));
+vi.mock('../../shared/tee', async (original) => ({ ...(await original<typeof import('../../shared/tee')>()), tee: { releaseLog: vi.fn() } }));
+vi.mock('./logCheck', async (original) => ({
+  ...(await original<typeof import('./logCheck')>()),
+  readCheckedLog: vi.fn(() => Promise.reject(new Error('The log is out of reach.'))),
 }));
 vi.mock('./unlock', async (original) => ({ ...(await original<typeof import('./unlock')>()), unlockPaper: vi.fn(),
   prepareUnlock: vi.fn(() => Promise.resolve({ kPub: new Uint8Array(32).fill(7), sealedKeyPriv: new Uint8Array(1), preparedAt: Date.now() })),
@@ -253,6 +259,13 @@ describe('refusalFor', () => {
     expect(refusalFor(null, new Error('no')).canRetry).toBe(true);
   });
 
+  it('says a changed key file was changed, not that it has not arrived', () => {
+    const refusal = refusalFor(null, new KeyFileChangedError('it does not match the signed release log.'));
+    expect(refusal.title).toContain('has been changed');
+    expect(refusal.why).toContain('your security key was not used');
+    expect(refusal.contact).toContain('exam board');
+  });
+
   it('always names the exam board', () => {
     for (const error of [new PaperHashMismatchError(), new UnlockError('timelock', 'x'), new Error('x')]) {
       expect(refusalFor(null, error).contact).toContain('exam board');
@@ -339,6 +352,55 @@ describe('useOpenPaper', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe('the release log', () => {
+    const log = { files: [] } as unknown as CheckedLog['log'];
+    const checked = vi.mocked(readCheckedLog);
+    const pressed = async (ahead: boolean) => {
+      mocked.mockResolvedValue(paper);
+      const { result } = opener();
+      if (ahead) {
+        act(() => {
+          result.current.prepare();
+        });
+        await waitFor(() => {
+          expect(checked).toHaveBeenCalled();
+        });
+      }
+      act(() => {
+        result.current.start();
+      });
+      await waitFor(() => {
+        expect(result.current.paper).toEqual(paper);
+      });
+      return mocked.mock.calls[0]?.[0].verifiedLog;
+    };
+
+    afterEach(() => {
+      checked.mockReset();
+      checked.mockImplementation(() => Promise.reject(new Error('The log is out of reach.')));
+    });
+
+    it.each([
+      ['got ahead of the press', true],
+      ['got at the press', false],
+    ])('passes a verified log on when %s', async (_name, ahead) => {
+      checked.mockResolvedValue({ log, verdict: { pass: true } as CheckedLog['verdict'] });
+      expect(await pressed(ahead)).toBe(log);
+    });
+
+    it.each([
+      ['got ahead of the press', true],
+      ['got at the press', false],
+    ])('opens without a log that can not be read when %s', async (_name, ahead) => {
+      expect(await pressed(ahead)).toBeNull();
+    });
+
+    it('does not pass on a log that failed its checks', async () => {
+      checked.mockResolvedValue({ log, verdict: { pass: false } as CheckedLog['verdict'] });
+      expect(await pressed(false)).toBeNull();
+    });
   });
 
   it('holds no paper when the hash check fails', async () => {

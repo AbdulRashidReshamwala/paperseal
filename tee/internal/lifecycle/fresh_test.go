@@ -33,7 +33,7 @@ func built(t *testing.T) (*world, chainread.Build, *attestation.Keys) {
 	b := chainread.Build{
 		ApprovedListHash: [32]byte(f.ApprovedListHash), PaperHash: [32]byte(f.PaperHash),
 		StorageManifestHash: [32]byte(f.StorageManifestHash), SaltedPaperHash: [32]byte(f.SaltedPaperHash),
-		Selected: f.Selected, BankSize: f.BankSize, CriteriaHash: [32]byte(f.CriteriaHash),
+		Selected: f.Selected, BankSize: f.BankSize, CriteriaHash: [32]byte(f.CriteriaHash), BuiltRound: f.BuiltRound,
 		TEESignature: msg.TEESignature, InstancePublicKey: msg.InstancePublicKey,
 	}
 	return w, b, keys
@@ -194,6 +194,10 @@ func TestFreshInstanceRefusesAnUnverifiedBuild(t *testing.T) {
 		},
 		"another criteria hash": func(w *world, b *chainread.Build) func(*lifecycle.Config) {
 			b.CriteriaHash[0] ^= 1
+			return nil
+		},
+		"another built round": func(w *world, b *chainread.Build) func(*lifecycle.Config) {
+			b.BuiltRound++
 			return nil
 		},
 		"a key the token does not bind": func(w *world, b *chainread.Build) func(*lifecycle.Config) {

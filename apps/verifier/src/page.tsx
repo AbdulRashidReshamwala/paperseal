@@ -1,7 +1,7 @@
 import { createArkivReader } from '@paperseal/arkiv';
-import { resolveExamName, type ExamNameResult } from '@paperseal/chain';
+import { checkPasskeyName, resolveExamName, type ExamNameResult, type PasskeyNameResult } from '@paperseal/chain';
 import { createSwarmClient } from '@paperseal/swarm';
-import { requireHardwareAttestation, type Hex, type Paper } from '@paperseal/protocol';
+import { ownerEnsName, requireHardwareAttestation, roles, toHex, type Hex, type Paper } from '@paperseal/protocol';
 import {
   Button,
   Check,
@@ -23,8 +23,9 @@ import { clockTime, custody, dayTime, REPOSITORY, type Custody, type CustodyStep
 import { Evidence } from './evidence';
 import { useExamLink } from './link';
 import { useLatestRound, useNow } from './live';
-import { loadArkiv, loadLive, loadRecords, useProof, type Records } from './load';
+import { loadArkiv, loadLive, loadRecords, signedKeyPriv, useProof, type Records } from './load';
 import { usePoll, type Polled } from './poll';
+import { approvedEntries } from './commitments';
 import { createStorage } from './storage';
 import {
   arkivWriters,
@@ -58,6 +59,25 @@ function useExamName(name: string | null, rpcUrl: string, everyMs: number): Poll
   }, [name, rpcUrl]);
   const polled = usePoll(load, everyMs);
   return name === null ? undefined : polled;
+}
+
+/**
+ * Reads each listed party's ENS name against its security key, with the viewer's own RPC and nothing
+ * else. Setters have no name. A name is a label and a proof of who holds a key, never a check the exam
+ * depends on, so every answer comes back as a result and a failed read never fails anything.
+ */
+function usePartyNames(entries: Hex | null, rpcUrl: string, everyMs: number): Polled<Record<string, PasskeyNameResult>> {
+  const load = useMemo(() => {
+    const listed = approvedEntries(entries ?? null) ?? [];
+    const named = listed.flatMap((entry) => {
+      const name = entry.role === roles.setter ? null : ownerEnsName(entry.owner);
+      return name ? [{ name, key: toHex(entry.passkeyPublicKey) }] : [];
+    });
+    if (named.length === 0 || !rpcUrl) return null;
+    return async () =>
+      Object.fromEntries(await Promise.all(named.map(async ({ name, key }) => [key, await checkPasskeyName(name, key, { rpcUrl })] as const)));
+  }, [entries, rpcUrl]);
+  return usePoll(load, everyMs);
 }
 
 function useExamView(pollMs: { records: number; live: number; proofRetry?: number }) {
@@ -130,6 +150,7 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
   const records = usePoll(loadRecordsNow, pollMs.records);
 
   const chain = records.state === 'ready' ? records.value.chain : null;
+  const partyNames = usePartyNames(chain?.entries ?? null, settings.rpcUrl, pollMs.records);
   const chainRef = useRef<ChainData | null>(chain);
   useEffect(() => {
     chainRef.current = chain;
@@ -156,6 +177,7 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
     examId,
     client: drand,
     chain,
+    keyPrivSha256: records.state === 'ready' ? signedKeyPriv(records.value.log) : null,
     latest,
     now,
     backup,
@@ -165,9 +187,10 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
   return {
     examId,
     invalidLink: link.kind === 'invalid',
-    ...(link.kind === 'name' && name ? { name: { name: link.name, result: name, used: { teeUrl, storageUrl, bucket } } } : {}),
+    ...(link.kind === 'name' && name ? { name: { name: link.name, result: name, used: { teeUrl, storageUrl, bucket }, configuredRegistry: settings.registryAddress } } : {}),
     sources: { chain: registry !== null, storage: storage !== null, tee: tee !== null, arkiv: arkivReader !== null },
     records,
+    partyNames,
     live,
     arkiv: arkivRead,
     arkivWriters: writers,
@@ -234,6 +257,17 @@ function FailureAlarm({ failures }: { failures: readonly Failure[] }) {
         ))}
       </ul>
     </section>
+  );
+}
+
+function Warnings({ warnings }: { warnings: readonly string[] }) {
+  if (warnings.length === 0) return null;
+  return (
+    <ul className="vf-warnings" role="status">
+      {warnings.map((warning) => (
+        <li key={warning}>{warning}</li>
+      ))}
+    </ul>
   );
 }
 
@@ -478,6 +512,7 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
       <RoleHeader role="Public record" {...(exam ? { exam } : {})} note="Anyone can check this" />
       <main>
         <FailureAlarm failures={result.failures} />
+        <Warnings warnings={result.warnings} />
         <Head view={result} zone={zoneName()} />
         {view.records.state === 'error' ? (
           <p className="vf-gap">

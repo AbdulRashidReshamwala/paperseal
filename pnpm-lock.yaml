@@ -230,6 +230,9 @@ importers:
       '@hpke/core':
         specifier: 1.10.0
         version: 1.10.0
+      '@noble/curves':
+        specifier: 1.9.7
+        version: 1.9.7
       '@paperseal/protocol':
         specifier: workspace:*
         version: link:../protocol
@@ -246,6 +249,9 @@ importers:
         specifier: workspace:*
         version: link:../protocol
     devDependencies:
+      '@noble/curves':
+        specifier: 1.9.7
+        version: 1.9.7
       playwright-core:
         specifier: 1.64.1
         version: 1.64.1

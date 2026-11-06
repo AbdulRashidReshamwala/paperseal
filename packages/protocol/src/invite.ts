@@ -3,32 +3,33 @@ import { sha256 } from '@noble/hashes/sha2.js';
 
 import { equalBytes, fromHex, toHex, utf8ToBytes } from './bytes';
 import { roles, setterOwner, type ApprovedListEntry } from './encoding';
-import { limits, threshold } from './constants';
+import { limits } from './constants';
 import type { Hex } from './types';
 
 /*
- * Invites, from "Invites" in spec/api.md. An invite is a random 32-byte secret plus the role and the
- * owner it was made for, sent as a link whose URL fragment holds all of it, so no server sees it.
+ * Invites, from "Invites" in spec/api.md. Only setters are invited. An invite is a random 32-byte
+ * secret plus its role, sent as a link whose URL fragment holds all of it, so no server sees it.
  * `inviteTag = HMAC-SHA-256(inviteSecret, passkeyPublicKey)` is signed into the `registration`
- * message, and the board recomputes it from its own copy of the invite.
+ * message, and the board recomputes it from its own copy of the invite. Key holders and centres have
+ * a permanent ENS name instead, and register with `noInviteTag` (spec/api.md, "Party Names").
  *
  * Link shape (a design choice the spec leaves open): the app routes on the fragment, so the invite is
- * the query of the `/join` route: `<page>#/join?exam=0x..&role=keyholder&owner=Name&secret=0x..`.
+ * the query of the `/join` route: `<page>#/join?exam=0x..&role=setter&secret=0x..`.
  */
 
 export const inviteSecretBytes = 32;
 /** The TEE refuses an `owner` longer than this many UTF-8 bytes, `limits.ownerBytes`, the same cap the approved list has. */
 export const maxOwnerBytes = limits.ownerBytes;
 
-export const inviteRoles = ['setter', 'keyholder', 'centre'] as const;
-/** The part someone is invited to play. The board decides the list `role` (spec/api.md) later. */
+/** `inviteTag` of a registration by name: 32 zero bytes, which keeps the field in the signed message. */
+export const noInviteTag: Uint8Array = new Uint8Array(inviteSecretBytes);
+
+export const inviteRoles = ['setter'] as const;
 export type InviteRole = (typeof inviteRoles)[number];
 
 export interface Invite {
   examId: Hex;
   role: InviteRole;
-  /** Absent for a setter, whose `owner` is its `setterOwner` hash. Always present otherwise. */
-  owner?: string;
   inviteSecret: Hex;
 }
 
@@ -74,17 +75,11 @@ export function ownerProblem(owner: string): string | null {
 export function checkInvite(invite: Invite): void {
   if (!hex32.test(invite.examId)) throw new InviteError('The exam is not 32 bytes of lowercase hex.');
   if (!hex32.test(invite.inviteSecret)) throw new InviteError('The secret is not 32 bytes of lowercase hex.');
-  if (!inviteRoles.includes(invite.role)) throw new InviteError('The role is not setter, keyholder or centre.');
-  if (invite.role === 'setter') {
-    if (invite.owner !== undefined) throw new InviteError('A setter invite has no name.');
-    return;
-  }
-  if (invite.owner === undefined) throw new InviteError('The invite has no name.');
-  const problem = ownerProblem(invite.owner);
-  if (problem) throw new InviteError(problem);
+  if (!inviteRoles.includes(invite.role)) throw new InviteError('Only setters are invited by link.');
 }
 
 const joinPrefix = '#/join?';
+const linkKeys = ['exam', 'role', 'secret'];
 
 /** The fragment of an invite link, `#/join?...`. Validates first. */
 export function encodeInviteFragment(invite: Invite): string {
@@ -92,7 +87,6 @@ export function encodeInviteFragment(invite: Invite): string {
   const params = new URLSearchParams();
   params.set('exam', invite.examId);
   params.set('role', invite.role);
-  if (invite.owner !== undefined) params.set('owner', invite.owner);
   params.set('secret', invite.inviteSecret);
   return `${joinPrefix}${params.toString()}`;
 }
@@ -114,32 +108,24 @@ export function decodeInviteFragment(fragment: string): Invite {
     if (seen.has(key)) throw new InviteError(`The link repeats ${key}.`);
     seen.set(key, value);
   }
-  const role = seen.get('role');
-  const allowed = role === 'setter' ? ['exam', 'role', 'secret'] : ['exam', 'role', 'owner', 'secret'];
   for (const key of seen.keys()) {
-    if (!allowed.includes(key)) throw new InviteError(`The link has an unexpected part, ${key}.`);
+    if (!linkKeys.includes(key)) throw new InviteError(`The link has an unexpected part, ${key}.`);
   }
-  for (const key of allowed) {
+  for (const key of linkKeys) {
     if (!seen.has(key)) throw new InviteError(`The link is missing ${key}.`);
   }
-  const owner = seen.get('owner');
   const invite = {
     examId: seen.get('exam') as Hex,
-    role: role as InviteRole,
-    ...(owner === undefined ? {} : { owner }),
+    role: seen.get('role') as InviteRole,
     inviteSecret: seen.get('secret') as Hex,
   };
   checkInvite(invite);
   return invite;
 }
 
-/**
- * Whether `registration` belongs to `invite`: its tag is the HMAC of the invite's secret over its
- * own passkey, and its owner is the invite's owner, or for a setter the `setterOwner` hash of its
- * passkey. A holder invite also needs a derived key, and a setter invite none.
- */
+/** Whether `registration` belongs to `invite`: its tag is the HMAC of the invite's secret over its own passkey, its owner is that passkey's `setterOwner` hash, and it has no derived key. */
 export function registrationMatchesInvite(
-  invite: Pick<Invite, 'role' | 'owner' | 'inviteSecret'>,
+  invite: Pick<Invite, 'inviteSecret'>,
   registration: { owner: string; passkeyPublicKey: Hex; derivedPublicKey: Hex; inviteTag: Hex },
 ): boolean {
   if (!hex32.test(registration.inviteTag)) return false;
@@ -151,9 +137,7 @@ export function registrationMatchesInvite(
   }
   if (passkey.length !== 65 || passkey[0] !== 0x04) return false;
   if (!equalBytes(inviteTag(fromHex(invite.inviteSecret), passkey), fromHex(registration.inviteTag))) return false;
-  const holder = registration.derivedPublicKey !== '0x';
-  if (invite.role === 'setter') return !holder && registration.owner === setterOwner(passkey);
-  return holder && registration.owner === invite.owner;
+  return registration.derivedPublicKey === '0x' && registration.owner === setterOwner(passkey);
 }
 
 /* ------------------------------------------------------------------ Matching */
@@ -166,8 +150,8 @@ export interface TaggedRegistration {
   inviteTag: Hex;
 }
 
-/** What the board keeps of an invite to match against: its role, its owner and its secret. */
-export type InviteSecret = Pick<Invite, 'role' | 'owner' | 'inviteSecret'>;
+/** What the board keeps of an invite to match against. */
+export type InviteSecret = Pick<Invite, 'inviteSecret'>;
 
 export type InviteState<R extends TaggedRegistration = TaggedRegistration> =
   | { kind: 'waiting' }
@@ -178,7 +162,7 @@ export type InviteState<R extends TaggedRegistration = TaggedRegistration> =
 export interface Matching<I extends InviteSecret = InviteSecret, R extends TaggedRegistration = TaggedRegistration> {
   /** One row per invite, in the order given. */
   rows: { invite: I; state: InviteState<R> }[];
-  /** Registrations that fit no invite: nobody invited, a copied tag, another name, or the wrong kind of key. */
+  /** Registrations that fit no invite: a party, nobody invited, a copied tag, or the wrong kind of key. */
   unmatched: R[];
 }
 
@@ -211,38 +195,15 @@ export function matchInvites<I extends InviteSecret, R extends TaggedRegistratio
   return { rows, unmatched: registrations.filter((registration) => !claimed.has(registration.passkeyPublicKey)) };
 }
 
-/**
- * The list `role` for each matched registration, by passkey. A setter and a neutral party take the
- * role their invite names. A centre takes a share place while one is free, in invite order, and after
- * that none: a centre without a share receives the paper's key at unlock, so that is the board's choice.
- */
-export function listRolesFor(matching: Matching): Record<string, number> {
-  const picked: Record<string, number> = {};
-  let centres = 0;
-  for (const { invite, state } of matching.rows) {
-    if (state.kind !== 'matched') continue;
-    const key = state.registration.passkeyPublicKey;
-    if (invite.role === 'setter') picked[key] = roles.setter;
-    else if (invite.role === 'keyholder') picked[key] = roles.neutral;
-    else if (centres < threshold.centres) {
-      picked[key] = roles.centreKeyHolder;
-      centres += 1;
-    }
-  }
-  return picked;
-}
-
-/** The approved list entries for the matched registrations, with the roles given. Anyone without one is left out. */
-export function entriesFor(matching: Matching, picked: Readonly<Record<string, number | undefined>>): ApprovedListEntry[] {
+/** The approved list entries for the matched setters. */
+export function setterEntries(matching: Matching): ApprovedListEntry[] {
   return matching.rows.flatMap(({ state }) => {
     if (state.kind !== 'matched') return [];
     const { registration } = state;
-    const role = picked[registration.passkeyPublicKey];
-    if (role === undefined) return [];
     return [
       {
         owner: registration.owner,
-        role,
+        role: roles.setter,
         passkeyPublicKey: fromHex(registration.passkeyPublicKey),
         derivedPublicKey: fromHex(registration.derivedPublicKey),
       },

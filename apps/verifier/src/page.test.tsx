@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import type { ExamNameCheck, ExamNameResult, ResolvedExamName } from '@paperseal/chain';
-import { decodeApprovedList, fromHex, toHex } from '@paperseal/protocol';
+import type { ExamNameCheck, ExamNameResult, PasskeyNameResult, PasskeyNameState, ResolvedExamName } from '@paperseal/chain';
+import { decodeApprovedList, fromHex, passkeyRecordValue, toHex, type Hex } from '@paperseal/protocol';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { getAddress } from 'viem';
@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { teeStorageBucket } from './attest';
 import { VerifierPage } from './page';
-import { buildWorld, examId, offlineQuicknet, registryAddress, signedReleaseLog, type World } from './fixtures';
+import { buildWorld, examId, offlineQuicknet, registryAddress, registryMatches, signedReleaseLog, type World } from './fixtures';
 import type { ArkivSource } from './load';
 import { SettingsProvider, type Settings } from './settings';
 
@@ -27,6 +27,10 @@ vi.mock('./checks', async (original) => ({
   },
 }));
 
+/** What reading a party name against its key comes to. Null runs the real read, which needs an RPC. */
+let passkeyAnswer: ((name: string, key: Hex) => PasskeyNameState) | null = null;
+let passkeyReads: { name: string; key: Hex; rpcUrl: string | undefined }[] = [];
+
 /** What reading an exam name comes to. Null runs the real checks, which need no RPC for a name they refuse. */
 let nameAnswer: ((name: string) => ExamNameResult) | null = null;
 let nameReads: { name: string; rpcUrl: string | undefined }[] = [];
@@ -37,6 +41,12 @@ vi.mock('@paperseal/chain', async (original) => {
     resolveExamName: (name: string, options: { rpcUrl?: string }) => {
       nameReads.push({ name, rpcUrl: options.rpcUrl });
       return nameAnswer ? Promise.resolve(nameAnswer(name)) : real.resolveExamName(name, options);
+    },
+    checkPasskeyName: (name: string, key: Hex, options: { rpcUrl?: string }): Promise<PasskeyNameResult> => {
+      passkeyReads.push({ name, key, rpcUrl: options.rpcUrl });
+      if (!passkeyAnswer) return real.checkPasskeyName(name, key, options);
+      const state = passkeyAnswer(name, key);
+      return Promise.resolve({ state, name, expected: passkeyRecordValue(key), reason: state });
     },
   };
 });
@@ -97,6 +107,7 @@ const settings: Settings = {
 
 function arrange(world: World, files: Record<string, Uint8Array> = {}) {
   chainData = {
+    registryCode: registryMatches,
     exam: world.exam,
     list: { listHash: world.build.approvedListHash },
     build: world.build,
@@ -149,6 +160,8 @@ afterEach(() => {
   chainReads = [];
   nameAnswer = null;
   nameReads = [];
+  passkeyAnswer = null;
+  passkeyReads = [];
   buckets = [];
   arkivReader = null;
   arkivReaders = [];
@@ -335,7 +348,7 @@ describe('failures', () => {
   it('do not appear for missing data', async () => {
     const world = await buildWorld();
     arrange(world);
-    chainData = { exam: world.exam, list: null, build: null, criteria: world.criteriaHex, entries: null };
+    chainData = { registryCode: registryMatches, exam: world.exam, list: null, build: null, criteria: world.criteriaHex, entries: null };
     vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response('no', { status: 404 }))));
     open(1);
     await findStep(/^3\. People approved$/);
@@ -393,6 +406,37 @@ describe('step 6, unlock', () => {
     const step = await findStep(/^6\. Paper unlocks for centres$/);
     await within(step).findByText(/release-log.json is not in storage yet/);
     expect(within(step).queryByText('Fail')).toBeNull();
+  });
+
+  it('shows each key file from a verified log as a check', async () => {
+    tokenVerified = true;
+    const world = await buildWorld();
+    arrange(world);
+    open(1000);
+    const step = await findStep(/^6\. Paper unlocks for centres$/);
+    await within(step).findByText('Lists the key file and one copy for each centre on the approved list', {}, { timeout: 5000 });
+    expect(within(step).getByText('key-priv.tlock')).toBeTruthy();
+    expect(within(step).getByText('recipient approved-centre.paperseal-demo.eth')).toBeTruthy();
+  });
+
+  it('raises the alarm when a verified log lists a centre copy that was swapped', async () => {
+    tokenVerified = true;
+    const world = await buildWorld();
+    const name = world.releaseLog.files.find((file) => file.name.startsWith('key-priv/'))?.name ?? '';
+    arrange(world, { [name]: new Uint8Array(120) });
+    open(1000);
+    const step = await findStep(/^6\. Paper unlocks for centres$/);
+    expect(await screen.findByRole('alert', {}, { timeout: 5000 })).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toMatch(/The copy of the key for .* was changed after it was recorded/);
+    expect(stateOf(step)).toBe('failed');
+  });
+
+  it('checks no key file until the log has passed', async () => {
+    const world = await buildWorld();
+    arrange(world);
+    open(1000);
+    const step = await findStep(/^6\. Paper unlocks for centres$/);
+    await within(step).findByText('Not checked until the log and its proof pass', {}, { timeout: 5000 });
   });
 
   describe('with the live TEE', () => {
@@ -724,6 +768,44 @@ describe('step 7, proof', () => {
     expect(screen.queryByText('Differentiate x squared.')).toBeNull();
   });
 
+  it('fails, and does not say sealed, when a verified log lists a deleted key-priv.tlock', async () => {
+    tokenVerified = true;
+    const world = await buildWorld();
+    world.files.delete('key-priv.tlock');
+    arrange(world);
+    open(1000);
+    const step = await findStep(/^7\. Paper opens to everyone$/);
+    await waitFor(() => {
+      expect(stateOf(step)).toBe('failed');
+    }, { timeout: 5000 });
+    expect(screen.getByRole('alert').textContent).toMatch(/was removed from the public files after the unlock recorded it/);
+    expect(screen.queryByText('Differentiate x squared.')).toBeNull();
+    expect(document.body.textContent).not.toMatch(/never unlocked/);
+  });
+
+  it('fails, and shows no paper, when a verified log lists a different key-priv.tlock', async () => {
+    tokenVerified = true;
+    const world = await buildWorld();
+    arrange(world, { 'key-priv.tlock': new TextEncoder().encode(await world.seal(world.kPriv)) });
+    open(1000);
+    const step = await findStep(/^7\. Paper opens to everyone$/);
+    await waitFor(() => {
+      expect(stateOf(step)).toBe('failed');
+    }, { timeout: 5000 });
+    expect(screen.getByRole('alert').textContent).toMatch(/was changed after the unlock recorded it/);
+    expect(screen.queryByText('Differentiate x squared.')).toBeNull();
+  });
+
+  it('stays sealed when the log naming key-priv.tlock has not passed its checks', async () => {
+    const world = await buildWorld();
+    world.files.delete('key-priv.tlock');
+    arrange(world);
+    open(1000);
+    const step = await findStep(/^7\. Paper opens to everyone$/);
+    await within(step).findByText(/The paper cannot be opened/, { selector: '.ps-step-note' }, { timeout: 5000 });
+    expect(stateOf(step)).toBe('not-applicable');
+  });
+
   it('says when the paper opens before the end round, and shows no paper', async () => {
     const world = await buildWorld({ endRound: 99_999_999 });
     arrange(world);
@@ -792,13 +874,23 @@ describe('verify by name', () => {
   const failed = (check: ExamNameCheck): ExamNameResult => ({ ok: false, failed: check, reason: 'The record says otherwise.', partial: { name } });
   const noteOf = (step: HTMLElement) => step.querySelector('.ps-step-note')?.textContent ?? '';
 
+  it('warns on the main view when the name leads to another registry than the one set up', async () => {
+    arrange(await buildWorld());
+    nameAnswer = () => passed();
+    open(1000, saved, `/name/${name}`);
+    await waitFor(() => {
+      expect(document.querySelector('.vf-warnings')?.textContent).toMatch(/This name leads to a different exam record/);
+    });
+    expect(noteOf(await findStep(/^1\. Name$/))).toMatch(/On Sepolia, a test network/);
+  });
+
   it('passes the Name step first, then reads the chain with the name\'s registry and exam', async () => {
     const world = await buildWorld();
     arrange(world);
     nameAnswer = () => passed();
     const setItem = vi.spyOn(Storage.prototype, 'setItem');
     open(1000, saved, `/name/${name}`);
-    const step = await findStep(/^1\. Exam name$/);
+    const step = await findStep(/^1\. Name$/);
     await waitFor(() => {
       expect(stateOf(step)).toBe('done');
     });
@@ -807,10 +899,10 @@ describe('verify by name', () => {
     await findStep(/^2\. Exam published$/);
     expect(chainReads.length).toBeGreaterThan(0);
     expect(chainReads.every((read) => read.registry === registryAddress && read.examId === examId)).toBe(true);
-    expect(noteOf(step)).toMatch(/checked both ways/);
-    expect(within(step).getByText(/test network/)).toBeTruthy();
+    expect(noteOf(step)).toMatch(/belongs to the exam board/);
+    expect(within(step).getByText(/a Sepolia name|On Sepolia/)).toBeTruthy();
     expect(within(step).getByText('board.eth')).toBeTruthy();
-    expect(within(step).getAllByText('Your own choice')).toHaveLength(2);
+    expect(within(step).getAllByText('From your settings')).toHaveLength(2);
     expect(within(step).getByText('Built into this page')).toBeTruthy();
     expect(await screen.findByText(`${name}, on`, { exact: false })).toBeTruthy();
     // The name's values are for this view only.
@@ -833,7 +925,7 @@ describe('verify by name', () => {
     );
     nameAnswer = () => passed({ teeUrl: 'https://tee.name.example', storageUrl: 'https://names.example/bucket', bucket: 'name-bucket' });
     open(1000, { ...saved, teeUrl: 'https://tee.example' }, `/name/${name}`);
-    const step = await findStep(/^1\. Exam name$/);
+    const step = await findStep(/^1\. Name$/);
     await waitFor(() => {
       expect(stateOf(step)).toBe('done');
     });
@@ -852,7 +944,7 @@ describe('verify by name', () => {
     arrange(world);
     nameAnswer = () => passed();
     open(1000, saved, `/name/${name}`);
-    await findStep(/^1\. Exam name$/);
+    await findStep(/^1\. Name$/);
     await waitFor(() => {
       expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).startsWith(`https://files.example/bucket/${examId}/`))).toBe(true);
       expect(buckets.length).toBeGreaterThan(0);
@@ -904,23 +996,21 @@ describe('verify by name', () => {
 
   it.each([
     ['name', 'Not a valid name'],
-    ['registry', 'No registry'],
-    ['primaryName', 'Primary name differs'],
-    ['forward', 'Not verified both ways'],
+    ['registry', 'No exam record'],
+    ['primaryName', 'Not the board’s name'],
+    ['forward', 'Not confirmed by the board'],
   ] as [ExamNameCheck, string][])('a failed %s check fails the Name step, stops the rest and shows no seal', async (check, title) => {
     const world = await buildWorld();
     arrange(world);
     nameAnswer = () => failed(check);
     open(1000, saved, `/name/${name}`);
-    const step = await findStep(/^1\. Exam name$/);
+    const step = await findStep(/^1\. Name$/);
     await waitFor(() => {
       expect(stateOf(step)).toBe('failed');
     });
-    expect(noteOf(step)).toMatch(new RegExp(`${title}\\. \\w`));
-    // The reader's own reason is evidence: folded, never in the note or the alarm.
-    expect(noteOf(step)).not.toContain('The record says otherwise.');
-    expect(step.querySelector('details')?.textContent).toContain('The record says otherwise.');
-    expect((await screen.findByRole('alert')).textContent).toMatch(new RegExp(`Step 1, Exam name\\. ${title}`));
+    expect(noteOf(step)).toContain(`${title}. `);
+    expect(noteOf(step)).not.toContain('The record says otherwise');
+    expect((await screen.findByRole('alert')).textContent).toMatch(new RegExp(`Step 1, Name\\. ${title}`));
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('This name does not lead to a verified exam.');
     expect(stateOf(stepNamed(/^2\. Exam published$/))).toBe('waiting');
     expect(document.querySelector('.ps-seal')).toBeNull();
@@ -930,12 +1020,11 @@ describe('verify by name', () => {
 
   it('refuses a name that is not normalised, as typed, with the real check', async () => {
     open(1000, saved, '/name/JEE-Main-2026.board.eth');
-    const step = await findStep(/^1\. Exam name$/);
+    const step = await findStep(/^1\. Name$/);
     await waitFor(() => {
       expect(stateOf(step)).toBe('failed');
     });
-    expect(noteOf(step)).toMatch(/Not a valid name\. Check that it is written exactly/);
-    expect(step.querySelector('details')?.textContent).toMatch(/normalised/);
+    expect(noteOf(step)).toMatch(/Not a valid name\. Check how the name is spelled/);
     expect(chainReads).toEqual([]);
   });
 
@@ -950,9 +1039,9 @@ describe('verify by name', () => {
         </MemoryRouter>
       </SettingsProvider>,
     );
-    const step = await findStep(/^1\. Exam name$/);
+    const step = await findStep(/^1\. Name$/);
     await waitFor(() => {
-      expect(noteOf(step)).toMatch(/^Can't read ENS\./);
+      expect(noteOf(step)).toMatch(/^Can't read the name\./);
     });
     expect(stateOf(step)).toBe('current');
     // token.jwt never traces back to Google's root in these tests, so only step 6 is looked at.
@@ -989,12 +1078,102 @@ describe('verify by name', () => {
     expect(screen.getByText(/a name such as jee-main-2026\.board\.eth/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText(/^Exam ID or name/), { target: { value: ` ${name} ` } });
     fireEvent.click(screen.getByRole('button', { name: 'Open this exam' }));
-    await findStep(/^1\. Exam name$/);
+    await findStep(/^1\. Name$/);
     expect(nameReads[0]?.name).toBe(name);
     fireEvent.change(screen.getByLabelText(/^Exam ID or name/), { target: { value: 'Maths-2026.Board.eth' } });
     fireEvent.click(screen.getByRole('button', { name: 'Open this exam' }));
     await waitFor(() => {
       expect(nameReads.at(-1)?.name).toBe('Maths-2026.Board.eth');
     });
+  });
+});
+
+describe('party names', () => {
+  const ownerOf = (name: string) =>
+    name === 'Neutral 1' ? 'asha.eth' : name === 'Neutral 2' ? 'ben.eth' : name === 'Centre 1' ? 'north.centres.maths-board.eth' : name;
+  const peopleOf = (world: World) => decodeApprovedList(fromHex(world.entriesHex));
+  const keyOf = (world: World, owner: string) => toHex(peopleOf(world).find((entry) => entry.owner === owner)?.passkeyPublicKey ?? new Uint8Array());
+  const rowFor = (step: HTMLElement, owner: string) => within(step).getByText(owner).closest('li') as HTMLElement;
+
+  async function opened(answer: (world: World) => (name: string, key: Hex) => PasskeyNameState) {
+    const world = await buildWorld({ ownerOf });
+    arrange(world);
+    passkeyAnswer = answer(world);
+    open(1000);
+    return { world, step: await findStep(/^3\. People approved$/) };
+  }
+
+  it('shows "Name confirmed" for a key holder whose record matches, and reads with the viewer own RPC', async () => {
+    const { step } = await opened(() => () => 'confirmed');
+    await waitFor(() => {
+      expect(within(rowFor(step, 'asha.eth')).getByText('Name confirmed')).toBeTruthy();
+    });
+    expect(passkeyReads.length).toBeGreaterThan(0);
+    expect(passkeyReads.every((read) => read.rpcUrl === settings.rpcUrl)).toBe(true);
+    expect(screen.getByRole('alert').textContent).not.toMatch(/Step\s*3/);
+  });
+
+  it('reads only names, never a setter or a plain name', async () => {
+    const { world } = await opened(() => () => 'confirmed');
+    await waitFor(() => {
+      expect(passkeyReads.length).toBe(3);
+    });
+    expect(passkeyReads.map((read) => read.name).sort()).toEqual(['asha.eth', 'ben.eth', 'north.centres.maths-board.eth']);
+    const setterKey = toHex(peopleOf(world).find((entry) => entry.role === 1)?.passkeyPublicKey ?? new Uint8Array());
+    expect(passkeyReads.some((read) => read.key === setterKey)).toBe(false);
+  });
+
+  it('says "Not confirmed" in plain words for a missing or wrong record, and never fails the exam', async () => {
+    const { step } = await opened((w) => (_name, key) => (key === keyOf(w, 'asha.eth') ? 'mismatch' : 'missing'));
+    expect(await within(step).findByText('The record on asha.eth names a different security key.')).toBeTruthy();
+    expect(within(rowFor(step, 'asha.eth')).getByText('Not confirmed')).toBeTruthy();
+    expect(within(step).getByText('ben.eth has no record for this security key yet.')).toBeTruthy();
+    // The two failures on this page are the test PKI's, in steps 2 and 6. Step 3 has none.
+    expect(step.querySelector('.vf-step-failures')).toBeNull();
+    expect(screen.getByRole('alert').textContent).not.toMatch(/Step\s*3/);
+    expect(stateOf(step)).toBe('done');
+  });
+
+  it('treats a name that could not be read as not confirmed, and still passes the step', async () => {
+    const { step } = await opened(() => () => 'unreadable');
+    expect(await within(step).findByText('asha.eth could not be read just now.')).toBeTruthy();
+    expect(within(step).getAllByText('Not confirmed').length).toBe(2);
+    expect(stateOf(step)).toBe('done');
+    expect(screen.getByRole('alert').textContent).not.toMatch(/Step\s*3/);
+  });
+
+  it('shows a centre name as a label that proves nothing about independence', async () => {
+    const { step } = await opened(() => () => 'missing');
+    expect(await within(step).findByText(/It does not show that the centre is independent/)).toBeTruthy();
+    expect(within(rowFor(step, 'north.centres.maths-board.eth')).getByText('Label only')).toBeTruthy();
+    expect(within(rowFor(step, 'north.centres.maths-board.eth')).queryByText('Not confirmed')).toBeNull();
+    expect(within(step).getByText(/Whoever controls centres\.maths-board\.eth vouches for the names under it/)).toBeTruthy();
+    expect(within(step).getByText(/, and whoever controls centres\.maths-board\.eth vouches for it/)).toBeTruthy();
+  });
+
+  it('keeps the evidence folded, and says Sepolia names prove nothing', async () => {
+    const { step } = await opened(() => () => 'confirmed');
+    await waitFor(() => {
+      expect(within(step).getAllByText('Name confirmed').length).toBe(3);
+    });
+    expect(within(step).getByText(/anyone can register a similar name/)).toBeTruthy();
+    expect(step.querySelector('details')?.contains(within(step).getAllByText('Name confirmed')[0] as HTMLElement)).toBe(true);
+  });
+
+  it('reads nothing, and says "Not an ENS name" as a warning and not a failure, when no party has an ENS name', async () => {
+    // An older exam, or a board that skipped the app: the contract does not check the owner.
+    const world = await buildWorld({ ownerOf: (name) => name });
+    arrange(world);
+    open(1000);
+    const step = await findStep(/^3\. People approved$/);
+    await within(step).findByText('Neutral 1');
+    expect(within(rowFor(step, 'Neutral 1')).getByText('Not an ENS name')).toBeTruthy();
+    expect(passkeyReads).toEqual([]);
+    expect(within(step).queryByText('Name confirmed')).toBeNull();
+    expect(within(step).queryByText('Not confirmed')).toBeNull();
+    expect(step.querySelector('.vf-step-failures')).toBeNull();
+    expect(stateOf(step)).toBe('done');
+    expect(document.querySelector('.vf-warnings')?.textContent).toMatch(/11 key holders or centres on the list are not named by an ENS name/);
+    expect(screen.getByRole('alert').textContent).not.toMatch(/Step\s*3/);
   });
 });

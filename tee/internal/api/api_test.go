@@ -51,7 +51,7 @@ func (s *stub) ReleaseChallenge(context.Context) (ChallengeResponse, error) {
 }
 func (s *stub) ReleaseShare(_ context.Context, r ShareRequest) error { s.share = r; return s.err }
 func (s *stub) ReleaseLog(context.Context) (release.Log, error) {
-	return release.Log{ExamID: "0x01", Entries: []release.LogEntry{}, EntriesHash: "0x02", TEESignature: "0x03"}, s.err
+	return release.Log{ExamID: "0x01", Entries: []release.LogEntry{}, EntriesHash: "0x02", Files: []release.LogFile{}, FilesHash: "0x04", TEESignature: "0x03"}, s.err
 }
 
 func do(h http.Handler, method, path, body string) *httptest.ResponseRecorder {

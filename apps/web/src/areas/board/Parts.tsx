@@ -1,5 +1,6 @@
 import { toHex, roles, type ApprovedListEntry } from '@paperseal/protocol';
-import { Check, CopyButton, Hash, PrimaryAction, Row, Rows } from '@paperseal/ui';
+import { Button, Check, Hash, PrimaryAction, Row, Rows } from '@paperseal/ui';
+import { shortAddress } from '../../shared/wallet';
 import { useState, type HTMLInputTypeAttribute, type ReactNode } from 'react';
 
 import { useBoardForm } from './BoardForm';
@@ -25,6 +26,30 @@ export function Problem(props: { children: string }) {
   );
 }
 
+/**
+ * The wallet's warning from `useBoardWallet`. On a wrong account it names both accounts and offers
+ * the wallet's own account picker.
+ */
+export function WalletProblem(props: { wallet: ReturnType<typeof useBoardWallet> }) {
+  const { problem, mismatch, chooseAccount } = props.wallet;
+  if (!problem) return null;
+  return (
+    <>
+      <Problem>{problem}</Problem>
+      {mismatch ? (
+        <>
+          <p className="board-blocked">
+            Connected: {shortAddress(mismatch.connected)}. The exam board uses: {shortAddress(mismatch.board)}.
+          </p>
+          <Button type="button" onClick={() => void chooseAccount()}>
+            Choose the board’s account
+          </Button>
+        </>
+      ) : null}
+    </>
+  );
+}
+
 /** `Field`, with the input types a date picker and a phone's number pad need. */
 export function Input(props: {
   label: string;
@@ -33,7 +58,10 @@ export function Input(props: {
   value: string;
   onChange: (value: string) => void;
   type?: HTMLInputTypeAttribute;
+  /** Takes digits only, so a stray letter never reaches the field. */
   numeric?: boolean;
+  /** The field's name for a screen reader, when the visible label is shared by several rows. */
+  ariaLabel?: string;
 }) {
   return (
     <label className="ps-field">
@@ -42,12 +70,13 @@ export function Input(props: {
         className="ps-input"
         type={props.type ?? 'text'}
         inputMode={props.numeric ? 'numeric' : undefined}
+        aria-label={props.ariaLabel}
         value={props.value}
         spellCheck={false}
         autoComplete="off"
         aria-invalid={props.error ? true : undefined}
         onChange={(event) => {
-          props.onChange(event.target.value);
+          props.onChange(props.numeric ? event.target.value.replace(/\D/g, '') : event.target.value);
         }}
       />
       {props.error ? <span className="ps-field-error">{plainWords(props.error)}</span> : null}
@@ -91,7 +120,8 @@ export function PostAction(props: {
   post: (onStage: (stage: WalletStage) => void) => Promise<PostOutcome>;
   onPosted: (outcome: PostOutcome) => void;
 }) {
-  const { ensureAccount, problem } = useBoardWallet();
+  const boardWallet = useBoardWallet();
+  const { ensureAccount } = boardWallet;
   const [progress, setProgress] = useState<Progress>({ state: 'idle' });
 
   async function send() {
@@ -118,7 +148,7 @@ export function PostAction(props: {
           <p className="ps-mono">{blocked.detail}</p>
         </Fold>
       ) : null}
-      {problem ? <Problem>{problem}</Problem> : null}
+      <WalletProblem wallet={boardWallet} />
       {progress.state === 'failed' ? <Problem>{progress.message}</Problem> : null}
       <PrimaryAction
         disabled={props.blocked !== null}
@@ -160,16 +190,4 @@ export function ReceiptRows() {
       <Hash value={receipt.outcome.transactionHash} label="receipt code" />
     </Row>
   ));
-}
-
-/** A value shown in full, with a button that copies it. `what` names it for screen readers. */
-export function CopyValue(props: { what: string; value: string }) {
-  return (
-    <span className="board-copy">
-      <span className="ps-mono">{props.value}</span>
-      <CopyButton text={props.value} aria-label={`Copy ${props.what}`}>
-        Copy
-      </CopyButton>
-    </span>
-  );
 }

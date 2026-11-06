@@ -123,6 +123,7 @@ export function fakeChain(options: FakeChainOptions) {
                 saltedPaperHash: found[4],
                 selected: Number(found[5]),
                 bankSize: Number(found[6]),
+                builtRound: BigInt(found[10] as unknown as bigint),
                 postedAt: 1n,
                 criteriaHash: found[7],
                 teeSignature: found[8],
@@ -135,6 +136,7 @@ export function fakeChain(options: FakeChainOptions) {
                 saltedPaperHash: zero32,
                 selected: 0,
                 bankSize: 0,
+                builtRound: 0n,
                 postedAt: 0n,
                 criteriaHash: zero32,
                 teeSignature: '0x' as Hex,
@@ -189,8 +191,13 @@ export function fakeChain(options: FakeChainOptions) {
           const [examId, entries] = call.args as unknown as [Hex, Hex];
           lists.set(examId, { entries, block });
         } else if (call.functionName === 'postBuild') {
-          const args = call.args as unknown as [Hex, ...Hex[]];
-          builds.set(args[0], args as unknown as Hex[]);
+          const [examId, f, teeSignature, instancePublicKey] = call.args as unknown as [
+            Hex,
+            Record<string, Hex | number | bigint>,
+            Hex,
+            Hex,
+          ];
+          builds.set(examId, [examId, f.approvedListHash, f.paperHash, f.storageManifestHash, f.saltedPaperHash, f.selected, f.bankSize, f.criteriaHash, teeSignature, instancePublicKey, f.builtRound] as unknown as Hex[]);
         } else if (call.functionName === 'createExam') {
           const args = call.args as unknown as CreateArgs;
           exams.set(args[2].examId, { args, block });

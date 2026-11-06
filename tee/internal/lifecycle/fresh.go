@@ -84,7 +84,7 @@ func (m *Machine) startFreshUnlock(ctx context.Context, list chainread.List, bui
 	fields := hashing.BuildFields{
 		ExamID: exam.ExamID, ApprovedListHash: built.ApprovedListHash, PaperHash: built.PaperHash,
 		StorageManifestHash: built.StorageManifestHash, SaltedPaperHash: built.SaltedPaperHash,
-		Selected: built.Selected, BankSize: built.BankSize, CriteriaHash: built.CriteriaHash,
+		Selected: built.Selected, BankSize: built.BankSize, CriteriaHash: built.CriteriaHash, BuiltRound: built.BuiltRound,
 	}
 	if err := attestation.Verify(built.InstancePublicKey, hashing.Build(fields), sig); err != nil {
 		return fail("unlock: build signature: %w", err)

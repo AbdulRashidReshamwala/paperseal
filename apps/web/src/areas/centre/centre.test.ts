@@ -13,16 +13,20 @@ import {
   concatBytes,
   encodeMessage,
   entriesHash,
+  filesHash,
   releaseEntryFromWire,
+  releaseFileFromWire,
+  sortReleaseFiles,
+  storageNames,
   type ApprovedListEntry,
   type Hex,
 } from '@paperseal/protocol';
 import { describe, expect, it, vi } from 'vitest';
 
 import { StorageVerificationError } from '../../shared/storage';
-import { verifyReleaseLog } from './logCheck';
+import { verifiedLogForUnlock, verifyReleaseLog, type CheckedLog } from './logCheck';
 import { downloadPaperFiles } from './download';
-import { PaperHashMismatchError, unlockPaper, type UnlockContext } from './unlock';
+import { KeyFileChangedError, PaperHashMismatchError, prepareUnlock, unlockPaper, type UnlockContext } from './unlock';
 
 const examId: Hex = `0x${'11'.repeat(32)}`;
 const sha = (bytes: Uint8Array) => new Uint8Array(createHash('sha256').update(bytes).digest());
@@ -57,6 +61,14 @@ async function unlockSetup(overrides: { salted?: Hex; kPrivOpened?: Uint8Array }
   } satisfies UnlockContext;
   return { context, kPub };
 }
+
+const sealedKeyFile = new Uint8Array([1, 2, 3]);
+const listing = (derived: Hex, bytes: Uint8Array) => ({
+  files: [
+    { name: 'key-priv.tlock', sha256: toHex(sha(new Uint8Array([9]))) },
+    { name: storageNames.centreKeyPriv(fromHex(derived)), sha256: toHex(sha(bytes)) },
+  ],
+});
 
 describe('unlockPaper', () => {
   it('combines K_pub and K_priv, decrypts and returns the checked paper', async () => {
@@ -99,6 +111,71 @@ describe('unlockPaper', () => {
     await unlockPaper(context);
     expect(kPub).toEqual(new Uint8Array(32));
     expect(kPriv).toEqual(new Uint8Array(32));
+  });
+
+  describe('against a verified release log', () => {
+    it('goes on when the log lists this very file', async () => {
+      const { context } = await unlockSetup();
+      const paper = await unlockPaper({ ...context, verifiedLog: listing(context.derivedPublicKey, sealedKeyFile) });
+      expect(paper).toEqual(paperJson);
+      expect(context.keys.openKeyPriv).toHaveBeenCalledOnce();
+    });
+
+    it('stops before the touch when the file was swapped, and wipes K_pub', async () => {
+      const { context } = await unlockSetup();
+      const kPub = filled(1);
+      context.timelockDecrypt.mockResolvedValue(kPub);
+      const steps: string[] = [];
+      const unlocking = unlockPaper({ ...context, verifiedLog: listing(context.derivedPublicKey, new Uint8Array([7])), onStep: (s) => steps.push(s) });
+      await expect(unlocking).rejects.toBeInstanceOf(KeyFileChangedError);
+      await expect(unlocking).rejects.toMatchObject({ step: 'keyPriv' });
+      await expect(unlocking).rejects.toThrow('changed after the TEE wrote it');
+      expect(context.keys.openKeyPriv).not.toHaveBeenCalled();
+      expect(steps).toEqual(['timelock', 'keyPriv']);
+      expect(kPub).toEqual(new Uint8Array(32));
+    });
+
+    it('stops a swapped file that was got ahead of the press', async () => {
+      const { context } = await unlockSetup();
+      const prepared = await prepareUnlock(context);
+      await expect(unlockPaper({ ...context, prepared, verifiedLog: listing(context.derivedPublicKey, new Uint8Array([7])) })).rejects.toBeInstanceOf(KeyFileChangedError);
+      expect(context.keys.openKeyPriv).not.toHaveBeenCalled();
+    });
+
+    it('stops when the log lists files but none for this centre', async () => {
+      const { context } = await unlockSetup();
+      await expect(unlockPaper({ ...context, verifiedLog: listing(toHex(key(8)), sealedKeyFile) })).rejects.toBeInstanceOf(KeyFileChangedError);
+      expect(context.keys.openKeyPriv).not.toHaveBeenCalled();
+    });
+
+    it('takes a log from before the threshold, which lists no files, as saying nothing', async () => {
+      const { context } = await unlockSetup();
+      expect(await unlockPaper({ ...context, verifiedLog: { files: [] } })).toEqual(paperJson);
+    });
+
+    it('goes on with no log at all', async () => {
+      const { context } = await unlockSetup();
+      expect(await unlockPaper({ ...context, verifiedLog: null })).toEqual(paperJson);
+      expect(context.keys.openKeyPriv).toHaveBeenCalledOnce();
+    });
+  });
+});
+
+describe('verifiedLogForUnlock', () => {
+  const log = { files: [] } as unknown as CheckedLog['log'];
+  const verdict = (pass: boolean) => ({ pass }) as CheckedLog['verdict'];
+
+  it('gives the log only when it verified', async () => {
+    expect(await verifiedLogForUnlock(() => Promise.resolve({ log, verdict: verdict(true) }))).toBe(log);
+    expect(await verifiedLogForUnlock(() => Promise.resolve({ log, verdict: verdict(false) }))).toBeNull();
+  });
+
+  it('gives nothing when the log cannot be read, so the unlock is not blocked', async () => {
+    await expect(verifiedLogForUnlock(() => Promise.reject(new Error('unreachable')))).resolves.toBeNull();
+  });
+
+  it('stops waiting for a log that never answers', async () => {
+    await expect(verifiedLogForUnlock(() => new Promise(() => {}), 5)).resolves.toBeNull();
   });
 });
 
@@ -186,13 +263,17 @@ describe('downloadPaperFiles', () => {
 });
 
 describe('verifyReleaseLog', () => {
-  async function signedLog() {
+  async function signedLog(files = sortReleaseFiles([
+    { name: `key-priv/${toHex(key(2))}.bin`, sha256: toHex(filled(0x44)) },
+    { name: 'key-priv.tlock', sha256: toHex(filled(0x45)) },
+  ])) {
     const subtle = globalThis.crypto.subtle;
     const pair = await subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
     const entries = [{ passkeyPublicKey: toHex(key(1)) as Hex, shareHash: `0x${'ab'.repeat(32)}` as Hex, round: '42' }];
     const hash = toHex(entriesHash(entries.map(releaseEntryFromWire)));
+    const filesDigest = toHex(filesHash(files.map(releaseFileFromWire)));
     let signature = new Uint8Array(
-      await subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, new Uint8Array(encodeMessage('releaseLog', { examId: fromHex(examId), entriesHash: fromHex(hash) }))),
+      await subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, new Uint8Array(encodeMessage('releaseLog', { examId: fromHex(examId), entriesHash: fromHex(hash), filesHash: fromHex(filesDigest) }))),
     );
     const order = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n;
     const s = BigInt(toHex(signature.subarray(32)));
@@ -204,6 +285,8 @@ describe('verifyReleaseLog', () => {
       examId,
       entries,
       entriesHash: hash,
+      files,
+      filesHash: filesDigest,
       teeSignature: toHex(signature),
       instancePublicKey: toHex(new Uint8Array(await subtle.exportKey('raw', pair.publicKey))),
     };
@@ -213,7 +296,37 @@ describe('verifyReleaseLog', () => {
 
   it('passes when the hash, signature and token all check out', async () => {
     const log = await signedLog();
-    expect(await verifyReleaseLog(log, { examId }, 'jwt', good)).toMatchObject({ pass: true, entriesHash: true, signature: true, exam: true });
+    expect(await verifyReleaseLog(log, { examId }, 'jwt', good)).toMatchObject({ pass: true, entriesHash: true, files: true, signature: true, exam: true });
+  });
+
+  it('passes a log from before the threshold, which lists no files', async () => {
+    const log = await signedLog([]);
+    expect(await verifyReleaseLog(log, { examId }, 'jwt', good)).toMatchObject({ pass: true, files: true });
+  });
+
+  it('fails a wrong filesHash, whether or not the signature covers it', async () => {
+    const log = await signedLog();
+    const other = await signedLog([{ name: 'key-priv.tlock', sha256: toHex(filled(0x46)) }]);
+    const swapped = await verifyReleaseLog({ ...log, filesHash: other.filesHash }, { examId }, 'jwt', good);
+    expect(swapped).toMatchObject({ pass: false, files: false, signature: false });
+    const signedOver = await verifyReleaseLog({ ...other, files: log.files }, { examId }, 'jwt', good);
+    expect(signedOver).toMatchObject({ pass: false, files: false, signature: true });
+  });
+
+  it('fails a list of files that was changed under a good signature', async () => {
+    const log = await signedLog();
+    const changed = log.files.map((file) => ({ ...file, sha256: toHex(filled(0x47)) }));
+    expect(await verifyReleaseLog({ ...log, files: changed }, { examId }, 'jwt', good)).toMatchObject({ pass: false, files: false });
+  });
+
+  it('fails a malformed list of files instead of throwing', async () => {
+    const log = await signedLog();
+    const backwards = [...log.files].reverse();
+    expect(await verifyReleaseLog({ ...log, files: backwards }, { examId }, 'jwt', good)).toMatchObject({ pass: false, files: false });
+    const [first] = log.files as [(typeof log.files)[number]];
+    expect(await verifyReleaseLog({ ...log, files: [first, first] }, { examId }, 'jwt', good)).toMatchObject({ pass: false, files: false });
+    expect(await verifyReleaseLog({ ...log, files: [{ name: 'x', sha256: '0x00' }] }, { examId }, 'jwt', good)).toMatchObject({ pass: false, files: false });
+    expect(await verifyReleaseLog({ ...log, files: null as never }, { examId }, 'jwt', good)).toMatchObject({ pass: false, files: false });
   });
 
   it('fails when the token does not attest the key, or is missing', async () => {

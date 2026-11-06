@@ -1,7 +1,7 @@
 import { chain } from '@paperseal/protocol';
 import { useCallback, useEffect, useState } from 'react';
 
-import { currentAccount, requestAccount, switchToSepolia, walletChainId } from '../../shared/wallet';
+import { chooseAccounts, currentAccount, onWalletChange, requestAccount, switchToSepolia, walletChainId } from '../../shared/wallet';
 import { useBoardForm } from './BoardForm';
 import { explainError, PublishBlockedError } from './publishFlow';
 
@@ -96,8 +96,8 @@ export function useBoardWallet() {
       return;
     }
     try {
-      const [account, chainId] = [await currentAccount(provider), await walletChainId(provider)];
       const board = environment.createRegistry ? await environment.createRegistry().board() : null;
+      const [account, chainId] = [await currentAccount(provider, board), await walletChainId(provider)];
       setWallet({ account, chainId, board, error: null });
     } catch (error) {
       setWallet((previous) => ({ ...previous, error: explainError(error) }));
@@ -109,11 +109,29 @@ export function useBoardWallet() {
     void refresh();
   }, [refresh]);
 
+  // Switching account or network in the wallet shows here without a reload.
+  useEffect(() => {
+    const provider = environment.getProvider();
+    if (!provider) return;
+    return onWalletChange(provider, () => {
+      void refresh();
+    });
+  }, [environment, refresh]);
+
+  /** Opens the wallet's own account picker, then reads again. A declined prompt changes nothing. */
+  const chooseAccount = useCallback(async () => {
+    const provider = environment.getProvider();
+    if (!provider) return;
+    await chooseAccounts(provider);
+    await refresh();
+  }, [environment, refresh]);
+
   /** Asks the wallet to share an account if it hasn't, which is part of the one action on screen. */
   const ensureAccount = useCallback(async () => {
     const provider = environment.getProvider();
     if (!provider) throw new PublishBlockedError('Your wallet was not found. Install a wallet extension in Chrome, then reload this page.');
-    const account = (await currentAccount(provider)) ?? (await requestAccount(provider));
+    const board = environment.createRegistry ? await environment.createRegistry().board() : null;
+    const account = (await currentAccount(provider, board)) ?? (await requestAccount(provider));
     // A wallet on another network is asked to move. If it declines, `problem` keeps the plain instruction.
     await switchToSepolia(provider);
     await refresh();
@@ -121,12 +139,14 @@ export function useBoardWallet() {
   }, [environment, refresh]);
 
   let problem = wallet.error;
+  let mismatch: { connected: string; board: string } | null = null;
   if (!problem && wallet.chainId !== null && wallet.chainId !== chain.chainId) {
     problem = 'Your wallet is on the wrong network. Switch it to Sepolia in your wallet.';
   } else if (!problem && wallet.account && wallet.board && wallet.account.toLowerCase() !== wallet.board.toLowerCase()) {
     problem = 'This wallet account is not the exam board’s account. Switch accounts in your wallet.';
+    mismatch = { connected: wallet.account, board: wallet.board };
   }
-  return { wallet, problem, ensureAccount };
+  return { wallet, problem, mismatch, chooseAccount, ensureAccount };
 }
 
 export type WalletStage = 'checking' | 'simulating' | 'wallet' | 'mining' | 'reading';

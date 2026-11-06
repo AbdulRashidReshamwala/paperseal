@@ -9,10 +9,9 @@ import {
 import { useSyncExternalStore } from 'react';
 
 /*
- * The invite a registrant opened. It comes from the URL fragment of the board's link, is read once
- * by `Join`, and is then held here, in memory only: the address bar is cleared, and nothing is
- * written to storage or sent anywhere. Reloading the page forgets it, and the link opens it again.
- * One invite is held per role, so one browser can still be a key holder and a centre.
+ * The invite a setter opened. It comes from the URL fragment of the board's link, is read once by
+ * `Join`, and is then held here, in memory only: the address bar is cleared, and nothing is written
+ * to storage or sent anywhere. Reloading the page forgets it, and the link opens it again.
  */
 
 const held = new Map<InviteRole, Invite>();
@@ -27,8 +26,6 @@ const notify = () => {
 /** The page for each role. The invite link opens `/join`, which moves on to this. */
 export const rolePaths: Record<InviteRole, string> = {
   setter: '/setter',
-  keyholder: '/keyholder',
-  centre: '/centre',
 };
 
 export function holdInvite(invite: Invite): void {

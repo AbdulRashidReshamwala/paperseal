@@ -37,6 +37,10 @@ import {
   type ExamSettings,
   ScheduleError,
   checkSchedule,
+  chain,
+  drand,
+  schedule as specSchedule,
+  scheduleBoundsProblem,
   firstRoundAtOrAfter,
   startupArgs,
   type MessageName,
@@ -97,7 +101,7 @@ describe('abi.encode messages', () => {
     ).toBe(toHex(expected));
   });
 
-  it('encodes build with uint32 counts in table order', () => {
+  it('encodes build with uint32 counts and the built round in table order', () => {
     const fields = {
       examId: fill(1),
       approvedListHash: fill(2),
@@ -107,10 +111,11 @@ describe('abi.encode messages', () => {
       selected: 20,
       bankSize: 300,
       criteriaHash: fill(6),
+      builtRound: 35732267n,
     };
     const expected = abi(
-      ['string', 'bytes32', 'bytes32', 'bytes32', 'bytes32', 'bytes32', 'uint32', 'uint32', 'bytes32'],
-      ['paperseal/v1/build', ...[1, 2, 3, 4, 5].map((n) => toHex(fill(n))), 20, 300, toHex(fill(6))],
+      ['string', 'bytes32', 'bytes32', 'bytes32', 'bytes32', 'bytes32', 'uint32', 'uint32', 'bytes32', 'uint64'],
+      ['paperseal/v1/build', ...[1, 2, 3, 4, 5].map((n) => toHex(fill(n))), 20, 300, toHex(fill(6)), 35732267n],
     );
     expect(toHex(encodeMessage('build', fields))).toBe(toHex(expected));
   });
@@ -127,8 +132,8 @@ describe('abi.encode messages', () => {
     expect(toHex(encodeMessage('shareRelease', { examId, challenge }))).toBe(
       toHex(abi(['string', 'bytes32', 'bytes'], ['paperseal/v1/share-release', toHex(examId), toHex(challenge)])),
     );
-    expect(toHex(encodeMessage('releaseLog', { examId, entriesHash: fill(9) }))).toBe(
-      toHex(abi(['string', 'bytes32', 'bytes32'], ['paperseal/v1/release-log', toHex(examId), toHex(fill(9))])),
+    expect(toHex(encodeMessage('releaseLog', { examId, entriesHash: fill(9), filesHash: fill(10) }))).toBe(
+      toHex(abi(['string', 'bytes32', 'bytes32', 'bytes32'], ['paperseal/v1/release-log', toHex(examId), toHex(fill(9)), toHex(fill(10))])),
     );
   });
 
@@ -145,16 +150,20 @@ describe('abi.encode messages', () => {
   });
 
   it('separates messages by tag', () => {
-    expect(hashMessage('releaseLog', { examId: fill(1), entriesHash: fill(2) })).not.toEqual(
+    expect(hashMessage('releaseLog', { examId: fill(1), entriesHash: fill(2), filesHash: fill(3) })).not.toEqual(
       hashMessage('shareRelease', { examId: fill(1), challenge: fill(2) }),
     );
   });
 
   it('rejects malformed fields', () => {
-    expect(() => encodeMessage('releaseLog', { examId: fill(1, 31), entriesHash: fill(2) })).toThrow('examId must be 32 bytes');
-    const build = { examId: fill(1), approvedListHash: fill(1), paperHash: fill(1), storageManifestHash: fill(1), saltedPaperHash: fill(1), bankSize: 1, criteriaHash: fill(1) };
+    expect(() => encodeMessage('releaseLog', { examId: fill(1, 31), entriesHash: fill(2), filesHash: fill(3) })).toThrow('examId must be 32 bytes');
+    expect(() => encodeMessage('releaseLog', { examId: fill(1), entriesHash: fill(2), filesHash: fill(3, 31) })).toThrow('filesHash must be 32 bytes');
+    const build = { examId: fill(1), approvedListHash: fill(1), paperHash: fill(1), storageManifestHash: fill(1), saltedPaperHash: fill(1), bankSize: 1, criteriaHash: fill(1), builtRound: 1n };
     expect(() => encodeMessage('build', { ...build, selected: -1 })).toThrow(RangeError);
     expect(() => encodeMessage('build', { ...build, selected: 2 ** 32 })).toThrow(RangeError);
+    expect(() => encodeMessage('build', { ...build, selected: 1, builtRound: -1n })).toThrow(RangeError);
+    expect(() => encodeMessage('build', { ...build, selected: 1, builtRound: 1n << 64n })).toThrow(RangeError);
+    expect(() => encodeMessage('build', { ...build, selected: 1, builtRound: 1 as unknown as bigint })).toThrow('uint64');
     expect(() => encodeMessage('questionReceipt', { examId: fill(1), passkeyPublicKey: fill(4, 64), questionHash: fill(1) })).toThrow('65-byte');
     expect(() => encodeMessage('questionReceipt', { examId: fill(1), passkeyPublicKey: fill(2, 65), questionHash: fill(1) })).toThrow('0x04');
     expect(() => encodeMessage('registration', { derivedPublicKey: fill(4, 64), holderId: fill(1, 1), challenge: fill(1, 1), inviteTag: fill(1, 32) })).toThrow('65-byte');
@@ -409,7 +418,7 @@ describe('tee/ cross-language vectors', () => {
     const fields = Object.fromEntries(
       vector.fields.map(({ name: field, type, value }) => [
         field,
-        type === 'uint32' ? Number(BigInt(value)) : type === 'string' ? value : fromHex(value),
+        type === 'uint32' ? Number(BigInt(value)) : type === 'uint64' ? BigInt(value) : type === 'string' ? value : fromHex(value),
       ]),
     ) as never;
     expect(constants.domainTags[name]).toBe(vector.tag);
@@ -443,6 +452,38 @@ describe('tee/ cross-language vectors', () => {
     const fields = { instancePublicKey: fromHex(vector.instancePublicKey), examId: fromHex(vector.examId) };
     expect(toHex(encodeMessage('attestationNonce', fields))).toBe(vector.preimage);
     expect(attestationNonce(fromHex(vector.instancePublicKey), fromHex(vector.examId))).toBe(vector.nonce);
+  });
+});
+
+describe('schedule bounds', () => {
+  const examStart = 1_800_000_000n;
+  const inTime = (seconds: bigint) => (seconds - BigInt(drand.genesisTime)) / BigInt(drand.periodSeconds) + 1n;
+  const lastEnd = inTime(examStart + BigInt(specSchedule.maxEndAfterStartSeconds));
+
+  it('accepts each bound exactly and refuses one step past it', () => {
+    const ok = { examStart, delta: BigInt(specSchedule.maxDeltaSeconds), endRound: lastEnd };
+    expect(scheduleBoundsProblem(ok)).toBeNull();
+    expect(scheduleBoundsProblem({ ...ok, delta: ok.delta + 1n })).toBe('delta_too_long');
+    expect(scheduleBoundsProblem({ ...ok, endRound: lastEnd + 1n })).toBe('end_too_far');
+    expect(scheduleBoundsProblem({ ...ok, endRound: 2n ** 64n - 1n })).toBe('end_too_far');
+  });
+
+  it('is part of checkSchedule', () => {
+    const delta = specSchedule.maxDeltaSeconds + 1;
+    const unlock = firstRoundAtOrAfter(Number(examStart) - delta);
+    const settings = { examStart: Number(examStart), lockRound: String(unlock - 1), chainId: chain.chainId };
+    const code = (over: object) => {
+      try {
+        checkSchedule({ ...settings, delta, unlockRound: String(unlock), endRound: String(lastEnd), ...over });
+      } catch (error) {
+        return (error as ScheduleError).code;
+      }
+      return null;
+    };
+    expect(code({})).toBe('delta_too_long');
+    const fine = { delta: 60, unlockRound: String(firstRoundAtOrAfter(Number(examStart) - 60)) };
+    expect(code(fine)).toBeNull();
+    expect(code({ ...fine, endRound: String(lastEnd + 1n) })).toBe('end_too_far');
   });
 });
 

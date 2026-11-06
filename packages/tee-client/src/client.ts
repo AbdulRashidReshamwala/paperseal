@@ -38,6 +38,14 @@ export function isReleaseNotOpen(error: unknown): boolean {
 export const RELEASE_NOT_OPEN_MESSAGE =
   'Release opens once the unlock round is published. The TEE refuses release challenges before then, so wait for the countdown to finish and try again.';
 
+/**
+ * Between the threshold and the prepared delivery, `GET /v1/release/log` answers 503
+ * `delivery_pending`, which is not a fault: no log can list its files yet, so ask again shortly.
+ */
+export function isDeliveryPending(error: unknown): boolean {
+  return error instanceof TeeApiError && error.code === 'delivery_pending';
+}
+
 function isErrorBody(body: unknown): body is ApiErrorBody {
   const error = (body as Partial<ApiErrorBody> | null)?.error;
   return typeof error?.code === 'string' && typeof error.message === 'string';

@@ -21,13 +21,9 @@ function render(Area: ComponentType, base: string, path: string) {
 
 // With no exam and no settings, every old link lands on the one screen its area's state calls for.
 const screens: [ComponentType, string, string, string][] = [
-  [BoardArea, '/board', '', 'Create the exam'],
-  [BoardArea, '/board', '/blueprint', 'Create the exam'],
-  [BoardArea, '/board', '/schedule', 'Create the exam'],
+  [BoardArea, '/board', '', 'Your exams'],
+  [BoardArea, '/board', '/new', 'Create the exam'],
   [BoardArea, '/board', '/publish', 'Create the exam'],
-  [BoardArea, '/board', '/onboarding', 'Create the exam'],
-  [BoardArea, '/board', '/list', 'Create the exam'],
-  [BoardArea, '/board', '/outbox', 'Create the exam'],
   [SetterArea, '/setter', '', 'This link isn’t ready yet'],
   [SetterArea, '/setter', '/upload', 'This link isn’t ready yet'],
   [SetterArea, '/setter', '/receipt', 'This link isn’t ready yet'],

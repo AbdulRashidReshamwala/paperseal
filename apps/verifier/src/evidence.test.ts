@@ -1,11 +1,14 @@
-import { encodeMessage, fromHex, toHex, type Hex } from '@paperseal/protocol';
+import { encodeMessage, fromHex, storageNames, toHex, type Hex } from '@paperseal/protocol';
+import { TeeApiError, type TeeClient } from '@paperseal/tee-client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { checkBuildSignature, checkFreshToken, checkPublishedToken, checkRecordToken } from './attest';
+import type { ChainData } from './checks';
 import { checkManifest, approvedEntries, holdersOf } from './commitments';
-import { buildWorld, p256, registryAddress, teeSign, examId, signToken, type World } from './fixtures';
+import { buildWorld, p256, random, registryAddress, teeSign, examId, signToken, type World } from './fixtures';
+import { loadLive, signedKeyPriv } from './load';
 import { runProof } from './proof';
-import { checkReleaseLog, parseReleaseLog, releaseProgress } from './unlock';
+import { checkReleaseFiles, checkReleaseLog, expectedReleaseFiles, parseReleaseLog, releaseProgress } from './unlock';
 import { createStorage } from './storage';
 
 
@@ -226,6 +229,7 @@ describe('release log', () => {
     expect(await checkReleaseLog(log, examId, log.instancePublicKey)).toEqual({
       examId: 'pass',
       entriesHash: 'pass',
+      filesHash: 'pass',
       signature: 'pass',
     });
     const progress = releaseProgress(holdersOf(w.entries), log.entries.map((e) => e.passkeyPublicKey));
@@ -245,6 +249,25 @@ describe('release log', () => {
     const tampered = { ...log, entries: log.entries.slice(1) };
     const verdict = await checkReleaseLog(tampered, examId, log.instancePublicKey);
     expect(verdict.entriesHash).toBe('fail');
+  });
+
+  it('fails tampered files, and a tampered filesHash under the same signature', async () => {
+    const w = await getWorld();
+    const log = parseReleaseLog(must(w.files.get('release-log.json')));
+    const swapped = log.files.map((file, i) => (i === 0 ? { ...file, sha256: toHex(random(32)) } : file));
+    const changedFiles = await checkReleaseLog({ ...log, files: swapped }, examId, log.instancePublicKey);
+    expect(changedFiles).toMatchObject({ filesHash: 'fail', signature: 'pass' });
+    const changedHash = await checkReleaseLog({ ...log, filesHash: toHex(random(32)) }, examId, log.instancePublicKey);
+    expect(changedHash).toMatchObject({ filesHash: 'fail', signature: 'fail' });
+  });
+
+  it('refuses a list out of order or with a repeated name, rather than sorting it', async () => {
+    const w = await getWorld();
+    const log = parseReleaseLog(must(w.files.get('release-log.json')));
+    const reversed = await checkReleaseLog({ ...log, files: [...log.files].reverse() }, examId, log.instancePublicKey);
+    expect(reversed.filesHash).toBe('fail');
+    const repeated = await checkReleaseLog({ ...log, files: [...log.files, must(log.files.at(-1))] }, examId, log.instancePublicKey);
+    expect(repeated.filesHash).toBe('fail');
   });
 
   it('is signed by a fresh Unlock instance, not the Build instance, and its token passes against the chain', async () => {
@@ -295,6 +318,61 @@ describe('release log', () => {
     expect(() => parseReleaseLog(new TextEncoder().encode('nope'))).toThrow();
     expect(() => parseReleaseLog(new TextEncoder().encode('{"examId":"0x"}'))).toThrow('release log shape');
   });
+
+  it('rejects a log without files or filesHash, or with a malformed file', async () => {
+    const w = await getWorld();
+    const parse = (log: unknown) => () => parseReleaseLog(new TextEncoder().encode(JSON.stringify(log)));
+    const { files, filesHash, ...old } = w.releaseLog;
+    expect(parse({ ...old, filesHash })).toThrow('release log shape');
+    expect(parse({ ...old, files })).toThrow('release log shape');
+    expect(parse({ ...w.releaseLog, filesHash: '0xabcd' })).toThrow('release log shape');
+    expect(parse({ ...w.releaseLog, files: [{ name: 'key-priv.tlock', sha256: '0xabcd' }] })).toThrow('malformed file');
+    expect(parse({ ...w.releaseLog, files: [{ sha256: filesHash }] })).toThrow('malformed file');
+  });
+
+  it('counts a live answer of delivery_pending as no log yet, not as a failure', async () => {
+    const w = await getWorld();
+    const tee = {
+      status: () => Promise.resolve({ stage: 'unlock', questionCount: 0, release: { released: [], required: 8 } }),
+      releaseLog: () => Promise.reject(new TeeApiError(503, 'delivery_pending', 'not ready')),
+      attestation: () => Promise.reject(new Error('down')),
+    } as unknown as TeeClient;
+    const chain = { exam: w.exam, entries: w.entriesHex } as ChainData;
+    const report = await loadLive({ tee, chain: () => chain, examId, registry: registryAddress });
+    if ('kind' in report) throw new Error('expected a report');
+    expect(report.log).toBeNull();
+  });
+});
+
+describe('release files', () => {
+  it('expects key-priv.tlock and one copy per centre, and no one else', async () => {
+    const w = await getWorld();
+    const names = [...expectedReleaseFiles(w.entries).keys()];
+    const centres = w.entries.filter((entry) => entry.role === 3 || entry.role === 4);
+    expect(centres).toHaveLength(8);
+    expect(names).toHaveLength(9);
+    expect(names).toContain(storageNames.keyPriv);
+    for (const entry of w.entries) {
+      const named = names.includes(storageNames.centreKeyPriv(entry.derivedPublicKey));
+      expect(named).toBe(entry.role === 3 || entry.role === 4);
+    }
+  });
+
+  it('passes when the log, the list and storage all agree', async () => {
+    const w = await getWorld();
+    const log = parseReleaseLog(must(w.files.get('release-log.json')));
+    const report = await checkReleaseFiles(log, w.entries, w.storage());
+    expect(report).toMatchObject({ pending: false, names: 'pass', missing: [], extra: [], check: 'pass' });
+    expect(report.files).toHaveLength(9);
+  });
+
+  it('still compares stored files with no list, without passing', async () => {
+    const w = await getWorld();
+    const log = parseReleaseLog(must(w.files.get('release-log.json')));
+    const report = await checkReleaseFiles(log, null, w.storage({ [storageNames.keyPriv]: random(40) }));
+    expect(report.check).toBe('fail');
+    expect(report.files.find((file) => file.name === storageNames.keyPriv)?.problem).toBe('changed');
+  });
 });
 
 describe('post-exam proof', () => {
@@ -305,10 +383,13 @@ describe('post-exam proof', () => {
     build: w.build,
     criteria: w.criteriaHex,
     currentRound: 1000,
+    keyPrivSha256: null,
     now: 2_000_000_000,
     client: w.client,
     ...over,
   });
+  /** What `signedKeyPriv` gives for a log that passed: its hash of `key-priv.tlock`. */
+  const listedKeyPriv = (w: World) => must(w.releaseLog.files.find((file) => file.name === storageNames.keyPriv)).sha256;
 
   it('opens the paper with the real timelocks and passes every check', async () => {
     const w = await getWorld();
@@ -335,6 +416,43 @@ describe('post-exam proof', () => {
   it('says no copy exists when the end round passed with no key-priv.tlock', async () => {
     const w = await buildWorld({ unlocked: false });
     expect(await runProof(input(w))).toEqual({ state: 'sealed' });
+  });
+
+  it('opens the paper when key-priv.tlock is the file the signed log lists', async () => {
+    const w = await getWorld();
+    const result = await runProof(input(w, { keyPrivSha256: listedKeyPriv(w) }));
+    if (result.state !== 'opened') throw new Error('expected opened');
+    expect(result.paper).not.toBeNull();
+  });
+
+  it('fails, and does not say sealed, when a signed log lists a deleted key-priv.tlock', async () => {
+    const w = await getWorld();
+    const result = await runProof(input(w, { keyPrivSha256: listedKeyPriv(w), storage: w.storage({ [storageNames.keyPriv]: null }) }));
+    expect(result).toMatchObject({ state: 'failed', step: 'files', message: expect.stringMatching(/was removed from the public files/) as string });
+  });
+
+  it('fails before opening anything when key-priv.tlock is not the file the signed log lists', async () => {
+    const w = await getWorld();
+    // Sealed for real to the right round, so only the log's hash can catch it.
+    const swapped = new TextEncoder().encode(await w.seal(w.kPriv));
+    const result = await runProof(input(w, { keyPrivSha256: listedKeyPriv(w), storage: w.storage({ [storageNames.keyPriv]: swapped }) }));
+    expect(result).toMatchObject({ state: 'failed', step: 'files', message: expect.stringMatching(/was changed after the unlock recorded it/) as string });
+  });
+
+  it('stays sealed with no log and no key-priv.tlock', async () => {
+    const w = await getWorld();
+    const storage = w.storage({ [storageNames.keyPriv]: null, [storageNames.releaseLog]: null });
+    expect(await runProof(input(w, { storage }))).toEqual({ state: 'sealed' });
+  });
+
+  it('takes the hash for the proof only from a log whose checks passed', async () => {
+    const w = await getWorld();
+    const report = await checkReleaseFiles(parseReleaseLog(must(w.files.get('release-log.json'))), w.entries, w.storage());
+    const ready = { kind: 'ready', verdict: {}, token: null, progress: null } as unknown as Extract<Parameters<typeof signedKeyPriv>[0], { kind: 'ready' }>;
+    expect(signedKeyPriv({ ...ready, files: report })).toBe(listedKeyPriv(w));
+    expect(signedKeyPriv({ ...ready, files: null })).toBeNull();
+    expect(signedKeyPriv({ kind: 'neutral', message: 'no log' })).toBeNull();
+    expect(signedKeyPriv({ kind: 'malformed', message: 'bad' })).toBeNull();
   });
 
   it('fails when the Build’s saltedPaperHash is not the paper’s, and withholds the paper', async () => {

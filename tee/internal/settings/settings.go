@@ -30,7 +30,8 @@ type Exam struct {
 
 // Parse reads the settings and applies the same checks as
 // ExamRegistry.createExam, so a TEE can't start with settings the contract would
-// refuse. Arguments are one --name=value each, in the order of the table in
+// refuse, and the schedule bounds in spec/constants.json, which it doesn't check.
+// Arguments are one --name=value each, in the order of the table in
 // spec/api.md, so the attestation check can compare one exact list.
 func Parse(args []string) (Exam, error) {
 	var e Exam
@@ -112,7 +113,22 @@ func (e Exam) validate() error {
 	if min := firstRoundAfter(e.ExamStart); e.EndRound < min {
 		return fmt.Errorf("settings: end round must be produced after exam start, so at least %d, got %d", min, e.EndRound)
 	}
+	if max := spec.C.Schedule.MaxDeltaSeconds; e.Delta > max {
+		return fmt.Errorf("settings: delta must be at most %d seconds, got %d", max, e.Delta)
+	}
+	if max := lastRoundWithin(e.ExamStart, spec.C.Schedule.MaxEndAfterStartSeconds); e.EndRound > max {
+		return fmt.Errorf("settings: end round must be produced within schedule.maxEndAfterStartSeconds of exam start, so at most %d, got %d", max, e.EndRound)
+	}
 	return nil
+}
+
+// lastRoundWithin returns the last quicknet round produced at or before a time
+// plus a span. It works in rounds, because a large time plus the span could
+// overflow a uint64. at must not be before genesisTime.
+func lastRoundWithin(at, span uint64) uint64 {
+	elapsed := at - uint64(spec.C.Drand.GenesisTime)
+	period := uint64(spec.C.Drand.PeriodSeconds)
+	return elapsed/period + (elapsed%period+span)/period + 1
 }
 
 // unlockRoundFor returns the first quicknet round at or after a time, which is

@@ -40,9 +40,10 @@ func checkName(name string) error {
 // IsUnlockFile reports whether name, which starts with the exam folder, is one
 // of the files written at unlock: key-priv/*, key-priv.tlock, release-log.json
 // and release-token.jwt. A new Unlock instance may have to replace them, because
-// HPKE, the timelock and signatures differ on every run. Each is authenticated
-// by its own means, and the Build commits to none of them. Every file in the
-// manifest stays create-only.
+// HPKE, the timelock and signatures differ on every run. The Build commits to
+// none of them: they come after it. The signed release log lists the hash of
+// each key-priv file, and carries its own signature, which release-token.jwt
+// attests. Every file in the manifest stays create-only.
 func IsUnlockFile(name string) bool {
 	_, rel, ok := strings.Cut(name, "/")
 	if !ok {

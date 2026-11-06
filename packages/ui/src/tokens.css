@@ -205,13 +205,17 @@ a:hover {
   flex: none;
 }
 
-.ps-logo-sheet,
-.ps-logo[data-tone='mono'] .ps-logo-wax {
-  fill: currentColor;
+/* The seal's art has a transparent margin, so it is enlarged to sit level with the words. */
+.ps-wordmark img.ps-logo {
+  scale: 1.32;
 }
 
 .ps-logo-wax {
   fill: var(--ps-wax);
+}
+
+.ps-logo[data-tone='mono'] .ps-logo-wax {
+  fill: currentColor;
 }
 
 .ps-role-name {
@@ -485,48 +489,6 @@ a:hover {
   font-weight: 600;
   letter-spacing: 0.08em;
   color: var(--ps-seal-ink);
-}
-
-.ps-seal-under {
-  fill: var(--ps-wax-deep);
-}
-
-.ps-seal-wax {
-  fill: var(--ps-wax);
-}
-
-.ps-seal-well {
-  fill: none;
-  stroke: var(--ps-wax-deep);
-  stroke-width: 1.5;
-}
-
-.ps-seal-beads {
-  fill: none;
-  stroke: var(--ps-wax-deep);
-  stroke-width: 1.6;
-  stroke-linecap: round;
-  stroke-dasharray: 0.1 4.3;
-}
-
-.ps-seal-shine {
-  fill: none;
-  stroke: var(--ps-wax-shine);
-  stroke-width: 2;
-  stroke-linecap: round;
-  opacity: 0.8;
-}
-
-.ps-seal-mark {
-  font-family: var(--ps-serif);
-  font-size: 29px;
-  font-weight: 700;
-  fill: var(--ps-wax-deep);
-}
-
-.ps-seal-mark-lift {
-  fill: var(--ps-wax-shine);
-  opacity: 0.55;
 }
 
 .ps-seal-half {
@@ -1071,6 +1033,72 @@ a:hover {
   color: var(--ps-fail);
 }
 
+/*
+ * Loading. The seal is pressed onto the paper, then one thin line is drawn around it and lifted off, on
+ * repeat, so it never reads as a meter filling up. The art has a wide transparent margin, so the 120px image
+ * shows a seal of about 80px, and the line sits in that margin. apps/web/index.html repeats this as .ps-boot.
+ */
+
+.ps-loading {
+  --ps-loading-wait: calc(150ms - var(--ps-loading-ran, 0ms));
+
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.ps-loading-seal,
+.ps-loading-ring {
+  grid-area: 1 / 1;
+}
+
+.ps-loading-seal {
+  animation: ps-loading-press 460ms var(--ps-ease-settle) var(--ps-loading-wait) both;
+}
+
+.ps-loading-ring {
+  rotate: -90deg;
+  fill: none;
+  stroke: var(--ps-wax);
+  stroke-width: 1;
+  stroke-dasharray: 1 1;
+  animation: ps-loading-ring 3s ease-in-out calc(var(--ps-loading-wait) + 460ms) infinite both;
+}
+
+@keyframes ps-loading-press {
+  from {
+    opacity: 0;
+    scale: 1.16;
+  }
+
+  70% {
+    opacity: 1;
+    scale: 0.98;
+  }
+}
+
+@keyframes ps-loading-ring {
+  from {
+    stroke-dashoffset: 1;
+  }
+
+  50% {
+    stroke-dashoffset: 0;
+  }
+
+  to {
+    stroke-dashoffset: -1;
+  }
+}
+
+@keyframes ps-loading-appear {
+  from {
+    opacity: 0;
+  }
+}
+
 /* Reduced motion: every state still shows, it just arrives at once. */
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -1078,5 +1106,11 @@ a:hover {
   *::after {
     transition: none !important;
     animation: none !important;
+  }
+
+  /* No press and a still, whole ring. It is held back all the same, so a fast load shows nothing. */
+  .ps-loading-seal,
+  .ps-loading-ring {
+    animation: ps-loading-appear 1ms var(--ps-loading-wait) both !important;
   }
 }

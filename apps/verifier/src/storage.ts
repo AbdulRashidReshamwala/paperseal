@@ -1,4 +1,4 @@
-import { type Hex } from '@paperseal/protocol';
+import { encryptedPaperHash, toHex, type Hex } from '@paperseal/protocol';
 
 /** The public bucket, read from the viewer's own base URL. Hashes protect the content. */
 export interface StorageReader {
@@ -27,6 +27,9 @@ export function createStorage(
 }
 
 export const utf8Text = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
+
+/** The plain SHA-256 of a stored file. @paperseal/protocol only names it per file. */
+export const fileSha256 = (bytes: Uint8Array): Hex => toHex(encryptedPaperHash(bytes));
 
 /** `release-token.jwt` in spec/api.md. @paperseal/protocol's storageNames does not list it yet. */
 export const releaseTokenName = 'release-token.jwt';

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -94,6 +95,31 @@ func lockAndBuild(t *testing.T, w *world, m *lifecycle.Machine) {
 	stepUntil(t, m, lifecycle.StageUnlock)
 }
 
+// Other code at the registry address ends the exam. A failed read of the code
+// doesn't, however often it happens.
+func TestRegistryCodeMismatchFailsAndRPCErrorsRetry(t *testing.T) {
+	w := newWorld(t)
+	m, _, _ := w.machine()
+	w.chain.mu.Lock()
+	w.chain.examErr = errors.New("chainread: eth_getCode: status 503")
+	w.chain.mu.Unlock()
+	for range 5 {
+		if err := m.Step(context.Background()); err == nil {
+			t.Fatal("a failed read returned no error")
+		}
+		if m.Stage() != lifecycle.StageOnboard {
+			t.Fatalf("stage %s after an RPC error", m.Stage())
+		}
+	}
+	w.chain.mu.Lock()
+	w.chain.examErr = fmt.Errorf("%w: code hash 0x00", chainread.ErrWrongRegistry)
+	w.chain.mu.Unlock()
+	_ = m.Step(context.Background())
+	if m.Stage() != lifecycle.StageFailed || !errors.Is(m.Failure(), chainread.ErrWrongRegistry) {
+		t.Fatalf("stage %s, failure %v", m.Stage(), m.Failure())
+	}
+}
+
 func TestFullLifecycle(t *testing.T) {
 	w := newWorld(t)
 	m, keys, h := w.machine()
@@ -147,7 +173,7 @@ func TestFullLifecycle(t *testing.T) {
 	fields := hashing.BuildFields{
 		ExamID: w.exam.ExamID, ApprovedListHash: [32]byte(f.ApprovedListHash), PaperHash: [32]byte(f.PaperHash),
 		StorageManifestHash: [32]byte(f.StorageManifestHash), SaltedPaperHash: [32]byte(f.SaltedPaperHash),
-		Selected: f.Selected, BankSize: f.BankSize, CriteriaHash: [32]byte(f.CriteriaHash),
+		Selected: f.Selected, BankSize: f.BankSize, CriteriaHash: [32]byte(f.CriteriaHash), BuiltRound: f.BuiltRound,
 	}
 	var sig [64]byte
 	copy(sig[:], msg.TEESignature)
@@ -285,6 +311,13 @@ func TestFullLifecycle(t *testing.T) {
 	c.mustOK("GET", "/v1/release/log", nil, &log)
 	if len(log.Entries) != 8 {
 		t.Fatalf("final log has %d entries", len(log.Entries))
+	}
+	published, err := w.store.Get(ctx, prefix+"release-log.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if served, err := json.Marshal(log); err != nil || !bytes.Equal(served, published) {
+		t.Fatalf("served %s\npublished %s: %v", served, published, err)
 	}
 	if code, why := c.releaseShare(w, w.holders[8], enc); code != http.StatusConflict {
 		t.Errorf("share after release: %d %s", code, why)
@@ -960,5 +993,51 @@ func TestFailedUnlockServesNothing(t *testing.T) {
 	}
 	if code, why := c.do("GET", "/v1/release/log", nil, nil); code != http.StatusConflict || why != "wrong_stage" {
 		t.Errorf("log after failing: %d %s", code, why)
+	}
+}
+
+// builtRound is the relay's newest round when the paper was sealed, it is
+// signed, and a read that fails while sealing retries and doesn't fail the exam.
+func TestBuildSealsAtTheNewestRoundAndRetriesAFailedRead(t *testing.T) {
+	w := newWorld(t)
+	failures := 3
+	m, keys, h := w.machine(func(cfg *lifecycle.Config) {
+		cfg.Beacon = &toggleBeacon{inner: w.beacon, bad: &badBeacon{}, latestErrs: &failures}
+	})
+	c := client{t, h}
+	onboardAndSubmit(t, w, m, c, keys)
+	w.beacon.Set(lockRound + 2)
+	sawError := false
+	for i := 0; i < 20 && m.Stage() != lifecycle.StageUnlock; i++ {
+		if err := m.Step(context.Background()); err != nil {
+			sawError = true
+		}
+		if m.Stage() == lifecycle.StageFailed {
+			t.Fatalf("a failed read failed the exam: %v", m.Failure())
+		}
+	}
+	if m.Stage() != lifecycle.StageUnlock || !sawError || failures != 0 {
+		t.Fatalf("stage %s, saw error %v, %d failures left", m.Stage(), sawError, failures)
+	}
+	var ob api.OutboxResponse
+	c.mustOK("GET", "/v1/outbox", nil, &ob)
+	msg := ob.Messages[0]
+	f := msg.Fields
+	if f.BuiltRound != lockRound+2 {
+		t.Fatalf("builtRound %d, want %d", f.BuiltRound, lockRound+2)
+	}
+	fields := hashing.BuildFields{
+		ExamID: w.exam.ExamID, ApprovedListHash: [32]byte(f.ApprovedListHash), PaperHash: [32]byte(f.PaperHash),
+		StorageManifestHash: [32]byte(f.StorageManifestHash), SaltedPaperHash: [32]byte(f.SaltedPaperHash),
+		Selected: f.Selected, BankSize: f.BankSize, CriteriaHash: [32]byte(f.CriteriaHash), BuiltRound: f.BuiltRound,
+	}
+	var sig [64]byte
+	copy(sig[:], msg.TEESignature)
+	if err := attestation.Verify(msg.InstancePublicKey, hashing.Build(fields), sig); err != nil {
+		t.Fatalf("signature over the built round: %v", err)
+	}
+	fields.BuiltRound++
+	if err := attestation.Verify(msg.InstancePublicKey, hashing.Build(fields), sig); err == nil {
+		t.Fatal("the signature doesn't cover builtRound")
 	}
 }

@@ -2,7 +2,7 @@ import { createHash, createPublicKey, verify } from 'node:crypto';
 import { resolve } from 'node:path';
 
 import { hpkeContext, hpkeSeal } from '@paperseal/crypto';
-import { utf8ToBytes, webauthn } from '@paperseal/protocol';
+import { prfInput, utf8ToBytes, webauthn } from '@paperseal/protocol';
 import type { Browser, CDPSession } from 'playwright-core';
 import { createServer, type ViteDevServer } from 'vite';
 import { afterAll, beforeAll, describe, it } from 'vitest';
@@ -10,6 +10,8 @@ import { afterAll, beforeAll, describe, it } from 'vitest';
 import { freePort } from '../src/procs';
 import { launchChrome, Recording } from '../src/recorder';
 import type { PageApi } from '../keys-page/page';
+
+const examId = new Uint8Array(createHash('sha256').update('exam-1').digest());
 
 /*
  * The real packages/keys code in the installed Chrome, against Chrome's own virtual authenticator
@@ -116,15 +118,15 @@ describe('packages/keys on a virtual authenticator', () => {
       await ps('clearRequests');
       let derived = '';
       await rec.check('getPublicKey derives a 65-byte key, with the spec salt and user verification required', async () => {
-        derived = ok(await ps('getPublicKey', credentialId));
+        derived = ok(await ps('getPublicKey', credentialId, toHex(examId)));
         const bytes = fromHex(derived);
         if (bytes.length !== 65 || bytes[0] !== 4) throw new Error(`derived key is ${String(bytes.length)} bytes`);
         const [req, ...rest] = await ps('requests');
         if (rest.length !== 0 || req?.kind !== 'get') throw new Error('expected exactly one get request');
         if (req.userVerification !== webauthn.userVerification || req.userVerification !== 'required') throw new Error(`uv ${String(req.userVerification)}`);
-        if (req.prfSaltHex !== toHex(utf8ToBytes(webauthn.prfSalt))) throw new Error(`salt ${String(req.prfSaltHex)}`);
+        if (req.prfSaltHex !== toHex(prfInput(examId))) throw new Error(`salt ${String(req.prfSaltHex)}`);
         await say(`        derived pubkey  ${derived}`, 'ok');
-        await say('        PASS  salt equals spec/constants.json webauthn.prfSalt', 'ok');
+        await say('        PASS  PRF input is prfInput of this exam', 'ok');
         return `derived ${derived.slice(0, 16)}...`;
       });
       await rec.pause(2500);
@@ -137,7 +139,7 @@ describe('packages/keys on a virtual authenticator', () => {
       await rec.say('Step 3: page reloaded, same passkey, deriving again');
       await say('step 3  page reloaded; getPublicKey(credential) again ...', 'step');
       await rec.check('The same derived key comes back after the reload', async () => {
-        const again = ok(await ps('getPublicKey', credentialId));
+        const again = ok(await ps('getPublicKey', credentialId, toHex(examId)));
         if (again !== derived) throw new Error(`before ${derived}, after ${again}`);
         await say(`        derived pubkey  ${again}`, 'ok');
         await say('        PASS  identical to the key derived before the reload', 'ok');
@@ -148,7 +150,6 @@ describe('packages/keys on a virtual authenticator', () => {
       await rec.say('Step 4: one-touch releaseShare. A share is sealed to the derived key, then released');
       await say('step 4  sealing a 33-byte share to the derived public key with hpkeSeal (packages/crypto) ...', 'step');
       const share = crypto.getRandomValues(new Uint8Array(33));
-      const examId = new Uint8Array(createHash('sha256').update('exam-1').digest());
       const sealed = await hpkeSeal(fromHex(derived), share, hpkeContext('share', examId));
       await say(`        sealed share    ${toHex(sealed).slice(0, 96)}... (${String(sealed.length)} bytes)`, 'dim');
       await ps('clearRequests');
@@ -160,7 +161,7 @@ describe('packages/keys on a virtual authenticator', () => {
         const requests = await ps('requests');
         const [only] = requests;
         if (requests.length !== 1) throw new Error(`${String(requests.length)} requests`);
-        if (only?.kind !== 'get' || only.userVerification !== 'required' || only.prfSaltHex !== toHex(utf8ToBytes(webauthn.prfSalt))) throw new Error(JSON.stringify(only));
+        if (only?.kind !== 'get' || only.userVerification !== 'required' || only.prfSaltHex !== toHex(prfInput(examId))) throw new Error(JSON.stringify(only));
         await say(`        PASS  requests made: ${String(requests.length)} (get, userVerification "required", PRF salt present)`, 'ok');
         return '1 request';
       });

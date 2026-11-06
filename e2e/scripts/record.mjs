@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const results = resolve(root, 'videos/results');
-const names = ['board-publish', 'verifier-checks', 'mock-security-key', 'contracts-tests', 'tee-tests', 'packages-tests', 'web-tests'];
+const names = ['board-publish', 'verifier-checks', 'mock-security-key'];
 
 rmSync(results, { recursive: true, force: true });
 const run = spawnSync('pnpm', ['exec', 'vitest', 'run', '--config', 'vitest.config.ts'], { cwd: root, stdio: 'inherit' });

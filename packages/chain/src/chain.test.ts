@@ -10,6 +10,7 @@ import {
   encodeEventTopics,
   encodeFunctionResult,
   numberToHex,
+  sha256,
   zeroAddress,
   type Hex,
 } from 'viem';
@@ -112,6 +113,7 @@ const emptyBuild = {
   saltedPaperHash: zero32,
   selected: 0,
   bankSize: 0,
+  builtRound: 0n,
   postedAt: 0n,
   criteriaHash: zero32,
   teeSignature: '0x',
@@ -149,9 +151,27 @@ describe('ExamRegistry ABI', () => {
   });
 });
 
+describe('postBuild', () => {
+  it('takes the Build fields as one struct ending in builtRound', () => {
+    const fn = examRegistryAbi.find((e) => e.type === 'function' && e.name === 'postBuild');
+    const struct = fn?.inputs[1] as { components: { name: string }[] } | undefined;
+    expect(fn?.inputs.map((i) => i.name)).toEqual(['examId', 'fields', 'teeSignature', 'instancePublicKey']);
+    expect(struct?.components.map((c) => c.name)).toEqual([
+      'approvedListHash',
+      'paperHash',
+      'storageManifestHash',
+      'saltedPaperHash',
+      'selected',
+      'bankSize',
+      'criteriaHash',
+      'builtRound',
+    ]);
+  });
+});
+
 describe('createExamRegistry', () => {
   it('returns a posted record', async () => {
-    const build = { ...emptyBuild, selected: 30, bankSize: 300, postedAt: 5n };
+    const build = { ...emptyBuild, selected: 30, bankSize: 300, builtRound: 35732267n, postedAt: 5n };
     const registry = createExamRegistry({
       address,
       transport: rpc(() => build),
@@ -159,6 +179,7 @@ describe('createExamRegistry', () => {
     expect(await registry.getBuild(examId)).toMatchObject({
       selected: 30,
       bankSize: 300,
+      builtRound: 35732267n,
       postedAt: 5n,
     });
   });
@@ -364,6 +385,31 @@ describe('createExamRegistry', () => {
     await expect(tampered.getCriteria(examId)).rejects.toMatchObject({ what: 'criteria', kind: 'mismatch' });
     const missing = createExamRegistry({ address, transport: chainStub(record, () => []) });
     await expect(missing.getCriteria(examId)).rejects.toMatchObject({ what: 'criteria', kind: 'missing' });
+
+    // A reorg marks a log removed. It isn't on the chain any more, so it must not count.
+    const removed = createExamRegistry({ address, transport: chainStub(record, () => [{ ...log(criteria), removed: true }]) });
+    await expect(removed.getCriteria(examId)).rejects.toMatchObject({ what: 'criteria', kind: 'missing' });
+    const beside = createExamRegistry({ address, transport: chainStub(record, () => [{ ...log('0xc0ffef'), removed: true }, log(criteria)]) });
+    expect(await beside.getCriteria(examId)).toBe(criteria);
+  });
+
+  it('skips removed ApprovedListPosted logs too', async () => {
+    const entries: Hex = '0xabcd';
+    const posted = { listHash: toHex(approvedListHash(fromHex(examId), fromHex(entries))), postedAt: 7n, postedBlock: 42n };
+    const log = (bytes: Hex, removed: boolean) => ({
+      address,
+      topics: encodeEventTopics({ abi: examRegistryAbi, eventName: 'ApprovedListPosted', args: { examId } }),
+      data: encodeAbiParameters([{ type: 'bytes32' }, { type: 'bytes' }], [posted.listHash, bytes]),
+      blockNumber: '0x2a',
+      blockHash: hash32,
+      transactionHash: hash32,
+      transactionIndex: '0x0',
+      logIndex: '0x0',
+      removed,
+    });
+    const reading = (logs: unknown[]) => createExamRegistry({ address, transport: chainStub((name) => (name === 'getApprovedList' ? posted : exam), () => logs) });
+    await expect(reading([log(entries, true)]).getApprovedListEntries(examId)).rejects.toMatchObject({ what: 'approvedList', kind: 'missing' });
+    expect(await reading([log('0xdead', true), log(entries, false)]).getApprovedListEntries(examId)).toBe(entries);
   });
 
   it('returns null criteria before the exam exists', async () => {
@@ -538,9 +584,10 @@ describe('scanEvents', () => {
 describe('sync-abi.mjs', () => {
   const dir = mkdtempSync(join(tmpdir(), 'sync-abi-'));
   const output = join(dir, 'abi.ts');
+  const pin = join(dir, 'registry.json');
 
   it('fails clearly when the artifact is missing', () => {
-    const run = spawnSync('node', [script, join(dir, 'missing.json'), output], {
+    const run = spawnSync('node', [script, join(dir, 'missing.json'), output, pin], {
       encoding: 'utf8',
     });
     expect(run.status).toBe(1);
@@ -550,7 +597,7 @@ describe('sync-abi.mjs', () => {
   it('fails clearly when the artifact has no ABI', () => {
     const artifact = join(dir, 'empty.json');
     writeFileSync(artifact, '{}');
-    const run = spawnSync('node', [script, artifact, output], {
+    const run = spawnSync('node', [script, artifact, output, pin], {
       encoding: 'utf8',
     });
     expect(run.status).toBe(1);
@@ -564,7 +611,7 @@ describe('sync-abi.mjs', () => {
   const runWith = (file: string, contents: unknown) => {
     const artifact = join(dir, file);
     writeFileSync(artifact, JSON.stringify(contents));
-    return spawnSync('node', [script, artifact, output], { encoding: 'utf8' });
+    return spawnSync('node', [script, artifact, output, pin], { encoding: 'utf8' });
   };
 
   it('fails clearly unless the code has exactly one immutable, each use one word long', () => {
@@ -601,5 +648,30 @@ describe('sync-abi.mjs', () => {
     expect(source).toContain('export const examRegistryAbi');
     expect(source).toContain(`bytecode: '${code.toLowerCase()}'`);
     expect(source).toContain('boardOffsets: [2, 38]');
+  });
+
+  it('writes a sample of matching code when given a path for it', () => {
+    const artifact = join(dir, 'sample.json');
+    const sample = join(dir, 'sample-code.json');
+    writeFileSync(artifact, JSON.stringify({ abi, deployedBytecode: deployedBytecode({ 7: [{ start: 2, length: 32 }] }) }));
+    expect(spawnSync('node', [script, artifact, output, pin, sample], { encoding: 'utf8' }).status).toBe(0);
+    const { board, code: filled } = JSON.parse(readFileSync(sample, 'utf8')) as { board: string; code: string };
+    expect(filled.slice(6, 70)).toBe(board.slice(2).padStart(64, '0'));
+    expect(filled.length).toBe(code.length);
+  });
+
+  it('writes the pin over the executable code only, with the board words zeroed', () => {
+    const references = { 7: [{ start: 38, length: 32 }, { start: 2, length: 32 }] };
+    const hashed = (object: string) => {
+      expect(runWith('pin.json', { abi, deployedBytecode: deployedBytecode(references, object) }).status).toBe(0);
+      return JSON.parse(readFileSync(pin, 'utf8')) as { runtimeCodeHash: string; executableBytes: number; boardOffsets: number[] };
+    };
+    const written = hashed(code);
+    expect(written.executableBytes).toBe(70);
+    expect(written.boardOffsets).toEqual([2, 38]);
+    expect(written.runtimeCodeHash).toBe(sha256(`0x6080${'00'.repeat(32)}aabb${'00'.repeat(34)}`));
+    // A comment edit changes only the metadata, so the pin stays.
+    expect(hashed(`${code.slice(0, -12)}b1b2b3b40004`).runtimeCodeHash).toBe(written.runtimeCodeHash);
+    expect(hashed(code.replace('aabb', 'aabc')).runtimeCodeHash).not.toBe(written.runtimeCodeHash);
   });
 });

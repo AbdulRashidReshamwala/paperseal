@@ -12,7 +12,15 @@ import { approvedEntries, checkManifest, holdersOf, type ManifestReport } from '
 import type { LatestRound } from './live';
 import { runProof, type ProofState } from './proof';
 import { releaseTokenName, utf8Text, type StorageReader } from './storage';
-import { checkReleaseLog, parseReleaseLog, releaseProgress, type LogVerdict, type ReleaseProgress } from './unlock';
+import {
+  checkReleaseFiles,
+  checkReleaseLog,
+  parseReleaseLog,
+  releaseProgress,
+  type LogVerdict,
+  type ReleaseFilesReport,
+  type ReleaseProgress,
+} from './unlock';
 
 /** Nothing to judge yet. Never red, because nothing failed. */
 export interface Neutral {
@@ -41,6 +49,8 @@ export type LogResult =
       /** The `release-token.jwt` check, or null if the token is not in storage. */
       token: RecordVerdict | null;
       progress: ReleaseProgress | null;
+      /** The log's files against the list and storage. Null until the log's signature and token pass. */
+      files: ReleaseFilesReport | null;
     };
 
 /** One polled read of the public record: the chain, and each public file checked against it. */
@@ -105,7 +115,7 @@ async function readManifest(chain: ChainData, storage: StorageReader, examId: He
 }
 
 const verifiedLog = (verdict: LogVerdict) =>
-  verdict.examId === 'pass' && verdict.entriesHash === 'pass' && verdict.signature === 'pass';
+  verdict.examId === 'pass' && verdict.entriesHash === 'pass' && verdict.filesHash === 'pass' && verdict.signature === 'pass';
 
 /** Why a backup copy of the release log did not pass, for the evidence. */
 function logFailure(verdict: LogVerdict, token: RecordVerdict | null): string {
@@ -166,11 +176,12 @@ async function readLog(
   // Read again once the log is settled, so only the token copies tried against it are reported.
   const token = await tokenFor(log, true);
   const list = approvedEntries(entries);
+  // The log's own key is only used once `release-token.jwt` attests it. Until then there is no
+  // key to check under, so the signature shows "Not checked" and never a pass.
+  const verdict = await checkReleaseLog(log, examId, token?.verified ? log.instancePublicKey : null);
   return {
     kind: 'ready',
-    // The log's own key is only used once `release-token.jwt` attests it. Until then there is no
-    // key to check under, so the signature shows "Not checked" and never a pass.
-    verdict: await checkReleaseLog(log, examId, token?.verified ? log.instancePublicKey : null),
+    verdict,
     token,
     progress: list
       ? releaseProgress(
@@ -178,7 +189,18 @@ async function readLog(
           log.entries.map((entry) => entry.passkeyPublicKey),
         )
       : null,
+    files: isValidLog(verdict, token) ? await checkReleaseFiles(log, list, storage) : null,
   };
+}
+
+/** Whether a log can be relied on for what it lists: its token, signature, exam and file list all passed. */
+export const isValidLog = (verdict: LogVerdict, token: RecordVerdict | null) =>
+  token?.verified === true && verdict.signature === 'pass' && verdict.examId === 'pass' && verdict.filesHash === 'pass';
+
+/** The hash of `key-priv.tlock` in a valid log, for the proof. Null if there is none. */
+export function signedKeyPriv(log: Records['log']): Hex | null {
+  if (log.kind !== 'ready' || !log.files) return null;
+  return log.files.files.find((file) => file.name === storageNames.keyPriv)?.sha256 ?? null;
 }
 
 export async function loadRecords(args: {
@@ -467,13 +489,15 @@ export function useProof(args: {
   examId: Hex | null;
   client: ChainClient;
   chain: ChainData | null;
+  /** See `ProofInput`. Read at each run, so a retry sees a log that appeared since the last one. */
+  keyPrivSha256: Hex | null;
   latest: LatestRound;
   now: number;
   retryMs?: number;
   /** Where to find a Swarm backup of the files, or null with backups off. */
   backup?: BackupSource | null;
 }): ProofRun | null {
-  const { storage, examId, client, chain, latest, now, retryMs = PROOF_RETRY_MS, backup = null } = args;
+  const { storage, examId, client, chain, keyPrivSha256, latest, now, retryMs = PROOF_RETRY_MS, backup = null } = args;
   const endRound = chain?.exam ? Number(chain.exam.settings.endRound) : null;
   const reached = endRound !== null && roundReached(endRound, latest.round, now);
   const key = `${String(reached)}|${String(latest.round !== null)}|${String(chain?.build?.postedAt)}`;
@@ -481,15 +505,15 @@ export function useProof(args: {
   const [attempts, setAttempts] = useState(0);
 
   // The round and the clock only decide when to start. Later ticks must not restart it.
-  const inputs = useRef({ chain, currentRound: latest.round });
+  const inputs = useRef({ chain, keyPrivSha256, currentRound: latest.round });
   useEffect(() => {
-    inputs.current = { chain, currentRound: latest.round };
-  }, [chain, latest.round]);
+    inputs.current = { chain, keyPrivSha256, currentRound: latest.round };
+  }, [chain, keyPrivSha256, latest.round]);
 
   useEffect(() => {
     if (!reached) return;
     let live = true;
-    const { chain: data, currentRound } = inputs.current;
+    const { chain: data, keyPrivSha256: signed, currentRound } = inputs.current;
     const backed = storage ? withBackup(storage, backup, data?.build ?? null) : null;
     const used = () => (backed && backup ? { backup: backed.use() } : {});
     runProof({
@@ -499,6 +523,7 @@ export function useProof(args: {
       build: data?.build ?? null,
       criteria: data?.criteria ?? null,
       currentRound,
+      keyPrivSha256: signed,
       now: Math.floor(Date.now() / 1000),
       client,
     }).then(

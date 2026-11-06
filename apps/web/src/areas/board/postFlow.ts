@@ -1,5 +1,5 @@
 import { examRegistryAbi, OnChainBytesError, type ExamRegistry } from '@paperseal/chain';
-import { approvedListHash, chain, fromHex, toHex, type Hex } from '@paperseal/protocol';
+import { approvedListHash, chain, entriesOverLimit, fromHex, limits, toHex, type Hex } from '@paperseal/protocol';
 import { BaseError, ContractFunctionRevertedError, UserRejectedRequestError, type Address } from 'viem';
 
 import { currentAccount, switchToSepolia, walletChainId, walletClientFor } from '../../shared/wallet';
@@ -45,7 +45,7 @@ async function sendFromBoard(
   if (!registryAddress || !publicClient || !createRegistry) {
     throw new PublishBlockedError('Posting is not set up on this page. Ask whoever installed Paper Seal to finish the setup, then reload.');
   }
-  const account = await currentAccount(provider);
+  const account = await currentAccount(provider, await createRegistry().board());
   if (!account) throw new PublishBlockedError('Connect your wallet, then press the button again.');
   // A wallet on the wrong network is asked to switch. If it declines or can't, the instruction below is shown.
   await switchToSepolia(provider);
@@ -154,6 +154,15 @@ export async function postApprovedListFlow(
   options: PostOptions = {},
 ): Promise<PostOutcome> {
   const { examId, entries } = input;
+  // Checked before the wallet is asked: the network would drop a list this long and never say so.
+  if (entriesOverLimit(fromHex(entries))) {
+    throw new PublishBlockedError(
+      withDetails(
+        'The list is too long to post, and nothing was posted. Take some people off the list, or shorten their names, then try again.',
+        `${String(fromHex(entries).length)} bytes. The limits are ${String(limits.entriesBytes)} bytes and ${String(limits.entries)} people.`,
+      ),
+    );
+  }
   const existing = environment.createRegistry ? await environment.createRegistry().getApprovedList(examId) : null;
   if (existing) {
     throw new PublishBlockedError('The list of people is already posted for this exam. It cannot be replaced.');
@@ -190,6 +199,8 @@ export interface BuildPost {
   selected: number;
   bankSize: number;
   criteriaHash: Hex;
+  /** The newest verified drand round when the TEE sealed the paper. */
+  builtRound: bigint;
   teeSignature: Hex;
   instancePublicKey: Hex;
 }
@@ -201,18 +212,17 @@ export async function postBuildFlow(
   onStage: (stage: PostStage) => void = () => undefined,
   options: PostOptions = {},
 ): Promise<PostOutcome> {
-  const args = [
-    build.examId,
-    build.approvedListHash,
-    build.paperHash,
-    build.storageManifestHash,
-    build.saltedPaperHash,
-    build.selected,
-    build.bankSize,
-    build.criteriaHash,
-    build.teeSignature,
-    build.instancePublicKey,
-  ] as const;
+  const fields = {
+    approvedListHash: build.approvedListHash,
+    paperHash: build.paperHash,
+    storageManifestHash: build.storageManifestHash,
+    saltedPaperHash: build.saltedPaperHash,
+    selected: build.selected,
+    bankSize: build.bankSize,
+    criteriaHash: build.criteriaHash,
+    builtRound: build.builtRound,
+  };
+  const args = [build.examId, fields, build.teeSignature, build.instancePublicKey] as const;
   const existing = environment.createRegistry ? await environment.createRegistry().getBuild(build.examId) : null;
   if (existing) throw new PublishBlockedError('The sealed paper is already recorded for this exam. It cannot be recorded twice.');
   const sent = await sendFromBoard(
@@ -234,6 +244,7 @@ export async function postBuildFlow(
     row('Selected', String(build.selected), String(stored.selected)),
     row('Bank size', String(build.bankSize), String(stored.bankSize)),
     row('Criteria hash', lower(build.criteriaHash), lower(stored.criteriaHash)),
+    row('Sealed at round', String(build.builtRound), String(stored.builtRound)),
     row('TEE signature', lower(build.teeSignature), lower(stored.teeSignature)),
     row('Instance public key', lower(build.instancePublicKey), lower(stored.instancePublicKey)),
   ];

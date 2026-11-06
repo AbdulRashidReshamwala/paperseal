@@ -11,17 +11,21 @@ import {
   encodePaper,
   encryptedPaperHash,
   entriesHash,
+  filesHash,
   fromHex,
   hashMessage,
   padPaper,
   saltedPaperHash,
   setterOwner,
+  sortReleaseFiles,
   startupArgs,
   storageManifestHash,
+  storageNames,
   toHex,
   type ApprovedListEntry,
   type Hex,
   type Paper,
+  type ReleaseFile,
 } from '@paperseal/protocol';
 import { BasicConstraintsExtension, X509Certificate, X509CertificateGenerator } from '@peculiar/x509';
 import { CompactSign } from 'jose';
@@ -42,6 +46,10 @@ const rsa = { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256', publicExponent: new Ui
 export const examId: Hex = `0x${'11'.repeat(32)}`;
 export const registryAddress: Hex = '0x00000000000000000000000000000000000000aa';
 export const imageDigest: Hex = `0x${'ab'.repeat(32)}`;
+
+export const boardAddress: Hex = '0x000000000000000000000000000000000000b0a2';
+/** A registry whose code passed the check. */
+export const registryMatches = { state: 'match', board: boardAddress } as const;
 
 /** Real quicknet round 1000, signed by the real network. It is the only round tests can open. */
 export const beacon = {
@@ -152,14 +160,17 @@ export const paper: Paper = {
   ],
 };
 
+/** Key holders and centres are listed by ENS name: `Neutral 1` is `neutral-1.paperseal-demo.eth`. */
+export const ensOwnerOf = (name: string): string => `${name.toLowerCase().replace(/\s+/g, '-')}.paperseal-demo.eth`;
+
 /** The list holds a setter only as the hash of its own passkey public key, and never as a name. */
-export function approvedList(): ApprovedListEntry[] {
+export function approvedList(ownerOf: (name: string) => string = ensOwnerOf): ApprovedListEntry[] {
   const key = (n: number) => Uint8Array.from([0x04, n, ...random(63)]);
   const entry = (role: number, name: string, n: number): ApprovedListEntry => {
     const passkeyPublicKey = key(n);
     return {
       role,
-      owner: role === 1 ? setterOwner(passkeyPublicKey) : name,
+      owner: role === 1 ? setterOwner(passkeyPublicKey) : ownerOf(name),
       passkeyPublicKey,
       derivedPublicKey: role === 1 ? new Uint8Array(0) : key(n + 100),
     };
@@ -173,7 +184,10 @@ export function approvedList(): ApprovedListEntry[] {
 }
 
 export interface WorldOptions {
-  /** Which files storage holds besides the manifest. Defaults to everything written before the Build. */
+  /**
+   * Whether the threshold was reached, so storage holds the key files and the log lists them.
+   * Otherwise the log is one from below the threshold, with too few entries and no files.
+   */
   unlocked?: boolean;
   endRound?: number;
   /** Corrupts the Build's saltedPaperHash, as if the TEE committed to another paper. */
@@ -184,6 +198,10 @@ export interface WorldOptions {
   badReleaseToken?: boolean;
   /** The Build's `selected`, if not the paper's question count. */
   selected?: number;
+  /** What the signed log lists, given the files really written. It is signed for real either way. */
+  logFiles?: (files: ReleaseFile[]) => ReleaseFile[];
+  /** The `owner` each key holder or centre is listed under, given its default name. */
+  ownerOf?: (name: string) => string;
 }
 
 /** A whole exam: chain records, storage files, a PKI token and a release log. */
@@ -192,7 +210,7 @@ export async function buildWorld(options: WorldOptions = {}) {
   const client = offlineQuicknet();
   const examBytes = fromHex(examId);
   const signing = await p256();
-  const entries = approvedList();
+  const entries = approvedList(options.ownerOf);
   const entriesBytes = encodeApprovedList(entries);
   const criteriaBytes = encodeCriteria(criteria);
   const thePaper = options.paper ?? paper;
@@ -280,6 +298,7 @@ export async function buildWorld(options: WorldOptions = {}) {
     selected,
     bankSize: 30,
     criteriaHash: criteriaHash(criteriaBytes),
+    builtRound: 150n,
   };
   const build = {
     approvedListHash: toHex(buildFields.approvedListHash),
@@ -288,6 +307,7 @@ export async function buildWorld(options: WorldOptions = {}) {
     saltedPaperHash: toHex(buildFields.saltedPaperHash),
     selected,
     bankSize: 30,
+    builtRound: buildFields.builtRound,
     postedAt: 1n,
     criteriaHash: toHex(buildFields.criteriaHash),
     teeSignature: toHex(await teeSign(signing.pair.privateKey, encodeMessage('build', buildFields))),
@@ -301,7 +321,7 @@ export async function buildWorld(options: WorldOptions = {}) {
     pki,
   );
   // Eight holders released: the three neutral parties and five centres.
-  const releasedHolders = holders.slice(0, 8);
+  const releasedHolders = holders.slice(0, unlocked ? 8 : 3);
   const logEntries = releasedHolders.map((holder, i) => ({
     passkeyPublicKey: toHex(holder.passkeyPublicKey),
     shareHash: toHex(random(32)),
@@ -309,18 +329,31 @@ export async function buildWorld(options: WorldOptions = {}) {
   }));
   const wire = logEntries.map((e) => ({ passkeyPublicKey: fromHex(e.passkeyPublicKey), shareHash: fromHex(e.shareHash), round: BigInt(e.round) }));
   const logHash = entriesHash(wire);
+  // Each centre's copy is opaque here: the verifier compares its hash and never opens it.
+  const keyFiles = new Map<string, Uint8Array>();
+  if (unlocked) {
+    keyFiles.set(storageNames.keyPriv, new TextEncoder().encode(await seal(kPriv)));
+    for (const centre of entries.filter((e) => e.role === 3 || e.role === 4)) {
+      keyFiles.set(storageNames.centreKeyPriv(centre.derivedPublicKey), random(120));
+    }
+  }
+  const written = sortReleaseFiles([...keyFiles].map(([name, bytes]) => ({ name, sha256: encryptedPaperHash(bytes) })));
+  const listed = options.logFiles ? options.logFiles(written) : written;
+  const listedHash = filesHash(listed);
   const releaseLog = {
     examId,
     entries: logEntries,
     entriesHash: toHex(logHash),
-    teeSignature: toHex(await teeSign(unlockSigning.pair.privateKey, encodeMessage('releaseLog', { examId: examBytes, entriesHash: logHash }))),
+    files: listed.map((file) => ({ name: file.name, sha256: toHex(file.sha256) })),
+    filesHash: toHex(listedHash),
+    teeSignature: toHex(
+      await teeSign(unlockSigning.pair.privateKey, encodeMessage('releaseLog', { examId: examBytes, entriesHash: logHash, filesHash: listedHash })),
+    ),
     instancePublicKey: toHex(unlockSigning.publicKey),
   };
   files.set('release-token.jwt', new TextEncoder().encode(releaseToken));
   files.set('release-log.json', new TextEncoder().encode(JSON.stringify(releaseLog)));
-  if (unlocked) {
-    files.set('key-priv.tlock', new TextEncoder().encode(await seal(kPriv)));
-  }
+  for (const [name, bytes] of keyFiles) files.set(name, bytes);
 
   const storage = (replace: Record<string, Uint8Array | null> = {}): StorageReader => ({
     url: (name) => `https://files.example/${examId}/${name}`,
@@ -365,11 +398,16 @@ export async function signedReleaseLog(world: World, count: number, signer: Awai
   const hash = entriesHash(
     entries.map((e) => ({ passkeyPublicKey: fromHex(e.passkeyPublicKey), shareHash: fromHex(e.shareHash), round: BigInt(e.round) })),
   );
+  // The TEE lists the key files only once the threshold is reached, as here the full log.
+  const files = count >= world.releaseLog.entries.length ? world.releaseLog.files : [];
+  const listed = filesHash(files.map((f) => ({ name: f.name, sha256: fromHex(f.sha256) })));
   return {
     examId,
     entries,
     entriesHash: toHex(hash),
-    teeSignature: toHex(await teeSign(signer.pair.privateKey, encodeMessage('releaseLog', { examId: examBytes, entriesHash: hash }))),
+    files,
+    filesHash: toHex(listed),
+    teeSignature: toHex(await teeSign(signer.pair.privateKey, encodeMessage('releaseLog', { examId: examBytes, entriesHash: hash, filesHash: listed }))),
     instancePublicKey: toHex(signer.publicKey),
   };
 }

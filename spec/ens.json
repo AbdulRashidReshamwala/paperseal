@@ -3,7 +3,11 @@
     "tee": "paperseal.tee",
     "storage": "paperseal.storage",
     "bucket": "paperseal.bucket",
-    "arkivWriters": "paperseal.arkiv-writers"
+    "arkivWriters": "paperseal.arkiv-writers",
+    "passkey": "paperseal.passkey",
+    "credential": "paperseal.credential",
+    "directory": "paperseal.directory"
   },
+  "directoryBytes": 8192,
   "ccipRead": false
 }

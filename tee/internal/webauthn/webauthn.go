@@ -1,11 +1,12 @@
 // Package webauthn checks passkey signatures as spec/api.md "Passkey
 // Signatures" describes. A passkey signs a message hash as the WebAuthn
 // challenge, and the TEE checks the ES256 signature with crypto/ecdsa and the
-// fixed-layout authenticator data by hand. It needs no CBOR library, because
-// the TEE never parses the attestation object unless attestation is required.
+// fixed-layout authenticator data by hand. A CBOR library reads the attestation
+// object, and only when attestation is required.
 package webauthn
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/sha256"
@@ -14,6 +15,8 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+
+	"github.com/fxamacker/cbor/v2"
 
 	"paperseal/tee/internal/hashing"
 	"paperseal/tee/internal/notimpl"
@@ -46,6 +49,9 @@ type Assertion struct {
 
 // ErrBad is the base of every rejection.
 var ErrBad = errors.New("webauthn: invalid passkey signature")
+
+// ErrAttestation means an attestation object doesn't belong to the passkey.
+var ErrAttestation = errors.New("webauthn: attestation does not belong to this passkey")
 
 func bad(format string, a ...any) error {
 	return fmt.Errorf("%w: %s", ErrBad, fmt.Sprintf(format, a...))
@@ -110,17 +116,80 @@ type AttestationResult struct {
 }
 
 // CheckAttestation applies webauthn.requireHardwareAttestation. When it is
-// false the chain check is skipped, and the result says so. When it is true the
-// check isn't implemented, so it refuses: the TEE can't verify an attestation
-// chain yet, and it never claims it did.
-func CheckAttestation(attestationObject []byte) (AttestationResult, error) {
-	return checkAttestation(spec.C.WebAuthn.RequireHardwareAttestation, attestationObject)
+// false nothing is read, and the result says so. When it is true the object must
+// belong to the passkey. The chain check after that isn't implemented, so it
+// refuses: the TEE can't verify an attestation chain yet, and it never claims it
+// did.
+func CheckAttestation(attestationObject, passkeyPublicKey []byte) (AttestationResult, error) {
+	return checkAttestation(spec.C.WebAuthn.RequireHardwareAttestation, attestationObject, passkeyPublicKey)
 }
 
-func checkAttestation(require bool, _ []byte) (AttestationResult, error) {
-	if require {
-		return AttestationResult{}, notimpl.New("webauthn.CheckAttestation: hardware attestation chains " +
-			"need a CBOR parser and the approved authenticator roots (AAGUIDs), which are not chosen yet")
+func checkAttestation(require bool, attestationObject, passkeyPublicKey []byte) (AttestationResult, error) {
+	if !require {
+		return AttestationResult{ChainChecked: false}, nil
 	}
-	return AttestationResult{ChainChecked: false}, nil
+	if err := checkAttestedKey(attestationObject, passkeyPublicKey); err != nil {
+		return AttestationResult{}, err
+	}
+	return AttestationResult{}, notimpl.New("webauthn.CheckAttestation: hardware attestation chains " +
+		"need the approved authenticator roots (AAGUIDs), which are not chosen yet")
+}
+
+// Offsets in authenticator data with attested credential data: the rpIdHash,
+// flags and counter, then the 16-byte AAGUID and the credential ID's length.
+const (
+	flagAttested  = 0x40
+	credentialLen = authDataMin + 16
+	credentialID  = credentialLen + 2
+)
+
+// COSE_Key labels and values for an ES256 key, from RFC 9053.
+const (
+	coseKty    = 1
+	coseAlg    = 3
+	coseCrv    = -1
+	coseX      = -2
+	coseY      = -3
+	coseKtyEC2 = 2
+	coseES256  = -7
+	coseP256   = 1
+	coordBytes = 32
+)
+
+// checkAttestedKey checks that the object's attested credential is passkeyPublicKey.
+func checkAttestedKey(attestationObject, passkeyPublicKey []byte) error {
+	var object struct {
+		AuthData []byte `cbor:"authData"`
+	}
+	if err := cbor.Unmarshal(attestationObject, &object); err != nil {
+		return fmt.Errorf("%w: the object doesn't read: %v", ErrAttestation, err)
+	}
+	data := object.AuthData
+	if len(data) < credentialID || data[32]&flagAttested == 0 {
+		return fmt.Errorf("%w: no attested credential", ErrAttestation)
+	}
+	end := credentialID + int(data[credentialLen])<<8 + int(data[credentialLen+1])
+	if len(data) <= end {
+		return fmt.Errorf("%w: the credential is cut short", ErrAttestation)
+	}
+	var key map[int]cbor.RawMessage
+	// UnmarshalFirst, because extension data may follow the key.
+	if _, err := cbor.UnmarshalFirst(data[end:], &key); err != nil {
+		return fmt.Errorf("%w: the public key doesn't read: %v", ErrAttestation, err)
+	}
+	var kty, alg, crv int
+	var x, y []byte
+	for label, into := range map[int]any{coseKty: &kty, coseAlg: &alg, coseCrv: &crv, coseX: &x, coseY: &y} {
+		if err := cbor.Unmarshal(key[label], into); err != nil {
+			return fmt.Errorf("%w: the public key has no usable label %d", ErrAttestation, label)
+		}
+	}
+	if kty != coseKtyEC2 || alg != coseES256 || crv != coseP256 || len(x) != coordBytes || len(y) != coordBytes {
+		return fmt.Errorf("%w: not a P-256 ES256 key", ErrAttestation)
+	}
+	point := append(append([]byte{4}, x...), y...)
+	if !bytes.Equal(point, passkeyPublicKey) {
+		return fmt.Errorf("%w: it attests a different key", ErrAttestation)
+	}
+	return nil
 }

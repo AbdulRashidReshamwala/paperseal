@@ -84,14 +84,14 @@ export function cast(chain: Chain, signature: string, ...args: string[]): string
 export async function startApp(
   dir: string,
   env: Record<string, string>,
-  options: { host?: string } = {},
+  options: { host?: string; /** A Vite mode, such as the mock suite's `mock`. */ mode?: string } = {},
 ): Promise<{ url: string; stop: () => Promise<void> }> {
   // WebAuthn refuses an IP address as its relying party, so a run that uses security keys passes host "localhost".
   const host = options.host ?? '127.0.0.1';
   const port = await freePort();
   const cwd = resolve(repoRoot, dir);
   // vite.config.ts sets strictPort on 5171/5172, which may be taken, so the CLI overrides the port.
-  const server = spawnManaged('pnpm', ['exec', 'vite', '--host', host, '--port', String(port), '--strictPort'], {
+  const server = spawnManaged('pnpm', ['exec', 'vite', '--host', host, '--port', String(port), '--strictPort', ...(options.mode ? ['--mode', options.mode] : [])], {
     cwd,
     env,
     label: `vite ${dir}`,

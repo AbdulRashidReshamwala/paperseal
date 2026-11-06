@@ -38,12 +38,12 @@ export function castSendArgs(to: Address, data: Hex): string[] {
   ];
 }
 
-export function castSend(data: Hex, to: Address = deployed.registry, timeoutMs = 10 * 60_000): Promise<Hex> {
+export function castSend(data: Hex, to: Address = deployed.registry, timeoutMs = 10 * 60_000, extra: readonly string[] = []): Promise<Hex> {
   if (!existsSync(deployed.passwordFile)) {
     return Promise.reject(new Error(`the password file ${deployed.passwordFile} does not exist (its contents are never read here)`));
   }
   return new Promise((resolve, reject) => {
-    const child = spawn('cast', castSendArgs(to, data), { stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('cast', [...castSendArgs(to, data), ...extra], { stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     let err = '';
     child.stdout.on('data', (chunk: Buffer) => (out += chunk.toString('utf8')));

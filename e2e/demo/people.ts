@@ -95,6 +95,8 @@ export interface OpenOptions {
   permissions?: string[];
   /** Runs after the key exists and before the first page load, so a counter or a wallet sees every load. */
   setup?: (person: Person) => Promise<void> | void;
+  /** Records this person's window to a video in `dir`, at the viewport size. Needs a fixed `viewport`. */
+  recordVideo?: { dir: string; size: { width: number; height: number } };
   /** Hide the corner label. Screenshots then show the app and nothing else. */
   noLabel?: boolean;
 }
@@ -111,6 +113,7 @@ export async function openPerson(
   const context = await browser.newContext({
     viewport: options.viewport ?? null,
     ...(options.permissions ? { permissions: options.permissions } : {}),
+    ...(options.recordVideo ? { recordVideo: options.recordVideo } : {}),
   });
   if (!options.noLabel) await context.addInitScript(labelScript(name));
 

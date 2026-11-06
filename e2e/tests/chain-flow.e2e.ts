@@ -78,6 +78,15 @@ describe('exam on a local anvil chain', () => {
       await value(page, 'Length, in minutes').fill('180');
       await rec.say('Step 1: released to centres 30 minutes before');
       await value(page, 'Minutes before the exam to release the paper to centres').fill('30');
+      await rec.say('Step 1: Advanced holds the public record provider');
+      await unfold(page, 'Advanced');
+      await value(page, 'Public record address').fill(RPC_HOST);
+      await rec.check('The first page works out when questions close', async () => {
+        const note = (await page.locator('.board-note').first().innerText()).replace(/\s+/g, ' ');
+        if (!note.includes('Questions close')) throw new Error(`no closing time: ${note}`);
+        return note;
+      });
+      await page.getByRole('button', { name: 'Continue' }).click();
       await rec.say('Step 1: first topic, Mechanics, 5 questions');
       await rec.type(value(page, 'Topic 1 name'), 'Mechanics');
       await rec.type(value(page, 'Topic 1 questions'), '5');
@@ -85,29 +94,36 @@ describe('exam on a local anvil chain', () => {
       await page.getByRole('button', { name: 'Add topic' }).click();
       await rec.type(value(page, 'Topic 2 name'), 'Optics');
       await rec.type(value(page, 'Topic 2 questions'), '3');
-      await rec.say('Step 1: Advanced holds the setter limits and the public record provider');
+      await rec.say('Step 1: Advanced holds the setter limits');
       await unfold(page, 'Advanced');
       await value(page, 'Most of a topic one setter can write, in percent').fill('20');
-      await value(page, 'Question bank size, as a multiple of the questions used').fill('4');
-      await value(page, 'Public record provider').fill(RPC_HOST);
+      await value(page, 'How many questions to collect, compared with the questions used').fill('4');
       await rec.pause(2000);
       await rec.check('Create step works out the rest: 8 questions at a multiple of 4 and 20 percent need 32 questions from 5 setters', async () => {
         const note = (await page.locator('.board-note').first().innerText()).replace(/\s+/g, ' ');
         if (!note.includes('at least 32 questions from at least 5 setters')) throw new Error(note);
-        if (!note.includes('Questions close')) throw new Error(`no closing time: ${note}`);
         return note;
       });
 
       await page.getByRole('button', { name: 'Continue' }).click();
-      await rec.say('Step 2: the sealed machine version list is fetched live from GitHub releases');
-      await page.getByRole('heading', { name: 'Choose what the sealed machine runs' }).waitFor({ timeout: 15_000 });
+      await rec.say('Steps 3 and 4: the 7 centres and 3 neutral parties the list needs');
+      const addName = async (name: string) => {
+        await value(page, "Add a name that isn't listed").fill(name);
+        await page.getByRole('button', { name: 'Add name' }).click();
+      };
+      for (let n = 1; n <= 7; n += 1) await addName(`centre-${String(n)}.paperseal-demo.eth`);
+      await page.getByRole('button', { name: 'Continue' }).click();
+      for (let n = 1; n <= 3; n += 1) await addName(`neutral-${String(n)}.paperseal-demo.eth`);
+      await page.getByRole('button', { name: 'Continue' }).click();
+      await rec.say('Step 2: one summary of everything. The Paper Seal version is a row in it, and the version list is fetched live from GitHub releases');
+      await page.getByRole('heading', { name: 'Preview and submit' }).waitFor({ timeout: 15_000 });
       const other = page.locator('summary', { hasText: 'Use a different version' });
       const versions = page.locator('details', { has: other }).locator('select');
       await other.waitFor({ timeout: 60_000 }).catch(() => undefined);
       const githubOk = await rec.check('The version list appeared from the live GitHub releases', async () => {
         await other.waitFor({ timeout: 5000 }).catch(async () => {
           const body = await rec.bodyText();
-          const limited = /limiting requests/.test(body);
+          const limited = /limiting requests|busy/.test(body);
           throw new Error(limited ? 'GitHub rate-limited this run, so the versions could not be listed' : `no version list: ${body.slice(0, 200)}`);
         });
         await other.click();
@@ -116,25 +132,20 @@ describe('exam on a local anvil chain', () => {
       if (!githubOk) throw new Error('cannot publish without the live GitHub release list');
       await rec.say(`Step 2: choosing ${TAG}, an older version with a known commit and digest`);
       await versions.selectOption({ label: TAG });
-      const useVersion = page.getByRole('button', { name: `Use ${TAG}` });
-      await useVersion.waitFor({ timeout: 30_000 }).catch(() => undefined);
-      await rec.pause(2500);
+      await page.getByText(new RegExp(`^${TAG.replace('.', '\\.')}, the version you chose`)).first().waitFor({ timeout: 60_000 });
       await rec.check(`The app says the tag ${TAG} points at this commit, with the real commit and digest in the record`, async () => {
         await unfold(page, 'Exam record');
         const body = await rec.bodyText();
-        if (!body.includes('The tag points at this commit')) throw new Error(/limiting requests/.test(body) ? 'GitHub rate-limited this run' : `no verified-tag message: ${body.slice(0, 300)}`);
-        const [commit, digest] = [await hashOf(page, 'commit'), await hashOf(page, 'image digest')];
+        if (!body.includes('This version matches its published release')) throw new Error(/limiting requests/.test(body) ? 'GitHub rate-limited this run' : `no verified-tag message: ${body.slice(0, 300)}`);
+        const [commit, digest] = [await hashOf(page, 'commit'), await hashOf(page, 'software image')];
         if (commit.toLowerCase() !== COMMIT || digest.toLowerCase() !== DIGEST) throw new Error(`the record shows ${commit} and ${digest}`);
         return `${commit} / ${digest}`;
       });
-      await useVersion.click();
 
-      await rec.say('Step 3: one summary of everything, before anything is written');
-      await page.getByRole('heading', { name: 'Review and publish' }).waitFor({ timeout: 15_000 });
       await rec.pause(2500);
       await rec.check('The review shows the topics, the bank and the version, and warns that it is final', async () => {
         const body = await rec.bodyText();
-        for (const part of ['cannot be changed afterwards', 'Topic: Mechanics', 'Topic: Optics', 'At least 32 questions', TAG]) {
+        for (const part of ['nothing here can be changed', 'Topic: Mechanics', 'Topic: Optics', 'At least 32 questions', TAG]) {
           if (!body.includes(part)) throw new Error(`no "${part}" on the review`);
         }
         return 'topics, bank and version shown';
@@ -161,11 +172,11 @@ describe('exam on a local anvil chain', () => {
       await rec.say('Rejected case: Publish the exam with the wrong account');
       const publishButton = page.getByRole('button', { name: 'Publish the exam' });
       await publishButton.click();
-      await page.getByText(/not the board address/i).first().waitFor({ timeout: 20_000 });
+      await page.getByText(/not the exam board.s account/i).first().waitFor({ timeout: 20_000 });
       await rec.pause(3500);
       await rec.check('Publishing as the wrong account is refused before anything is sent', async () => {
         const body = await rec.bodyText();
-        if (!/not the board address/i.test(body)) throw new Error('no refusal message in page text');
+        if (!/not the exam board.s account/i.test(body)) throw new Error('no refusal message in page text');
         const blockAfter = (await rpcCall(chain.rpcUrl, 'eth_blockNumber')) as string;
         if (blockAfter !== blockBefore) throw new Error(`chain advanced from ${blockBefore} to ${blockAfter}`);
         const onChain = await client.readContract({ address: chain.registry, abi: chain.abi, functionName: 'getExam', args: [examId] });
@@ -181,27 +192,25 @@ describe('exam on a local anvil chain', () => {
 
       await rec.say('Publish the exam. The app dry-runs, sends createExam, mines, then reads back');
       await publishButton.click();
-      await page.getByRole('heading', { name: /The exam is published|the read-back differs/ }).waitFor({ timeout: 60_000 });
-      await unfold(page, 'Exam record').catch(() => undefined);
-      await rec.say('The receipt: each row compares what ExamRegistry holds with what was entered');
-      await rec.pause(4000);
-      await rec.check('The receipt says the exam is published, with every row matching', async () => {
+      await page.getByRole('heading', { name: 'Invite people' }).waitFor({ timeout: 60_000 });
+      await rec.say('The read-back matched, so the board goes straight to the invites under a Published stamp');
+      await rec.pause(3000);
+      await rec.check('A Published banner appears on Invite people, and its details show every row matching', async () => {
         const body = await rec.bodyText();
-        if (!body.includes('The exam is published')) throw new Error('the read-back did not match');
-        if (/Expected .* read /.test(body)) throw new Error('a read-back row differs');
-        const matches = (body.match(/Matches/g) ?? []).length;
+        if (!/Published/.test(body) || !body.includes('it matches what you entered')) throw new Error('no Published banner');
+        await page.locator('summary', { hasText: 'Details' }).first().click();
+        const after = await rec.bodyText();
+        if (/You entered .* The public record has /.test(after)) throw new Error('a read-back row differs');
+        const matches = (after.match(/Matches/g) ?? []).length;
         if (matches < 5) throw new Error(`only ${String(matches)} Matches rows`);
         return `${String(matches)} rows match`;
       });
       published = true;
 
-      await page.getByRole('button', { name: 'Bring people in' }).click();
-      await rec.say('Step 4: the board moves on by itself, and the record now reads from ExamRegistry');
-      await page.getByRole('heading', { name: 'Bring people in' }).waitFor({ timeout: 15_000 });
       await unfold(page, 'Exam record');
-      await page.getByRole('button', { name: 'Copy transaction: ' }).first().waitFor({ timeout: 15_000 });
+      await page.getByRole('button', { name: 'Copy receipt code: ' }).first().waitFor({ timeout: 15_000 });
       await rec.pause(2500);
-      const txHash = await hashOf(page, 'transaction');
+      const txHash = await hashOf(page, 'receipt code');
 
       await rec.say('Independent check: reading ExamRegistry with viem and cast, not through the app');
       await rec.check('The transaction on anvil succeeded, sent from the board to ExamRegistry', async () => {
@@ -345,7 +354,7 @@ describe('exam on a local anvil chain', () => {
       await rec.pause(2500);
       await rec.check('An invalid link says so and checks nothing', async () => {
         const body = await rec.bodyText();
-        if (!body.includes('The link did not hold a valid exam ID.')) throw new Error(body.slice(0, 300));
+        if (!body.includes('This link does not hold a valid exam ID.')) throw new Error(body.slice(0, 300));
         if (await page.locator('li[data-state="done"]').count()) throw new Error('a step is done for an invalid link');
         return 'invalid link refused';
       });

@@ -19,6 +19,33 @@ func TestConstantsMatchRoot(t *testing.T) {
 	}
 }
 
+func TestRegistryMatchesRoot(t *testing.T) {
+	root, err := os.ReadFile("../../../spec/registry.json")
+	if err != nil {
+		t.Fatalf("read root registry: %v", err)
+	}
+	if !bytes.Equal(root, rawRegistry) {
+		t.Fatal("internal/spec/registry.json differs from spec/registry.json: run make abi")
+	}
+}
+
+func TestRegistryValidate(t *testing.T) {
+	hash := "0x" + strings.Repeat("ab", 32)
+	for name, r := range map[string]Registry{
+		"short hash":   {RuntimeCodeHash: "0xab", ExecutableBytes: 64, BoardOffsets: []int{0}},
+		"no offsets":   {RuntimeCodeHash: hash, ExecutableBytes: 64},
+		"past the end": {RuntimeCodeHash: hash, ExecutableBytes: 64, BoardOffsets: []int{33}},
+		"negative":     {RuntimeCodeHash: hash, ExecutableBytes: 64, BoardOffsets: []int{-1}},
+	} {
+		if err := r.validate(); err == nil {
+			t.Errorf("%s accepted", name)
+		}
+	}
+	if err := (Registry{RuntimeCodeHash: hash, ExecutableBytes: 64, BoardOffsets: []int{32}}).validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // Every key in the JSON must reach the struct, so a new constant can't be
 // silently ignored by the Go side.
 func TestStructCoversEveryKey(t *testing.T) {
@@ -76,8 +103,8 @@ func TestDomainTagsAreDistinctAndPrefixed(t *testing.T) {
 	if err := json.Unmarshal(b, &tags); err != nil {
 		t.Fatal(err)
 	}
-	if len(tags) != 13 {
-		t.Fatalf("got %d tags, want 13", len(tags))
+	if len(tags) != 14 {
+		t.Fatalf("got %d tags, want 14", len(tags))
 	}
 	seen := map[string]bool{}
 	for name, tag := range tags {

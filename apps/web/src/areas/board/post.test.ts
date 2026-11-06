@@ -4,6 +4,7 @@ import {
   encodeApprovedList,
   encodeMessage,
   fromHex,
+  limits,
   roles,
   setterOwner,
   toHex,
@@ -28,7 +29,7 @@ const examId: Hex = `0x${'11'.repeat(32)}`;
 const key = (seed: number): Hex => toHex(new Uint8Array([4, ...new Uint8Array(64).fill(seed)]));
 
 const records = Array.from({ length: 10 }, (_, i) => ({
-  owner: `holder-${String(i)}`,
+  owner: `holder-${String(i)}.maths-board.eth`,
   role: i < 3 ? roles.neutral : roles.centreKeyHolder,
   passkeyPublicKey: key(10 + i),
   derivedPublicKey: key(50 + i),
@@ -55,6 +56,12 @@ describe('registrations', () => {
     const list = composeApprovedList(examId, entries());
     expect(list.encoded).toBe(toHex(encodeApprovedList(entries())));
     expect(list.hash).toBe(toHex(approvedListHash(fromHex(examId), fromHex(list.encoded))));
+  });
+
+  it('refuses a key holder or centre whose owner is not an ENS name, and says which entry', () => {
+    const plain = entries().map((entry, index) => (index === 0 ? { ...entry, owner: 'holder-0' } : entry));
+    expect(() => composeApprovedList(examId, plain)).toThrow('entry 0 owner "holder-0" is not an ENS name');
+    expect(tryCompose(examId, plain)).toMatchObject({ ok: false });
   });
 
   it('refuses a setter whose owner is a plain name, or the hash of another key', () => {
@@ -110,6 +117,16 @@ describe('postApprovedListFlow', () => {
     expect(declined.node.sent).toHaveLength(0);
   });
 
+  it('refuses a list too long to post, before the wallet is asked', async () => {
+    const { node, env } = environment();
+    const tooLong = toHex(new Uint8Array(limits.entriesBytes + 1));
+    await expect(postApprovedListFlow(env, { examId, entries: tooLong }, undefined, noWait)).rejects.toThrow('The list is too long to post');
+    const many = entries();
+    const padded = Array.from({ length: limits.entries + 1 }, (_, i) => ({ role: roles.setter, owner: 'x', derivedPublicKey: new Uint8Array(), passkeyPublicKey: fromHex(key(i % 200)), ...many[0] }));
+    await expect(postApprovedListFlow(env, { examId, entries: toHex(encodeApprovedList(padded)) }, undefined, noWait)).rejects.toThrow('The list is too long to post');
+    expect(node.sent).toHaveLength(0);
+  });
+
   it('blocks an account that is not the board', async () => {
     const { node, env } = environment({ account: stranger });
     await expect(postApprovedListFlow(env, { examId, entries: '0x01' }, undefined, noWait)).rejects.toThrow('not the exam board’s account');
@@ -144,6 +161,7 @@ async function signedBuild(overrides: Partial<Record<string, string | number>> =
     selected: 5,
     bankSize: 40,
     criteriaHash: hash(6),
+    builtRound: '35732267',
     ...overrides,
   };
   const message = encodeMessage('build', {
@@ -155,6 +173,7 @@ async function signedBuild(overrides: Partial<Record<string, string | number>> =
     selected: Number(fields.selected),
     bankSize: Number(fields.bankSize),
     criteriaHash: fromHex(fields.criteriaHash as Hex),
+    builtRound: BigInt(fields.builtRound),
   });
   let signature = new Uint8Array(await subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, new Uint8Array(message)));
   const order = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n;
@@ -177,13 +196,33 @@ describe('verifyOutboxBuild', () => {
   it('accepts a Build signed by the attested instance key', async () => {
     const { outbox, instancePublicKey } = await signedBuild();
     const build = await verifyOutboxBuild(outbox, { examId, attestedInstancePublicKey: instancePublicKey });
-    expect(build).toMatchObject({ selected: 5, bankSize: 40, instancePublicKey, teeSignature: outbox.teeSignature });
+    expect(build).toMatchObject({ selected: 5, bankSize: 40, builtRound: 35732267n, instancePublicKey, teeSignature: outbox.teeSignature });
   });
 
   it('rejects a changed field, because the signature no longer verifies', async () => {
     const { outbox, instancePublicKey } = await signedBuild();
     const tampered = { ...outbox, fields: { ...outbox.fields, paperHash: `0x${'99'.repeat(32)}` } };
     await expect(verifyOutboxBuild(tampered, { examId, attestedInstancePublicKey: instancePublicKey })).rejects.toThrow('does not verify');
+  });
+
+  it('rejects a changed, missing or malformed builtRound', async () => {
+    const { outbox, instancePublicKey } = await signedBuild();
+    const expected = { examId, attestedInstancePublicKey: instancePublicKey };
+    const withRound = (builtRound: unknown) => ({ ...outbox, fields: { ...outbox.fields, builtRound } }) as OutboxMessage;
+    await expect(verifyOutboxBuild(withRound('35732268'), expected)).rejects.toThrow('does not verify');
+    await expect(verifyOutboxBuild(withRound(35732268), expected)).rejects.toThrow('does not verify');
+    for (const bad of ['0', '-1', '1.5', '', 'abc', '18446744073709551616', null]) {
+      await expect(verifyOutboxBuild(withRound(bad), expected)).rejects.toThrow('not a drand round');
+    }
+    const { builtRound: _removed, ...rest } = outbox.fields;
+    await expect(verifyOutboxBuild({ ...outbox, fields: rest } as OutboxMessage, expected)).rejects.toThrow('exactly the fields');
+    expect(_removed).toBe('35732267');
+  });
+
+  it('accepts a builtRound sent as a number', async () => {
+    const { outbox, instancePublicKey } = await signedBuild();
+    const asNumber = { ...outbox, fields: { ...outbox.fields, builtRound: 35732267 } } as OutboxMessage;
+    await expect(verifyOutboxBuild(asNumber, { examId, attestedInstancePublicKey: instancePublicKey })).resolves.toMatchObject({ builtRound: 35732267n });
   });
 
   it('rejects a valid signature from a key that is not the attested one', async () => {
@@ -214,7 +253,7 @@ describe('postBuildFlow', () => {
     const outcome = await postBuildFlow(env, post, undefined, noWait);
     expect(node.builds.get(examId)).toBeDefined();
     expect(outcome.matches).toBe(true);
-    expect(outcome.rows).toHaveLength(9);
+    expect(outcome.rows).toHaveLength(10);
   });
 
   it('refuses a second Build without sending', async () => {

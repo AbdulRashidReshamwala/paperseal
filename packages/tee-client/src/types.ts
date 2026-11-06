@@ -1,4 +1,4 @@
-import type { DecimalString, Hex, ReleaseEntryWire, Stage } from '@paperseal/protocol';
+import type { DecimalString, Hex, ReleaseEntryWire, ReleaseFileWire, Stage } from '@paperseal/protocol';
 
 /*
  * Request and response bodies are the "TEE API" table in spec/api.md, field for field.
@@ -97,7 +97,10 @@ export interface QuestionReceipt {
   teeSignature: Hex;
 }
 
-/** The only outbox message kind is the Build. `teeSignature` covers the `build` message. */
+/**
+ * The only outbox message kind is the Build. `teeSignature` covers the `build` message. `fields` holds the
+ * message fields after `examId`, with `selected` and `bankSize` as numbers or decimal strings and `builtRound` as a decimal string.
+ */
 export interface OutboxMessage {
   kind: 'build';
   examId: Hex;
@@ -117,11 +120,17 @@ export interface ReleaseShareRequest {
   sealed: Hex;
 }
 
-/** `GET /v1/release/log`. `teeSignature` covers the `releaseLog` message, under `instancePublicKey`. */
+/**
+ * `GET /v1/release/log`. `teeSignature` covers the `releaseLog` message, under `instancePublicKey`.
+ * `files` is empty until the threshold, then lists the unlock files, sorted by name. Between the
+ * threshold and the prepared delivery the route refuses (see `isDeliveryPending`).
+ */
 export interface ReleaseLogResponse {
   examId: Hex;
   entries: ReleaseEntryWire[];
   entriesHash: Hex;
+  files: ReleaseFileWire[];
+  filesHash: Hex;
   teeSignature: Hex;
   instancePublicKey: Hex;
 }

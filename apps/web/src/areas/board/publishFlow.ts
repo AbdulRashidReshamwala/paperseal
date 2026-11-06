@@ -1,4 +1,4 @@
-import { createExamRegistry, examRegistryAbi, OnChainBytesError, type ExamRegistry } from '@paperseal/chain';
+import { createEnsLookup, createExamRegistry, examRegistryAbi, OnChainBytesError, type EnsLookup, type ExamRegistry } from '@paperseal/chain';
 import { chain, decodeCriteria, fromHex, type Criteria, type Hex } from '@paperseal/protocol';
 import {
   BaseError,
@@ -29,6 +29,8 @@ export interface PublishEnvironment {
   publicClient: PublicClient | null;
   /** A registry on `packages/chain`; with a wallet client it can write. */
   createRegistry: ((wallet?: WalletClient) => ExamRegistry) | null;
+  /** Reads of ENS names, on chain only and over the same RPC. Null when it is not set, so names are left unread. */
+  ensLookup?: EnsLookup | null;
 }
 
 export function defaultEnvironment(
@@ -42,6 +44,7 @@ export function defaultEnvironment(
     publicClient: rpcUrl ? createPublicClient({ chain: sepolia, transport: http(rpcUrl) }) : null,
     createRegistry:
       rpcUrl && address ? (wallet) => createExamRegistry({ address, rpcUrl, ...(wallet ? { wallet } : {}) }) : null,
+    ensLookup: rpcUrl ? createEnsLookup({ rpcUrl }) : null,
   };
 }
 
@@ -167,7 +170,7 @@ export async function publishExam(
   if (!registryAddress || !publicClient || !createRegistry) {
     throw new PublishBlockedError('Publishing is not set up on this page. Ask whoever installed Paper Seal to finish the setup, then reload.');
   }
-  const account = await currentAccount(provider);
+  const account = await currentAccount(provider, await createRegistry().board());
   if (!account) throw new PublishBlockedError('Connect your wallet, then press the button again.');
 
   // A wallet on the wrong network is asked to switch. If it declines or can't, the instruction below is shown.

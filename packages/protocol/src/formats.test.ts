@@ -14,8 +14,13 @@ import {
   encodeQuestion,
   encodeRelease,
   encodeReleaseEntries,
+  encodeReleaseFiles,
   entriesHash,
+  filesHash,
+  FormatError,
   fromHex,
+  noInviteTag,
+  prfInput,
   hashMessage,
   limits,
   pad,
@@ -25,6 +30,8 @@ import {
   parsePaper,
   parseQuestion,
   releaseEntryFromWire,
+  releaseFileFromWire,
+  sortReleaseFiles,
   requireHardwareAttestation,
   stages,
   storageManifestHash,
@@ -33,6 +40,7 @@ import {
   unpad,
   unpadPaper,
   unpadQuestion,
+  type Hex,
 } from './index';
 
 const bytes = (n: number, fill: number) => new Uint8Array(n).fill(fill);
@@ -40,8 +48,8 @@ const point = (fill: number) => Uint8Array.from([4, ...bytes(64, fill)]);
 const sha = (data: Uint8Array) => new Uint8Array(createHash('sha256').update(data).digest());
 
 describe('constants and stages', () => {
-  it('has a schema for every one of the 13 domain tags', () => {
-    expect(Object.keys(constants.domainTags)).toHaveLength(13);
+  it('has a schema for every one of the 14 domain tags', () => {
+    expect(Object.keys(constants.domainTags)).toHaveLength(14);
     const sample = { examId: bytes(32, 1), encryptionPublicKey: point(2) };
     expect(constants.domainTags.instanceKey).toBe('paperseal/v1/instance-key');
     expect(encodeMessage('instanceKey', sample).length).toBeGreaterThan(0);
@@ -83,6 +91,34 @@ describe('instanceKey message', () => {
     expect(existsSync(vectorsPath), `${vectorsPath} is missing`).toBe(true);
     const vectors = JSON.parse(readFileSync(vectorsPath, 'utf8')) as { hash: { message: string }[] };
     expect(vectors.hash.some((v) => v.message === 'instanceKey')).toBe(true);
+  });
+});
+
+describe('prfInput', () => {
+  const vectors = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../../tee/testdata/vectors.json'), 'utf8')) as {
+    hash: { message: string; fields: { name: string; value: string }[]; encoded: string; hash: string }[];
+  };
+
+  it('matches the Go vectors, and differs per exam', () => {
+    const found = vectors.hash.filter((vector) => vector.message === 'prfInput');
+    expect(found).toHaveLength(2);
+    for (const vector of found) {
+      const examId = fromHex(vector.fields.find((field) => field.name === 'examId')?.value as Hex);
+      expect(toHex(prfInput(examId))).toBe(vector.hash);
+    }
+    expect(found[0]?.hash).not.toBe(found[1]?.hash);
+  });
+
+  it('pins a registration by name, with its zero tag', () => {
+    const vector = vectors.hash.find((item) => item.message === 'registration' && item.fields.some((field) => field.value === toHex(noInviteTag)));
+    const field = (name: string) => fromHex(vector?.fields.find((item) => item.name === name)?.value as Hex);
+    const message = hashMessage('registration', {
+      derivedPublicKey: field('derivedPublicKey'),
+      holderId: field('holderId'),
+      challenge: field('challenge'),
+      inviteTag: noInviteTag,
+    });
+    expect(toHex(message)).toBe(vector?.hash);
   });
 });
 
@@ -291,7 +327,7 @@ describe('release entries', () => {
 
   it('feeds the releaseLog message', () => {
     const examId = bytes(32, 9);
-    expect(hashMessage('releaseLog', { examId, entriesHash: entriesHash(entries) })).toHaveLength(32);
+    expect(hashMessage('releaseLog', { examId, entriesHash: entriesHash(entries), filesHash: filesHash([]) })).toHaveLength(32);
   });
 
   const first = { passkeyPublicKey: point(1), shareHash: bytes(32, 5), round: 123n };
@@ -302,6 +338,56 @@ describe('release entries', () => {
     expect(() => releaseEntryFromWire({ ...wire, round: '01' })).toThrow('decimal');
     expect(() => encodeReleaseEntries([{ ...first, shareHash: bytes(31, 0) }])).toThrow(RangeError);
     expect(() => encodeReleaseEntries([{ ...first, round: 2n ** 64n }])).toThrow(RangeError);
+  });
+});
+
+describe('release files', () => {
+  const file = (name: string, fill = 1) => ({ name, sha256: bytes(32, fill) });
+
+  it('hashes abi.encode(ReleaseFile[])', () => {
+    const files = [file('key-priv.tlock', 1), file('key-priv/a.bin', 2)];
+    const encoded = fromHex(
+      encodeAbiParameters(
+        [
+          {
+            type: 'tuple[]',
+            components: [
+              { name: 'name', type: 'string' },
+              { name: 'sha256', type: 'bytes32' },
+            ],
+          },
+        ],
+        [files.map((f) => ({ name: f.name, sha256: toHex(f.sha256) }))],
+      ),
+    );
+    expect(encodeReleaseFiles(files)).toEqual(encoded);
+    expect(filesHash(files)).toEqual(sha(encoded));
+  });
+
+  it('sorts a copy in UTF-8 byte order, unlike locale order or UTF-16 order', () => {
+    const names = (list: { name: string }[]) => list.map((f) => f.name);
+    const input = [file('a'), file('Z'), file('key-priv/x'), file('key-priv.tlock')];
+    expect(names(sortReleaseFiles(input))).toEqual(['Z', 'a', 'key-priv.tlock', 'key-priv/x']);
+    expect(names(input)).toEqual(['a', 'Z', 'key-priv/x', 'key-priv.tlock']);
+    // U+FF21 comes before U+1F600 in UTF-8, and after its surrogates in UTF-16.
+    expect(names(sortReleaseFiles([file('\u{1F600}'), file('\uFF21')]))).toEqual(['\uFF21', '\u{1F600}']);
+    // A name that is a prefix of another comes first.
+    expect(names(sortReleaseFiles([file('ab'), file('a')]))).toEqual(['a', 'ab']);
+  });
+
+  it('refuses unsorted or repeated names and a bad hash', () => {
+    expect(() => encodeReleaseFiles([file('b'), file('a')])).toThrow(FormatError);
+    expect(() => encodeReleaseFiles([file('a', 1), file('a', 2)])).toThrow(FormatError);
+    expect(() => filesHash([file('a'), file('Z')])).toThrow('sorted');
+    expect(() => encodeReleaseFiles([{ name: 'a', sha256: bytes(31, 0) }])).toThrow(RangeError);
+  });
+
+  it('reads wire files and rejects a bad hash', () => {
+    const wire = { name: 'a', sha256: toHex(bytes(32, 0xab)) };
+    expect(releaseFileFromWire(wire)).toEqual({ name: 'a', sha256: bytes(32, 0xab) });
+    expect(() => releaseFileFromWire({ ...wire, sha256: toHex(bytes(31, 0)) })).toThrow(FormatError);
+    expect(() => releaseFileFromWire({ ...wire, sha256: `0x${'AB'.repeat(32)}` })).toThrow(FormatError);
+    expect(() => releaseFileFromWire({ ...wire, name: 1 as never })).toThrow(FormatError);
   });
 });
 

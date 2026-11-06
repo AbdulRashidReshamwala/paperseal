@@ -1,6 +1,7 @@
-import { ens, type Criteria, type Hex } from '@paperseal/protocol';
+import { ens, roles, threshold, type Criteria, type Hex } from '@paperseal/protocol';
 
 import { evaluateBlueprint, evaluateSchedule, parseLocalTime, type BlueprintInput, type ScheduleInput, type TopicInput } from './form';
+import type { ChosenParty } from './parties';
 
 /*
  * What the board types on one page, in plain terms, and how it becomes the BlueprintInput and
@@ -9,7 +10,10 @@ import { evaluateBlueprint, evaluateSchedule, parseLocalTime, type BlueprintInpu
  */
 
 export interface PlanInput {
+  /** The exam's name as the public record holds it: one normalised ENS label, worked out from `typedName`. */
   name: string;
+  /** The name as the board typed it. */
+  typedName: string;
   /** Local time, `YYYY-MM-DDTHH:mm` from the date picker. */
   examStart: string;
   durationMinutes: string;
@@ -20,10 +24,13 @@ export interface PlanInput {
   minBankMultiple: string;
   /** When questions close. Empty means `defaultLockSeconds` picks it. */
   lockTime: string;
+  /** The centres and neutral parties chosen so far. They carry over to the exam when it is published. */
+  parties: ChosenParty[];
 }
 
 export const defaultPlan: PlanInput = {
   name: '',
+  typedName: '',
   examStart: '',
   durationMinutes: '180',
   releaseMinutes: '10',
@@ -31,7 +38,16 @@ export const defaultPlan: PlanInput = {
   maxSetterPercent: '20',
   minBankMultiple: '4',
   lockTime: '',
+  parties: [],
 };
+
+/** What the board typed, as an ENS label. `examNameProblem` still has the last word on the result. */
+export const examLabel = (typed: string): string =>
+  typed
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '');
 
 export const toBlueprint = (plan: PlanInput): BlueprintInput => ({
   name: plan.name,
@@ -200,9 +216,44 @@ export function verifierNameUrl(verifier: string, name: string): string {
   return `${verifier.replace(/\/+$/, '')}/#/name/${name}`;
 }
 
-export type DraftStep = 'create' | 'review';
+/** The pages before an exam exists, in order. */
+export const draftSteps = ['create', 'topics', 'centres', 'neutrals', 'review'] as const;
+export type DraftStep = (typeof draftSteps)[number];
 
-/** The exam has to be complete to be reviewed, so a value that stops being valid sends the board back to it. */
-export function draftScreen(chosen: DraftStep, ready: { create: boolean }): DraftStep {
-  return !ready.create || chosen === 'create' ? 'create' : 'review';
+export interface DraftReady {
+  details: boolean;
+  topics: boolean;
+  centres: boolean;
+  neutrals: boolean;
+}
+
+const countRole = (parties: readonly ChosenParty[], role: number) => parties.filter((party) => party.role === role).length;
+
+/** What each people page still lacks, in words, or null when it is complete. The list needs these exact counts. */
+export function centresProblem(parties: readonly ChosenParty[]): string | null {
+  const have = countRole(parties, roles.centreKeyHolder);
+  if (have > threshold.centres) return `Only ${String(threshold.centres)} centres can hold part of the key.`;
+  const short = threshold.centres - have;
+  if (short === 0) return null;
+  return `Still needed: ${String(short)} more ${short === 1 ? 'centre' : 'centres'} holding part of the key.`;
+}
+
+export function neutralsProblem(parties: readonly ChosenParty[]): string | null {
+  const short = threshold.neutrals - countRole(parties, roles.neutral);
+  if (short <= 0) return null;
+  return `Still needed: ${String(short)} more neutral ${short === 1 ? 'party' : 'parties'}.`;
+}
+
+/** The furthest page the form allows: each page needs the ones before it to be complete. */
+export function furthestStep(ready: DraftReady): DraftStep {
+  if (!ready.details) return 'create';
+  if (!ready.topics) return 'topics';
+  if (!ready.centres) return 'centres';
+  return ready.neutrals ? 'review' : 'neutrals';
+}
+
+/** The page to show, so a value that stops being valid sends the board back to it. */
+export function draftScreen(chosen: DraftStep, ready: DraftReady): DraftStep {
+  const furthest = furthestStep(ready);
+  return draftSteps.indexOf(chosen) > draftSteps.indexOf(furthest) ? furthest : chosen;
 }

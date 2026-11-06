@@ -14,7 +14,10 @@ import { startApp } from '../src/chain';
  */
 
 const REAL_EXAM = process.env.UI_REAL_EXAM ?? '0xb59aac823a36e24a348cbef2dadc9e3a0f772939e583b500a25f8c861f3eece2';
-const REAL_REGISTRY = process.env.LIVE_REGISTRY ?? '0x6a9f017F374630EcB84e8E3816B1eE9F8Fa2dBE8';
+// The finished exam was posted to the first Sepolia registry, so this test is pinned to it and ignores
+// LIVE_REGISTRY. That contract's code is not the current pin, so the verifier's code step shows it as an
+// old build. Point UI_REAL_REGISTRY and UI_REAL_EXAM at a finished exam on the new registry when one exists.
+const REAL_REGISTRY = process.env.UI_REAL_REGISTRY ?? '0x6a9f017F374630EcB84e8E3816B1eE9F8Fa2dBE8';
 const REAL_RPC = process.env.LIVE_RPC_URL ?? 'https://ethereum-sepolia-rpc.publicnode.com';
 const REAL_BUCKET = process.env.LIVE_STORAGE_URL ?? 'https://storage.googleapis.com/paperseal-demo-paperseal-exams';
 

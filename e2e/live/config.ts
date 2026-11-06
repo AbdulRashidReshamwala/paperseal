@@ -20,7 +20,7 @@ export const logPath = resolve(stateDir, 'run.log');
 const env = process.env;
 
 export const deployed = {
-  registry: (env.LIVE_REGISTRY ?? '0x6a9f017F374630EcB84e8E3816B1eE9F8Fa2dBE8') as Hex,
+  registry: (env.LIVE_REGISTRY ?? '0xc25F7e0004f0E9B77581CFf6B4B5Ae8b120658eb') as Hex,
   rpcUrl: env.LIVE_RPC_URL ?? 'https://ethereum-sepolia-rpc.publicnode.com',
   teeUrl: (env.LIVE_TEE_URL ?? 'https://tee.abdulrashid.dev').replace(/\/+$/, ''),
   storageUrl: (env.LIVE_STORAGE_URL ?? 'https://storage.googleapis.com/paperseal-demo-paperseal-exams').replace(/\/+$/, ''),
@@ -50,7 +50,7 @@ export interface LiveGaps {
 export function gapsFor(readBlock: string): LiveGaps {
   switch (readBlock) {
     case 'latest':
-      return { lock: 165, unlock: 195, examStart: 210, end: 295, minLeadBeforeLock: 100, listDelay: 'within seconds, at the latest block' };
+      return { lock: 330, unlock: 360, examStart: 375, end: 460, minLeadBeforeLock: 200, listDelay: 'within seconds, at the latest block' };
     case 'finalized':
       return { lock: 28 * 60, unlock: 31 * 60, examStart: 32 * 60, end: 36 * 60, minLeadBeforeLock: 20 * 60, listDelay: 'at the finalized block, in about 13 to 15 minutes' };
     default:

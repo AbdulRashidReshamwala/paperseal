@@ -28,6 +28,9 @@ function readStored(): Hex | null {
   return value && /^0x[0-9a-f]{64}$/.test(value) ? (value as Hex) : null;
 }
 
+/** Only an exam this browser was pointed at, never the build's `VITE_EXAM_ID`. */
+export const getStoredExamId = readStored;
+
 export function getCurrentExamId(): Hex | null {
   return readStored() ?? envExamId;
 }

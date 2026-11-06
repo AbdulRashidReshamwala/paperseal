@@ -10,15 +10,19 @@ import {
   encodeCriteria,
   encodeRelease,
   encodeReleaseEntries,
+  encodeReleaseFiles,
   encodePaper,
   entriesHash,
+  filesHash,
   fromHex,
   parsePaper,
   pad,
   parseManifest,
   releaseEntryFromWire,
+  releaseFileFromWire,
   saltedPaperHash,
   selectedCount,
+  sortReleaseFiles,
   storageManifestHash,
   toHex,
   unpad,
@@ -26,6 +30,7 @@ import {
   type Hex,
   type Question,
   type ReleaseEntryWire,
+  type ReleaseFileWire,
 } from './index';
 
 /*
@@ -43,6 +48,13 @@ interface Vectors {
   padding: { data: string; size: number; padded: string }[];
   release: { share: string; signature: string; authenticatorData: string; clientDataJSON: string; encoded: string };
   releaseEntries: { entries: ReleaseEntryWire[]; preimage: string; entriesHash: string };
+  releaseFiles: {
+    files: ReleaseFileWire[];
+    preimage: string;
+    filesHash: string;
+    emptyPreimage: string;
+    emptyFilesHash: string;
+  };
   manifest: { manifest: string; storageManifestHash: string };
   paper: { name: string; examId: Hex; questions: Question[]; bytes: string; seed: string; saltedPaperHash: string }[];
 }
@@ -113,6 +125,35 @@ describe('tee/ vectors: release entries', () => {
 
   it('recomputes entriesHash', () => {
     expect(toHex(entriesHash(entries))).toBe(releaseEntries.entriesHash);
+  });
+});
+
+describe('tee/ vectors: release files', () => {
+  const { releaseFiles } = vectors;
+  const files = releaseFiles.files.map(releaseFileFromWire);
+
+  it('sorts names in the Go order, from any starting order', () => {
+    const names = releaseFiles.files.map((file) => file.name);
+    expect(names.indexOf('key-priv/Z.bin')).toBeLessThan(names.indexOf('key-priv/a.bin'));
+    expect(sortReleaseFiles([...files].reverse()).map((file) => file.name)).toEqual(names);
+    expect(sortReleaseFiles([...releaseFiles.files].reverse())).toEqual(releaseFiles.files);
+  });
+
+  it('encodes abi.encode(ReleaseFile[]) to the Go preimage', () => {
+    expect(toHex(encodeReleaseFiles(sortReleaseFiles(files)))).toBe(releaseFiles.preimage);
+  });
+
+  it('recomputes filesHash', () => {
+    expect(toHex(filesHash(sortReleaseFiles(files)))).toBe(releaseFiles.filesHash);
+  });
+
+  it('matches Go for the empty list, the log before the threshold', () => {
+    expect(toHex(encodeReleaseFiles([]))).toBe(releaseFiles.emptyPreimage);
+    expect(toHex(filesHash([]))).toBe(releaseFiles.emptyFilesHash);
+  });
+
+  it('refuses the same files out of order', () => {
+    expect(() => filesHash([...files].reverse())).toThrow('sorted');
   });
 });
 

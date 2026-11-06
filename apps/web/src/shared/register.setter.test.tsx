@@ -15,12 +15,7 @@ const challenge = `0x${'cd'.repeat(80)}` as Hex;
 
 const inviteSecret = `0x${'a5'.repeat(32)}` as Hex;
 const otherSecret = `0x${'5a'.repeat(32)}` as Hex;
-const inviteFor = (role: Invite['role'], owner?: string, secret: Hex = inviteSecret): Invite => ({
-  examId,
-  role,
-  ...(owner === undefined ? {} : { owner }),
-  inviteSecret: secret,
-});
+const inviteFor = (secret: Hex = inviteSecret): Invite => ({ examId, role: 'setter', inviteSecret: secret });
 const tagOf = (secret: Hex) => toHex(inviteTag(fromHex(secret), fromHex(passkey)));
 
 const request = (owner: string, secret: Uint8Array) => ({
@@ -37,8 +32,8 @@ const request = (owner: string, secret: Uint8Array) => ({
 
 function makeKeys() {
   return {
-    register: vi.fn((options: { role: 'holder' | 'setter'; owner?: string; inviteSecret: Uint8Array }) => {
-      const owner = options.role === 'setter' ? setterOwner(fromHex(passkey)) : (options.owner ?? '');
+    register: vi.fn((options: { inviteSecret: Uint8Array }) => {
+      const owner = setterOwner(fromHex(passkey));
       return Promise.resolve({ credentialId: fromHex(credentialId), owner, request: request(owner, options.inviteSecret) });
     }),
   };
@@ -60,35 +55,20 @@ describe('registerWithTee', () => {
   it('registers a setter from its invite, and the owner is the hash of its passkey', async () => {
     const keys = makeKeys();
     const tee = makeTee();
-    const registration = await registerWithTee({ keys, tee, invite: inviteFor('setter') });
+    const registration = await registerWithTee({ keys, tee, invite: inviteFor() });
     expect(keys.register).toHaveBeenCalledWith({ role: 'setter', challenge: fromHex(challenge), inviteSecret: fromHex(inviteSecret) });
     expect(registration.owner).toBe(setterOwner(fromHex(passkey)));
     expect(tee.register).toHaveBeenCalledWith(expect.objectContaining({ owner: setterOwner(fromHex(passkey)), inviteTag: tagOf(inviteSecret) }));
-  });
-
-  it('passes the TEE challenge on as given, whatever its width, and never sends the secret', async () => {
-    const keys = makeKeys();
-    const tee = makeTee();
-    await registerWithTee({ keys, tee, invite: inviteFor('centre', 'Centre One') });
-    expect(keys.register).toHaveBeenCalledWith({
-      role: 'holder',
-      owner: 'Centre One',
-      challenge: fromHex(challenge),
-      inviteSecret: fromHex(inviteSecret),
-    });
     expect(JSON.stringify(tee.register.mock.calls)).not.toContain(inviteSecret.slice(2));
   });
 });
 
 describe('Register', () => {
-  const mount = (role: 'setter' | 'keyholder' | 'centre', invite: Invite | null, keys = makeKeys(), tee = makeTee()) =>
-    render(<Register role={role} examId={examId} tee={tee} keys={keys} invite={invite} />);
-
+  const mount = (invite: Invite | null, keys = makeKeys(), tee = makeTee()) => render(<Register examId={examId} tee={tee} keys={keys} invite={invite} />);
   const registerButton = () => screen.getByRole('button', { name: 'Register your security key' });
 
   it('registers a setter from its invite with nothing to type, and keeps only the hash and the tag', async () => {
-    const keys = makeKeys();
-    mount('setter', inviteFor('setter'), keys);
+    mount(inviteFor());
     expect(screen.queryByRole('textbox')).toBeNull();
     fireEvent.click(registerButton());
     await waitFor(() => {
@@ -98,65 +78,32 @@ describe('Register', () => {
     expect(loadCredential(examId, 'setter')).toMatchObject({ owner: setterOwner(fromHex(passkey)), inviteTag: tagOf(inviteSecret) });
   });
 
-  it.each(['keyholder', 'centre'] as const)('shows the name from the link to a %s, with no field to type in', async (role) => {
-    const keys = makeKeys();
-    mount(role, inviteFor(role, 'Centre One'), keys);
-    expect(screen.queryByRole('textbox')).toBeNull();
-    expect(screen.getByText(/Centre One/)).toBeTruthy();
-    fireEvent.click(registerButton());
-    await waitFor(() => {
-      expect(keys.register).toHaveBeenCalledWith({
-        role: 'holder',
-        owner: 'Centre One',
-        challenge: fromHex(challenge),
-        inviteSecret: fromHex(inviteSecret),
-      });
-    });
-    expect(await screen.findByText('Registered as Centre One.')).toBeTruthy();
-  });
-
   it('shows a plain explanation and no form or key touch without a link', () => {
-    const keys = makeKeys();
-    mount('keyholder', null, keys);
+    mount(null);
     expect(screen.getByRole('heading', { name: 'Open your invitation link' })).toBeTruthy();
     expect(screen.queryByRole('button')).toBeNull();
     expect(screen.queryByRole('textbox')).toBeNull();
   });
 
-  it('does not use a link made for another role or another exam', () => {
-    mount('keyholder', inviteFor('centre', 'Centre One'));
-    expect(screen.getByRole('heading', { name: 'Open your invitation link' })).toBeTruthy();
-    cleanup();
-    mount('centre', { ...inviteFor('centre', 'Centre One'), examId: `0x${'22'.repeat(32)}` });
+  it('does not use a link made for another exam', () => {
+    mount({ ...inviteFor(), examId: `0x${'22'.repeat(32)}` });
     expect(screen.getByRole('heading', { name: 'Open your invitation link' })).toBeTruthy();
   });
 
-  it('uses the invite this browser opened from a link', async () => {
-    holdInvite(inviteFor('centre', 'Held Centre'));
-    render(<Register role="centre" examId={examId} tee={makeTee()} keys={makeKeys()} />);
-    expect(screen.getByText(/Held Centre/)).toBeTruthy();
+  it('uses the invite this browser opened from a link', () => {
+    holdInvite(inviteFor());
+    render(<Register examId={examId} tee={makeTee()} keys={makeKeys()} />);
     expect(registerButton()).toBeTruthy();
   });
 
   it('keeps a stored key as registered, until a new invite is opened that it was not registered under', () => {
-    const credential = { owner: 'Centre One', role: 'centre', credentialId: '0x02', passkeyPublicKey: passkey, inviteTag: tagOf(inviteSecret) } as const;
-    saveCredential(examId, credential);
-    const { unmount } = render(<Register role="centre" examId={examId} tee={makeTee()} keys={makeKeys()} invite={null} />);
-    expect(screen.getByText('Your security key is registered')).toBeTruthy();
-    unmount();
-    // The same invite: still registered, and there is no way to register a second key on it.
-    const same = render(<Register role="centre" examId={examId} tee={makeTee()} keys={makeKeys()} invite={inviteFor('centre', 'Centre One')} />);
+    saveCredential(examId, { owner: setterOwner(fromHex(passkey)), role: 'setter', credentialId: '0x02', passkeyPublicKey: passkey, inviteTag: tagOf(inviteSecret) });
+    const same = mount(inviteFor());
     expect(screen.getByText('Your security key is registered')).toBeTruthy();
     expect(screen.queryByRole('button')).toBeNull();
     same.unmount();
     // A reissued invite has a new secret, so the old key no longer counts and a new one can be registered.
-    render(<Register role="centre" examId={examId} tee={makeTee()} keys={makeKeys()} invite={inviteFor('centre', 'Centre One', otherSecret)} />);
-    expect(registerButton()).toBeTruthy();
-  });
-
-  it('does not count a key stored before invites existed against a new invite', () => {
-    saveCredential(examId, { owner: 'Centre One', role: 'centre', credentialId: '0x02', passkeyPublicKey: passkey });
-    render(<Register role="centre" examId={examId} tee={makeTee()} keys={makeKeys()} invite={inviteFor('centre', 'Centre One')} />);
+    mount(inviteFor(otherSecret));
     expect(registerButton()).toBeTruthy();
   });
 });

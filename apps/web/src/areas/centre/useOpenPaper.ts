@@ -1,5 +1,6 @@
 import { timelockDecrypt } from '@paperseal/crypto';
 import { fromHex, toHex, type Hex, type Paper } from '@paperseal/protocol';
+import type { ReleaseLogResponse } from '@paperseal/tee-client';
 import { useEffect, useRef, useState } from 'react';
 
 import { storageUrl } from '../../shared/config';
@@ -8,9 +9,19 @@ import { listEntryFor } from '../../shared/holder';
 import { browserKeys, describeError, type StoredCredential } from '../../shared/Register';
 import { registry } from '../../shared/registry';
 import { storageFetcher, StorageVerificationError } from '../../shared/storage';
+import { tee } from '../../shared/tee';
 import { downloadPaperFiles, type Downloaded } from './download';
+import { readCheckedLog, verifiedLogForUnlock } from './logCheck';
 import { chainReaders } from './readers';
-import { PaperHashMismatchError, prepareUnlock, unlockPaper, UnlockError, type PreparedUnlock, type UnlockStep } from './unlock';
+import {
+  KeyFileChangedError,
+  PaperHashMismatchError,
+  prepareUnlock,
+  unlockPaper,
+  UnlockError,
+  type PreparedUnlock,
+  type UnlockStep,
+} from './unlock';
 
 export type OpenPhase =
   | { name: 'idle' }
@@ -45,6 +56,15 @@ export function refusalFor(step: UnlockStep | null, error: unknown): Refusal {
       why: 'It does not match the published record, so it may not be the paper that was sealed.',
       contact: TELL_THE_BOARD,
       canRetry: false,
+      detail,
+    };
+  }
+  if (error instanceof KeyFileChangedError) {
+    return {
+      title: 'Your centre’s part of the key has been changed',
+      why: 'It is not the file Paper Seal wrote for your centre, so your security key was not used.',
+      contact: RETRY_THEN_BOARD,
+      canRetry: true,
       detail,
     };
   }
@@ -100,6 +120,14 @@ export function refusalFor(step: UnlockStep | null, error: unknown): Refusal {
   };
 }
 
+/** The log to check this centre's sealed key against, or null. It never stops or holds up an unlock. */
+function logForUnlock(exam: Hex): Promise<ReleaseLogResponse | null> {
+  const client = tee;
+  const reader = registry;
+  if (!client || !reader) return Promise.resolve(null);
+  return verifiedLogForUnlock(() => readCheckedLog(client, reader, exam));
+}
+
 /** How long what was got ahead of the press stays good. After this the press gets it again. */
 export const EARLY_TTL_MS = 120_000;
 
@@ -109,6 +137,7 @@ interface Early {
   build: NonNullable<Awaited<ReturnType<ReturnType<typeof chainReaders>['readBuild']>>>;
   criteria: Awaited<ReturnType<ReturnType<typeof chainReaders>['readCriteria']>>;
   prepared: PreparedUnlock;
+  verifiedLog: ReleaseLogResponse | null;
   at: number;
 }
 
@@ -150,13 +179,14 @@ export function useOpenPaper(downloaded: Downloaded | null, identity: StoredCred
       const build = await readers.readBuild();
       if (!build) return null;
       const derivedPublicKey = toHex(own.derivedPublicKey);
+      const log = logForUnlock(examId);
       const prepared = await prepareUnlock({
         derivedPublicKey,
         keyPubTlock: downloaded.keyPubTlock,
         timelockDecrypt: (ciphertext) => timelockDecrypt(ciphertext),
         fetchFile: storageFetcher(storageUrl, examId),
       });
-      return { derivedPublicKey, build, criteria: await readers.readCriteria(), prepared, at: Date.now() };
+      return { derivedPublicKey, build, criteria: await readers.readCriteria(), prepared, verifiedLog: await log, at: Date.now() };
     } catch {
       // Not an error to show: pressing the button gets everything again and says what went wrong.
       return null;
@@ -190,6 +220,7 @@ export function useOpenPaper(downloaded: Downloaded | null, identity: StoredCred
           timelockDecrypt: (ciphertext) => timelockDecrypt(ciphertext),
           fetchFile: storageFetcher(storageUrl, examId),
           prepared: held.prepared,
+          verifiedLog: held.verifiedLog,
           onStep: (step) => {
             current = step;
             setPhase(step === 'touch' ? { name: 'touch' } : step === 'decrypt' || step === 'check' ? { name: 'opening' } : { name: 'checking' });
@@ -201,6 +232,7 @@ export function useOpenPaper(downloaded: Downloaded | null, identity: StoredCred
       }
       const own = await listEntryFor(registry, examId, identity.passkeyPublicKey);
       if (!own || own.derivedPublicKey.length === 0) throw new Error('Your security key is not an approved centre on the on-chain list.');
+      const log = logForUnlock(examId);
       const fetchFile = storageFetcher(storageUrl, examId);
       const readers = chainReaders(registry, examId);
       const build = await readers.readBuild();
@@ -219,6 +251,7 @@ export function useOpenPaper(downloaded: Downloaded | null, identity: StoredCred
         keyPubTlock: files.keyPubTlock,
         timelockDecrypt: (ciphertext) => timelockDecrypt(ciphertext),
         fetchFile,
+        verifiedLog: await log,
         onStep: (step) => {
           current = step;
           setPhase(step === 'touch' ? { name: 'touch' } : step === 'decrypt' || step === 'check' ? { name: 'opening' } : { name: 'checking' });

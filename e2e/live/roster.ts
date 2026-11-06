@@ -6,6 +6,13 @@ export interface RosterEntry {
   role: 1 | 2 | 3 | 4;
 }
 
+/** The ENS parent the demo names sit under. A key holder or centre is invited by ENS name only (spec/api.md, "Party Names"). */
+export const partyParent = 'paperseal-demo.eth';
+
+/** The `owner` a roster entry is invited under: `neutral-1.paperseal-demo.eth`. A setter has none, so its label stays only a label. */
+export const ownerNameOf = (entry: Pick<RosterEntry, 'name' | 'kind'>): string | undefined =>
+  entry.kind === 'setter' ? undefined : `${entry.name}.${partyParent}`;
+
 const count = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
 
 export const roster: RosterEntry[] = [

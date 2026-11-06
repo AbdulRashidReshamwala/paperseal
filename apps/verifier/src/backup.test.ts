@@ -204,7 +204,7 @@ describe('unlock files from the Swarm backup', () => {
   const chainOf = (w: World): ChainData =>
     ({ exam: w.exam, build: w.build, list: { listHash: w.build.approvedListHash }, criteria: w.criteriaHex, entries: w.entriesHex }) as ChainData;
   const proof = (w: World, storage: Parameters<typeof runProof>[0]['storage']) =>
-    runProof({ storage, examId, exam: w.exam, build: w.build, criteria: w.criteriaHex, currentRound: 1000, now: 2_000_000_000, client: w.client });
+    runProof({ storage, examId, exam: w.exam, build: w.build, criteria: w.criteriaHex, currentRound: 1000, keyPrivSha256: null, now: 2_000_000_000, client: w.client });
   /** The world's files with some replaced, as a backup collection. */
   const withFiles = (w: World, replace: Record<string, Uint8Array>) => new Map([...w.files, ...Object.entries(replace)]);
 

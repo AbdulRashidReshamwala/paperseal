@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { chromium, type Browser, type Locator, type Page } from 'playwright-core';
 
 import { openPerson, type OpenOptions, type Person } from '../demo/people';
+import { captionScript } from '../src/recorder';
 
 /*
  * The browser kit of the UI suite. A person is one window with one tab and one virtual security key
@@ -103,6 +104,8 @@ export interface ActorOptions extends Omit<OpenOptions, 'setup' | 'viewport'> {
   bindings?: Record<string, (...args: never[]) => unknown>;
   /** Business role for the table: board, setter, key holder, centre, verifier. */
   role: string;
+  /** Record this person's window to a video in this folder, with a caption bar naming each step. */
+  videoDir?: string;
 }
 
 export class Actor {
@@ -111,6 +114,13 @@ export class Actor {
   person!: Person;
   readonly counts: Counts = zero();
   readonly flows: FlowRecord[] = [];
+  /** Set when this person's window is being recorded. */
+  videoDir: string | null = null;
+  /** When the recording began, to place `marks` in the video. */
+  videoStartedAt = 0;
+  /** Slow typing and pauses, for the parts of a recording a viewer must follow. */
+  paced = false;
+  readonly marks: { name: string; at: number }[] = [];
   /** Main-frame navigations of any kind. `routeChanges` is this minus the full loads. */
   navigations = 0;
 
@@ -144,7 +154,29 @@ export class Actor {
   }
 
   async type(locator: Locator, text: string): Promise<void> {
+    if (this.paced && text !== '') {
+      await locator.click();
+      await locator.fill('');
+      await locator.pressSequentially(text, { delay: 40 });
+      return;
+    }
     await locator.fill(text);
+  }
+
+  /** Notes a moment, so a recording can be cut around it. */
+  mark(name: string): void {
+    this.marks.push({ name, at: Date.now() });
+  }
+
+  /** Names the step in the caption bar of a recorded window. Call again after a page load. */
+  async say(text: string): Promise<void> {
+    if (!this.videoDir) return;
+    await this.page.evaluate((t) => (window as unknown as { __caption?: (a: string, b: string) => void }).__caption?.(t, ''), text).catch(() => undefined);
+  }
+
+  /** A pause a viewer can follow. Does nothing outside a recording. */
+  async beat(ms = 1500): Promise<void> {
+    if (this.videoDir) await this.page.waitForTimeout(ms);
   }
 
   async goto(url: string): Promise<void> {
@@ -156,6 +188,11 @@ export class Actor {
     mkdirSync(SCREENS_DIR, { recursive: true });
     const base = `${this.role.replace(/\s+/g, '-')}-${state}`.replace(/[^a-zA-Z0-9._-]+/g, '-');
     const page = this.page;
+    if (this.videoDir) {
+      // A recorded window never changes size, or the video would flash a phone-sized page.
+      await page.screenshot({ path: resolve(SCREENS_DIR, `${base}-1280.png`), fullPage: true }).catch(() => undefined);
+      return;
+    }
     try {
       await page.setViewportSize(WIDE);
       await page.waitForTimeout(250);
@@ -223,6 +260,7 @@ export async function openActor(browser: Browser, name: string, url: string | nu
   actor.person = await openPerson(browser, name, url, windowIndex++, (m) => notes.push(m), {
     viewport: WIDE,
     noLabel: true,
+    ...(options.videoDir ? { recordVideo: { dir: options.videoDir, size: { ...WIDE } } } : {}),
     permissions: options.permissions ?? ['clipboard-read', 'clipboard-write'],
     setup: async (person) => {
       actor.person = person;
@@ -239,6 +277,11 @@ export async function openActor(browser: Browser, name: string, url: string | nu
         await person.context.exposeBinding(bindingName, (_source, ...args: unknown[]) => (fn as (...a: unknown[]) => unknown)(...args));
       }
       await person.context.addInitScript(meterScript);
+      if (options.videoDir) {
+        actor.videoDir = options.videoDir;
+        actor.videoStartedAt = Date.now();
+        await person.context.addInitScript(captionScript);
+      }
       if (options.wallet) {
         await person.context.addInitScript(options.wallet);
         await person.context.addInitScript(walletMeterScript);

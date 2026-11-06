@@ -1,9 +1,11 @@
-import { entriesFor, listRolesFor, matchInvites, roles, threshold, type InviteRole, type InviteState } from '@paperseal/protocol';
+import type { Directory } from '@paperseal/chain';
+import { matchInvites, ownerProblem, partyNameProblem, roles, setterEntries, threshold, type Hex, type InviteState } from '@paperseal/protocol';
 import type { RegistrationEntry, TeeClient } from '@paperseal/tee-client';
-import { Button, Check, CopyButton, Field, Hash, Panel, Row, Rows, Stage, Stamp } from '@paperseal/ui';
+import { Button, Check, Field, Hash, Panel, Row, Rows, Stage, Stamp } from '@paperseal/ui';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 
 import { useCurrentExamId } from '../../shared/currentExam';
+import { directoryName } from '../../shared/names';
 import { TEE_STATUS_POLL_MS } from '../../shared/TeeStatus';
 import { useBoardForm, useReader } from './BoardForm';
 import { usePoll } from './hooks';
@@ -12,7 +14,8 @@ import { ExamRecord } from './ExamRecord';
 import type { Snapshot } from './examState';
 import { InviteBackup } from './InviteBackup';
 import { Fold, PostAction, ReadBackRows } from './Parts';
-import { centreRoles, createInvite, inviteRoleNames, linkFor, reissueInvite, type BoardInvite } from './invites';
+import { createInvite, linkFor, reissueInvite, type BoardInvite } from './invites';
+import { defaultRole, partyEntries, partyRoles, partyState, useDirectoryNames, useParties, usePartyRecords, type ChosenParty, type PartyState } from './parties';
 import { bankNeeded } from './plan';
 import { checkPostTarget, type PostGate } from './postGate';
 import { postApprovedListFlow, type PostOutcome } from './postFlow';
@@ -63,62 +66,53 @@ function usePostGate(tee: TeeClient | null): PostGate {
   return { state: 'checking' };
 }
 
-function CopyLink(props: { who: string; url: string }) {
+/** The public exam page's link. See "Registration by name" in spec/api.md. */
+export const examPageLink = (base: string, examId: Hex) => `${base.split('#')[0] ?? ''}#/exam?exam=${examId}`;
+
+function CopyLink(props: { label: string; url: string }) {
+  const [copy, setCopy] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const onClick = () => {
+    // navigator.clipboard is missing outside a secure context.
+    const written = (globalThis.navigator as Navigator | undefined)?.clipboard?.writeText(props.url);
+    if (!written) {
+      setCopy('failed');
+      return;
+    }
+    written.then(
+      () => {
+        setCopy('copied');
+      },
+      () => {
+        setCopy('failed');
+      },
+    );
+  };
   return (
     <span className="board-link">
-      <CopyButton text={props.url} aria-label={`Copy the link for ${props.who}`}>
-        Copy link
-      </CopyButton>
+      <Button aria-label={props.label} onClick={onClick}>
+        {copy === 'copied' ? 'Copied' : 'Copy link'}
+      </Button>
+      {copy === 'failed' ? (
+        <>
+          <span role="status">The link could not be copied. Select it below and copy it yourself.</span>
+          <span className="ps-mono">{props.url}</span>
+        </>
+      ) : null}
     </span>
   );
 }
 
-const inviteRoleOptions: InviteRole[] = ['keyholder', 'centre', 'setter'];
-
-/** Makes one invite: a role and a name, then a link to copy. Setters need no name, and any note stays here. */
+/** Makes one setter invite: an optional private note, then a link to copy. */
 function AddInvite(props: { invites: readonly BoardInvite[]; onAdd: (invite: BoardInvite) => void }) {
-  const [role, setRole] = useState<InviteRole>('keyholder');
   const [text, setText] = useState('');
-  const [error, setError] = useState<string | undefined>();
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    const made = createInvite(props.invites, role, text);
-    if (!made.ok) {
-      setError(made.reason);
-      return;
-    }
-    setError(undefined);
     setText('');
-    props.onAdd(made.invite);
+    props.onAdd(createInvite(props.invites, text));
   };
   return (
     <form className="board-invite-form" onSubmit={submit}>
-      <label className="ps-field">
-        <span>Role</span>
-        <select
-          className="ps-input board-role"
-          value={role}
-          onChange={(event) => {
-            setRole(event.target.value as InviteRole);
-            setError(undefined);
-          }}
-        >
-          {inviteRoleOptions.map((option) => (
-            <option key={option} value={option}>
-              {inviteRoleNames[option]}
-            </option>
-          ))}
-        </select>
-      </label>
-      <Field
-        label={role === 'setter' ? 'A note for yourself (optional, kept private)' : 'Name to show on the public list'}
-        value={text}
-        error={error}
-        onChange={(value) => {
-          setText(value);
-          setError(undefined);
-        }}
-      />
+      <Field label="A note for yourself (optional, kept private)" value={text} onChange={setText} />
       <Button type="submit">Add invite</Button>
     </form>
   );
@@ -130,41 +124,16 @@ const stateWords: Record<InviteState['kind'], string> = {
   conflict: 'Two security keys used this invite, so neither is on the list.',
 };
 
-/** One invite: who it is for, where it stands, and what the board can do about it. */
-function InviteRow(props: {
-  invite: BoardInvite;
-  state: InviteState;
-  link: string;
-  role: number | undefined;
-  onRole: (role: number | null) => void;
-  onReissue: () => void;
-}) {
+/** One setter invite: where it stands, and what the board can do about it. */
+function InviteRow(props: { invite: BoardInvite; state: InviteState; link: string; onReissue: () => void }) {
   const { invite, state } = props;
-  const who = `${invite.label} (${inviteRoleNames[invite.role]})`;
   return (
-    <Row label={who}>
+    <Row label={invite.label}>
       <span className="board-link">
         <Check status={state.kind === 'matched' ? 'pass' : state.kind === 'conflict' ? 'fail' : 'pending'}>{stateWords[state.kind]}</Check>
-        {state.kind === 'matched' && invite.role === 'centre' ? (
-          <select
-            className="ps-input board-role"
-            aria-label={`Role for ${invite.label}`}
-            value={props.role ?? ''}
-            onChange={(event) => {
-              props.onRole(event.target.value === '' ? null : Number(event.target.value));
-            }}
-          >
-            <option value="">Leave out</option>
-            {centreRoles.map((role) => (
-              <option key={role} value={role}>
-                {roleNames[role]}
-              </option>
-            ))}
-          </select>
-        ) : null}
-        {state.kind === 'waiting' ? <CopyLink who={who} url={props.link} /> : null}
+        {state.kind === 'waiting' ? <CopyLink label={`Copy the link for ${invite.label}`} url={props.link} /> : null}
         {state.kind === 'conflict' ? (
-          <Button aria-label={`Make a new link for ${who}`} onClick={props.onReissue}>
+          <Button aria-label={`Make a new link for ${invite.label}`} onClick={props.onReissue}>
             Make a new link
           </Button>
         ) : null}
@@ -172,6 +141,135 @@ function InviteRow(props: {
     </Row>
   );
 }
+
+/** Where a chosen name stands, in plain words. */
+function PartyLine(props: { name: string; state: PartyState; onRetry: () => void }) {
+  const { name, state } = props;
+  switch (state.kind) {
+    case 'reading':
+      return <Check status="pending">Reading {name}</Check>;
+    case 'unread':
+      return (
+        <>
+          <Check status="pending">{name} can&apos;t be read right now.</Check>
+          <Button aria-label={`Try reading ${name} again`} onClick={props.onRetry}>
+            Try again
+          </Button>
+          <Fold summary="Details">
+            <p>{state.reason}</p>
+          </Fold>
+        </>
+      );
+    case 'no-record':
+      return <Check status="fail">{name} has no security key on it, so nobody can register under it.</Check>;
+    case 'waiting':
+      return <Check status="pending">Waiting for them to register</Check>;
+    case 'other-key':
+      return <Check status="fail">Someone registered under {name} with a different security key, so they are not on the list.</Check>;
+    case 'registered':
+      return <Check status="pass">Name confirmed</Check>;
+  }
+}
+
+/** One name: a tick, then a role and where it stands once it is chosen. */
+function PartyRow(props: {
+  name: string;
+  party: ChosenParty | undefined;
+  state: PartyState | undefined;
+  onTick: (ticked: boolean) => void;
+  onRole: (role: number | null) => void;
+  onRetry: () => void;
+}) {
+  const { name, party, state } = props;
+  return (
+    <Row
+      label={
+        <label className="board-tick">
+          <input
+            type="checkbox"
+            aria-label={`Include ${name}`}
+            checked={party !== undefined}
+            onChange={(event) => {
+              props.onTick(event.target.checked);
+            }}
+          />{' '}
+          {name}
+        </label>
+      }
+    >
+      {party ? (
+        <span className="board-link">
+          <select
+            className="ps-input board-role"
+            aria-label={`Role for ${name}`}
+            value={party.role ?? ''}
+            onChange={(event) => {
+              props.onRole(event.target.value === '' ? null : Number(event.target.value));
+            }}
+          >
+            <option value="">Choose a role</option>
+            {partyRoles.map((role) => (
+              <option key={role} value={role}>
+                {roleNames[role]}
+              </option>
+            ))}
+          </select>
+          {state ? <PartyLine name={name} state={state} onRetry={props.onRetry} /> : null}
+        </span>
+      ) : null}
+    </Row>
+  );
+}
+
+/** Adds a name that isn't in the directory. Its own records decide, as for any other. */
+export function AddName(props: { taken: readonly string[]; onAdd: (name: string) => void }) {
+  const [text, setText] = useState('');
+  const [error, setError] = useState<string | undefined>();
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    const name = text.trim();
+    const problem = name === '' ? 'Enter an ENS name, like iit-delhi.eth.' : (ownerProblem(name) ?? partyNameProblem(name));
+    if (problem) {
+      setError(problem);
+      return;
+    }
+    if (props.taken.includes(name)) {
+      setError(`${name} is already here.`);
+      return;
+    }
+    setError(undefined);
+    setText('');
+    props.onAdd(name);
+  };
+  return (
+    <form className="board-invite-form" onSubmit={submit}>
+      <Field
+        label="Add a name that isn't listed"
+        value={text}
+        error={error}
+        onChange={(value) => {
+          setText(value);
+          setError(undefined);
+        }}
+      />
+      <Button type="submit">Add name</Button>
+    </form>
+  );
+}
+
+const directoryWords = (read: Directory | null): string | null => {
+  if (!read) return 'Reading the directory.';
+  switch (read.state) {
+    case 'found':
+      return read.names.length === 0 ? `${directoryName} lists nobody yet.` : null;
+    case 'none':
+      return `${directoryName} lists nobody yet.`;
+    case 'malformed':
+      return `The list on ${directoryName} can't be used. Ask whoever runs it to fix it.`;
+    default:
+      return `${directoryName} can't be read right now.`;
+  }
+};
 
 function Count(props: { label: string; have: number; need: number }) {
   const { have, need } = props;
@@ -186,7 +284,7 @@ function Count(props: { label: string; have: number; need: number }) {
 
 const expected = /^expected \d+ neutral and \d+ centre key holders/;
 
-/** Step 4: invites to send, then the list composed from whoever registered with one. */
+/** Step 4: names to choose and setters to invite, then the list composed from whoever registered. */
 export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPosted: () => void }) {
   const { environment, tee, addReceipt, receipts } = useBoardForm();
   const published = receipts.find((receipt) => receipt.kind === 'publish' && receipt.outcome.matches);
@@ -199,19 +297,38 @@ export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPoste
   const { invites, update } = useInvites(examId);
   // The tags are recomputed from the stored secrets on every read, so nothing the TEE says is taken on trust.
   const matching = useMemo(() => matchInvites(invites, registrations), [invites, registrations]);
-  // `null` is the board leaving a centre out. Anything not touched keeps its default.
-  const [touched, setTouched] = useState<Record<string, number | null>>({});
-  const picked = useMemo(() => {
-    const merged: Record<string, number | undefined> = listRolesFor(matching);
-    for (const { invite, state } of matching.rows) {
-      if (invite.role !== 'centre' || state.kind !== 'matched') continue;
-      const key = state.registration.passkeyPublicKey;
-      if (key in touched) merged[key] = touched[key] ?? undefined;
-    }
-    return merged;
-  }, [matching, touched]);
-  const entries = useMemo(() => entriesFor(matching, picked), [matching, picked]);
+  const { parties, update: updateParties } = useParties(examId);
+  const directory = useDirectoryNames(environment.ensLookup);
+  const [search, setSearch] = useState('');
+  const chosenNames = useMemo(() => parties.map((party) => party.name), [parties]);
+  const { records, retry } = usePartyRecords(environment.ensLookup, chosenNames);
+  const partyRows = useMemo(
+    () => parties.map((party) => ({ party, state: partyState(party.name, records[party.name], registrations) })),
+    [parties, records, registrations],
+  );
+  const entries = useMemo(() => [...partyEntries(partyRows), ...setterEntries(matching)], [partyRows, matching]);
   const composed = useMemo(() => (examId && entries.length > 0 ? tryCompose(examId, entries) : null), [examId, entries]);
+
+  const listed = useMemo(() => (directory.read?.state === 'found' ? directory.read.names : []), [directory.read]);
+  const shown = useMemo(() => {
+    const all = [...new Set([...listed, ...chosenNames])];
+    const wanted = search.trim().toLowerCase();
+    return wanted === '' ? all : all.filter((name) => name.includes(wanted));
+  }, [listed, chosenNames, search]);
+  const seen = directoryWords(directory.read);
+  const unreadDirectory = directory.read !== null && !['found', 'none', 'malformed'].includes(directory.read.state);
+
+  const tick = (name: string, ticked: boolean) => {
+    updateParties(ticked ? [...parties, { name, role: defaultRole(parties) }] : parties.filter((party) => party.name !== name));
+  };
+  const setRole = (name: string, role: number | null) => {
+    updateParties(parties.map((party) => (party.name === name ? { ...party, role } : party)));
+  };
+
+  // A registration that fits neither an invite nor a chosen name. Anyone can make one, so only the count shows.
+  const stray = matching.unmatched.filter(
+    (registration) => !partyRows.some(({ state }) => state.kind === 'registered' && state.registration.passkeyPublicKey === registration.passkeyPublicKey),
+  ).length;
 
   const counts = (role: number) => entries.filter((entry) => entry.role === role).length;
   const conflicts = matching.rows.filter(({ state }) => state.kind === 'conflict').length;
@@ -220,8 +337,8 @@ export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPoste
     : !examId
       ? 'No exam is open. Go back to the exam board page and open your exam.'
       : entries.length === 0
-        ? invites.length === 0
-          ? 'Add an invite for each person, then send them their link.'
+        ? parties.length === 0 && invites.length === 0
+          ? 'Choose who takes part, then share the exam link.'
           : 'Waiting for people to register. You can close this page and come back.'
         : composed && !composed.ok
           ? expected.test(composed.reason)
@@ -236,15 +353,11 @@ export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPoste
   const base = 'location' in globalThis ? `${location.origin}${location.pathname}` : '';
   const needs = props.snapshot.found?.criteria ? bankNeeded(props.snapshot.found.criteria) : null;
 
-  const changeInvite = (next: BoardInvite) => {
-    update(invites.map((invite) => (invite.id === next.id ? next : invite)));
-  };
-
   return (
     <Stage
       eyebrow={props.eyebrow}
-      title="Invite people"
-      lede="Add an invite for each person and send them their link. When everyone has registered, post the list."
+      title="Choose who takes part"
+      lede="Tick each key holder and centre, and share the exam link with them once. Invite setters with a private link. When everyone has registered, post the list."
       action={
         <>
           {published ? (
@@ -260,7 +373,55 @@ export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPoste
               ) : null}
             </div>
           ) : null}
-          <Panel title="Invites">
+          <Panel title="Key holders and centres">
+            {examId ? (
+              <>
+                <p className="board-link">
+                  <span>Share this exam link once. It holds nothing secret.</span>
+                  <CopyLink label="Copy the exam link" url={examPageLink(base, examId)} />
+                </p>
+                <Field label="Search the directory" value={search} onChange={setSearch} />
+                {seen ? (
+                  <p className="board-note">
+                    {seen}{' '}
+                    {unreadDirectory ? <Button onClick={directory.retry}>Try again</Button> : null}
+                  </p>
+                ) : null}
+                {shown.length > 0 ? (
+                  <Rows>
+                    {shown.map((name) => {
+                      const row = partyRows.find(({ party }) => party.name === name);
+                      return (
+                        <PartyRow
+                          key={name}
+                          name={name}
+                          party={row?.party}
+                          state={row?.state}
+                          onTick={(ticked) => {
+                            tick(name, ticked);
+                          }}
+                          onRole={(role) => {
+                            setRole(name, role);
+                          }}
+                          onRetry={retry}
+                        />
+                      );
+                    })}
+                  </Rows>
+                ) : null}
+                <AddName
+                  taken={[...listed, ...chosenNames]}
+                  onAdd={(name) => {
+                    tick(name, true);
+                  }}
+                />
+              </>
+            ) : null}
+            <p className="board-note">
+              ENS names are read on Sepolia, a test network, where anyone can register a similar name. Whoever runs {directoryName} decides which key belongs to each name on it.
+            </p>
+          </Panel>
+          <Panel title="Setters">
             {examId ? (
               <AddInvite
                 invites={invites}
@@ -271,29 +432,22 @@ export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPoste
             ) : null}
             {invites.length > 0 && examId ? (
               <Rows>
-                {matching.rows.map(({ invite, state }) => {
-                  const key = state.kind === 'matched' ? state.registration.passkeyPublicKey : undefined;
-                  return (
-                    <InviteRow
-                      key={invite.id}
-                      invite={invite}
-                      state={state}
-                      link={linkFor(base, examId, invite)}
-                      role={key ? picked[key] : undefined}
-                      onRole={(role) => {
-                        if (key) setTouched({ ...touched, [key]: role });
-                      }}
-                      onReissue={() => {
-                        changeInvite(reissueInvite(invite));
-                      }}
-                    />
-                  );
-                })}
+                {matching.rows.map(({ invite, state }) => (
+                  <InviteRow
+                    key={invite.id}
+                    invite={invite}
+                    state={state}
+                    link={linkFor(base, examId, invite)}
+                    onReissue={() => {
+                      update(invites.map((item) => (item.id === invite.id ? reissueInvite(invite) : item)));
+                    }}
+                  />
+                ))}
               </Rows>
             ) : null}
             {examId ? <InviteBackup examId={examId} invites={invites} onRestore={update} /> : null}
             <p className="board-note">
-              Each link works for one person only, so send it to them privately. It is safe to close this page while you wait.
+              Each link works for one setter only, so send it to them privately. It is safe to close this page while you wait.
             </p>
           </Panel>
           <Panel title="On the list">
@@ -314,18 +468,7 @@ export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPoste
                 <Check status="fail">An invite was used by two security keys, so neither is on the list. Make a new link for that invite, then send it to the right person.</Check>
               </p>
             ) : null}
-            {matching.unmatched.length > 0 ? (
-              <Rows>
-                {matching.unmatched.map((registration) => (
-                  <Row key={registration.passkeyPublicKey} label="Not invited">
-                    <span className="board-link">
-                      <Check status="fail">This person registered without one of your invites, so they are not on the list.</Check>
-                      <Hash value={registration.passkeyPublicKey} label="security key" />
-                    </span>
-                  </Row>
-                ))}
-              </Rows>
-            ) : null}
+            {stray > 0 ? <p className="board-note">{stray === 1 ? '1 other registration matches nobody here, so it is not on the list.' : `${String(stray)} other registrations match nobody here, so they are not on the list.`}</p> : null}
           </div>
           <PostAction
             label="Post the list"
@@ -366,6 +509,13 @@ export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPoste
       {entries.length > 0 ? (
         <Fold summary="Registered security keys">
           <Rows>
+            {partyRows.map(({ party, state }) =>
+              state.kind === 'registered' ? (
+                <Row key={party.name} label={party.name}>
+                  <Hash value={state.registration.passkeyPublicKey} label="security key" />
+                </Row>
+              ) : null,
+            )}
             {matching.rows.map(({ invite, state }) =>
               state.kind === 'matched' ? (
                 <Row key={invite.id} label={invite.label}>

@@ -2,6 +2,11 @@
 // selection criteria, the approved list and the Build. The TEE has no wallet and
 // sends no transactions.
 //
+// The first read checks the code at exam.Registry against the pin in
+// spec/registry.json with eth_getCode, because the attested address alone doesn't
+// show it is ExamRegistry. Code that differs is ErrWrongRegistry, which ends the
+// exam. An RPC failure, or no code yet, is a plain error and is retried.
+//
 // Each read has two steps over TLS to exam.RPCHost, for exam.Registry and
 // exam.ExamID. First eth_call a getter at the chain.readBlock block tag, which
 // gives the record and the one block that holds its log. A record with no block
@@ -48,7 +53,7 @@ import (
 const RootsPath = "/etc/paperseal/roots.pem"
 
 // maxResponse bounds an RPC response. The approved list is the largest, and
-// limits.entriesBytes (320 KiB) as hex in a log fits well within 1 MiB.
+// limits.entriesBytes (130,000 bytes) as hex in a log fits well within 1 MiB.
 const maxResponse = 1 << 20
 
 // eventOverhead is room in event data for everything but the large value: the
@@ -62,6 +67,9 @@ var (
 	// ErrWrongExam means the chain holds an exam that differs from the attested
 	// settings, so nothing from it can be trusted.
 	ErrWrongExam = errors.New("chainread: on-chain exam differs from the attested settings")
+	// ErrWrongRegistry means the attested registry address runs other code than
+	// the pinned ExamRegistry, so nothing read from it can be trusted.
+	ErrWrongRegistry = errors.New("chainread: the code at the registry address is not ExamRegistry")
 )
 
 // Source is what the lifecycle reads. RPC is the real one.
@@ -102,6 +110,7 @@ type Build struct {
 	Selected            uint32
 	BankSize            uint32
 	CriteriaHash        [32]byte
+	BuiltRound          uint64
 	TEESignature        []byte
 	InstancePublicKey   []byte
 }
@@ -141,9 +150,10 @@ type RPC struct {
 	client    *http.Client
 	readBlock string // The eth_call block tag, chain.readBlock.
 
-	mu      sync.Mutex
-	chainOK bool
-	nextID  int
+	mu         sync.Mutex
+	chainOK    bool
+	registryOK bool
+	nextID     int
 }
 
 var _ Source = (*RPC)(nil)
@@ -247,6 +257,9 @@ func (r *RPC) registryHex() string { return "0x" + hex.EncodeToString(r.exam.Reg
 // ethCall calls a getter at the chain.readBlock block and unpacks its one output.
 func (r *RPC) ethCall(ctx context.Context, method string) ([]any, error) {
 	if err := r.checkChain(ctx); err != nil {
+		return nil, err
+	}
+	if err := r.checkRegistry(ctx); err != nil {
 		return nil, err
 	}
 	data, err := registryABI.Pack(method, r.exam.ExamID)
@@ -429,7 +442,7 @@ func (r *RPC) Build(ctx context.Context) (Build, error) {
 	return Build{
 		ApprovedListHash: b.ApprovedListHash, PaperHash: b.PaperHash,
 		StorageManifestHash: b.StorageManifestHash, SaltedPaperHash: b.SaltedPaperHash,
-		Selected: b.Selected, BankSize: b.BankSize, CriteriaHash: b.CriteriaHash,
+		Selected: b.Selected, BankSize: b.BankSize, CriteriaHash: b.CriteriaHash, BuiltRound: b.BuiltRound,
 		TEESignature: b.TeeSignature, InstancePublicKey: b.InstancePublicKey,
 	}, nil
 }

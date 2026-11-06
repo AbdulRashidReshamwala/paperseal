@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.30;
+pragma solidity 0.8.34;
 
 /// @title ExamRegistry
 /// @notice Write-once public record of each exam. Only the board address can write.
@@ -44,10 +44,24 @@ contract ExamRegistry {
         bytes32 saltedPaperHash;
         uint32 selected;
         uint32 bankSize;
+        uint64 builtRound;
         uint64 postedAt;
         bytes32 criteriaHash;
         bytes teeSignature;
         bytes instancePublicKey;
+    }
+
+    /// @notice The TEE's `build` message fields after `examId`, in the order it hashes them. `builtRound` is the
+    ///         newest verified drand round when the TEE sealed the paper.
+    struct BuildFields {
+        bytes32 approvedListHash;
+        bytes32 paperHash;
+        bytes32 storageManifestHash;
+        bytes32 saltedPaperHash;
+        uint32 selected;
+        uint32 bankSize;
+        bytes32 criteriaHash;
+        uint64 builtRound;
     }
 
     event ExamCreated(
@@ -73,6 +87,7 @@ contract ExamRegistry {
         uint32 selected,
         uint32 bankSize,
         bytes32 criteriaHash,
+        uint64 builtRound,
         bytes teeSignature,
         bytes instancePublicKey
     );
@@ -105,7 +120,7 @@ contract ExamRegistry {
     string private constant CRITERIA_TAG = "paperseal/v1/criteria";
     string private constant APPROVED_LIST_TAG = "paperseal/v1/approved-list";
     /// @dev Matches `limits.entriesBytes` in spec/constants.json.
-    uint256 private constant ENTRIES_BYTES = 327680;
+    uint256 private constant ENTRIES_BYTES = 130000;
     /// @dev Matches `limits.criteriaBytes` in spec/constants.json.
     uint256 private constant CRITERIA_BYTES = 16384;
     /// @dev Uncompressed P-256 key: 0x04, x, y.
@@ -194,45 +209,46 @@ contract ExamRegistry {
     ///      fill the write-once slot.
     function postBuild(
         bytes32 examId,
-        bytes32 approvedListHash,
-        bytes32 paperHash,
-        bytes32 storageManifestHash,
-        bytes32 saltedPaperHash,
-        uint32 selected,
-        uint32 bankSize,
-        bytes32 criteriaHash,
+        BuildFields calldata fields,
         bytes calldata teeSignature,
         bytes calldata instancePublicKey
     ) external onlyBoard {
-        _checkBuild(examId, approvedListHash, criteriaHash);
-        if (paperHash == bytes32(0) || storageManifestHash == bytes32(0) || saltedPaperHash == bytes32(0)) {
+        _checkBuild(examId, fields.approvedListHash, fields.criteriaHash);
+        if (
+            fields.paperHash == bytes32(0) || fields.storageManifestHash == bytes32(0)
+                || fields.saltedPaperHash == bytes32(0)
+        ) {
             revert ZeroValue();
         }
-        if (selected == 0 || selected > bankSize) revert InvalidSelection();
+        if (fields.selected == 0 || fields.selected > fields.bankSize) revert InvalidSelection();
+        // Format only. Readers compare the round with the exam's rounds.
+        if (fields.builtRound == 0) revert ZeroValue();
         _checkTeeOutput(teeSignature, instancePublicKey);
 
         // Field by field: a struct literal this size is too deep for the legacy code generator.
         Build storage build = _builds[examId];
-        build.approvedListHash = approvedListHash;
-        build.paperHash = paperHash;
-        build.storageManifestHash = storageManifestHash;
-        build.saltedPaperHash = saltedPaperHash;
-        build.selected = selected;
-        build.bankSize = bankSize;
+        build.approvedListHash = fields.approvedListHash;
+        build.paperHash = fields.paperHash;
+        build.storageManifestHash = fields.storageManifestHash;
+        build.saltedPaperHash = fields.saltedPaperHash;
+        build.selected = fields.selected;
+        build.bankSize = fields.bankSize;
+        build.builtRound = fields.builtRound;
         build.postedAt = _now();
-        build.criteriaHash = criteriaHash;
+        build.criteriaHash = fields.criteriaHash;
         build.teeSignature = teeSignature;
         build.instancePublicKey = instancePublicKey;
 
         emit BuildPosted(
             examId,
-            approvedListHash,
-            paperHash,
-            storageManifestHash,
-            saltedPaperHash,
-            selected,
-            bankSize,
-            criteriaHash,
+            fields.approvedListHash,
+            fields.paperHash,
+            fields.storageManifestHash,
+            fields.saltedPaperHash,
+            fields.selected,
+            fields.bankSize,
+            fields.criteriaHash,
+            fields.builtRound,
             teeSignature,
             instancePublicKey
         );

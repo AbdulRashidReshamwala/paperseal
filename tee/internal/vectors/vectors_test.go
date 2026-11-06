@@ -175,12 +175,59 @@ func TestSealedVectorsOpenFromTheFile(t *testing.T) {
 	if x(sum[:]) != f.ReleaseEntries.EntriesHash {
 		t.Error("entriesHash is not the SHA-256 of its preimage")
 	}
+	checkReleaseFiles(t, f.ReleaseFiles)
 	msum := sha256.Sum256([]byte(f.Manifest.Manifest))
 	if x(msum[:]) != f.Manifest.Hash {
 		t.Error("manifest hash")
 	}
 	if _, err := storage.ParseManifest([]byte(f.Manifest.Manifest)); err != nil {
 		t.Errorf("manifest: %v", err)
+	}
+}
+
+func checkReleaseFiles(t *testing.T, v FilesVector) {
+	t.Helper()
+	var files []release.File
+	for i, j := range v.Files {
+		file := release.File{Name: j.Name}
+		copy(file.SHA256[:], unhex0x(t, j.SHA256))
+		files = append(files, file)
+		if i > 0 && !(v.Files[i-1].Name < j.Name) {
+			t.Errorf("files are not in byte order at %q", j.Name)
+		}
+	}
+	// The order is byte order, not a locale's: the punctuation and the case
+	// both matter here.
+	names := make([]string, len(v.Files))
+	for i, j := range v.Files {
+		names[i] = j.Name
+	}
+	if len(names) != 4 || names[0] != "key-priv.tlock" || names[2] != "key-priv/Z.bin" || names[3] != "key-priv/a.bin" {
+		t.Errorf("names: %v", names)
+	}
+	pre, err := release.FilesPreimage(files)
+	if err != nil || x(pre) != v.Preimage {
+		t.Errorf("files preimage: %v", err)
+	}
+	sum := sha256.Sum256(unhex0x(t, v.Preimage))
+	if x(sum[:]) != v.FilesHash {
+		t.Error("filesHash is not the SHA-256 of its preimage")
+	}
+	empty := sha256.Sum256(unhex0x(t, v.EmptyPreimage))
+	if x(empty[:]) != v.EmptyFilesHash {
+		t.Error("the empty filesHash is not the SHA-256 of its preimage")
+	}
+	// An empty array is its offset and a zero length.
+	if want := "0x" + strings.Repeat("0", 62) + "20" + strings.Repeat("0", 64); v.EmptyPreimage != want {
+		t.Errorf("empty preimage %s", v.EmptyPreimage)
+	}
+	// Input out of order is refused, not quietly sorted.
+	reversed := []release.File{files[1], files[0]}
+	if _, err := release.FilesHash(reversed); err == nil {
+		t.Error("hashed files out of order")
+	}
+	if _, err := release.FilesHash([]release.File{files[0], files[0]}); err == nil {
+		t.Error("hashed a repeated name")
 	}
 }
 

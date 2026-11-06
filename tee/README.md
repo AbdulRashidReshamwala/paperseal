@@ -39,7 +39,7 @@ The TEE has no wallet and writes nothing to the chain. Its chain reads are the e
 2. **Submit:** accept questions from setters on the list until drand publishes the lock round.
 3. **Lock:** check the bank against the criteria. On failure the stage is `failed`.
 4. **Build and Distribute:** draw a seed, pick the questions per topic, encrypt the paper, split `K`, timelock `K_pub`, encrypt shares, write the files, then the manifest last, then queue the signed Build. `K`, `K_pub`, `K_priv`, the shares and the seed are zeroed before anything waits on storage.
-5. **Unlock:** accept shares once drand publishes the unlock round, check each against the manifest's `shareHash`, rebuild `K_priv` at 8, then write `key-priv/*`, `key-priv.tlock`, `release-token.jwt` and `release-log.json`. Shares are refused once the end round is published.
+5. **Unlock:** accept shares once drand publishes the unlock round, check each against the manifest's `shareHash`, rebuild `K_priv` at 8, then write `key-priv/*`, `key-priv.tlock`, `release-token.jwt` and, last, `release-log.json`, whose signature covers the hash of each `key-priv` file. Shares are refused once the end round is published.
 
 `chain.readBlock` is `latest` during development and must be `finalized` for a real exam (see "Dev Mode" in `spec/api.md`). The TEE panics at startup on any other value and logs the value once. At `latest` a reorg can remove a list the TEE already accepted. The TEE doesn't read it again, so a different list then fails at `postBuild`, which checks the list hash.
 
@@ -83,7 +83,7 @@ Environment: set `STORAGE_BUCKET` to a public Google Cloud Storage bucket (write
 
 ## Test Vectors
 
-`testdata/vectors.json` holds fixed inputs and expected bytes for other languages to check against: every message hash (including `instanceKey`), the selection criteria, the approved list, the attestation nonce, HPKE messages sealed in Go for each purpose and AES-256-GCM (to open in TypeScript from the recipient's input keying material), padding, the `release` plaintext, `entriesHash` and the manifest hash. A test fails if the Go output drifts from the file. After a deliberate format change, change `spec/` first, then run:
+`testdata/vectors.json` holds fixed inputs and expected bytes for other languages to check against: every message hash (including `instanceKey`), the selection criteria, the approved list, the attestation nonce, HPKE messages sealed in Go for each purpose and AES-256-GCM (to open in TypeScript from the recipient's input keying material), padding, the `release` plaintext, `entriesHash`, `filesHash` and the manifest hash. A test fails if the Go output drifts from the file. After a deliberate format change, change `spec/` first, then run:
 
 ```sh
 go test ./internal/vectors -update

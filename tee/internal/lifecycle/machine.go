@@ -299,9 +299,10 @@ func (m *Machine) acceptList(entries []approvedlist.Entry, list chainread.List) 
 }
 
 // classify treats chain errors as retryable, except those that show the chain
-// holds a different exam than the attested settings.
+// holds a different exam than the attested settings, or that the attested
+// address isn't ExamRegistry at all.
 func (m *Machine) classify(err error) error {
-	if errors.Is(err, chainread.ErrWrongExam) {
+	if errors.Is(err, chainread.ErrWrongExam) || errors.Is(err, chainread.ErrWrongRegistry) {
 		return fail("%w", err)
 	}
 	return err
@@ -482,6 +483,20 @@ func (m *Machine) stepBuild(ctx context.Context) error {
 		return err
 	}
 
+	// The signed time of sealing: the relay's newest verified round, read as
+	// release entries read theirs. A read that fails or comes back from a stale
+	// relay (before the lock round) passes, so the step is retried, not failed.
+	builtRound, err := m.cfg.Beacon.Latest(ctx)
+	if err != nil {
+		return err
+	}
+	if builtRound < exam.LockRound {
+		return fmt.Errorf("build: the relay's newest round %d is before the lock round %d", builtRound, exam.LockRound)
+	}
+	if builtRound >= exam.UnlockRound {
+		return fail("the unlock round %d is already published, so K_pub would be sealed open", exam.UnlockRound)
+	}
+
 	p := &pending{selected: paper.Selected}
 	add := func(name string, data []byte, recipient, shareHash string) {
 		sum := sha256.Sum256(data)
@@ -526,7 +541,7 @@ func (m *Machine) stepBuild(ctx context.Context) error {
 	p.fields = hashing.BuildFields{
 		ExamID: exam.ExamID, ApprovedListHash: list.hash, PaperHash: paper.PaperHash,
 		SaltedPaperHash: paper.SaltedPaperHash, Selected: paper.Selected, BankSize: paper.BankSize,
-		CriteriaHash: exam.CriteriaHash,
+		CriteriaHash: exam.CriteriaHash, BuiltRound: builtRound,
 	}
 	m.mu.Lock()
 	m.pending = p
@@ -608,7 +623,7 @@ func (m *Machine) stepDistribute(ctx context.Context) error {
 		Kind: outbox.KindBuild, ExamID: fields.ExamID, ApprovedListHash: fields.ApprovedListHash,
 		PaperHash: fields.PaperHash, StorageManifestHash: fields.StorageManifestHash,
 		SaltedPaperHash: fields.SaltedPaperHash, Selected: fields.Selected, BankSize: fields.BankSize,
-		CriteriaHash: fields.CriteriaHash, TEESignature: sig, InstancePublicKey: m.cfg.Keys.PublicKey(),
+		CriteriaHash: fields.CriteriaHash, BuiltRound: fields.BuiltRound, TEESignature: sig, InstancePublicKey: m.cfg.Keys.PublicKey(),
 	}); err != nil && !errors.Is(err, outbox.ErrAlreadyQueued) {
 		return err
 	}

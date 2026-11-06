@@ -293,6 +293,77 @@ export function entriesHash(entries: readonly ReleaseEntry[]): Uint8Array {
   return sha256(encodeReleaseEntries(entries));
 }
 
+/* --------------------------------------------------------------- Release files */
+
+/** `ReleaseFile` in spec/api.md: a file written at unlock and the plain SHA-256 of its stored bytes. */
+export interface ReleaseFile {
+  name: string;
+  sha256: Uint8Array;
+}
+
+/** A release file in JSON, as `files` in the release log. */
+export interface ReleaseFileWire {
+  name: string;
+  sha256: Hex;
+}
+
+const releaseFilesParameters = [
+  {
+    type: 'tuple[]',
+    components: [
+      { name: 'name', type: 'string' },
+      { name: 'sha256', type: 'bytes32' },
+    ],
+  },
+] as const satisfies readonly AbiParameter[];
+
+export function releaseFileFromWire(wire: ReleaseFileWire): ReleaseFile {
+  if (typeof wire.name !== 'string') throw new FormatError('release file name must be a string');
+  if (!isHexOf(wire.sha256, 32)) throw new FormatError('release file sha256 must be 32 bytes of lowercase 0x hex');
+  return { name: wire.name, sha256: fromHex(wire.sha256) };
+}
+
+/** Byte order of the UTF-8 names, which is Go's string order. `<` and `localeCompare` both differ from it. */
+function compareNames(a: string, b: string): number {
+  const left = utf8.encode(a);
+  const right = utf8.encode(b);
+  const shared = Math.min(left.length, right.length);
+  for (let i = 0; i < shared; i += 1) {
+    const difference = (left[i] ?? 0) - (right[i] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return left.length - right.length;
+}
+
+/** A copy sorted by `name` in byte order, the order `filesHash` covers. Takes files or wire files. */
+export function sortReleaseFiles<T extends { name: string }>(files: readonly T[]): T[] {
+  return [...files].sort((a, b) => compareNames(a.name, b.name));
+}
+
+/**
+ * `abi.encode(ReleaseFile[])`. Refuses files that aren't sorted by name without repeats, so the
+ * order is set in one place, `sortReleaseFiles`, and a repeated name can't match a signed log.
+ */
+export function encodeReleaseFiles(files: readonly ReleaseFile[]): Uint8Array {
+  files.forEach((file, i) => {
+    if (file.sha256.length !== 32) throw new RangeError('sha256 must be 32 bytes');
+    const previous = files[i - 1];
+    if (previous && compareNames(previous.name, file.name) >= 0) {
+      throw new FormatError('release files must be sorted by name, with no repeats');
+    }
+  });
+  return fromHex(
+    encodeAbiParameters(releaseFilesParameters, [
+      files.map((file) => ({ name: file.name, sha256: toHex(file.sha256) })),
+    ]),
+  );
+}
+
+/** `filesHash`: the plain SHA-256 of `abi.encode(ReleaseFile[])`. The `releaseLog` message covers it. */
+export function filesHash(files: readonly ReleaseFile[]): Uint8Array {
+  return sha256(encodeReleaseFiles(files));
+}
+
 /* --------------------------------------------------------------------- Manifest */
 
 /** One file in `manifest.json`. */

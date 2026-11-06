@@ -42,7 +42,7 @@ export interface RecordingResult {
   assertions: Assertion[];
 }
 
-const captionScript = `(() => {
+export const captionScript = `(() => {
   const ID = '__ps_caption';
   const build = () => {
     let el = document.getElementById(ID);

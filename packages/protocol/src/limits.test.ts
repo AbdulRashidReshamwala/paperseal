@@ -10,6 +10,7 @@ import {
   decodeCriteria,
   encodeApprovedList,
   encodeCriteria,
+  entriesOverLimit,
   fromHex,
   limits,
   roles,
@@ -57,9 +58,9 @@ const message = (fn: () => unknown): string => {
 describe('limits', () => {
   it('is exported from spec/constants.json', () => {
     expect(limits).toEqual({
-      entriesBytes: 327680,
+      entriesBytes: 130000,
       criteriaBytes: 16384,
-      entries: 512,
+      entries: 225,
       topics: 64,
       ownerBytes: 128,
       topicNameBytes: 64,
@@ -76,15 +77,33 @@ describe('approved list size limits', () => {
     atCap.set(word(0), 32); // an empty array, then trailing zeros
     const atMessage = message(() => decodeApprovedList(atCap));
     expect(atMessage).not.toContain('longer than');
-    expect(() => decodeApprovedList(new Uint8Array(limits.entriesBytes + 1))).toThrow(/longer than 327680/);
+    expect(() => decodeApprovedList(new Uint8Array(limits.entriesBytes + 1))).toThrow(/longer than 130000/);
     expect(() => decodeApprovedList(new Uint8Array(limits.entriesBytes + 1))).toThrow(ApprovedListError);
   });
 
-  it('allows 512 entries to reach the list rules and rejects 513 after decoding', () => {
+  it('allows 225 entries to reach the list rules and rejects 226 after decoding', () => {
     const at = Array.from({ length: limits.entries }, (_, i) => setter(i + 1));
     expect(message(() => decodeApprovedList(encodeApprovedList(at)))).not.toContain('more than');
     const over = [...at, setter(limits.entries + 1)];
-    expect(() => decodeApprovedList(encodeApprovedList(over))).toThrow(/more than 512 entries/);
+    expect(() => decodeApprovedList(encodeApprovedList(over))).toThrow(/more than 225 entries/);
+  });
+
+  it('fits a list of the most entries with the longest owners in one transaction', () => {
+    const encoded = encodeApprovedList(Array.from({ length: limits.entries }, (_, i) => neutral(i + 1, 'a'.repeat(limits.ownerBytes))));
+    expect(encoded.length).toBeLessThanOrEqual(limits.entriesBytes);
+    // geth's mempool refuses a transaction over 131,072 bytes. Calldata adds a selector, three words and
+    // padding. 512 bytes more is ample for the transaction's own fields and signature.
+    const calldata = 4 + 3 * 32 + Math.ceil(limits.entriesBytes / 32) * 32;
+    expect(calldata + 512).toBeLessThanOrEqual(131_072);
+  });
+
+  it('tells which encoded lists are over a limit, without decoding them', () => {
+    const count = (n: number) => join(word(32), word(n));
+    expect(entriesOverLimit(new Uint8Array(limits.entriesBytes + 1))).toBe(true);
+    expect(entriesOverLimit(new Uint8Array(limits.entriesBytes))).toBe(false);
+    expect(entriesOverLimit(count(limits.entries + 1))).toBe(true);
+    expect(entriesOverLimit(count(limits.entries))).toBe(false);
+    expect(entriesOverLimit(new Uint8Array([1]))).toBe(false);
   });
 
   it('allows a 128-byte owner and rejects 129', () => {

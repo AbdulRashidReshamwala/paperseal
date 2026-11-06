@@ -20,7 +20,9 @@
     "live",
     "demo",
     "vitest.config.ts",
+    "ffmpegLink.ts",
     "ui",
+    "mock",
     "vitest.ui.config.ts"
   ]
 }

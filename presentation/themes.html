@@ -1,0 +1,87 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Paper Seal theme samples</title>
+<style>
+@font-face{font-family:"Libre Caslon Text";font-weight:700;src:url(assets/fonts/libre-caslon-text-latin-700-normal.woff2) format("woff2")}
+@font-face{font-family:"Libre Caslon Text";font-weight:400;src:url(assets/fonts/libre-caslon-text-latin-400-normal.woff2) format("woff2")}
+@font-face{font-family:"Public Sans";font-weight:400;src:url(assets/fonts/public-sans-latin-400-normal.woff2) format("woff2")}
+@font-face{font-family:"Public Sans";font-weight:600;src:url(assets/fonts/public-sans-latin-600-normal.woff2) format("woff2")}
+@font-face{font-family:"IBM Plex Mono";font-weight:500;src:url(assets/fonts/ibm-plex-mono-latin-500-normal.woff2) format("woff2")}
+*{box-sizing:border-box;margin:0}
+body{background:#e9e9ee;font-family:"Public Sans",system-ui,sans-serif;padding:48px;color:#111}
+.page h1{font:700 40px "Libre Caslon Text",serif}.page p.sub{color:#555;margin:6px 0 36px}
+.theme{margin-bottom:64px}
+.theme>h2{font:600 22px "Public Sans";display:flex;gap:14px;align-items:baseline;margin-bottom:6px}
+.theme>h2 small{font:400 15px "Public Sans";color:#666}
+.theme>p{color:#555;margin-bottom:16px;max-width:900px}
+.row{display:grid;grid-template-columns:1.78fr 1fr;gap:24px;align-items:stretch}
+.slide,.site{border-radius:10px;overflow:hidden;position:relative;box-shadow:0 2px 16px #0002}
+.slide{aspect-ratio:16/9;padding:6% 7%;display:flex;flex-direction:column;justify-content:center}
+.site{padding:0;display:flex;flex-direction:column;min-height:330px}
+.lbl{font:500 11px "IBM Plex Mono";letter-spacing:.08em;opacity:.7;margin-bottom:10px}
+.slide h3{font-size:clamp(22px,3.3vw,46px);line-height:1.08}
+.chips{display:flex;gap:10px;margin-top:22px;flex-wrap:wrap}
+.chips span{font-size:13px;padding:7px 14px}
+.bar{display:flex;align-items:center;gap:10px;padding:12px 18px;font-size:13px}
+.logo{width:22px;height:22px;border-radius:5px}
+.stage{flex:1;display:flex;flex-direction:column;justify-content:center;padding:18px 9%}
+.stage h4{font-size:24px;line-height:1.15;margin-bottom:8px}
+.stage p{font-size:13px;margin-bottom:18px;opacity:.8}
+.count{font:500 34px "IBM Plex Mono";margin-bottom:16px}
+.btn{align-self:flex-start;padding:12px 22px;font:600 14px "Public Sans"}
+.next{font-size:11px;margin-top:12px;opacity:.7}
+
+/* 1 paper */
+.t1 .slide{background:#f3ecdf;color:#191a23;font-family:"Libre Caslon Text",serif}
+.t1 .slide h3{font-weight:700}.t1 em{font-style:normal;color:#96191f}
+.t1 .chips span{border-top:2px solid #191a23;font:600 13px "Public Sans";padding:8px 14px 0 0}
+.t1 .site{background:#f3ecdf;color:#191a23}
+.t1 .bar{border-bottom:3px double #191a23;font-family:"Libre Caslon Text";font-size:15px}
+.t1 .logo{background:#96191f;border-radius:2px}
+.t1 .stage h4{font-family:"Libre Caslon Text";font-weight:700}
+.t1 .btn{background:#96191f;color:#fff6e8;border:0;border-radius:2px}
+/* 2 midnight */
+.t2 .slide{background:radial-gradient(900px 400px at 90% 0,#0f2a2c,#0b0d17 60%);color:#f4efe6;font-family:"Libre Caslon Text",serif}
+.t2 .slide h3{font-weight:700}.t2 em{font-style:normal;color:#35e0b4}
+.t2 .chips span{border:2px solid #35e0b4;color:#35e0b4;border-radius:99px;font:600 13px "Public Sans"}
+.t2 .site{background:#0b0d17;color:#f4efe6}
+.t2 .bar{border-bottom:1px solid #2b3150}.t2 .logo{background:#ff5a4a;border-radius:50%}
+.t2 .stage h4{font-family:"Libre Caslon Text"}
+.t2 .btn{background:#35e0b4;color:#06231c;border:0;border-radius:99px}
+/* 3 newsprint */
+.t3 .slide{background:#fffdf5;color:#0a0a0a;font-family:"Libre Caslon Text",serif;border:3px solid #0a0a0a}
+.t3 .slide h3{font-weight:700;text-transform:uppercase;letter-spacing:-.01em}
+.t3 em{font-style:normal;background:#ffe600;padding:0 .12em}
+.t3 .lbl{background:#0a0a0a;color:#fffdf5;display:inline-block;padding:3px 8px;opacity:1;align-self:flex-start}
+.t3 .chips span{border:3px solid #0a0a0a;font:600 13px "Public Sans";box-shadow:4px 4px 0 #0a0a0a;background:#fff}
+.t3 .site{background:#fffdf5;color:#0a0a0a;border:3px solid #0a0a0a}
+.t3 .bar{border-bottom:3px solid #0a0a0a;font-weight:600}.t3 .logo{background:#ffe600;border:3px solid #0a0a0a;border-radius:0}
+.t3 .stage h4{font-family:"Libre Caslon Text";font-weight:700;text-transform:uppercase}
+.t3 .btn{background:#ffe600;color:#0a0a0a;border:3px solid #0a0a0a;border-radius:0;box-shadow:4px 4px 0 #0a0a0a}
+/* 4 omr */
+.t4 .slide{background:#1736b8;color:#fff;font-family:"Public Sans",sans-serif;background-image:radial-gradient(circle,#ffffff2e 1.5px,transparent 2px);background-size:26px 26px}
+.t4 .slide h3{font-weight:600;letter-spacing:-.02em}.t4 em{font-style:normal;color:#ffd84a}
+.t4 .lbl{color:#ffd84a;opacity:1}
+.t4 .chips span{border:2px solid #fff;border-radius:99px;font:500 12px "IBM Plex Mono";display:flex;gap:8px;align-items:center}
+.t4 .chips span::before{content:"";width:12px;height:12px;border-radius:50%;background:#ffd84a}
+.t4 .site{background:#f5f6fb;color:#0e1d66}
+.t4 .bar{background:#1736b8;color:#fff}.t4 .logo{background:#ffd84a;border-radius:50%}
+.t4 .stage h4{font-weight:600}
+.t4 .btn{background:#1736b8;color:#fff;border:0;border-radius:99px}
+</style></head><body><div class="page">
+<h1>Theme samples</h1><p class="sub">Four directions. Each shows the same deck slide and the same website screen (the centre’s unlock screen), so they compare like for like.</p>
+
+<section class="theme t1"><h2>A · Paper <small>the current website</small></h2><p>Warm paper, ink and one red wax seal. Official and calm, like an exam office. Safest for the site, least “wow” on stage.</p>
+<div class="row"><div class="slide"><div class="lbl">THE IDEA</div><h3>No one can leak a paper <em>they’ve never seen.</em></h3><div class="chips"><span>Verifiable</span><span>Many parties</span><span>No single key</span><span>Auditable</span></div></div>
+<div class="site"><div class="bar"><span class="logo"></span>Paper Seal · Exam centre</div><div class="stage"><h4>The paper opens soon</h4><p>Your security key is ready.</p><div class="count">00:42:10</div><button class="btn">Unlock the paper</button><div class="next">Next: touch your key when the clock reaches zero.</div></div></div></div></section>
+
+<section class="theme t2"><h2>B · Midnight Proof <small>the current deck</small></h2><p>Dark and cinematic, red for the problem and teal for “verified”. Great on a projector and for a hacker-crowd, a bit cold for exam officers.</p>
+<div class="row"><div class="slide"><div class="lbl">THE IDEA</div><h3>No one can leak a paper <em>they’ve never seen.</em></h3><div class="chips"><span>Verifiable</span><span>Many parties</span><span>No single key</span><span>Auditable</span></div></div>
+<div class="site"><div class="bar"><span class="logo"></span>Paper Seal · Exam centre</div><div class="stage"><h4>The paper opens soon</h4><p>Your security key is ready.</p><div class="count" style="color:#35e0b4">00:42:10</div><button class="btn">Unlock the paper</button><div class="next">Next: touch your key when the clock reaches zero.</div></div></div></div></section>
+
+<section class="theme t3"><h2>C · Newsprint <small>loud and fun</small></h2><p>Tabloid headline, yellow highlighter, hard shadows. It turns the “breaking news” of a leak into the brand. Memorable and playful, works for crowds, but the site needs restraint.</p>
+<div class="row"><div class="slide"><div class="lbl">BREAKING</div><h3>No one can leak a paper <em>they’ve never seen.</em></h3><div class="chips"><span>Verifiable</span><span>Many parties</span><span>No single key</span><span>Auditable</span></div></div>
+<div class="site"><div class="bar"><span class="logo"></span>PAPER SEAL · EXAM CENTRE</div><div class="stage"><h4>The paper opens soon</h4><p>Your security key is ready.</p><div class="count">00:42:10</div><button class="btn">Unlock the paper</button><div class="next">Next: touch your key when the clock reaches zero.</div></div></div></div></section>
+
+<section class="theme t4"><h2>D · OMR Sheet <small>exam-native</small></h2><p>Exam-blue with answer-bubble dots. Instantly says “exam” to every student in the room, friendly and light on the site. The most on-topic idea of the four.</p>
+<div class="row"><div class="slide"><div class="lbl">THE IDEA</div><h3>No one can leak a paper <em>they’ve never seen.</em></h3><div class="chips"><span>Verifiable</span><span>Many parties</span><span>No single key</span><span>Auditable</span></div></div>
+<div class="site"><div class="bar"><span class="logo"></span>Paper Seal · Exam centre</div><div class="stage"><h4>The paper opens soon</h4><p>Your security key is ready.</p><div class="count">00:42:10</div><button class="btn">Unlock the paper</button><div class="next">Next: touch your key when the clock reaches zero.</div></div></div></div></section>
+</div></body></html>

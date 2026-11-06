@@ -3,7 +3,7 @@ import { keccak_256 } from '@noble/hashes/sha3.js';
 import { decodeAbiParameters, encodeAbiParameters, type AbiParameter } from 'viem';
 
 import { fromHex, toHex, utf8ToBytes } from './bytes';
-import { domainTags, limits, padding, threshold, type DomainTagName } from './constants';
+import { domainTags, limits, padding, threshold, webauthn, type DomainTagName } from './constants';
 import type { Hex } from './types';
 
 /*
@@ -13,7 +13,7 @@ import type { Hex } from './types';
  */
 
 /** ABI types used by the Signed Messages table. */
-export type FieldType = 'bytes32' | 'uint32' | 'bytes' | 'string';
+export type FieldType = 'bytes32' | 'uint32' | 'uint64' | 'bytes' | 'string';
 
 /** `key` fields are P-256 public keys: 65-byte uncompressed points, or empty when `optional`. */
 type Field = readonly [name: string, type: FieldType, check?: 'publicKey' | 'optionalPublicKey'];
@@ -34,6 +34,10 @@ export const messageSchemas = {
     ['encryptionPublicKey', 'bytes', 'publicKey'],
   ],
   setterOwner: [['passkeyPublicKey', 'bytes', 'publicKey']],
+  prfInput: [
+    ['prfSalt', 'bytes'],
+    ['examId', 'bytes32'],
+  ],
   registration: [
     ['derivedPublicKey', 'bytes', 'optionalPublicKey'],
     ['holderId', 'bytes'],
@@ -64,6 +68,7 @@ export const messageSchemas = {
     ['selected', 'uint32'],
     ['bankSize', 'uint32'],
     ['criteriaHash', 'bytes32'],
+    ['builtRound', 'uint64'],
   ],
   paperHash: [
     ['seed', 'bytes32'],
@@ -77,12 +82,13 @@ export const messageSchemas = {
   releaseLog: [
     ['examId', 'bytes32'],
     ['entriesHash', 'bytes32'],
+    ['filesHash', 'bytes32'],
   ],
 } as const satisfies Record<DomainTagName, Schema>;
 
 export type MessageName = keyof typeof messageSchemas;
 
-type FieldValue<T extends FieldType> = T extends 'uint32' ? number : T extends 'string' ? string : Uint8Array;
+type FieldValue<T extends FieldType> = T extends 'uint32' ? number : T extends 'uint64' ? bigint : T extends 'string' ? string : Uint8Array;
 
 /** The named fields of a message, typed from its schema. */
 export type MessageFields<N extends MessageName> = {
@@ -95,7 +101,11 @@ function assertPublicKey(name: string, key: Uint8Array): void {
   }
 }
 
-function checkField([name, type, check]: Field, value: unknown): Uint8Array | number | string {
+function checkField([name, type, check]: Field, value: unknown): Uint8Array | number | bigint | string {
+  if (type === 'uint64') {
+    if (typeof value !== 'bigint' || value < 0n || value >= 1n << 64n) throw new RangeError(`${name} must be a uint64 bigint`);
+    return value;
+  }
   if (type === 'uint32') {
     if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value >= 2 ** 32) {
       throw new RangeError(`${name} must be a uint32`);
@@ -125,13 +135,21 @@ export function encodeMessage<N extends MessageName>(name: N, fields: MessageFie
     if (value === undefined) throw new TypeError(`${name} is missing ${field[0]}`);
     const checked = checkField(field, value);
     params.push({ type: field[1] === 'bytes' ? 'bytes' : field[1] });
-    args.push(typeof checked === 'number' || typeof checked === 'string' ? checked : toHex(checked));
+    args.push(typeof checked === 'number' || typeof checked === 'bigint' || typeof checked === 'string' ? checked : toHex(checked));
   }
   return fromHex(encodeAbiParameters(params, args));
 }
 
 export function hashMessage<N extends MessageName>(name: N, fields: MessageFields<N>): Uint8Array {
   return sha256(encodeMessage(name, fields));
+}
+
+/**
+ * The WebAuthn PRF `first` input for one exam, the same in register, release and open. One passkey
+ * gives each exam its own derived key, so a leak of one opens no other exam's material.
+ */
+export function prfInput(examId: Uint8Array): Uint8Array {
+  return hashMessage('prfInput', { prfSalt: utf8ToBytes(webauthn.prfSalt), examId });
 }
 
 /**
@@ -407,6 +425,17 @@ function checkCriteriaLayout(encoded: Uint8Array): void {
 }
 
 const utf8Length = (text: string): number => utf8ToBytes(text).length;
+
+/**
+ * Whether `abi.encode(Entry[])` bytes are over `limits.entriesBytes` or `limits.entries`. A list over either
+ * can't be read back, and a larger one may never reach a block ("Size Limits" in spec/api.md).
+ */
+export function entriesOverLimit(encoded: Uint8Array): boolean {
+  if (encoded.length > limits.entriesBytes) return true;
+  if (encoded.length < 2 * WORD) return false;
+  const count = encoded.subarray(WORD, 2 * WORD).reduce((sum, byte) => sum * 256 + byte, 0);
+  return count > limits.entries;
+}
 
 /**
  * Decodes `entries`, re-encodes it and rejects the list if the bytes differ,

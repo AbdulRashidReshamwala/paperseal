@@ -4,7 +4,27 @@ import { resolve } from 'node:path';
 import { labelhash, namehash } from 'viem/ens';
 import { describe, expect, it } from 'vitest';
 
-import { ens, examIdFromName, examNameProblem, splitExamEnsName } from './index';
+import {
+  credentialRecordValue,
+  keyCardText,
+  parseDirectory,
+  parseKeyCard,
+  passkeyRecordMatches,
+  ApprovedListError,
+  checkPartyNames,
+  partyNameProblem,
+  roles,
+  ens,
+  ensNameProblem,
+  examIdFromName,
+  examNameProblem,
+  limits,
+  looksLikeEnsName,
+  ownerEnsName,
+  passkeyRecordValue,
+  setterOwner,
+  splitExamEnsName,
+} from './index';
 
 /*
  * Checks against spec/fixtures/exam-names.json, whose examIds were computed with viem. The file is
@@ -23,12 +43,10 @@ const fixtures = JSON.parse(
 
 describe('exam names', () => {
   it('reads spec/ens.json', () => {
-    expect(ens.records).toEqual({
-      tee: 'paperseal.tee',
-      storage: 'paperseal.storage',
-      bucket: 'paperseal.bucket',
-      arkivWriters: 'paperseal.arkiv-writers',
+    expect(ens.records).toEqual({ tee: 'paperseal.tee', storage: 'paperseal.storage', bucket: 'paperseal.bucket', arkivWriters: 'paperseal.arkiv-writers',
+      passkey: 'paperseal.passkey', credential: 'paperseal.credential', directory: 'paperseal.directory',
     });
+    expect(ens.directoryBytes).toBe(8192);
     expect(ens.ccipRead).toBe(false);
   });
 
@@ -56,7 +74,7 @@ describe('exam names', () => {
   it('explains the problem in plain words', () => {
     expect(examNameProblem('')).toBe('The exam name is empty.');
     expect(examNameProblem('jee.main')).toMatch(/dot/);
-    expect(examNameProblem('JEE-Main-2026')).toMatch(/normalised form.*jee-main-2026\?$/);
+    expect(examNameProblem('JEE-Main-2026')).toMatch(/^Use lowercase letters.*Did you mean jee-main-2026\?$/);
     const space = examNameProblem('Maths 2026') ?? '';
     expect(space).toMatch(/^Use lowercase letters, digits and hyphens, like jee-main-2026\./);
     expect(space).not.toMatch(/[‎‏]/);
@@ -75,5 +93,111 @@ describe('exam names', () => {
   it('splits at the first dot only', () => {
     expect(splitExamEnsName('maths-2026.board.example.eth')).toEqual({ label: 'maths-2026', parent: 'board.example.eth' });
     for (const name of ['', 'maths-2026', '.eth', 'maths-2026.', '.']) expect(splitExamEnsName(name), name).toBeNull();
+  });
+});
+
+describe('party names', () => {
+  it('knows an ENS name from a plain name', () => {
+    for (const name of ['dr-rao.eth', 'north.centres.maths-board.eth', 'maths-board.eth']) expect(ownerEnsName(name), name).toBe(name);
+    for (const plain of ['Dr. Rao', 'Delhi Public School', 'Rao', 'dr rao.eth', '']) expect(ownerEnsName(plain), plain).toBeNull();
+  });
+
+  it('does not treat a name that is not normalised as one, and says what to use', () => {
+    expect(looksLikeEnsName('Dr-Rao.eth')).toBe(true);
+    expect(ownerEnsName('Dr-Rao.eth')).toBeNull();
+    expect(ensNameProblem('Dr-Rao.eth')).toContain('dr-rao.eth');
+    expect(ensNameProblem('dr_rao.eth')).toBeTruthy();
+    expect(ensNameProblem('dr-rao.eth')).toBeNull();
+  });
+
+  it('refuses a name over the owner limit in bytes, not characters', () => {
+    const long = `${'a'.repeat(limits.ownerBytes)}.eth`;
+    expect(ensNameProblem(long)).toContain(String(limits.ownerBytes));
+    expect(ownerEnsName(long)).toBeNull();
+    const wide = `${'é'.repeat(64)}.eth`;
+    expect(wide.length).toBeLessThan(limits.ownerBytes);
+    expect(ensNameProblem(wide)).toContain(String(limits.ownerBytes));
+  });
+
+  it('records the setterOwner hash of the passkey, a fixed vector', () => {
+    const key = new Uint8Array(65).fill(0xab);
+    key[0] = 4;
+    expect(passkeyRecordValue(key)).toBe(setterOwner(key));
+    expect(passkeyRecordValue(key)).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(passkeyRecordValue(`0x${Buffer.from(key).toString('hex')}`)).toBe(passkeyRecordValue(key));
+  });
+});
+
+describe('party names for key holders and centres', () => {
+  const entry = (role: number, owner: string) => ({
+    role,
+    owner,
+    passkeyPublicKey: new Uint8Array(65),
+    derivedPublicKey: new Uint8Array(0),
+  });
+
+  it('gives the one plain line, or the normalised name', () => {
+    expect(partyNameProblem('iit-delhi.eth')).toBeNull();
+    expect(partyNameProblem('north-1.centres.maths-board.eth')).toBeNull();
+    expect(partyNameProblem('Dr Rao')).toBe('Use an ENS name, like iit-delhi.eth.');
+    expect(partyNameProblem('plain')).toBe('Use an ENS name, like iit-delhi.eth.');
+    expect(partyNameProblem('Dr-Rao.eth')).toContain('Did you mean dr-rao.eth?');
+  });
+
+  it('refuses a list with a plain owner for a key holder or centre, and ignores setters', () => {
+    expect(() => checkPartyNames([entry(roles.setter, '0xabc'), entry(roles.neutral, 'a.eth'), entry(roles.centre, 'b.centres.x.eth')])).not.toThrow();
+    for (const role of [roles.neutral, roles.centreKeyHolder, roles.centre]) {
+      expect(() => checkPartyNames([entry(role, 'centre-1')])).toThrow(ApprovedListError);
+    }
+  });
+});
+
+describe('directory', () => {
+  it('reads a JSON list of names, without repeats', () => {
+    expect(parseDirectory('["a.paperseal-demo.eth","b.paperseal-demo.eth","a.paperseal-demo.eth"]')).toEqual({
+      ok: true,
+      names: ['a.paperseal-demo.eth', 'b.paperseal-demo.eth'],
+    });
+  });
+
+  it('refuses anything else, and a value over the limit', () => {
+    expect(parseDirectory('not json')).toMatchObject({ ok: false });
+    expect(parseDirectory('{"a":1}')).toMatchObject({ ok: false });
+    expect(parseDirectory('[1]')).toMatchObject({ ok: false });
+    expect(parseDirectory('["Plain Name"]')).toMatchObject({ ok: false });
+    expect(parseDirectory('["Dr-Rao.eth"]')).toMatchObject({ ok: false });
+    const name = 'a'.repeat(50);
+    expect(parseDirectory(JSON.stringify(Array.from({ length: 200 }, (_, i) => `${name}${String(i)}.eth`)))).toMatchObject({ ok: false, reason: expect.stringContaining('longer') as string });
+  });
+});
+
+describe('records', () => {
+  it('compares a passkey record in any case, around spaces', () => {
+    const value = `0x${'ab'.repeat(32)}` as const;
+    expect(passkeyRecordMatches(` 0x${'AB'.repeat(32)}\n`, value)).toBe(true);
+    expect(passkeyRecordMatches(`0x${'ac'.repeat(32)}`, value)).toBe(false);
+  });
+
+  it('reads a credential record as lowercase hex', () => {
+    expect(credentialRecordValue(' 0xAB01 ')).toBe('0xab01');
+    expect(credentialRecordValue('0xabc')).toBeNull();
+    expect(credentialRecordValue('hello')).toBeNull();
+  });
+});
+
+describe('key cards', () => {
+  const card = { passkey: `0x${'ab'.repeat(32)}`, credentialId: '0x0102', attestationObject: '0xa0' } as const;
+
+  it('round-trips, and names only public values', () => {
+    const text = keyCardText(card);
+    expect(parseKeyCard(text)).toEqual(card);
+    expect(Object.keys(JSON.parse(text) as object).sort()).toEqual(['attestationObject', 'credentialId', 'kind', 'passkey', 'version']);
+  });
+
+  it('refuses something else', () => {
+    expect(() => parseKeyCard('nope')).toThrow('not valid JSON');
+    expect(() => parseKeyCard('{}')).toThrow('not a Paper Seal key card');
+    expect(() => parseKeyCard(keyCardText({ ...card, passkey: '0x12' }))).toThrow('passkey hash');
+    expect(() => parseKeyCard(keyCardText({ ...card, credentialId: '0x' }))).toThrow('credential ID');
   });
 });
