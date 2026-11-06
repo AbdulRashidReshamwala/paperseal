@@ -170,7 +170,13 @@ A backup row is `readonly`. It lives for `lifetimeDays`, and anyone can extend i
 
 ### Writing
 
-A backup writer reads `manifest.json` from public storage. It checks the manifest against the Build's `storageManifestHash`, downloads each file it lists, and checks each one against the manifest's `sha256`. For `unlock`, it also checks that `release-log.json` is for this exam and that its `entriesHash` recomputes from its entries. It checks that `release-token.jwt` binds the log's signer to the exam, and that `key-priv.tlock` and one `key-priv/<derivedPublicKey>.bin` per approved centre (list roles 3 and 4) are present. A file that fails stops the upload, and nothing is written. Then the writer uploads the collection through a Bee node, stamped with a postage batch it controls, and writes the backup row.
+A backup writer reads `manifest.json` from public storage. It checks the manifest against the Build's `storageManifestHash`, downloads each file it lists, and checks each one against the manifest's `sha256`. For `unlock`, it checks each unlock file as far as anything can be checked before the end round:
+- `release-token.jwt` passes the same check readers apply to it (Google's PKI signature and the claims bound to the on-chain exam), and attests the log's `instancePublicKey`.
+- `release-log.json` parses with no unknown fields, is for this exam, has an `entriesHash` that recomputes from its entries, and has a valid `teeSignature` under that attested key.
+- `key-priv.tlock` is a timelock ciphertext for the exam's `endRound`.
+- There is one `key-priv/<derivedPublicKey>.bin` per approved centre (list roles 3 and 4), each exactly the size of an HPKE `keyPriv` sealing a 32-byte key.
+
+A file that fails stops the upload, and nothing is written. Every file must also fit a size cap: the manifest's own size for the files it lists, and a few KiB for the unlock files. If storage has `release-log.json` but not yet all the unlock files, the writer backs up the `build` phase instead. Nothing that hasn't passed these checks reaches Swarm. Then the writer uploads the collection through a Bee node, stamped with a postage batch it controls, and writes the backup row.
 
 ### Reading
 
@@ -178,6 +184,6 @@ A reader uses a backup only when the bucket can't give it a file, or gives it on
 
 1. It finds the `backup` rows for the exam and registry from published writers, preferring `unlock` over `build`, and the newest first.
 2. It reads `manifest.json` from the collection through the viewer's own Swarm API, which defaults to `swarm.defaultApiUrl`. It uses the collection only if the manifest hashes to the Build's `storageManifestHash` on Sepolia.
-3. It reads the file it needs from the collection and checks it against its hash in the manifest. For unlock files, it applies the same checks it applies to the bucket's copies: the release log's signature, the token, and finally the decryption and the paper's salted hash. A file that fails is ignored, exactly as if the bucket had served it.
+3. It reads the file it needs from the collection and checks it against its hash in the manifest. For unlock files, it applies the same checks it applies to the bucket's copies: the release log's signature, the token, and finally the decryption and the paper's salted hash. A file that fails is ignored, exactly as if the bucket had served it, and the reader tries the same file from the next backup row. A backup file that fails is never shown as a failure of the exam; only the bucket's own copies can fail a check.
 4. It says which files came from the Swarm backup. A backup that can't be read isn't treated as a failure of the exam, only as "not read".
 

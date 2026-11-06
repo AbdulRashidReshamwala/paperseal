@@ -1,29 +1,34 @@
 import { arkiv, type BackupInput } from '@paperseal/arkiv';
-import {
-  attestationNonce,
-  encodeApprovedList,
-  entriesHash,
-  fromHex,
-  setterOwner,
-  storageNames,
-  toHex,
-  type ApprovedListEntry,
-} from '@paperseal/protocol';
+import { encodeApprovedList, encodeMessage, fromHex, setterOwner, storageNames, toHex, type ApprovedListEntry } from '@paperseal/protocol';
 import type { ChainState, CollectionFile, PostageBatch, UploadOptions, Wallet } from '@paperseal/swarm';
 import type { Address, Hex } from 'viem';
 import { describe, expect, it, vi } from 'vitest';
 
 import { parseCommand, UsageError, type BackupTarget, type SwarmApi } from './args';
-import { backupFailed, BackupRefused, checkBatch, prepareBackup, readBackUrl, resultLines, sha256Hex, uploadBackup, type BackupRegistry } from './backup';
+import {
+  backupFailed,
+  BackupRefused,
+  checkBatch,
+  keyPrivBytes,
+  prepareBackup,
+  readBackUrl,
+  resultLines,
+  sha256Hex,
+  sizeCaps,
+  timelockRound,
+  uploadBackup,
+  type BackupRegistry,
+} from './backup';
+import { realBucket, realEndRound, realExam, realExamId, realKeyPrivTlock, realReleaseLog, realReleaseToken } from './fixtures/real-exam';
 import { explorerLinks } from './mirror';
 import { storageObjectUrl, type Fetch } from './storage';
 import { batchQuote, buyStamp, swarmNetworks, swarmStatusLines, syncing, syncLagBlocks, type SwarmSnapshot } from './swarm-node';
 
-const examId: Hex = `0x${'ab'.repeat(32)}`;
+// The real demo exam, so the unlock checks run on a token Google signed and a log its TEE signed.
+const examId: Hex = realExamId;
 const registry: Address = '0x6a9f017F374630EcB84e8E3816B1eE9F8Fa2dBE8';
 const storage = 'https://storage.example/bucket';
 const batchId = 'b7'.repeat(32);
-const instanceKey: Hex = `0x04${'33'.repeat(64)}`;
 const utf8 = (text: string) => new TextEncoder().encode(text);
 const links = explorerLinks(arkiv.network.explorer);
 
@@ -63,29 +68,53 @@ function manifestBytes(files: Record<string, Uint8Array> = buildFiles, exam: Hex
   return utf8(JSON.stringify({ examId: exam, files: listed }));
 }
 
-const b64 = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
-const jwt = (nonce: string) => `${b64({ alg: 'RS256' })}.${b64({ eat_nonce: [nonce], iss: 'https://confidentialcomputing.googleapis.com' })}.c2ln`;
+type LogJson = { examId: string; entries: { passkeyPublicKey: string; shareHash: string; round: string }[]; entriesHash: string; teeSignature: string; instancePublicKey: string };
+const realLog = (): LogJson => JSON.parse(realReleaseLog) as LogJson;
 
-function releaseLog(options: { exam?: Hex; badHash?: boolean } = {}): Uint8Array {
-  const entries = [{ passkeyPublicKey: toHex(point(10)), shareHash: `0x${'77'.repeat(32)}` as Hex, round: '42' }];
-  const hash = toHex(entriesHash(entries.map((e) => ({ passkeyPublicKey: fromHex(e.passkeyPublicKey), shareHash: fromHex(e.shareHash), round: BigInt(e.round) }))));
-  return utf8(
-    JSON.stringify({
-      examId: options.exam ?? examId,
-      entries,
-      entriesHash: options.badHash ? `0x${'00'.repeat(32)}` : hash,
-      teeSignature: `0x${'00'.repeat(64)}`,
-      instancePublicKey: instanceKey,
-    }),
-  );
+/** The real release log, or one changed by `edit`. Re-encoded only when edited, so the default is the exact stored bytes. */
+function releaseLog(edit?: (log: LogJson & Record<string, unknown>) => void): Uint8Array {
+  if (!edit) return utf8(realReleaseLog);
+  const log = realLog();
+  edit(log);
+  return utf8(JSON.stringify(log));
 }
 
-/** The files written at unlock. */
+const subtle = globalThis.crypto.subtle;
+const p256Order = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551n;
+
+/** A low-s `r || s` over the `releaseLog` message for `log`, by a fresh key that no token attests. */
+async function signedByAnotherKey(log: LogJson): Promise<{ signature: Hex; publicKey: Hex }> {
+  const pair = await subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+  const message = encodeMessage('releaseLog', { examId: fromHex(log.examId as Hex), entriesHash: fromHex(log.entriesHash as Hex) });
+  const raw = new Uint8Array(await subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, pair.privateKey, new Uint8Array(message)));
+  const s = BigInt(toHex(raw.subarray(32)));
+  if (s > p256Order / 2n) raw.set(fromHex(`0x${(p256Order - s).toString(16).padStart(64, '0')}`), 32);
+  return { signature: toHex(raw), publicKey: toHex(new Uint8Array(await subtle.exportKey('raw', pair.publicKey))) };
+}
+
+/** The real `key-priv.tlock` with its stanza's round replaced, re-armoured as tlock-js does. */
+function tlockForRound(round: string): Uint8Array {
+  const body = realKeyPrivTlock.replace('-----BEGIN AGE ENCRYPTED FILE-----', '').replace('-----END AGE ENCRYPTED FILE-----', '').replace(/\s+/g, '');
+  const age = Buffer.from(body, 'base64').toString('binary').replace(`-> tlock ${realEndRound.toString()} `, `-> tlock ${round} `);
+  const lines = Buffer.from(age, 'binary').toString('base64').match(/.{1,64}/g) ?? [];
+  const footer = (lines.at(-1)?.length ?? 0) === 64 ? '\n-----END AGE ENCRYPTED FILE-----' : '-----END AGE ENCRYPTED FILE-----';
+  return utf8(`-----BEGIN AGE ENCRYPTED FILE-----\n${lines.join('\n')}\n${footer}\n`);
+}
+
+/** A copy of the token with one character of its RS256 signature changed. */
+function tamperedToken(): string {
+  const [header, payload, signature = ''] = realReleaseToken.split('.');
+  const i = 20;
+  const swapped = signature[i] === 'A' ? 'B' : 'A';
+  return `${header ?? ''}.${payload ?? ''}.${signature.slice(0, i)}${swapped}${signature.slice(i + 1)}`;
+}
+
+/** The files written at unlock: the real log, token and timelock, and one 113-byte keyPriv per centre. */
 const unlockStorage = (): Record<string, Uint8Array> => ({
   [storageNames.releaseLog]: releaseLog(),
-  'release-token.jwt': utf8(jwt(attestationNonce(fromHex(instanceKey), fromHex(examId)))),
-  [storageNames.keyPriv]: utf8('timelocked K_priv'),
-  ...Object.fromEntries(centres.map((key, i) => [storageNames.centreKeyPriv(key), utf8(`K_priv for centre ${String(i)}`)])),
+  'release-token.jwt': utf8(realReleaseToken),
+  [storageNames.keyPriv]: utf8(realKeyPrivTlock),
+  ...Object.fromEntries(centres.map((key, i) => [storageNames.centreKeyPriv(key), new Uint8Array(keyPrivBytes).fill(i + 1)])),
 });
 
 const without = (files: Record<string, Uint8Array>, name: string) => Object.fromEntries(Object.entries(files).filter(([key]) => key !== name));
@@ -120,6 +149,7 @@ const reference = 'ce'.repeat(32);
 function setup(options: {
   files?: Record<string, Uint8Array>;
   chainHash?: Hex | null;
+  exam?: unknown;
   batch?: PostageBatch;
   readBack?: Uint8Array | null;
 } = {}) {
@@ -129,6 +159,7 @@ function setup(options: {
   const registryMock: BackupRegistry = {
     getBuild: vi.fn(() => Promise.resolve(chainHash === null ? null : ({ storageManifestHash: chainHash } as never))),
     getApprovedListEntries: vi.fn(() => Promise.resolve(toHex(encodeApprovedList(listEntries)))),
+    getExam: vi.fn(() => Promise.resolve((options.exam === undefined ? realExam : options.exam) as never)),
   };
   const uploads: { files: CollectionFile[]; options: UploadOptions }[] = [];
   const swarm = {
@@ -151,6 +182,7 @@ function setup(options: {
     examId,
     registry,
     storageUrl: storage,
+    bucket: { name: realBucket, source: '--bucket' },
     batchId,
     phase: undefined,
     swarm: swarmApi,
@@ -206,6 +238,31 @@ describe('backup phase', () => {
     await expect(s.run({ phase: 'unlock' })).rejects.toThrow(/no release-log.json/);
     expect(s.swarm.uploadCollection).not.toHaveBeenCalled();
   });
+
+  it('is build when storage has release-log.json but not every unlock file, and says why', async () => {
+    for (const missing of ['release-token.jwt', storageNames.keyPriv, storageNames.centreKeyPriv(centres[0] as Uint8Array)]) {
+      const s = setup({ files: without({ ...buildFiles, [storageNames.manifest]: manifestBytes(), ...unlockStorage() }, missing) });
+      const { plan } = await s.run();
+      expect(plan.phase).toBe('build');
+      expect(plan.phaseReason).toContain(`storage has release-log.json but not yet ${missing}`);
+      expect(s.uploads[0]?.files.map((f) => f.path)).toEqual([storageNames.manifest, ...Object.keys(buildFiles).sort()]);
+      expect(s.rows[0]?.phase).toBe('build');
+    }
+  });
+
+  it('checks the real unlock files: token, log signature, timelock round and key-priv sizes', async () => {
+    const s = setup({ files: { ...buildFiles, [storageNames.manifest]: manifestBytes(), ...unlockStorage() } });
+    const { plan } = await s.run();
+    expect(plan.phase).toBe('unlock');
+    expect(plan.phaseReason).toBe('storage has release-log.json and every unlock file');
+    const detail = (file: string) => plan.checks.find((c) => c.file === file)?.detail ?? '';
+    expect(detail('release-token.jwt')).toContain(`Google PKI signature; claims bound to the on-chain exam, bucket ${realBucket}`);
+    expect(detail('release-log.json')).toContain('teeSignature valid under the attested');
+    expect(detail('key-priv.tlock')).toContain(`endRound ${realEndRound.toString()}`);
+    expect(detail('key-priv/*')).toContain(`each ${String(keyPrivBytes)} bytes`);
+    expect(timelockRound(utf8(realKeyPrivTlock))).toBe(realEndRound.toString());
+    expect(s.rows[0]?.phase).toBe('unlock');
+  });
 });
 
 describe('backup refusals upload nothing and write nothing', () => {
@@ -242,24 +299,105 @@ describe('backup refusals upload nothing and write nothing', () => {
     await refuses(setup({ files: { ...buildFiles, [storageNames.manifest]: manifestBytes(buildFiles, `0x${'cd'.repeat(32)}`) } }), /is for exam 0xcdcd/);
   });
 
+  const unlocked = (replace: Record<string, Uint8Array | null> = {}) => {
+    const files: Record<string, Uint8Array> = { ...buildFiles, [storageNames.manifest]: manifestBytes(), ...unlockStorage() };
+    for (const [name, bytes] of Object.entries(replace)) {
+      if (bytes === null) delete files[name];
+      else files[name] = bytes;
+    }
+    return files;
+  };
+
   it("when the release log's entriesHash is not its entries' hash", async () => {
-    const files = { ...buildFiles, [storageNames.manifest]: manifestBytes(), ...unlockStorage(), [storageNames.releaseLog]: releaseLog({ badHash: true }) };
+    const files = unlocked({ [storageNames.releaseLog]: releaseLog((log) => {
+      log.entriesHash = `0x${'00'.repeat(32)}`;
+    }) });
     await refuses(setup({ files }), /entries hash to/);
   });
 
   it('when the release log is for another exam', async () => {
-    const files = { ...buildFiles, [storageNames.manifest]: manifestBytes(), ...unlockStorage(), [storageNames.releaseLog]: releaseLog({ exam: `0x${'cd'.repeat(32)}` }) };
+    const files = unlocked({ [storageNames.releaseLog]: releaseLog((log) => {
+      log.examId = `0x${'cd'.repeat(32)}`;
+    }) });
     await refuses(setup({ files }), /release log is for exam 0xcdcd/);
   });
 
-  it("when the release token's eat_nonce does not bind the log's signer", async () => {
-    const files = { ...buildFiles, [storageNames.manifest]: manifestBytes(), ...unlockStorage(), 'release-token.jwt': utf8(jwt('00'.repeat(32))) };
-    await refuses(setup({ files }), /eat_nonce does not bind/);
+  it('when the release log has a field the TEE does not write', async () => {
+    await refuses(setup({ files: unlocked({ [storageNames.releaseLog]: releaseLog((log) => {
+      log.extra = 1;
+    }) }) }), /unknown field "extra"/);
+    const inEntry = releaseLog((log) => Object.assign(log.entries[0] ?? {}, { note: 'x' }));
+    await refuses(setup({ files: unlocked({ [storageNames.releaseLog]: inEntry }) }), /entry 0 has an unknown field "note"/);
   });
 
-  it("when a centre's key-priv file is missing", async () => {
-    const files = without({ ...buildFiles, [storageNames.manifest]: manifestBytes(), ...unlockStorage() }, storageNames.centreKeyPriv(centres[3] as Uint8Array));
-    await refuses(setup({ files }), /storage has no key-priv\/0x04/);
+  it('when the release log is signed by a key other than the one the token attests', async () => {
+    // The log names the attested key, but its signature is another key's.
+    const log = realLog();
+    const other = await signedByAnotherKey(log);
+    const forged = releaseLog((l) => {
+      l.teeSignature = other.signature;
+    });
+    await refuses(setup({ files: unlocked({ [storageNames.releaseLog]: forged }) }), /teeSignature does not verify under the attested instancePublicKey/);
+    // The log names the other key and is validly signed by it, but no token attests that key.
+    const renamed = releaseLog((l) => {
+      l.teeSignature = other.signature;
+      l.instancePublicKey = other.publicKey;
+    });
+    await refuses(setup({ files: unlocked({ [storageNames.releaseLog]: renamed }) }), /release-token.jwt: it does not attest .* claim eat_nonce/);
+  });
+
+  it('when the release token signature does not verify', async () => {
+    await refuses(setup({ files: unlocked({ 'release-token.jwt': utf8(tamperedToken()) }) }), /release-token.jwt: .*(signature does not verify|cannot be verified)/);
+  });
+
+  it('when the release token is not a JWT', async () => {
+    await refuses(setup({ files: unlocked({ 'release-token.jwt': utf8('not a token') }) }), /release-token.jwt: .*three-part JWT/);
+  });
+
+  it("when the release token's claims are not the on-chain exam's", async () => {
+    const exam = { ...realExam, settings: { ...realExam.settings, endRound: realEndRound + 1n } };
+    await refuses(setup({ files: unlocked(), exam }), /release-token.jwt: .*claim args/);
+    const digest = { ...realExam, imageDigest: `0x${'00'.repeat(32)}` };
+    await refuses(setup({ files: unlocked(), exam: digest }), /claim image_digest/);
+  });
+
+  it("when the release token names another bucket, or the bucket is unknown", async () => {
+    await refuses(setup({ files: unlocked() }), /claim env_override/, { bucket: { name: 'other-bucket', source: '--bucket' } });
+    await refuses(setup({ files: unlocked() }), /storage bucket is unknown.*--bucket/, { bucket: undefined });
+  });
+
+  it('when the token is checked against a registry other than the one it was started with', async () => {
+    await refuses(setup({ files: unlocked() }), /claim args/, { registry: '0x1111111111111111111111111111111111111111' });
+  });
+
+  it("when key-priv.tlock is sealed to a round other than the exam's endRound", async () => {
+    const early = tlockForRound((realEndRound - 1n).toString());
+    expect(timelockRound(early)).toBe((realEndRound - 1n).toString());
+    await refuses(setup({ files: unlocked({ [storageNames.keyPriv]: early }) }), /sealed to round 33700842, not the exam's endRound 33700843/);
+  });
+
+  it('when key-priv.tlock is not a tlock ciphertext', async () => {
+    await refuses(setup({ files: unlocked({ [storageNames.keyPriv]: utf8('timelocked K_priv') }) }), /key-priv.tlock: it is not an armoured age file/);
+  });
+
+  it("when a centre's key-priv file is missing, with --phase unlock", async () => {
+    const files = unlocked({ [storageNames.centreKeyPriv(centres[3] as Uint8Array)]: null });
+    await refuses(setup({ files }), /--phase unlock, but storage has no key-priv\/0x04/, { phase: 'unlock' });
+  });
+
+  it("when a centre's key-priv file is not the size of an HPKE keyPriv", async () => {
+    const name = storageNames.centreKeyPriv(centres[2] as Uint8Array);
+    await refuses(setup({ files: unlocked({ [name]: new Uint8Array(keyPrivBytes - 1) }) }), /is 112 bytes, not the 113 of an HPKE keyPriv/);
+    await refuses(setup({ files: unlocked({ [name]: new Uint8Array(keyPrivBytes + 1) }) }), /is 114 bytes, not the 113/);
+    await refuses(setup({ files: unlocked({ [name]: new Uint8Array(sizeCaps.keyPriv + 1) }) }), /over its 4096-byte cap/);
+  });
+
+  it('when a file is over its size cap', async () => {
+    const share = storageNames.share(holders[0] as Uint8Array);
+    const big = { ...buildFiles, [share]: new Uint8Array(sizeCaps.listed + 1) };
+    await refuses(setup({ files: { ...big, [storageNames.manifest]: manifestBytes(big) } }), /shares\/0x04.*over its 8192-byte cap/);
+    await refuses(setup({ files: unlocked({ [storageNames.releaseLog]: new Uint8Array(sizeCaps.releaseLog + 1) }) }), /release-log.json in storage is over its 16384-byte cap/);
+    await refuses(setup({ files: unlocked({ 'release-token.jwt': new Uint8Array(sizeCaps.token + 1) }) }), /release-token.jwt in storage is over its 65536-byte cap/);
   });
 
   it('when the batch is not usable', async () => {
@@ -336,12 +474,17 @@ describe('arguments', () => {
       examId,
       registry,
       storageUrl: storage,
+      bucket: undefined,
       batchId,
       phase: undefined,
       swarm: { url: arkiv.swarm.defaultApiUrl, source: 'default' },
       rpcSource: 'default',
       dryRun: false,
     });
+    const gcs = parseCommand(['backup', '--exam', examId, '--registry', registry, '--storage', `https://storage.googleapis.com/${realBucket}`, '--batch', batchId], {});
+    expect(gcs.command === 'backup' && gcs.target.bucket).toEqual({ name: realBucket, source: '--storage' });
+    const named = parseCommand(['backup', '--exam', examId, '--registry', registry, '--storage', storage, '--batch', batchId, '--bucket', 'my-bucket'], {});
+    expect(named.command === 'backup' && named.target.bucket).toEqual({ name: 'my-bucket', source: '--bucket' });
     const env = parseCommand(['swarm-status'], { RELAY_SWARM_API: 'http://bee.local:1633/' });
     expect(env.command === 'swarm-status' && env.swarm).toEqual({ url: 'http://bee.local:1633', source: 'RELAY_SWARM_API' });
     const flag = parseCommand(['buy-stamp', '--depth', '19', '--days', '7', '--swarm', 'http://x:1633'], { RELAY_SWARM_API: 'http://bee.local:1633' });
@@ -355,6 +498,7 @@ describe('arguments', () => {
     [['backup', '--exam', examId, '--registry', registry, '--storage', storage]],
     [['backup', '--exam', examId, '--registry', registry, '--storage', storage, '--batch', 'abc']],
     [['backup', '--exam', examId, '--registry', registry, '--storage', storage, '--batch', batchId, '--phase', 'later']],
+    [['backup', '--exam', examId, '--registry', registry, '--storage', storage, '--batch', batchId, '--bucket', 'Not A Bucket']],
     [['buy-stamp', '--depth', '16', '--days', '7']],
     [['buy-stamp', '--depth', '19']],
     [['buy-stamp', '--depth', '19', '--days', '0']],

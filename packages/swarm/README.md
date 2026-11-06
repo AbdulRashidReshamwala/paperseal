@@ -10,6 +10,7 @@ It does not check hashes. A backup writer checks every file against the manifest
 import { createSwarmClient, stampCost, minAmount, minDepth } from '@paperseal/swarm';
 
 const bee = createSwarmClient({ apiUrl: 'http://127.0.0.1:1633' }); // default: swarm.defaultApiUrl in spec/arkiv.json
+// Also takes `fetch` and `timeoutMs`, the read timeout (default 30 s); see "Timeouts".
 
 const { reference } = await bee.uploadCollection(
   [
@@ -19,20 +20,23 @@ const { reference } = await bee.uploadCollection(
   { batchId },
 );
 const manifest = await bee.download(reference, 'manifest.json'); // Uint8Array, or null on 404
+const paper = await bee.download(reference, 'paper.bin', { timeoutMs: 60_000, signal }); // per-call limits
 ```
 
 | Call | Bee endpoint | Returns |
 | --- | --- | --- |
-| `uploadCollection(files, { batchId, deferred? })` | `POST /bzz` | `{ reference }`, 64 lowercase hex |
-| `download(reference, path)` | `GET /bzz/{reference}/{path}` | `Uint8Array`, or `null` on 404 |
-| `stamps()` | `GET /stamps` | `PostageBatch[]`, amounts as `bigint` |
-| `buyStamp({ amount, depth, label? })` | `POST /stamps/{amount}/{depth}` | The new batch ID |
-| `chainState()` | `GET /chainstate` | Price and totals as `bigint` |
-| `wallet()` | `GET /wallet` | Balances as `bigint` (PLUR and wei) |
-| `health()` | `GET /health` | `{ status, version, apiVersion }` |
-| `addresses()` | `GET /addresses` | Overlay, Ethereum address and keys |
+| `uploadCollection(files, { batchId, deferred?, timeoutMs?, signal? })` | `POST /bzz` | `{ reference }`, 64 lowercase hex |
+| `download(reference, path, options?)` | `GET /bzz/{reference}/{path}` | `Uint8Array`, or `null` on 404 |
+| `stamps(options?)` | `GET /stamps` | `PostageBatch[]`, amounts as `bigint` |
+| `buyStamp({ amount, depth, label? }, options?)` | `POST /stamps/{amount}/{depth}` | The new batch ID |
+| `chainState(options?)` | `GET /chainstate` | Price and totals as `bigint` |
+| `wallet(options?)` | `GET /wallet` | Balances as `bigint` (PLUR and wei) |
+| `health(options?)` | `GET /health` | `{ status, version, apiVersion }` |
+| `addresses(options?)` | `GET /addresses` | Overlay, Ethereum address and keys |
 
-Helpers: `stampCost({ amount, depth })` gives `{ plur, bzz }`, `formatBzz(plur)`, `minAmount(chainState)`, `minDepth` (17), `checkCollectionPath`, `checkReference`, `checkBatchId` and `collectionTar`.
+`options` is `{ timeoutMs?, signal? }`.
+
+Helpers: `defaultReadTimeoutMs` (30000), `stampCost({ amount, depth })` gives `{ plur, bzz }`, `formatBzz(plur)`, `minAmount(chainState)`, `minDepth` (17), `checkCollectionPath`, `checkReference`, `checkBatchId` and `collectionTar`.
 
 ### Uploads
 
@@ -57,9 +61,17 @@ A batch of depth `d` can stamp `2^d` chunks of 4 KB, and `amount` is the PLUR pa
 
 `buyStamp` sends `Immutable: true`, so a full batch refuses new chunks rather than overwriting old ones. It spends the node's BZZ and gas.
 
+### Timeouts
+
+A stalled Bee node must not hang a page, so every read (`download`, `stamps`, `chainState`, `wallet`, `health` and `addresses`) gives up after `defaultReadTimeoutMs`, 30 seconds. `createSwarmClient({ timeoutMs })` changes that for the client, and `timeoutMs` on a call changes it for that call; `Infinity` turns it off. The timeout covers the whole request, the response body included, so a node that sends headers and then stalls is cut off too.
+
+`uploadCollection` and `buyStamp` have no default timeout and ignore the client's: a non-deferred upload waits until every chunk is on the network, and a purchase waits for its transaction. Pass `timeoutMs` on the call to limit them.
+
+Every call also takes a `signal`, such as one that aborts when the viewer leaves the page. A timeout is a positive number of milliseconds up to `2^31 - 1`, or `Infinity`; anything else throws `RangeError` before a request is sent.
+
 ### Errors
 
-Every failed request throws `SwarmApiError`, with `status` (0 when no response came back) and `endpoint`, such as `GET /wallet`, and Bee's own message. `download` throws `SwarmReadError`, a subclass, for anything but a 404. Bee answers some endpoints, such as `/wallet` and `/stamps`, with 503 until it has synced.
+Every failed request throws `SwarmApiError`, with `status` (0 when no response came back) and `endpoint`, such as `GET /wallet`, and Bee's own message. `download` throws `SwarmReadError`, a subclass, for anything but a 404. A timeout or an aborted `signal` throws the same class with status 0 and a message saying which (`timed out after 30000 ms waiting for the Bee node`, or `aborted by the caller`), with the abort reason as `cause`. Bee answers some endpoints, such as `/wallet` and `/stamps`, with 503 until it has synced.
 
 ## Why Plain `fetch`
 

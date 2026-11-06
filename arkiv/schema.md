@@ -36,7 +36,7 @@ Index fields:
 | `role`, `owner`, `passkeyKeyHash` | `str` | Yes, to find a person's exams | Participant |
 | `derivedKeyHash` | `str` | No | Participant |
 
-Readers query by `examId`, `registry`, and `$creator` in the writers they trust. The index is also queried by `registry` alone (every exam), and by `owner` or `passkeyKeyHash` (a person's exams). Then they parse `body` and check it, and never trust the other columns over it.
+Readers query by `examId`, `registry`, and `$creator` in the writers they trust. The index is also queried by `registry` alone (every exam), and by `owner` or `passkeyKeyHash` (a person's exams). The reader supports both, and the verifier's search uses `owner`. Then they parse `body` and check it, and never trust the other columns over it.
 
 ## Ownership and Editing
 

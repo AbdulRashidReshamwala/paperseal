@@ -2,10 +2,10 @@ import { arkiv, type ArkivReader } from '@paperseal/arkiv';
 import { decodeToken } from '@paperseal/attestation';
 import type { ChainClient } from '@paperseal/crypto';
 import { roundTimeSeconds, storageNames, type Hex } from '@paperseal/protocol';
-import type { StatusResponse, TeeClient } from '@paperseal/tee-client';
+import type { ReleaseLogResponse, StatusResponse, TeeClient } from '@paperseal/tee-client';
 import { useEffect, useRef, useState } from 'react';
 
-import { withBackup, type BackupSource, type BackupUse } from './backup';
+import { readChecked, withBackup, type BackupSource, type BackupUse, type Judged } from './backup';
 import { checkFreshToken, checkPublishedToken, checkRecordToken, type Build, type FreshVerdict, type PublishedVerdict, type RecordVerdict } from './attest';
 import type { ChainData } from './checks';
 import { approvedEntries, checkManifest, holdersOf, type ManifestReport } from './commitments';
@@ -77,14 +77,17 @@ function issuedAt(token: string): number | null {
   }
 }
 
-async function readToken(chain: ChainData, storage: StorageReader, examId: Hex, registry: Hex, bucket?: string) {
+/** A DER root in place of Google's, for tests only. */
+const rootOf = (trustedRoot: Uint8Array | undefined) => (trustedRoot ? { trustedRoot } : {});
+
+async function readToken(chain: ChainData, storage: StorageReader, examId: Hex, registry: Hex, bucket?: string, trustedRoot?: Uint8Array) {
   const { exam, build } = chain;
   if (!exam) return neutral('The exam is not on the public record yet.');
   if (!build) return neutral('The paper is not recorded yet, so there is nothing to check the proof against.');
   const bytes = await storage.get(storageNames.token);
   if (!bytes) return neutral(`${storageNames.token} is not in storage yet. It is written before the Build.`);
   const token = utf8Text(bytes).trim();
-  const verdict = await checkPublishedToken({ token, exam, build, examId, registry, ...bucketOf(bucket) });
+  const verdict = await checkPublishedToken({ token, exam, build, examId, registry, ...bucketOf(bucket), ...rootOf(trustedRoot) });
   return { kind: 'ready' as const, verdict, build, issuedAt: issuedAt(token) };
 }
 
@@ -101,28 +104,67 @@ async function readManifest(chain: ChainData, storage: StorageReader, examId: He
   };
 }
 
-async function readLog(chain: ChainData, storage: StorageReader, examId: Hex, registry: Hex, bucket?: string): Promise<LogResult | Neutral> {
+const verifiedLog = (verdict: LogVerdict) =>
+  verdict.examId === 'pass' && verdict.entriesHash === 'pass' && verdict.signature === 'pass';
+
+/** Why a backup copy of the release log did not pass, for the evidence. */
+function logFailure(verdict: LogVerdict, token: RecordVerdict | null): string {
+  if (verdict.examId !== 'pass') return `${storageNames.releaseLog} is for another exam.`;
+  if (verdict.entriesHash !== 'pass') return `${storageNames.releaseLog} has an entriesHash that does not match its entries.`;
+  if (!token?.verified) return `No ${releaseTokenName} attests the key that signed ${storageNames.releaseLog}.`;
+  return `${storageNames.releaseLog} has a signature that does not check under the attested key.${verdict.error ? ` ${verdict.error}` : ''}`;
+}
+
+type LogCopy = { kind: 'malformed'; message: string } | { kind: 'read'; log: ReleaseLogResponse };
+
+async function readLog(
+  chain: ChainData,
+  storage: StorageReader,
+  examId: Hex,
+  registry: Hex,
+  bucket?: string,
+  trustedRoot?: Uint8Array,
+): Promise<LogResult | Neutral> {
   const { exam, entries } = chain;
-  const bytes = await storage.get(storageNames.releaseLog);
-  if (!bytes) return neutral(`${storageNames.releaseLog} is not in storage yet. The TEE writes it at unlock.`);
-  let log;
-  try {
-    log = parseReleaseLog(bytes);
-  } catch (error) {
-    return { kind: 'malformed', message: (error as Error).message };
-  }
-  const tokenBytes = await storage.get(releaseTokenName);
-  const token =
-    tokenBytes && exam
-      ? await checkRecordToken({
-          token: utf8Text(tokenBytes).trim(),
-          exam,
-          examId,
-          registry,
-          instancePublicKey: log.instancePublicKey,
-          ...bucketOf(bucket),
-        })
-      : null;
+  // The token is checked against the key a log names. A backup copy counts only if it passes.
+  const tokenFor = (log: ReleaseLogResponse, record: boolean): Promise<RecordVerdict | null> =>
+    exam
+      ? readChecked(
+          storage,
+          releaseTokenName,
+          async (bytes) => {
+            const token = await checkRecordToken({
+              token: utf8Text(bytes).trim(),
+              exam,
+              examId,
+              registry,
+              instancePublicKey: log.instancePublicKey,
+              ...bucketOf(bucket),
+              ...rootOf(trustedRoot),
+            });
+            return { pass: token.verified, value: token, reason: `${releaseTokenName} does not attest the key that signed ${storageNames.releaseLog}.` };
+          },
+          { record },
+        )
+      : Promise.resolve(null);
+  // A backup copy of the log counts only once it passes every check here, under a key a token attests.
+  const copy = await readChecked(storage, storageNames.releaseLog, async (bytes): Promise<Judged<LogCopy>> => {
+    let log: ReleaseLogResponse;
+    try {
+      log = parseReleaseLog(bytes);
+    } catch (error) {
+      const message = (error as Error).message;
+      return { pass: false, value: { kind: 'malformed', message }, reason: message };
+    }
+    const token = await tokenFor(log, false);
+    const verdict = await checkReleaseLog(log, examId, token?.verified ? log.instancePublicKey : null);
+    return { pass: verifiedLog(verdict), value: { kind: 'read', log }, reason: logFailure(verdict, token) };
+  });
+  if (!copy) return neutral(`${storageNames.releaseLog} is not in storage yet. The TEE writes it at unlock.`);
+  if (copy.kind === 'malformed') return copy;
+  const { log } = copy;
+  // Read again once the log is settled, so only the token copies tried against it are reported.
+  const token = await tokenFor(log, true);
   const list = approvedEntries(entries);
   return {
     kind: 'ready',
@@ -148,16 +190,18 @@ export async function loadRecords(args: {
   bucket?: string;
   /** Where to find a Swarm backup of the files. Null or left out, the bucket is all there is. */
   backup?: BackupSource | null;
+  /** A DER root in place of Google's. Tests only. */
+  trustedRoot?: Uint8Array;
 }): Promise<Records> {
-  const { examId, registry, bucket } = args;
+  const { examId, registry, bucket, trustedRoot } = args;
   const chain = await args.chain();
   const off: Off = { kind: 'off' };
   // The backup is checked against this read's Build, so it is set up again for each read.
   const storage = args.storage ? withBackup(args.storage, args.backup ?? null, chain.build) : null;
   const [token, manifest, log] = await Promise.all([
-    storage ? guarded(() => readToken(chain, storage, examId, registry, bucket)) : off,
+    storage ? guarded(() => readToken(chain, storage, examId, registry, bucket, trustedRoot)) : off,
     storage ? guarded(() => readManifest(chain, storage, examId)) : off,
-    storage ? guarded(() => readLog(chain, storage, examId, registry, bucket)) : off,
+    storage ? guarded(() => readLog(chain, storage, examId, registry, bucket, trustedRoot)) : off,
   ]);
   return { chain, token, manifest, log, ...(storage && args.backup ? { backup: storage.use() } : {}) };
 }
@@ -270,9 +314,6 @@ export interface ArkivReport {
 
 /** The two reads `loadArkiv` makes. `createArkivReader` from `@paperseal/arkiv` gives both. */
 export type ArkivSource = Pick<ArkivReader, 'releaseRows' | 'latestBlock'>;
-
-const verifiedLog = (verdict: LogVerdict) =>
-  verdict.examId === 'pass' && verdict.entriesHash === 'pass' && verdict.signature === 'pass';
 
 /**
  * Reads the Arkiv mirror as spec/arkiv.md "Reading" says. A token row counts only once it passes

@@ -534,7 +534,7 @@ describe('the backup on Swarm', () => {
   const bee = 'http://bee.example:1633';
 
   /** The bucket, empty or as built, a Swarm node with the world's files or none, and one backup row on Arkiv. */
-  function arrangeBackup(world: World, options: { bucket: 'empty' | 'full'; swarm: 'up' | 'down' }) {
+  function arrangeBackup(world: World, options: { bucket: 'empty' | 'full'; swarm: 'up' | 'down'; backupFiles?: Record<string, Uint8Array> }) {
     arrange(world);
     const storageFetch = vi.mocked(fetch).getMockImplementation() as (i: string | URL | Request) => Promise<Response>;
     const swarmReads: string[] = [];
@@ -545,7 +545,8 @@ describe('the backup on Swarm', () => {
         if (url.startsWith(`${bee}/`)) {
           swarmReads.push(url);
           if (options.swarm === 'down') return Promise.reject(new TypeError('fetch failed'));
-          const bytes = world.files.get(decodeURIComponent(url.replace(`${bee}/bzz/${swarmRef}/`, '')));
+          const name = decodeURIComponent(url.replace(`${bee}/bzz/${swarmRef}/`, ''));
+          const bytes = options.backupFiles?.[name] ?? world.files.get(name);
           return Promise.resolve(bytes ? new Response(new Uint8Array(bytes)) : new Response('no', { status: 404 }));
         }
         return options.bucket === 'empty' ? Promise.resolve(new Response('no', { status: 404 })) : storageFetch(input);
@@ -599,9 +600,24 @@ describe('the backup on Swarm', () => {
     await within(sealed).findByText('Backup on Swarm');
     expect((within(sealed).getAllByText('manifest.json')[0]?.closest('li') as HTMLElement).textContent).toMatch(/From the Swarm backup/);
     expect((within(sealed).getByText(/^Manifest hash matches/).closest('li') as HTMLElement).textContent).toMatch(/Pass/);
+    // The test token does not lead to Google's root, so no token attests the backup's release log,
+    // and it is not used. It is only "not read", never a failure.
     const unlock = stepNamed(/^6\. Paper unlocks for centres$/);
-    expect(within(unlock).getByText('Open release-log.json on Swarm')).toBeTruthy();
+    expect(within(unlock).queryByText('Open release-log.json on Swarm')).toBeNull();
+    expect(within(unlock).getByText(/^Not read from the Swarm backup\. 1 copy in the backup did not pass the checks in this step/)).toBeTruthy();
+    expect(stateOf(unlock)).not.toBe('failed');
     expect(backupRows).toHaveBeenCalledWith(examId, [writer], { registry: registryAddress });
+  });
+
+  it('uses the backup release log once its token attests the key that signed it', async () => {
+    tokenVerified = true;
+    const world = await buildWorld();
+    arrangeBackup(world, { bucket: 'empty', swarm: 'up' });
+    open(1000, { arkivWriters: writer });
+    const unlock = await findStep(/^6\. Paper unlocks for centres$/);
+    expect(await within(unlock).findByText('Open release-log.json on Swarm', {}, { timeout: 5000 })).toBeTruthy();
+    expect(within(unlock).getByText('Open release-token.jwt on Swarm')).toBeTruthy();
+    expect(within(unlock).queryByText(/did not pass the checks in this step/)).toBeNull();
   });
 
   it('is neutral, and says the backup was not read, when Swarm does not answer', async () => {
@@ -615,6 +631,19 @@ describe('the backup on Swarm', () => {
     await within(open7).findAllByText(/^Not read from the Swarm backup/);
     expect(stateOf(open7)).not.toBe('failed');
     expect(screen.queryByRole('alert')?.textContent ?? '').not.toMatch(/Step [567]/);
+  });
+
+  it('ignores a backup key-priv.tlock that does not open the paper, without failing or warning', async () => {
+    const world = await buildWorld();
+    arrangeBackup(world, { bucket: 'empty', swarm: 'up', backupFiles: { 'key-priv.tlock': new TextEncoder().encode('junk') } });
+    open(1000, { arkivWriters: writer });
+    const step = await findStep(/^7\. Paper opens to everyone$/);
+    await within(step).findByText(/^Not read from the Swarm backup\. 1 copy in the backup did not pass the checks in this step/, {}, { timeout: 5000 });
+    expect(within(step).getByText(new RegExp(`^A copy in the Swarm backup ${swarmRef} did not pass the checks in this step, so it was not used\\.`))).toBeTruthy();
+    expect(stateOf(step)).not.toBe('failed');
+    expect(within(step).queryByText('Fail')).toBeNull();
+    expect(screen.queryByText('Differentiate x squared.')).toBeNull();
+    expect(screen.queryByRole('alert')?.textContent ?? '').not.toMatch(/Step 7/);
   });
 
   it('reads no backup without writers, or with no Swarm API', async () => {

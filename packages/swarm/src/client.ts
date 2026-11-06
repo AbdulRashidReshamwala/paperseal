@@ -34,11 +34,31 @@ export class SwarmReadError extends SwarmApiError {
   }
 }
 
+/** How long a read waits for the Bee node, unless the client or the call sets its own. */
+export const defaultReadTimeoutMs = 30_000;
+
+/** The longest finite timeout, since `setTimeout` fires at once for anything larger. */
+const maxTimeoutMs = 2 ** 31 - 1;
+
 export interface SwarmClientOptions {
   /** The Bee API, such as `http://127.0.0.1:1633`. Defaults to `swarm.defaultApiUrl` in spec/arkiv.json. */
   apiUrl?: string | undefined;
   /** Defaults to the global `fetch`. */
   fetch?: typeof fetch | undefined;
+  /**
+   * The timeout for reads (`download`, `stamps`, `chainState`, `wallet`, `health` and `addresses`)
+   * that don't pass their own, in milliseconds. Defaults to `defaultReadTimeoutMs`; `Infinity`
+   * turns it off. Uploads and `buyStamp` never use it.
+   */
+  timeoutMs?: number | undefined;
+}
+
+/** Per-call limits. The timeout covers the whole request, the response body included. */
+export interface RequestOptions {
+  /** Milliseconds before the request is abandoned, or `Infinity` for no limit. */
+  timeoutMs?: number | undefined;
+  /** Abandons the request when it aborts. */
+  signal?: AbortSignal | undefined;
 }
 
 export interface Health {
@@ -103,7 +123,11 @@ export interface BuyStampParams extends StampParams {
   label?: string;
 }
 
-export interface UploadOptions {
+/**
+ * `timeoutMs` has no default here: without `deferred`, Bee answers only once every chunk is on the
+ * network, which can take a long time.
+ */
+export interface UploadOptions extends RequestOptions {
   /** The postage batch to stamp with, 64 lowercase hex characters. */
   batchId: string;
   /**
@@ -117,15 +141,21 @@ export interface UploadOptions {
 export interface SwarmClient {
   /** Uploads `files` as one unencrypted collection and returns its reference. */
   uploadCollection(files: readonly CollectionFile[], options: UploadOptions): Promise<{ reference: string }>;
-  /** One file of a collection, or `null` if Bee says it isn't there. Other failures throw `SwarmReadError`. */
-  download(reference: string, path: string): Promise<Uint8Array | null>;
-  stamps(): Promise<PostageBatch[]>;
-  /** Buys an immutable batch with the node's wallet and returns its ID. Spends BZZ and gas. */
-  buyStamp(params: BuyStampParams): Promise<string>;
-  chainState(): Promise<ChainState>;
-  wallet(): Promise<Wallet>;
-  health(): Promise<Health>;
-  addresses(): Promise<Addresses>;
+  /**
+   * One file of a collection, or `null` if Bee says it isn't there. Other failures, a timeout
+   * included, throw `SwarmReadError`.
+   */
+  download(reference: string, path: string, options?: RequestOptions): Promise<Uint8Array | null>;
+  stamps(options?: RequestOptions): Promise<PostageBatch[]>;
+  /**
+   * Buys an immutable batch with the node's wallet and returns its ID. Spends BZZ and gas. Bee
+   * answers once the purchase is on chain, so there is no default timeout.
+   */
+  buyStamp(params: BuyStampParams, options?: RequestOptions): Promise<string>;
+  chainState(options?: RequestOptions): Promise<ChainState>;
+  wallet(options?: RequestOptions): Promise<Wallet>;
+  health(options?: RequestOptions): Promise<Health>;
+  addresses(options?: RequestOptions): Promise<Addresses>;
 }
 
 const hex64 = /^[0-9a-f]{64}$/;
@@ -147,23 +177,87 @@ export function checkBatchId(batchId: string): void {
   }
 }
 
+/** Throws unless `timeoutMs` is `undefined`, `Infinity` or a positive number `setTimeout` can wait for. */
+function checkTimeout(timeoutMs: number | undefined): void {
+  if (timeoutMs === undefined || timeoutMs === Infinity) return;
+  if (!(timeoutMs > 0 && timeoutMs <= maxTimeoutMs)) {
+    throw new RangeError(`timeoutMs is a positive number of milliseconds up to ${maxTimeoutMs}, or Infinity, got ${timeoutMs}`);
+  }
+}
+
 export function createSwarmClient(options: SwarmClientOptions = {}): SwarmClient {
   const apiUrl = (options.apiUrl ?? swarm.defaultApiUrl).replace(/\/+$/, '');
   // Wrapped so a browser's `fetch` is never called with a foreign `this`.
   const doFetch: typeof fetch = options.fetch ?? ((input, init) => globalThis.fetch(input, init));
+  checkTimeout(options.timeoutMs);
+  const readTimeoutMs = options.timeoutMs ?? defaultReadTimeoutMs;
 
-  /** Sends one request. A network failure becomes a status-0 error of the given class. */
-  async function send(
+  /** A read's options, with the client's timeout unless the call sets one. */
+  function read(call: RequestOptions = {}): RequestOptions {
+    return { timeoutMs: call.timeoutMs ?? readTimeoutMs, signal: call.signal };
+  }
+
+  /**
+   * Sends one request and passes the response to `handle`, inside the timeout and the caller's
+   * signal, so a body that stalls is cut off too. A network failure, a timeout or an abort
+   * becomes a status-0 error of the given class.
+   *
+   * The fetch and `handle` are each raced against the abort, so the request ends on time even if
+   * a custom `fetch` or a body stream ignores the signal.
+   */
+  async function request<T>(
     method: string,
     path: string,
     init: RequestInit,
-    ErrorClass: typeof SwarmApiError = SwarmApiError,
-  ): Promise<{ response: Response; endpoint: string }> {
+    { timeoutMs, signal }: RequestOptions,
+    ErrorClass: typeof SwarmApiError,
+    handle: (response: Response, endpoint: string) => Promise<T>,
+  ): Promise<T> {
     const endpoint = `${method} ${path}`;
+    checkTimeout(timeoutMs);
+    const controller = new AbortController();
+    const aborted = new Promise<never>((_, reject) => {
+      controller.signal.addEventListener('abort', () => reject(controller.signal.reason as Error), { once: true });
+    });
+    aborted.catch(() => {}); // Only ever observed through the races below.
+
+    let timedOut = false;
+    const timer =
+      timeoutMs === undefined || timeoutMs === Infinity
+        ? undefined
+        : setTimeout(() => {
+            timedOut = true;
+            controller.abort(new DOMException(`no answer within ${timeoutMs} ms`, 'TimeoutError'));
+          }, timeoutMs);
+    const onAbort = () => controller.abort(signal?.reason);
+    if (signal?.aborted) onAbort();
+    else signal?.addEventListener('abort', onAbort, { once: true });
+
+    const stopped = (cause: unknown) =>
+      timedOut
+        ? new ErrorClass(0, endpoint, `timed out after ${timeoutMs} ms waiting for the Bee node`, { cause })
+        : new ErrorClass(0, endpoint, 'aborted by the caller', { cause });
+
     try {
-      return { response: await doFetch(`${apiUrl}${path}`, { ...init, method }), endpoint };
-    } catch (cause) {
-      throw new ErrorClass(0, endpoint, 'no response from the Bee node', { cause });
+      let response: Response;
+      try {
+        response = await Promise.race([
+          doFetch(`${apiUrl}${path}`, { ...init, method, signal: controller.signal }),
+          aborted,
+        ]);
+      } catch (cause) {
+        if (controller.signal.aborted) throw stopped(cause);
+        throw new ErrorClass(0, endpoint, 'no response from the Bee node', { cause });
+      }
+      try {
+        return await Promise.race([handle(response, endpoint), aborted]);
+      } catch (error) {
+        if (controller.signal.aborted) throw stopped(error);
+        throw error;
+      }
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
     }
   }
 
@@ -183,55 +277,62 @@ export function createSwarmClient(options: SwarmClientOptions = {}): SwarmClient
     return new ErrorClass(response.status, endpoint, message);
   }
 
-  async function json(method: string, path: string, init: RequestInit = {}): Promise<Fields> {
-    const { response, endpoint } = await send(method, path, init);
-    if (!response.ok) throw await failure(response, endpoint);
-    let body: unknown;
-    try {
-      body = await response.json();
-    } catch (cause) {
-      throw new SwarmApiError(response.status, endpoint, 'response is not JSON', { cause });
-    }
-    if (!isRecord(body)) throw new SwarmApiError(response.status, endpoint, 'response is not a JSON object');
-    return new Fields(body, response.status, endpoint);
+  function json(method: string, path: string, init: RequestInit, call: RequestOptions): Promise<Fields> {
+    return request(method, path, init, call, SwarmApiError, async (response, endpoint) => {
+      if (!response.ok) throw await failure(response, endpoint);
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch (cause) {
+        throw new SwarmApiError(response.status, endpoint, 'response is not JSON', { cause });
+      }
+      if (!isRecord(body)) throw new SwarmApiError(response.status, endpoint, 'response is not a JSON object');
+      return new Fields(body, response.status, endpoint);
+    });
   }
 
   return {
-    async uploadCollection(files, { batchId, deferred = false }) {
+    async uploadCollection(files, { batchId, deferred = false, timeoutMs, signal }) {
       checkBatchId(batchId);
       const tar = await collectionTar(files);
-      const body = await json('POST', '/bzz', {
-        // Exactly these headers. `Swarm-Encrypt` is never sent; see the file comment.
-        headers: {
-          'Content-Type': 'application/x-tar',
-          'Swarm-Collection': 'true',
-          'Swarm-Postage-Batch-Id': batchId,
-          'Swarm-Deferred-Upload': deferred ? 'true' : 'false',
+      const body = await json(
+        'POST',
+        '/bzz',
+        {
+          // Exactly these headers. `Swarm-Encrypt` is never sent; see the file comment.
+          headers: {
+            'Content-Type': 'application/x-tar',
+            'Swarm-Collection': 'true',
+            'Swarm-Postage-Batch-Id': batchId,
+            'Swarm-Deferred-Upload': deferred ? 'true' : 'false',
+          },
+          body: tar,
         },
-        body: tar,
-      });
+        { timeoutMs, signal },
+      );
       const reference = body.str('reference');
       // A 128-character reference would mean Bee encrypted the upload.
       if (!hex64.test(reference)) throw body.malformed('reference', 'an unencrypted 64-hex reference');
       return { reference };
     },
 
-    async download(reference, path) {
+    async download(reference, path, call) {
       checkReference(reference);
       checkCollectionPath(path);
       const encoded = path.split('/').map(encodeURIComponent).join('/');
-      const { response, endpoint } = await send('GET', `/bzz/${reference}/${encoded}`, {}, SwarmReadError);
-      if (response.status === 404) return null;
-      if (!response.ok) throw await failure(response, endpoint, SwarmReadError);
-      try {
-        return new Uint8Array(await response.arrayBuffer());
-      } catch (cause) {
-        throw new SwarmReadError(response.status, endpoint, 'body could not be read', { cause });
-      }
+      return request('GET', `/bzz/${reference}/${encoded}`, {}, read(call), SwarmReadError, async (response, endpoint) => {
+        if (response.status === 404) return null;
+        if (!response.ok) throw await failure(response, endpoint, SwarmReadError);
+        try {
+          return new Uint8Array(await response.arrayBuffer());
+        } catch (cause) {
+          throw new SwarmReadError(response.status, endpoint, 'body could not be read', { cause });
+        }
+      });
     },
 
-    async stamps() {
-      const body = await json('GET', '/stamps');
+    async stamps(call) {
+      const body = await json('GET', '/stamps', {}, read(call));
       return body.list('stamps').map((stamp) => ({
         batchId: stamp.str('batchID').toLowerCase(),
         usable: stamp.bool('usable'),
@@ -247,18 +348,18 @@ export function createSwarmClient(options: SwarmClientOptions = {}): SwarmClient
       }));
     },
 
-    async buyStamp({ amount, depth, label }) {
+    async buyStamp({ amount, depth, label }, call = {}) {
       checkStampParams({ amount, depth });
       const query = label === undefined ? '' : `?label=${encodeURIComponent(label)}`;
       // Immutable, so a full batch refuses new chunks instead of overwriting old ones.
-      const body = await json('POST', `/stamps/${amount}/${depth}${query}`, { headers: { Immutable: 'true' } });
+      const body = await json('POST', `/stamps/${amount}/${depth}${query}`, { headers: { Immutable: 'true' } }, call);
       const batchId = body.str('batchID').toLowerCase();
       checkBatchId(batchId);
       return batchId;
     },
 
-    async chainState() {
-      const body = await json('GET', '/chainstate');
+    async chainState(call) {
+      const body = await json('GET', '/chainstate', {}, read(call));
       const blocks = body.optionalNum('minimumValidityBlocks');
       return {
         chainTip: body.num('chainTip'),
@@ -269,8 +370,8 @@ export function createSwarmClient(options: SwarmClientOptions = {}): SwarmClient
       };
     },
 
-    async wallet() {
-      const body = await json('GET', '/wallet');
+    async wallet(call) {
+      const body = await json('GET', '/wallet', {}, read(call));
       const chequebook = body.optionalStr('chequebookContractAddress');
       return {
         bzzBalance: body.big('bzzBalance'),
@@ -281,8 +382,8 @@ export function createSwarmClient(options: SwarmClientOptions = {}): SwarmClient
       };
     },
 
-    async health() {
-      const body = await json('GET', '/health');
+    async health(call) {
+      const body = await json('GET', '/health', {}, read(call));
       const status = body.str('status');
       if (status !== 'ok' && status !== 'nok' && status !== 'unknown') {
         throw body.malformed('status', 'ok, nok or unknown');
@@ -290,8 +391,8 @@ export function createSwarmClient(options: SwarmClientOptions = {}): SwarmClient
       return { status, version: body.str('version'), apiVersion: body.str('apiVersion') };
     },
 
-    async addresses() {
-      const body = await json('GET', '/addresses');
+    async addresses(call) {
+      const body = await json('GET', '/addresses', {}, read(call));
       return {
         overlay: body.str('overlay'),
         underlay: body.strList('underlay'),

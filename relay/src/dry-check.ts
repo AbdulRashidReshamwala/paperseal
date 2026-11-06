@@ -134,6 +134,7 @@ async function offlineBackup(options: { tamper?: boolean; chainHash?: Hex } = {}
   const registry: BackupRegistry = {
     getBuild: () => Promise.resolve({ storageManifestHash: options.chainHash ?? sha256Hex(new TextEncoder().encode(manifest)) } as never),
     getApprovedListEntries: () => Promise.resolve(sampleList()),
+    getExam: () => Promise.reject(new Error('offline: a build-phase backup reads no exam')),
   };
   const uploads: { paths: string[]; options: UploadOptions }[] = [];
   const batchId = 'b7'.repeat(32);
@@ -163,6 +164,7 @@ async function offlineBackup(options: { tamper?: boolean; chainHash?: Hex } = {}
     examId: EXAM,
     registry: REGISTRY,
     storageUrl: base,
+    bucket: undefined,
     batchId,
     phase: undefined,
     swarm: { url: arkiv.swarm.defaultApiUrl, source: 'default' },

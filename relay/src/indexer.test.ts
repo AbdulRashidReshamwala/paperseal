@@ -357,6 +357,63 @@ describe('index loop', () => {
     expect(reports.map((r) => r.outcomes.map((o) => o.action))).toEqual([['failed'], ['created']]);
   });
 
+  it('tries a failed patch again on every later pass until it succeeds, with no new event', async () => {
+    const { bytes } = validList();
+    const { deps, writer } = mocks([
+      { fromBlock: 100n, toBlock: 200n, exams: [scannedExam(EXAM, { created: created(EXAM) })] },
+      { fromBlock: 201n, toBlock: 300n, exams: [scannedExam(EXAM, { list: list(bytes) })] },
+      { fromBlock: 301n, toBlock: 400n, exams: [scannedExam(EXAM, { build: build(350n) })] },
+    ]);
+    writer.upsertExam
+      .mockResolvedValueOnce({ action: 'created', entityKey: `0x${'e1'.repeat(32)}`, txHash: TX })
+      .mockResolvedValueOnce({ action: 'patched', entityKey: `0x${'e1'.repeat(32)}`, txHash: TX } as never)
+      .mockRejectedValueOnce(new Error('nonce too low'))
+      .mockRejectedValueOnce(new Error('rate limited'))
+      .mockResolvedValueOnce({ action: 'patched', entityKey: `0x${'e1'.repeat(32)}`, txHash: TX } as never);
+    const controller = new AbortController();
+    let sleeps = 0;
+    const reports: { outcomes: { action: string; input?: { stage: string } }[] }[] = [];
+    await indexLoop(target({ everySeconds: 5 }), {
+      ...deps,
+      signal: controller.signal,
+      sleep: () => {
+        sleeps += 1;
+        if (sleeps === 6) controller.abort();
+        return Promise.resolve();
+      },
+      onReport: (r) => reports.push(r),
+      onError: (m) => {
+        throw new Error(m);
+      },
+    });
+    expect(reports.map((r) => r.outcomes.map((o) => `${o.action}:${o.input?.stage ?? ''}`))).toEqual([
+      ['created:published'],
+      ['patched:listed'],
+      ['failed:built'],
+      ['failed:built'],
+      ['patched:built'],
+      // Confirmed written, so the exam is left alone.
+      [],
+    ]);
+    const stages = (writer.upsertExam.mock.calls as unknown as [{ stage: string }][]).map(([i]) => i.stage);
+    expect(stages).toEqual(['published', 'listed', 'built', 'built', 'built']);
+    expect(writer.mirrorParticipants).toHaveBeenCalledTimes(1);
+  });
+
+  it('tries participants again after a failed mirror, with no new event', async () => {
+    const { bytes } = validList();
+    const { deps, writer } = mocks([{ fromBlock: 100n, toBlock: 200n, exams: [scannedExam(EXAM, { created: created(EXAM), list: list(bytes) })] }]);
+    writer.mirrorParticipants.mockRejectedValueOnce(new Error('rate limited'));
+    const state = newIndexState(100n);
+    const first = await indexPass(target(), deps, state);
+    expect(first.outcomes[0]?.participants.result).toBe('failed');
+    const second = await indexPass(target(), deps, state);
+    expect(second.outcomes[0]?.participants.result).toBe('mirrored');
+    const third = await indexPass(target(), deps, state);
+    expect(third.outcomes).toEqual([]);
+    expect(writer.upsertExam).toHaveBeenCalledTimes(1);
+  });
+
   it('stops after one pass without --every', async () => {
     const { deps, registry } = mocks([]);
     await indexLoop(target(), { ...deps, signal: new AbortController().signal, sleep: () => Promise.reject(new Error('slept')), onReport: () => undefined, onError: () => undefined });

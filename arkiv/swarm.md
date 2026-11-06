@@ -1,6 +1,6 @@
 # Swarm
 
-Paper Seal backs up each exam's public files to Swarm, and records where the backup is on Arkiv. If the exam board's bucket goes down or is emptied on exam morning, key holders and centres can still get their encrypted shares and the encrypted paper, and the exam goes ahead. The rules are in [`spec/arkiv.md`](../spec/arkiv.md), "Backups".
+Paper Seal backs up each exam's public files to Swarm, and records where the backup is on Arkiv, so the files survive if the exam board's bucket goes down or is emptied on exam morning. Today the public verifier uses the backup: with the bucket gone, it still checks the exam and opens the paper. The key holder and centre pages don't use it yet. That comes next, so holders can fetch their encrypted shares, and centres the encrypted paper, from Swarm. The rules are in [`spec/arkiv.md`](../spec/arkiv.md), "Backups".
 
 ## What Goes Where
 
@@ -8,7 +8,7 @@ Paper Seal backs up each exam's public files to Swarm, and records where the bac
 | --- | --- | --- |
 | **Swarm** | One collection per exam: `manifest.json`, `paper.bin` (the encrypted paper, 1 MiB), `key-pub.tlock`, every `shares/<key>.bin` (each encrypted to its key holder) and `token.jwt`. After unlock it also holds `release-log.json`, `release-token.jwt`, `key-priv.tlock` and every `key-priv/<key>.bin`. That's 25 files, 1.08 MB | The files are large and must be immutable, and the board can't delete them. A file's address is its own hash |
 | **Arkiv** | A `paperseal.v1.backup` entity per exam and phase. **`swarmRef` holds the Swarm reference**, next to `manifestHash`, `phase`, `files` and `batchId` | Anyone can find the backup by exam ID, with no help from the board |
-| **Sepolia** | The Build's `storageManifestHash` | The source of truth. A backup is used only if its `manifest.json` hashes to it, and each file is used only if it matches its hash in the manifest |
+| **Sepolia** | The Build's `storageManifestHash` | The source of truth. A backup is used only if its `manifest.json` hashes to it, and each file it lists is used only if it matches its hash in the manifest. Unlock files aren't in the manifest. The relay checks them before uploading (token, log signature, timelock round, sizes), and the verifier checks them exactly like the bucket's copies. One that fails is ignored and the next backup is tried |
 | **Nowhere** | Questions, setter data, invite secrets | Never mirrored |
 
 Every file is already public and already encrypted or signed, so the collection is uploaded **unencrypted**. Swarm's own encryption would put a decryption key inside the reference, and Arkiv entities are public: the Arkiv writer refuses any 128-character, encrypted reference.
@@ -70,7 +70,7 @@ You should see `hash … the Build's storageManifestHash on Sepolia`, `uploaded 
    ```
 
 2. Run `pnpm --filter @paperseal/verifier dev` and open `http://localhost:5172/#/exam/0x422205bde8135878ece4ccb921496e30076b32e14f48fb2886e3fa3f5181f295`.
-3. All 7 steps should be done, ending with "The paper is open". Each step's evidence has a "Backup on Swarm" block marking `token.jwt`, `manifest.json`, `paper.bin` and `key-pub.tlock` as "From the Swarm backup, checked against the exam's on-chain record", with links to each file on Swarm and to the Arkiv row. The browser console shows the failed requests to the missing bucket.
+3. All 7 steps should be done, ending with "The paper is open". Each step's evidence has a "Backup on Swarm" block marking `token.jwt`, `manifest.json`, `paper.bin` and `key-pub.tlock` as "From the Swarm backup, checked against the exam's on-chain record". `release-log.json`, `release-token.jwt` and `key-priv.tlock` also come from Swarm, checked by the same steps as the bucket's copies. Each block links to the files on Swarm and to the Arkiv row. The browser console shows the failed requests to the missing bucket.
 
 Your Bee node must allow the verifier's origin: `cors-allowed-origins: ["http://localhost:5172"]` in its config.
 

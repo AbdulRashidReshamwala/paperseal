@@ -49,6 +49,14 @@ interface KnownExam {
   listHash?: Hex;
   /** The last input this run wrote, or undefined if it hasn't written one. */
   written?: ExamIndexInput;
+  /**
+   * True from the moment an event touches the exam until a write of the input it implies is
+   * confirmed. A failed write, or a failed read while building the input, leaves it set, so every
+   * later pass tries again even with no new event.
+   */
+  stale: boolean;
+  /** The input the last attempt wanted to write, written or not. */
+  desired?: ExamIndexInput;
   /** `pending` until this writer's participant rows are all on Arkiv, or the list fails the rules. */
   participants: 'pending' | 'done' | 'refused';
 }
@@ -244,10 +252,11 @@ export async function indexPass(target: IndexTarget, deps: IndexDeps, state: Ind
     const key = scanned.examId.toLowerCase();
     let known = state.exams.get(key);
     if (!known) {
-      known = { events: { examId: key as Hex, created: null }, participants: 'pending' };
+      known = { events: { examId: key as Hex, created: null }, participants: 'pending', stale: true };
       state.exams.set(key, known);
     }
     merge(known, scanned);
+    known.stale = true;
     touched.add(key);
   }
   // Never back: a --from-block past the chain's head stays where it was.
@@ -276,13 +285,17 @@ export async function indexPass(target: IndexTarget, deps: IndexDeps, state: Ind
     const name = verified ?? (unreadable !== undefined ? (known.written?.name ?? null) : null);
     const listPending = known.participants === 'pending' && (known.events.list !== undefined || known.events.build !== undefined);
     const nameChanged = known.written !== undefined && known.written.name !== name;
-    if (!touched.has(key) && known.written && !listPending && !nameChanged) continue;
+    // Skip only an exam whose desired row is confirmed on Arkiv and has nothing else waiting.
+    if (!touched.has(key) && !known.stale && known.written && !listPending && !nameChanged) continue;
 
     const outcome: ExamOutcome = { examId, action: 'failed', participants: { result: 'none', written: 0, skipped: 0, txHashes: [] } };
     report.outcomes.push(outcome);
     try {
       const input = await examInput(known, deps.registry, { registry: target.registry, board, chainId: deps.chainId, name });
       outcome.input = input;
+      known.desired = input;
+      // Set until the write below is confirmed, so a failure here is tried again next pass.
+      known.stale = true;
       if (sameInput(known.written, input)) {
         outcome.action = 'unchanged';
         outcome.detail = 'this run already wrote it';
@@ -293,7 +306,9 @@ export async function indexPass(target: IndexTarget, deps: IndexDeps, state: Ind
         if (written.txHash) outcome.txHash = written.txHash;
         known.written = input;
       }
+      known.stale = false;
     } catch (error) {
+      known.stale = true;
       outcome.detail = errorText(error);
       continue;
     }

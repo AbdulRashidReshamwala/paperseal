@@ -8,7 +8,7 @@
 | `$creator` in the trusted writers | Anyone can write rows, so we read only from published writers | "Writers read" in the evidence, and rows from strangers never appear |
 | `entriesHash` / `instanceKeyHash` (indexed `str`) | The relay checks for these before it writes, so a snapshot is written only once | One row per log snapshot, and no spam |
 | `registry` (indexed `addr`), alone | The exam history page lists a registry's exams, which `ExamRegistry` itself can't do | `#/exams`: 10 exams, newest first, each checked against Sepolia |
-| `examStart` (indexed `u64`), sorted | People look for an exam by when it was | The history list's order and dates |
+| `examStart` (indexed `u64`) | People look for an exam by when it was | The history list's dates. The page sorts by it after reading, and the column is indexed so a date filter works too |
 | `owner` (indexed `str`) | A centre or key holder wants every exam they're on | "Find exams by person": `centre-1` finds 6 exams, each checked against that exam's approved list on Sepolia |
 | `registry` (indexed `addr`) | The same exam ID can't be mixed up across registries | The verifier asks only for rows in the registry it reads, and the token check binds the registry as well |
 

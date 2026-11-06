@@ -267,7 +267,8 @@ function backupItems(use: BackupUse | undefined, names: readonly string[]): Item
   const wanted = new Set(names);
   const served = use.served.filter((file) => wanted.has(file.name));
   const notRead = use.missed.filter((miss) => wanted.has(miss.name) && miss.kind === 'not-read');
-  if (served.length === 0 && notRead.length === 0) return [];
+  const rejected = use.rejected.filter((copy) => wanted.has(copy.name));
+  if (served.length === 0 && notRead.length === 0 && rejected.length === 0) return [];
   const collections = new Map<string, BackupFile>();
   for (const file of served) if (!collections.has(file.swarmRef)) collections.set(file.swarmRef, file);
   const ignored = [
@@ -287,7 +288,7 @@ function backupItems(use: BackupUse | undefined, names: readonly string[]): Item
         : {
             kind: 'fact',
             label: { code: file.name },
-            value: `From the Swarm backup. ${gapWords[file.bucket]} The checks in this step apply to it as to the public files.`,
+            value: `From the Swarm backup. ${gapWords[file.bucket]} It passed the checks in this step before it was used, as a copy in the public files must.`,
           },
       { kind: 'link', href: file.url, text: `Open ${file.name} on Swarm` },
     ]),
@@ -297,6 +298,14 @@ function backupItems(use: BackupUse | undefined, names: readonly string[]): Item
       { kind: 'link', href: `${arkiv.network.explorer}/entity/${file.entityKey}`, text: 'Open the backup row in the Arkiv explorer' },
     ]),
     ...notRead.map((miss) => notChecked({ code: miss.name }, `Not read from the Swarm backup. ${miss.reason}`)),
+    // A backup copy that failed is ignored, as a bad copy in the public files would be. Never a failure.
+    ...rejected.map(
+      (copy): Item => ({
+        kind: 'fact',
+        label: { code: copy.name },
+        value: `A copy in the Swarm backup ${copy.swarmRef} did not pass the checks in this step, so it was not used. ${copy.reason}`,
+      }),
+    ),
     ...(ignored.length > 0 ? [{ kind: 'fact' as const, label: 'Backups ignored', value: ignored.join(', ') }] : []),
   ];
 }

@@ -1,6 +1,6 @@
 # @paperseal/relay
 
-The Arkiv writer of [spec/arkiv.md](../spec/arkiv.md) "Writers", which the code calls the relay. It reads one exam's public unlock evidence from storage and/or the TEE and mirrors it to Arkiv's Rabdi testnet through [`@paperseal/arkiv`](../packages/arkiv), with `index` it writes a registry's exam index from its Sepolia events, and with `backup` it copies an exam's checked storage files to Swarm through [`@paperseal/swarm`](../packages/swarm) and records the collection on Arkiv ("Backups"). Arkiv is only a mirror: the relay copies signed evidence and checks no signature, and readers check every row's `body` and only trust rows whose `$creator` is a published writer. A relay can stay silent, but it can't make a check pass.
+The Arkiv writer of [spec/arkiv.md](../spec/arkiv.md) "Writers", which the code calls the relay. It reads one exam's public unlock evidence from storage and/or the TEE and mirrors it to Arkiv's Rabdi testnet through [`@paperseal/arkiv`](../packages/arkiv), with `index` it writes a registry's exam index from its Sepolia events, and with `backup` it copies an exam's checked storage files to Swarm through [`@paperseal/swarm`](../packages/swarm) and records the collection on Arkiv ("Backups"). Arkiv is only a mirror: `mirror`, `watch` and `index` copy signed evidence and check no signature, and readers check every row's `body` and only trust rows whose `$creator` is a published writer. `backup` is the exception: before anything reaches Swarm it checks the unlock files as readers do, release token and log signature included. A relay can stay silent, but it can't make a check pass.
 
 ## Commands
 
@@ -33,7 +33,7 @@ node relay/cli.mjs index --registry <ExamRegistry> --from-block <n> [--to-block 
 # collection stamped with --batch, writes a paperseal.v1.backup row, then reads manifest.json back.
 # --dry-run runs every check (storage, Sepolia, the batch on the Bee node) and stops: no upload, no row, no key.
 node relay/cli.mjs backup --exam <examId> --registry <ExamRegistry> --storage <url> --batch <batchId> \
-  [--phase build|unlock] [--swarm <bee api>] [--rpc <sepolia url>] [--dry-run]
+  [--bucket <name>] [--phase build|unlock] [--swarm <bee api>] [--rpc <sepolia url>] [--dry-run]
 
 # Read-only: the Bee node's health, address, wallet balances, postage price and batches, and the
 # cost of a depth-19 batch for 7 days. Buys nothing.
@@ -85,14 +85,17 @@ With `--every <seconds>` (2 to 3600; no `--to-block`), `index` loops until Ctrl+
 
 `backup` follows spec/arkiv.md "Backups", "Writing". Every file is read and checked before anything is sent; the first failure prints `REFUSED`, exits 1, and nothing is uploaded or written.
 
-1. **Phase.** `--phase`, else `unlock` if storage has `release-log.json`, else `build`. `--phase unlock` with no log is refused.
+1. **Phase.** `--phase`, else `unlock` once storage has `release-log.json` and every unlock file (`release-token.jwt`, `key-priv.tlock` and each centre's `key-priv` file), else `build`. If storage has the log but not yet all the others, it backs up `build` and the `phase` line says which file is missing. `--phase unlock` with any unlock file missing is refused.
 2. **Manifest.** `getBuild` on Sepolia (`--rpc`, else `RELAY_SEPOLIA_RPC`, else the public default) must have a Build. The SHA-256 of `manifest.json` must equal its `storageManifestHash`, and the manifest must parse (`parseManifest`) and name this exam.
 3. **Listed files.** Each file the manifest lists is downloaded and must match its `sha256`.
-4. **Unlock files** (`unlock` only), the list in spec/api.md "Storage":
-   - `release-log.json` must name this exam, and its `entriesHash` must be the hash of its `entries`. Its `teeSignature` is left to readers.
-   - `release-token.jwt` must be a JWT whose `eat_nonce` is the `attestationNonce` of the log's `instancePublicKey` and this exam. Its signature is left to readers.
-   - `key-priv.tlock` and one `key-priv/<derivedPublicKey>.bin` per centre (roles 3 and 4 of the on-chain approved list, read with `getApprovedListEntries` and `decodeApprovedList`) must all be there. Nothing commits to their bytes (the Build commits to none of the unlock files, as `IsUnlockFile` in tee/internal/storage says), so the output marks them `unhashed`: they are backed up because they are in the spec's unlock list, and a reader authenticates each by its own means (the timelock, and HPKE to the centre's key).
-5. **Batch.** `--batch` must be on the Bee node and usable (`GET /stamps`).
+4. **Unlock files** (`unlock` only), the list in spec/api.md "Storage", each checked as far as anything can be before the end round:
+   - `release-log.json` must parse strictly (exactly the TEE's fields, lowercase hex of the right lengths, no unknown field at the top or in an entry), name this exam, and have an `entriesHash` that recomputes from its `entries`. Its `teeSignature` must then verify (`verifyTeeSignature` over the `releaseLog` message) under its `instancePublicKey`, once the token below attests that key.
+   - `release-token.jwt` gets the readers' check, as `checkRecordToken` in apps/verifier/src/attest.ts: the claims in `published` mode against `getExam` on Sepolia (startup args from the on-chain settings and this registry, `image_digest`, approved `hwmodel`s, `env_override` naming the exam's bucket, and an `eat_nonce` binding the log's `instancePublicKey` to this exam), then the PKI signature chained to Google's pinned root (`@paperseal/attestation`). The bucket is `--bucket`, else the bucket in a `https://storage.googleapis.com/<bucket>` `--storage` URL; if neither gives one, an `unlock` backup is refused.
+   - `key-priv.tlock` must be an armoured age file with exactly one `tlock` stanza for quicknet's chain hash, sealed to the exam's `endRound` (parsed with tlock-js's own armour and age readers; it can't be opened yet).
+   - One `key-priv/<derivedPublicKey>.bin` per centre (roles 3 and 4 of the on-chain approved list, read with `getApprovedListEntries` and `decodeApprovedList`), each exactly 113 bytes: an HPKE `keyPriv` (`enc` 65 + `K_priv` 32 + tag 16).
+   Nothing commits to the bytes of `key-priv.tlock` or `key-priv/*`, so the output marks them `unhashed`; their authenticated encryption and the paper's salted hash check them for readers.
+5. **Size caps.** No file is read past its cap: `manifest.json` 1 MiB, `paper.bin` `padding.paperBytes` + 4 KiB, `token.jwt` and `release-token.jwt` 64 KiB, the other listed files 8 KiB, `release-log.json` 16 KiB, `key-priv.tlock` 8 KiB, and each `key-priv` file 4 KiB before its exact-size check. A file over its cap is refused.
+6. **Batch.** `--batch` must be on the Bee node and usable (`GET /stamps`).
 
 Then, unless `--dry-run`, it loads the keystore key (a keystore problem stops here with nothing sent), uploads every file as one unencrypted collection under its storage name with `Swarm-Deferred-Upload: false`, so Bee answers only after pushing every chunk to the network, and writes the row through `mirrorBackup`: `phase`, `swarmRef`, `swarmNetwork` (`swarm.network` in spec/arkiv.json), `manifestHash`, `files` (the number of files in the collection, `manifest.json` included) and `batchId`. `mirrorBackup` skips a row this writer already has for the same exam, registry, phase and reference. It prints the reference, a read-back link `<bee api>/bzz/<reference>/manifest.json`, and the entity key, transaction and explorer links. Last it downloads `manifest.json` from the collection and compares its bytes with what was uploaded. A failed row or a read-back that is missing or differs exits 1; a failed row still prints the reference; running `backup` again uploads again and writes the row.
 

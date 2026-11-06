@@ -200,7 +200,7 @@ Written before the Build:
 
 `storageManifestHash` is the plain SHA-256 of `manifest.json`.
 
-Written at unlock, each covered by the signed release log:
+Written at unlock. The signed release log records who released and covers `release-log.json` itself, and `release-token.jwt` attests its signer. Nothing on-chain or in the log hashes `key-priv.tlock` or `key-priv/*`. Their authenticated encryption and the paper's salted hash check them:
 
 | File | Content |
 | --- | --- |

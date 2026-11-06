@@ -9,7 +9,7 @@ import { createServer } from 'vite';
 const here = dirname(fileURLToPath(import.meta.url));
 const packages = resolve(here, '../packages');
 const alias = Object.fromEntries(
-  ['protocol', 'arkiv', 'chain', 'swarm', 'tee-client'].map((name) => [`@paperseal/${name}`, resolve(packages, name, 'src/index.ts')]),
+  ['protocol', 'arkiv', 'attestation', 'chain', 'crypto', 'swarm', 'tee-client'].map((name) => [`@paperseal/${name}`, resolve(packages, name, 'src/index.ts')]),
 );
 
 const server = await createServer({

@@ -1,8 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   collectionTar,
   createSwarmClient,
+  defaultReadTimeoutMs,
   formatBzz,
   InvalidPathError,
   minAmount,
@@ -122,6 +123,174 @@ describe('download', () => {
     const { client, fetch } = mockClient(() => new Response(null, { status: 200 }));
     await expect(client.download(reference + reference, 'manifest.json')).rejects.toThrow(TypeError);
     await expect(client.download(reference, '../manifest.json')).rejects.toThrow(InvalidPathError);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe('timeouts', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** A `fetch` that never answers, and rejects once its signal aborts, as the real one does. */
+  function hangingFetch() {
+    return vi.fn<typeof globalThis.fetch>(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          const signal = init?.signal;
+          signal?.addEventListener('abort', () => reject(signal.reason as Error), { once: true });
+        }),
+    );
+  }
+
+  /** Records whether `promise` has settled, and turns a rejection into its error. */
+  function track<T>(promise: Promise<T>) {
+    const state = { settled: false };
+    const result = promise.then(
+      (value) => ((state.settled = true), value),
+      (error: unknown) => ((state.settled = true), error),
+    );
+    return { state, result };
+  }
+
+  const files = [{ path: 'manifest.json', bytes: new TextEncoder().encode('{}') }];
+
+  it('gives up on a download after 30 s by default with a status-0 SwarmReadError', async () => {
+    vi.useFakeTimers();
+    const fetch = hangingFetch();
+    const client = createSwarmClient({ apiUrl, fetch });
+    const { state, result } = track(client.download(reference, 'manifest.json'));
+
+    expect(defaultReadTimeoutMs).toBe(30_000);
+    await vi.advanceTimersByTimeAsync(defaultReadTimeoutMs - 1);
+    expect(state.settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+
+    const error = await result;
+    expect(error).toBeInstanceOf(SwarmReadError);
+    expect(error).toMatchObject({ status: 0, endpoint: `GET /bzz/${reference}/manifest.json` });
+    expect((error as Error).message).toContain('timed out after 30000 ms');
+    expect(onlyCall(fetch).init.signal?.aborted).toBe(true);
+  });
+
+  it('takes the timeout from the client, and from the call over the client', async () => {
+    vi.useFakeTimers();
+    const client = createSwarmClient({ apiUrl, fetch: hangingFetch(), timeoutMs: 5_000 });
+
+    const fromClient = track(client.download(reference, 'manifest.json'));
+    const fromCall = track(client.download(reference, 'manifest.json', { timeoutMs: 1_000 }));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(fromCall.state.settled).toBe(true);
+    expect(fromClient.state.settled).toBe(false);
+    expect(((await fromCall.result) as Error).message).toContain('timed out after 1000 ms');
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(((await fromClient.result) as Error).message).toContain('timed out after 5000 ms');
+  });
+
+  it('cuts off a body that stalls after the headers arrive', async () => {
+    vi.useFakeTimers();
+    const stalled = new ReadableStream<Uint8Array>({ start: (c) => c.enqueue(new Uint8Array([1])) });
+    const { client } = mockClient(() => new Response(stalled, { status: 200 }));
+    const { result } = track(client.download(reference, 'manifest.json'));
+    await vi.advanceTimersByTimeAsync(defaultReadTimeoutMs);
+    expect(await result).toMatchObject({ name: 'SwarmReadError', status: 0 });
+  });
+
+  it('times out even when a custom fetch ignores the signal', async () => {
+    vi.useFakeTimers();
+    const client = createSwarmClient({ apiUrl, fetch: () => new Promise<Response>(() => {}) });
+    const { result } = track(client.download(reference, 'manifest.json'));
+    await vi.advanceTimersByTimeAsync(defaultReadTimeoutMs);
+    expect(await result).toMatchObject({ name: 'SwarmReadError', status: 0 });
+  });
+
+  it.each(['health', 'stamps', 'chainState', 'wallet', 'addresses'] as const)(
+    'gives up on %s after 30 s with a status-0 SwarmApiError',
+    async (method) => {
+      vi.useFakeTimers();
+      const client = createSwarmClient({ apiUrl, fetch: hangingFetch() });
+      const { state, result } = track<unknown>(client[method]());
+      await vi.advanceTimersByTimeAsync(defaultReadTimeoutMs - 1);
+      expect(state.settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      const error = await result;
+      expect(error).toBeInstanceOf(SwarmApiError);
+      expect(error).not.toBeInstanceOf(SwarmReadError);
+      expect(error).toMatchObject({ status: 0 });
+      expect((error as Error).message).toContain('timed out after 30000 ms');
+    },
+  );
+
+  it("stops when the caller's signal aborts, before or during the request", async () => {
+    const fetch = hangingFetch();
+    const client = createSwarmClient({ apiUrl, fetch });
+
+    const controller = new AbortController();
+    const during = client.download(reference, 'manifest.json', { signal: controller.signal }).catch((e: unknown) => e);
+    controller.abort();
+    const error = await during;
+    expect(error).toBeInstanceOf(SwarmReadError);
+    expect(error).toMatchObject({ status: 0 });
+    expect((error as Error).message).toContain('aborted by the caller');
+
+    await expect(client.health({ signal: AbortSignal.abort() })).rejects.toMatchObject({
+      name: 'SwarmApiError',
+      status: 0,
+      message: expect.stringContaining('aborted by the caller') as unknown,
+    });
+  });
+
+  it('leaves no timer behind once a request finishes', async () => {
+    vi.useFakeTimers();
+    const { client } = mockClient(() => new Response(new Uint8Array([1]), { status: 200 }));
+    await client.download(reference, 'manifest.json');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('gives uploads and buyStamp no default timeout, but honours one passed in', async () => {
+    vi.useFakeTimers();
+    let answer: (response: Response) => void = () => {};
+    const fetch = vi.fn<typeof globalThis.fetch>(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    const client = createSwarmClient({ apiUrl, fetch, timeoutMs: 1_000 });
+
+    const upload = track(client.uploadCollection(files, { batchId }));
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(upload.state.settled).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+    answer(jsonResponse({ reference }, 201));
+    expect(await upload.result).toEqual({ reference });
+
+    const stamp = track(client.buyStamp({ amount: 1n, depth: minDepth }));
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(stamp.state.settled).toBe(false);
+    answer(jsonResponse({ batchID: batchId }, 201));
+    expect(await stamp.result).toBe(batchId);
+
+    const hanging = createSwarmClient({ apiUrl, fetch: hangingFetch() });
+    const limited = track(hanging.uploadCollection(files, { batchId, timeoutMs: 120_000 }));
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(await limited.result).toMatchObject({ name: 'SwarmApiError', status: 0, endpoint: 'POST /bzz' });
+  });
+
+  it('turns the timeout off with Infinity', async () => {
+    vi.useFakeTimers();
+    const client = createSwarmClient({ apiUrl, fetch: hangingFetch(), timeoutMs: Infinity });
+    const { state } = track(client.health());
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    expect(state.settled).toBe(false);
+  });
+
+  it('refuses a timeout that is not a positive number setTimeout can wait for', async () => {
+    for (const timeoutMs of [0, -1, Number.NaN, 2 ** 31]) {
+      expect(() => createSwarmClient({ apiUrl, timeoutMs })).toThrow(RangeError);
+    }
+    const { client, fetch } = mockClient(() => new Response(null, { status: 200 }));
+    await expect(client.download(reference, 'manifest.json', { timeoutMs: 0 })).rejects.toThrow(RangeError);
     expect(fetch).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createBackupCache, withBackup, type BackupRowSource, type BackupSource } from './backup';
+import type { ChainData } from './checks';
 import { buildWorld, examId, registryAddress, type World } from './fixtures';
+import { loadRecords } from './load';
+import { runProof } from './proof';
 
 const writer = '0x1111111111111111111111111111111111111111';
 const ref = (n: number) => n.toString(16).padStart(2, '0').repeat(32);
@@ -58,7 +61,7 @@ describe('the Swarm backup', () => {
     }
     expect(backup.rows.backupRows).not.toHaveBeenCalled();
     expect(swarm.download).not.toHaveBeenCalled();
-    expect(storage.use()).toEqual({ served: [], missed: [], ignored: { collections: 0, files: 0 } });
+    expect(storage.use()).toEqual({ served: [], missed: [], ignored: { collections: 0, files: 0 }, rejected: [] });
   });
 
   it('serves a file the bucket lost from a backup whose manifest matches the Build', async () => {
@@ -111,6 +114,7 @@ describe('the Swarm backup', () => {
       served: [],
       missed: [{ name: 'paper.bin', kind: 'none', reason: 'No backup that passed its check holds this file' }],
       ignored: { collections: 2, files: 0 },
+      rejected: [],
     });
   });
 
@@ -134,15 +138,18 @@ describe('the Swarm backup', () => {
     expect(await storage.get('paper.bin')).toEqual(bytes('tampered'));
   });
 
-  it('serves unlock files only from an unlock backup, for the page to check', async () => {
+  it('serves unlock files only from an unlock backup, and only once they pass the check given', async () => {
     const world = await buildWorld();
     const swarm = swarmWith({ [ref(1)]: world.files, [ref(2)]: world.files });
-    const backup = source([row(world, 2, { phase: 'build' })], swarm);
+    const pass = (bytes: Uint8Array) => Promise.resolve({ pass: true, value: bytes });
     const lost = { 'release-log.json': null, 'key-priv.tlock': null };
-    expect(await withBackup(world.storage(lost), backup, world.build).get('release-log.json')).toBeNull();
+    const buildOnly = withBackup(world.storage(lost), source([row(world, 2, { phase: 'build' })], swarm), world.build);
+    expect(await buildOnly.checked('release-log.json', pass)).toBeNull();
     const storage = withBackup(world.storage(lost), source([row(world, 1), row(world, 2, { phase: 'build' })], swarm), world.build);
-    expect(await storage.get('release-log.json')).toEqual(world.files.get('release-log.json'));
+    expect(await storage.checked('release-log.json', pass)).toEqual(world.files.get('release-log.json'));
     expect(storage.use().served[0]).toMatchObject({ name: 'release-log.json', inManifest: false, swarmRef: ref(1) });
+    // A plain read never takes an unlock file from a backup, since nothing there has checked it.
+    expect(await storage.get('key-priv.tlock')).toBeNull();
   });
 
   it('says a backup was not read, and gives the bucket answer, when Swarm or Arkiv does not answer', async () => {
@@ -190,5 +197,125 @@ describe('the Swarm backup', () => {
       [ref(1), 'manifest.json'],
       [ref(1), 'paper.bin'],
     ]);
+  });
+});
+
+describe('unlock files from the Swarm backup', () => {
+  const chainOf = (w: World): ChainData =>
+    ({ exam: w.exam, build: w.build, list: { listHash: w.build.approvedListHash }, criteria: w.criteriaHex, entries: w.entriesHex }) as ChainData;
+  const proof = (w: World, storage: Parameters<typeof runProof>[0]['storage']) =>
+    runProof({ storage, examId, exam: w.exam, build: w.build, criteria: w.criteriaHex, currentRound: 1000, now: 2_000_000_000, client: w.client });
+  /** The world's files with some replaced, as a backup collection. */
+  const withFiles = (w: World, replace: Record<string, Uint8Array>) => new Map([...w.files, ...Object.entries(replace)]);
+
+  it('skips a junk key-priv.tlock in the newest backup and opens the paper with an older one', async () => {
+    const world = await buildWorld();
+    const swarm = swarmWith({ [ref(2)]: withFiles(world, { 'key-priv.tlock': bytes('junk') }), [ref(1)]: world.files });
+    const storage = withBackup(world.storage({ 'key-priv.tlock': null }), source([row(world, 2), row(world, 1)], swarm), world.build);
+    const result = await proof(world, storage);
+    if (result.state !== 'opened') throw new Error(`expected opened, got ${result.state}`);
+    expect(Object.values(result.checks)).toEqual(Array(7).fill('pass'));
+    const use = storage.use();
+    expect(use.served).toEqual([expect.objectContaining({ name: 'key-priv.tlock', swarmRef: ref(1), entityKey: row(world, 1).entityKey, bucket: 'missing' })]);
+    expect(use.rejected).toEqual([{ name: 'key-priv.tlock', swarmRef: ref(2), entityKey: row(world, 2).entityKey, reason: expect.any(String) as string }]);
+    expect(use.missed).toEqual([]);
+  });
+
+  it('skips a key-priv.tlock that opens to another paper, since only the salted hash proves the key', async () => {
+    const world = await buildWorld();
+    const wrong = new TextEncoder().encode(await world.seal(new Uint8Array(32).fill(7)));
+    const swarm = swarmWith({ [ref(2)]: withFiles(world, { 'key-priv.tlock': wrong }), [ref(1)]: world.files });
+    const storage = withBackup(world.storage({ 'key-priv.tlock': null }), source([row(world, 2), row(world, 1)], swarm), world.build);
+    expect((await proof(world, storage)).state).toBe('opened');
+    expect(storage.use().rejected.map((copy) => copy.swarmRef)).toEqual([ref(2)]);
+  });
+
+  it('is only "not read", never a failure, when every backup copy of key-priv.tlock is junk', async () => {
+    const world = await buildWorld();
+    const junk = withFiles(world, { 'key-priv.tlock': bytes('junk') });
+    const swarm = swarmWith({ [ref(2)]: junk, [ref(1)]: junk });
+    const storage = withBackup(world.storage({ 'key-priv.tlock': null }), source([row(world, 2), row(world, 1)], swarm), world.build);
+    // As if the backup were not there: the bucket has no key-priv.tlock, so the paper stays sealed.
+    expect(await proof(world, storage)).toEqual({ state: 'sealed' });
+    const use = storage.use();
+    expect(use.served).toEqual([]);
+    expect(use.rejected.map((copy) => copy.swarmRef)).toEqual([ref(2), ref(1)]);
+    expect(use.missed).toEqual([
+      { name: 'key-priv.tlock', kind: 'not-read', reason: '2 copies in the backup did not pass the checks in this step, so none was used.' },
+    ]);
+  });
+
+  it("still fails the bucket's own junk key-priv.tlock, and reads no backup for it", async () => {
+    const world = await buildWorld();
+    const swarm = swarmWith({ [ref(1)]: world.files });
+    const backup = source([row(world, 1)], swarm);
+    const storage = withBackup(world.storage({ 'key-priv.tlock': bytes('junk') }), backup, world.build);
+    expect(await proof(world, storage)).toMatchObject({ state: 'failed', step: 'timelock' });
+    expect(storage.use()).toEqual({ served: [], missed: [], ignored: { collections: 0, files: 0 }, rejected: [] });
+    expect(swarm.download).not.toHaveBeenCalled();
+  });
+
+  it('skips a junk release-log.json in the newest backup and uses the older one, with its token', async () => {
+    const world = await buildWorld();
+    const swarm = swarmWith({ [ref(2)]: withFiles(world, { 'release-log.json': bytes('{"not": "a log"}') }), [ref(1)]: world.files });
+    for (const lost of [{ 'release-log.json': null }, { 'release-log.json': null, 'release-token.jwt': null }]) {
+      const records = await loadRecords({
+        chain: () => Promise.resolve(chainOf(world)),
+        storage: world.storage(lost),
+        examId,
+        registry: registryAddress,
+        backup: source([row(world, 2), row(world, 1)], swarm),
+        trustedRoot: world.pki.root,
+      });
+      if (records.log.kind !== 'ready') throw new Error(`expected a log, got ${records.log.kind}`);
+      expect(records.log.verdict).toMatchObject({ examId: 'pass', entriesHash: 'pass', signature: 'pass' });
+      expect(records.log.token?.verified).toBe(true);
+      const use = records.backup;
+      expect(use?.served.find((file) => file.name === 'release-log.json')?.swarmRef).toBe(ref(1));
+      expect(use?.rejected).toEqual([
+        { name: 'release-log.json', swarmRef: ref(2), entityKey: row(world, 2).entityKey, reason: 'release-log.json does not have the release log shape.' },
+      ]);
+      // The token is reported only for the log that was used, so ref(2)'s honest token is never "rejected".
+      if ('release-token.jwt' in lost) expect(use?.served.find((file) => file.name === 'release-token.jwt')?.swarmRef).toBe(ref(2));
+    }
+  });
+
+  it('skips a backup release log that no token attests', async () => {
+    const world = await buildWorld();
+    const forged = { ...world.releaseLog, teeSignature: `0x${'00'.repeat(64)}` };
+    const swarm = swarmWith({ [ref(2)]: withFiles(world, { 'release-log.json': bytes(JSON.stringify(forged)) }), [ref(1)]: world.files });
+    const records = await loadRecords({
+      chain: () => Promise.resolve(chainOf(world)),
+      storage: world.storage({ 'release-log.json': null }),
+      examId,
+      registry: registryAddress,
+      backup: source([row(world, 2), row(world, 1)], swarm),
+      trustedRoot: world.pki.root,
+    });
+    if (records.log.kind !== 'ready') throw new Error(`expected a log, got ${records.log.kind}`);
+    expect(records.log.verdict.signature).toBe('pass');
+    expect(records.backup?.rejected.map((copy) => copy.swarmRef)).toEqual([ref(2)]);
+  });
+
+  it("is neutral when every backup release log is junk, and still fails the bucket's own junk log", async () => {
+    const world = await buildWorld();
+    const junk = withFiles(world, { 'release-log.json': bytes('junk') });
+    const read = (bucket: Record<string, Uint8Array | null>, collections: Record<string, Map<string, Uint8Array>>) =>
+      loadRecords({
+        chain: () => Promise.resolve(chainOf(world)),
+        storage: world.storage(bucket),
+        examId,
+        registry: registryAddress,
+        backup: source([row(world, 2), row(world, 1)], swarmWith(collections)),
+        trustedRoot: world.pki.root,
+      });
+    const allJunk = await read({ 'release-log.json': null }, { [ref(2)]: junk, [ref(1)]: junk });
+    expect(allJunk.log.kind).toBe('neutral');
+    expect(allJunk.backup?.missed).toEqual([expect.objectContaining({ name: 'release-log.json', kind: 'not-read' })]);
+    expect(allJunk.backup?.rejected).toHaveLength(2);
+
+    const badBucket = await read({ 'release-log.json': bytes('junk') }, { [ref(2)]: world.files, [ref(1)]: world.files });
+    expect(badBucket.log).toEqual({ kind: 'malformed', message: 'release-log.json is not valid JSON.' });
+    expect(badBucket.backup?.served).toEqual([]);
   });
 });

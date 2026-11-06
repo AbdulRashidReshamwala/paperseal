@@ -42,6 +42,12 @@ export interface BackupTarget {
   examId: Hex;
   registry: Address;
   storageUrl: string;
+  /**
+   * The exam's storage bucket: the `STORAGE_BUCKET` the release token's `env_override` must name.
+   * `--bucket`, else the bucket in a `storage.googleapis.com` `--storage` URL, else unknown, and an
+   * `unlock` backup is refused.
+   */
+  bucket: { name: string; source: '--bucket' | '--storage' } | undefined;
   /** 64 lowercase hex characters, no `0x`. */
   batchId: string;
   /** Undefined: `unlock` if storage has `release-log.json`, else `build`. */
@@ -93,10 +99,13 @@ export const usage = `Paper Seal relay: mirrors an exam's public unlock evidence
       approved lists to the Arkiv exam index. --every repeats it from the last block scanned.
       Sepolia RPC: --rpc, else RELAY_SEPOLIA_RPC, else ${defaultSepoliaRpc}.
   node relay/cli.mjs backup --exam <examId> --registry <address> --storage <url> --batch <batchId>
-                            [--phase build|unlock] [--swarm <bee api>] [--rpc <sepolia url>] [--dry-run]
-      Checks the exam's storage files against the Build's storageManifestHash on Sepolia, uploads
-      them to Swarm as one collection and writes a paperseal.v1.backup row. Phase defaults to
-      unlock if storage has release-log.json, else build. --dry-run stops after the checks.
+                            [--bucket <name>] [--phase build|unlock] [--swarm <bee api>] [--rpc <sepolia url>] [--dry-run]
+      Checks the exam's storage files against the Build's storageManifestHash on Sepolia, and the
+      unlock files as readers do (release token, signed release log, timelock round, key-priv
+      sizes), uploads them to Swarm as one collection and writes a paperseal.v1.backup row. Phase
+      defaults to unlock once storage has every unlock file, else build. --bucket is the exam's
+      STORAGE_BUCKET, which defaults to the bucket in a storage.googleapis.com --storage URL.
+      --dry-run stops after the checks.
   node relay/cli.mjs swarm-status [--swarm <bee api>]
       Read-only: the Bee node's health, address, wallet, price and postage batches, and what a
       depth-${String(recommendedBatch.depth)}, ${String(recommendedBatch.days)}-day batch would cost.
@@ -198,6 +207,21 @@ export function parseBatchId(value: string | undefined): string {
   return bare.toLowerCase();
 }
 
+const bucketName = /^[a-z0-9][a-z0-9._-]{1,220}[a-z0-9]$/;
+
+/** `--bucket`, else the bucket a `https://storage.googleapis.com/<bucket>` URL names, else undefined. */
+export function parseBucket(value: string | undefined, storageUrl: string): BackupTarget['bucket'] {
+  if (value !== undefined) {
+    if (!bucketName.test(value)) throw new UsageError(`--bucket must be a storage bucket name, got ${JSON.stringify(value)}`);
+    return { name: value, source: '--bucket' };
+  }
+  const url = new URL(storageUrl);
+  let name: string | undefined;
+  if (url.hostname === 'storage.googleapis.com') name = url.pathname.split('/').filter(Boolean)[0];
+  else if (url.hostname.endsWith('.storage.googleapis.com')) name = url.hostname.slice(0, -'.storage.googleapis.com'.length);
+  return name !== undefined && bucketName.test(name) ? { name, source: '--storage' } : undefined;
+}
+
 export function parsePhase(value: string | undefined): BackupPhase | undefined {
   if (value === undefined) return undefined;
   if (!(backupPhases as readonly string[]).includes(value)) throw new UsageError(`--phase must be ${backupPhases.join(' or ')}, got ${JSON.stringify(value)}`);
@@ -217,6 +241,7 @@ const backupFlags = {
   exam: { type: 'string' },
   registry: { type: 'string' },
   storage: { type: 'string' },
+  bucket: { type: 'string' },
   batch: { type: 'string' },
   phase: { type: 'string' },
   swarm: { type: 'string' },
@@ -231,6 +256,7 @@ function backupTarget(values: Partial<Record<Exclude<keyof typeof backupFlags, '
     examId: parseExamId(values.exam),
     registry: parseAddress('--registry', values.registry),
     storageUrl,
+    bucket: parseBucket(values.bucket, storageUrl),
     batchId: parseBatchId(values.batch),
     phase: parsePhase(values.phase),
     swarm: swarmApi(values.swarm, env),
