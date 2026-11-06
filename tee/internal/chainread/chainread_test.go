@@ -56,7 +56,7 @@ type chain struct {
 	entries     []byte
 	listHash    [32]byte
 	logBlock    uint64 // the block the log is served in
-	code        string // the eth_getCode result, the live contract's by default
+	code        string // the eth_getCode result, the sample code by default
 	codeErr     bool   // eth_getCode answers with an RPC error
 	extraLogs   int
 	removedLogs int // 1: the node serves only a removed log. 2: a removed log, then the real one.
@@ -69,7 +69,7 @@ type chain struct {
 const createdBlock, postedBlock = 1000, 2000
 
 func newChain(t *testing.T, exam settings.Exam) *chain {
-	c := &chain{t: t, exam: exam, chainID: "0xaa36a7", code: liveCode(t).Code, createdAt: 5, criteria: []byte("criteria-bytes"), entries: []byte("entries-bytes"), logBlock: postedBlock}
+	c := &chain{t: t, exam: exam, chainID: "0xaa36a7", code: sampleCode(t).Code, createdAt: 5, criteria: []byte("criteria-bytes"), entries: []byte("entries-bytes"), logBlock: postedBlock}
 	c.exampleSig = make([]byte, 64)
 	return c
 }

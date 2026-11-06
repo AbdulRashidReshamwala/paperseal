@@ -12,48 +12,46 @@ import (
 	"paperseal/tee/internal/spec"
 )
 
-type liveRegistry struct {
-	Address string `json:"address"`
-	Board   string `json:"board"`
-	Code    string `json:"code"`
+type sampleRegistry struct {
+	Board string `json:"board"`
+	Code  string `json:"code"`
 }
 
-// liveCode is the deployed ExamRegistry, read from Sepolia with `cast code`.
-func liveCode(t *testing.T) liveRegistry {
+// sampleCode is the current build with a sample board, which `make abi` writes.
+func sampleCode(t *testing.T) sampleRegistry {
 	t.Helper()
 	raw, err := os.ReadFile("../../../spec/fixtures/registry-code.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var l liveRegistry
+	var l sampleRegistry
 	if err := json.Unmarshal(raw, &l); err != nil {
 		t.Fatal(err)
 	}
 	return l
 }
 
-func liveBytes(t *testing.T) []byte {
+func sampleBytes(t *testing.T) []byte {
 	t.Helper()
-	b, err := hex.DecodeString(strings.TrimPrefix(liveCode(t).Code, "0x"))
+	b, err := hex.DecodeString(strings.TrimPrefix(sampleCode(t).Code, "0x"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return b
 }
 
-// The pin must match the live contract, whose metadata differs from a new build.
-func TestBoardFromCodeMatchesTheLiveContract(t *testing.T) {
-	board, err := BoardFromCode(liveBytes(t))
+func TestBoardFromCodeReadsTheBoard(t *testing.T) {
+	board, err := BoardFromCode(sampleBytes(t))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := "0x"+hex.EncodeToString(board[:]), strings.ToLower(liveCode(t).Board); got != want {
+	if got, want := "0x"+hex.EncodeToString(board[:]), strings.ToLower(sampleCode(t).Board); got != want {
 		t.Fatalf("board %s, want %s", got, want)
 	}
 }
 
 func TestBoardFromCodeIgnoresOnlyTheMetadata(t *testing.T) {
-	code := liveBytes(t)
+	code := sampleBytes(t)
 	metadata := int(code[len(code)-2])<<8 + int(code[len(code)-1]) + 2
 	first := len(code) - metadata
 
@@ -89,7 +87,7 @@ func TestBoardFromCodeRefusesBadBoardWords(t *testing.T) {
 		},
 	}
 	for name, change := range cases {
-		code := liveBytes(t)
+		code := sampleBytes(t)
 		change(code)
 		if _, err := BoardFromCode(code); !errors.Is(err, ErrWrongRegistry) {
 			t.Errorf("%s: %v", name, err)

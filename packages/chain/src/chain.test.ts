@@ -443,6 +443,16 @@ describe('sync-abi.mjs', () => {
     expect(source).toContain('boardOffsets: [2, 38]');
   });
 
+  it('writes a sample of matching code when given a path for it', () => {
+    const artifact = join(dir, 'sample.json');
+    const sample = join(dir, 'sample-code.json');
+    writeFileSync(artifact, JSON.stringify({ abi, deployedBytecode: deployedBytecode({ 7: [{ start: 2, length: 32 }] }) }));
+    expect(spawnSync('node', [script, artifact, output, pin, sample], { encoding: 'utf8' }).status).toBe(0);
+    const { board, code: filled } = JSON.parse(readFileSync(sample, 'utf8')) as { board: string; code: string };
+    expect(filled.slice(4, 68)).toBe(board.slice(2).padStart(64, '0'));
+    expect(filled.length).toBe(code.length);
+  });
+
   it('writes the pin over the executable code only, with the board words zeroed', () => {
     const references = { 7: [{ start: 38, length: 32 }, { start: 2, length: 32 }] };
     const hashed = (object: string) => {

@@ -59,7 +59,7 @@ An address on its own doesn't show that a contract is `ExamRegistry`, so every r
 
 A reader takes the bytes `eth_getCode` returns, then:
 
-1. Removes the CBOR metadata that solc appends. Its length is the code's last two bytes, big-endian, plus those two bytes. It never runs, and it hashes the source including comments, so a comment edit would otherwise change the pin. The live contract was built from older comments, so its metadata differs from a new build and only its executable code matches.
+1. Removes the CBOR metadata that solc appends. Its length is the code's last two bytes, big-endian, plus those two bytes. It never runs, and it hashes the source including comments, so a comment edit would otherwise change the pin. A contract built from older comments has different metadata, and its executable code still matches.
 2. Checks that `executableBytes` bytes remain.
 3. Checks that every `board` word holds the same value, and that the value is a non-zero address left-padded with zeros. That address is the board.
 4. Zeroes those words, and compares the SHA-256 of the result with `runtimeCodeHash`.
@@ -68,7 +68,7 @@ The TEE reads the code at the `chain.readBlock` block, once, before it trusts an
 
 The verifier makes the same check on every read of the public record, and fails the exam's first step if the code differs or is missing. It reads nothing else from that address, and it shows the board address the code holds. The Exam Names check uses the same pin.
 
-A redeploy needs `make abi`, a new TEE release, and a new `spec/fixtures/registry-code.json`, the deployed code that the tests compare with the pin. Code can't show how storage was set at deployment. See the note in Exam Names, check 2.
+After a change to the contract's code, `make abi` updates the pin, its copy in the TEE and `spec/fixtures/registry-code.json`, the sample code the tests use. The pin is in the attested image, so it also needs a new TEE release. `node e2e/live/cli.mjs registry-check` compares the deployed contract with the pin, read-only. Code can't show how storage was set at deployment. See the note in Exam Names, check 2.
 
 ## TEE Releases
 

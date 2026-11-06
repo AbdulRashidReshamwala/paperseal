@@ -3,6 +3,7 @@ import {
   ContractFunctionRevertedError,
   custom,
   encodeErrorResult,
+  getAddress,
   HttpRequestError,
   parseAbi,
   RpcRequestError,
@@ -29,7 +30,7 @@ import {
 const name = 'jee-main-2026.paperseal-mumbai.eth';
 const parent = 'paperseal-mumbai.eth';
 const examId: Hex = '0xa8ec8fb4eda3d90b6190127d877227895bcd634a849e7f3a355311ed10637556';
-import deployedRegistry from '../../../spec/fixtures/registry-code.json';
+import sampleCode from '../../../spec/fixtures/registry-code.json';
 
 const registry: Address = '0x00000000000000000000000000000000000000aa';
 const board: Address = '0x00000000000000000000000000000000000000bB';
@@ -82,13 +83,16 @@ const needsGateway = () =>
   );
 
 describe('the code pin in spec/registry.json', () => {
-  const live = deployedRegistry as { address: Address; board: Address; code: Hex };
+  const sample = sampleCode as { board: Address; code: Hex };
+  const sampleBoard = getAddress(sample.board);
 
-  it('matches the live contract, whose metadata differs from a fresh build', () => {
-    expect(examRegistryBoard(live.code)).toBe(live.board);
-    expect(isExamRegistryCode(live.code, live.board)).toBe(true);
-    expect(checkRegistryCode(live.code)).toEqual({ state: 'match', board: live.board });
-    expect(live.code.slice(-106)).not.toBe(examRegistryRuntime.bytecode.slice(-106));
+  it('matches the code `make abi` wrote, and ignores its metadata', () => {
+    expect(examRegistryBoard(sample.code)).toBe(sampleBoard);
+    expect(isExamRegistryCode(sample.code, sampleBoard)).toBe(true);
+    expect(checkRegistryCode(sample.code)).toEqual({ state: 'match', board: sampleBoard });
+    // A build from other comments differs only in the metadata's hash, near the end of the code.
+    const flipped = `${sample.code.slice(0, -40)}${sample.code.slice(-40, -38) === '00' ? 'ff' : '00'}${sample.code.slice(-38)}` as Hex;
+    expect(examRegistryBoard(flipped)).toBe(sampleBoard);
   });
 
   it('matches the code `make abi` generated, and any board', () => {
@@ -106,10 +110,10 @@ describe('the code pin in spec/registry.json', () => {
   it('refuses code whose board words disagree, or do not hold an address', () => {
     const [first] = registryPin.boardOffsets;
     const at = 2 + (first ?? 0) * 2;
-    const word = (digits: string) => (live.code.slice(0, at) + digits + live.code.slice(at + 64)) as Hex;
+    const word = (digits: string) => (sample.code.slice(0, at) + digits + sample.code.slice(at + 64)) as Hex;
     expect(examRegistryBoard(word(`${'0'.repeat(24)}${'ab'.repeat(20)}`))).toBeNull();
     expect(examRegistryBoard(word('ff'.repeat(32)))).toBeNull();
-    let dirty: string = live.code;
+    let dirty: string = sample.code;
     for (const offset of registryPin.boardOffsets) dirty = `${dirty.slice(0, 2 + offset * 2)}ff${dirty.slice(4 + offset * 2)}`;
     expect(examRegistryBoard(dirty as Hex)).toBeNull();
   });
