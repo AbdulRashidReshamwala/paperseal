@@ -35,7 +35,7 @@ export function ReviewStep(props: { eyebrow: string; releases: Releases; onBack:
     if (!request) return;
     // The lock time may have passed while this page was open.
     if (!evaluateSchedule(scheduleInput).settings) {
-      setProgress({ state: 'failed', message: 'The schedule is no longer valid. Go back and choose new times.' });
+      setProgress({ state: 'failed', message: 'These times are no longer possible. Go back and choose new times.' });
       return;
     }
     setProgress({ state: 'running', stage: 'checking' });
@@ -61,7 +61,7 @@ export function ReviewStep(props: { eyebrow: string; releases: Releases; onBack:
       eyebrow={props.eyebrow}
       title="Review and publish"
       lede={
-        <strong>Everything here is written once and cannot be changed afterwards, not even by the board.</strong>
+        <strong>Once you publish, nothing here can be changed, not even by the exam board.</strong>
       }
       action={
         <>
@@ -80,10 +80,10 @@ export function ReviewStep(props: { eyebrow: string; releases: Releases; onBack:
               ))}
               {criteria && needs ? (
                 <Row label="Question bank">
-                  At least {needs.questions} questions, with no setter above {criteria.maxSetterPercent}% of a topic
+                  At least {needs.questions} questions in total, and no setter writes more than {criteria.maxSetterPercent}% of a topic
                 </Row>
               ) : null}
-              {fields ? <Row label="Sealed machine version">{fields.version}</Row> : null}
+              {fields ? <Row label="Paper Seal version">{fields.version}</Row> : null}
             </Rows>
           </div>
           {problem ? <Problem>{problem}</Problem> : null}
@@ -98,7 +98,7 @@ export function ReviewStep(props: { eyebrow: string; releases: Releases; onBack:
           </PrimaryAction>
         </>
       }
-      next="Your wallet asks you to confirm once. Then you bring people in."
+      next="Your wallet asks you to confirm once. Then you invite the people who take part."
     >
       {request ? (
         <Fold summary="Exam record">
@@ -118,17 +118,17 @@ export function ReviewStep(props: { eyebrow: string; releases: Releases; onBack:
             <Row label="Image digest">
               <Hash value={request.fields.imageDigest} label="image digest" />
             </Row>
-            <Row label="Public record provider">
+            <Row label="Public record address">
               <span className="ps-mono">{request.fields.rpcHost}</span>
             </Row>
             <Row label="Exam start">
               {formatClock(request.schedule.examStart)} ({request.schedule.examStart})
             </Row>
-            <Row label="Delta, T−Δ">{request.schedule.delta} seconds</Row>
+            <Row label="Released before the start">{request.schedule.delta} seconds</Row>
             <Row label="Lock round">{request.schedule.lockRound}</Row>
             <Row label="Unlock round">{request.schedule.unlockRound}</Row>
             <Row label="End round">{request.schedule.endRound}</Row>
-            <Row label="Criteria hash">
+            <Row label="Topics fingerprint">
               <Hash value={request.criteria.hash} label="criteria hash" />
             </Row>
           </Rows>

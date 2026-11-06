@@ -13,6 +13,7 @@ import { CreateStep } from './CreateStep';
 import { decideStep, readSnapshot, type Snapshot } from './examState';
 import { usePoll } from './hooks';
 import { PeopleStep } from './PeopleStep';
+import { Fold } from './Parts';
 import { draftScreen, plainWords } from './plan';
 import type { PublishEnvironment } from './publishFlow';
 import { evaluatePublish } from './form';
@@ -97,8 +98,16 @@ function useExamState() {
   return { examId, reader, ...poll };
 }
 
-function Waiting(props: { title: string; lede?: string; next: string }) {
-  return <Stage title={props.title} {...(props.lede ? { lede: props.lede } : {})} next={props.next} />;
+function Waiting(props: { title: string; lede?: string; next: string; details?: string }) {
+  return (
+    <Stage title={props.title} {...(props.lede ? { lede: props.lede } : {})} next={props.next}>
+      {props.details ? (
+        <Fold summary="Details">
+          <p className="ps-mono">{props.details}</p>
+        </Fold>
+      ) : null}
+    </Stage>
+  );
 }
 
 /** One screen, chosen by the exam's state. `route` only asks for a new exam, or for its review. */
@@ -132,21 +141,23 @@ function BoardFlow(props: { route?: 'draft' | 'review' }) {
   if (!reader) {
     return page(
       <Waiting
-        title="This page cannot read the public record"
-        lede="Set VITE_RPC_URL and VITE_REGISTRY_ADDRESS to connect it."
-        next="The exam shows here once the public record can be read."
+        title="This page is not ready to use yet"
+        lede="Ask whoever installed Paper Seal to finish setting it up."
+        next="Come back once they have. It is safe to close this page."
+        details="The page needs VITE_RPC_URL and VITE_REGISTRY_ADDRESS to be set."
       />,
     );
   }
   if (!value) {
     return page(
       pending ? (
-        <Waiting title="Reading the exam from the public record" next="The next step for this exam shows here." />
+        <Waiting title="Loading your exam" next="The next step appears here by itself. It is safe to close this page." />
       ) : (
         <Waiting
-          title="The public record cannot be read right now"
-          {...(problem ? { lede: plainWords(problem) } : {})}
-          next="This page keeps trying, and moves on by itself."
+          title="Your exam cannot be loaded right now"
+          lede="Check your internet connection. You do not need to do anything else."
+          next="This page tries again by itself. It is safe to close it and come back later."
+          {...(problem ? { details: plainWords(problem) } : {})}
         />
       ),
     );

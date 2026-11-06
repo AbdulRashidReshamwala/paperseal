@@ -1,6 +1,7 @@
 import { Button, Check, Hash, PrimaryAction, Row, Rows, Stage } from '@paperseal/ui';
 
 import { isRunUrlOf, type TeeReleasesError } from '../../shared/teeReleases';
+import { withDetails } from './details';
 import { Fold, Problem } from './Parts';
 import type { Releases } from './releases';
 
@@ -9,8 +10,8 @@ function Unreachable(props: { error: TeeReleasesError; retry: () => void }) {
     <>
       <Problem>
         {props.error.kind === 'rate_limited'
-          ? 'GitHub is limiting requests from this browser, so the versions could not be checked. Publishing is blocked until GitHub answers.'
-          : 'GitHub could not be reached, so the versions could not be checked. Publishing is blocked until GitHub answers.'}
+          ? 'The versions could not be loaded because the service is busy. Wait a few minutes, then press Try again.'
+          : 'The versions could not be loaded. Check your internet connection, then press Try again.'}
       </Problem>
       <div className="board-section">
         <Button onClick={props.retry}>Try again</Button>
@@ -33,18 +34,18 @@ export function VersionStep(props: {
   const hasReleases = list.state === 'ready' && list.releases.length > 0;
   const lede =
     list.state === 'loading'
-      ? 'Loading the published versions from GitHub.'
+      ? 'Loading the available versions.'
       : list.state === 'ready' && list.releases.length === 0
-        ? 'There are no versions yet. A version must be tagged first: push a tag like v1.0.0 and wait for the build workflow to publish its release.'
+        ? 'There is no version to use yet. Ask whoever looks after Paper Seal to publish one, then come back.'
         : verified
-          ? `${verified.version} is ${chosen ? 'the version you chose' : 'the newest published version'}, and its tag points at the commit its release names.`
+          ? `Version ${verified.version} is ${chosen ? 'the version you chose' : 'the newest version'}. It has been checked and is ready to use.`
           : status?.state === 'checking'
-            ? `Checking that the tag ${selected?.version ?? ''} points at the commit its release names.`
-            : 'No version can be used yet.';
+            ? `Checking version ${selected?.version ?? ''}.`
+            : 'No version can be used yet. Try again in a few minutes, or ask whoever looks after Paper Seal.';
   return (
     <Stage
       eyebrow={props.eyebrow}
-      title="Choose what the sealed machine runs"
+      title="Choose the Paper Seal version"
       lede={lede}
       action={
         <>
@@ -52,10 +53,13 @@ export function VersionStep(props: {
           {status?.state === 'failed' ? <Unreachable error={status.error} retry={releases.retry} /> : null}
           {mismatched.map(({ release, tagCommit }) => (
             <Problem key={release.version}>
-              {`Release mismatch: the tag ${release.version} points at commit ${tagCommit}, but the release notes say ${release.commit.slice(2)}. Do not use this version.`}
+              {withDetails(
+                `Version ${release.version} did not pass its check, so it cannot be used. Choose another version.`,
+                `The tag points at commit ${tagCommit}, but the release notes say ${release.commit.slice(2)}.`,
+              )}
             </Problem>
           ))}
-          {hasReleases && !selected ? <Problem>Publishing is blocked, because no version matches its tag.</Problem> : null}
+          {hasReleases && !selected ? <Problem>No version passed its check, so the exam cannot be published yet. Try again in a few minutes, or ask whoever looks after Paper Seal.</Problem> : null}
           <PrimaryAction disabled={!verified} onClick={props.onContinue}>
             {verified ? `Use ${verified.version}` : 'Use this version'}
           </PrimaryAction>
@@ -74,7 +78,7 @@ export function VersionStep(props: {
                 props.onChoose(event.target.value);
               }}
             >
-              <option value="">Newest that checks out</option>
+              <option value="">Newest checked version</option>
               {list.releases.map((release) => (
                 <option key={release.version} value={release.version}>
                   {release.version}
@@ -85,7 +89,7 @@ export function VersionStep(props: {
         </Fold>
       ) : null}
       {selected ? (
-        <Fold summary="Exam record">
+        <Fold summary="Version details">
           <Rows>
             <Row label="Version">{selected.version}</Row>
             <Row label="Commit">
@@ -97,14 +101,14 @@ export function VersionStep(props: {
             <Row label="Tag check">
               {status?.state === 'verified' ? <Check status="pass">The tag points at this commit</Check> : <Check status="pending" />}
             </Row>
-            <Row label="Build run">
+            <Row label="Release page">
               {isRunUrlOf(selected.run, repo) ? (
                 <a href={selected.run} target="_blank" rel="noreferrer">
                   {selected.run}
                 </a>
               ) : (
                 <>
-                  <Check status="not-checked">Not a workflow run of {repo}, so it is not linked.</Check> <span className="ps-mono">{selected.run}</span>
+                  <Check status="not-checked">This is not a run of {repo}, so it is not linked.</Check> <span className="ps-mono">{selected.run}</span>
                 </>
               )}
             </Row>
