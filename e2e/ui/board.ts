@@ -16,7 +16,7 @@ import { button, field, fold, hashOf, text, unfold } from './selectors';
  * those refusals are tested, and the posts themselves are driven in the live run.
  */
 
-const NAME = 'UI suite Physics Final';
+const NAME = 'ui-suite-physics-final';
 const pad = (n: number) => String(n).padStart(2, '0');
 const local = (d: Date) => `${String(d.getFullYear())}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
