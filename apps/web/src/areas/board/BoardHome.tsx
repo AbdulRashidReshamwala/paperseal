@@ -1,6 +1,6 @@
 import type { Hex } from '@paperseal/protocol';
 import { Button, Logo, Page, PrimaryAction, RoleHeader } from '@paperseal/ui';
-import { useCallback, useState, type ReactNode } from 'react';
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 
 import { useCurrentExamId } from '../../shared/currentExam';
@@ -12,6 +12,8 @@ import { listKnownExams } from './examsStore';
 import { useNow } from './hooks';
 import { useListSettled, useRowReads } from './homeReads';
 import { examStatus, homeRows, type HomeRow } from './homeStatus';
+import { examFinished, machineState, type ChainExam } from './machineVerdict';
+import { MachineRowStatus, useMachineRead, useMachineVerdicts } from './MachineCheck';
 import { formatWhen } from './plan';
 
 const examIdOf = (text: string): Hex | null => (/^0x[0-9a-fA-F]{64}$/.test(text.trim()) ? (text.trim().toLowerCase() as Hex) : null);
@@ -172,6 +174,17 @@ export function BoardHome() {
   const reads = useRowReads(examIds, reader ? load : null, TEE_STATUS_POLL_MS);
   const settled = useListSettled(examIds, reads, reader !== null);
 
+  // The machine is asked once for the whole list, and only while an exam on it can still need it.
+  const published = useMemo(() => {
+    const found = new Map<Hex, ChainExam>();
+    for (const [id, read] of reads) {
+      if (read.state === 'ready' && read.snapshot.found) found.set(id, read.snapshot.found.exam);
+    }
+    return found;
+  }, [reads]);
+  const { read: machine } = useMachineRead([...published.values()].some((exam) => !examFinished(exam, now)));
+  const verdicts = useMachineVerdicts(machine, published);
+
   const create = (
     <PrimaryAction
       onClick={() => {
@@ -259,6 +272,7 @@ export function BoardHome() {
         </div>
         <div className="board-home-status">
           <ExamPill snapshot={snapshot} failed={failed} now={now} />
+          {snapshot?.found ? <MachineRowStatus state={machineState(verdicts.get(exam.id) ?? null, snapshot.found.exam, now)} /> : null}
         </div>
         <div className="board-home-date">{settings ? `Exam on ${formatWhen(Number(settings.examStart))}` : null}</div>
         <div className="board-home-actions">
