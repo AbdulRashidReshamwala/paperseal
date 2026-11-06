@@ -32,9 +32,9 @@ Keep the printed address as `REGISTRY`. A new board address needs a new deployme
 git tag v0.1.0 && git push origin v0.1.0
 ```
 
-`.github/workflows/repro.yml` builds the image twice on clean runners. If the digests match, the release job pushes the image by digest to `ghcr.io/abdulrashidreshamwala/paperseal-tee` (no tag), checks the registry holds the same digest, checks an anonymous pull works, then publishes the GitHub release.
+`.github/workflows/repro.yml` builds the image twice on clean runners. If the digests match, the release job pushes the image by digest to `ghcr.io/<owner>/paperseal-tee` (no tag), checks the registry holds the same digest, checks an anonymous pull works, then publishes the GitHub release. `<owner>` is your repository's owner in lowercase, so a fork publishes its own image without editing anything (upstream's is `ghcr.io/abdulrashidreshamwala/paperseal-tee`). The GCP scripts default `IMAGE_REPO` to the same name, read from your `origin` remote; export `IMAGE_REPO` to use another image. A fork's image has a different digest, so it needs its own release.
 
-A new GHCR package starts private and Actions cannot change that. The first time, open the package's settings on GitHub, set visibility to public, and re-run the release job. Then read the release notes: they hold `commit` and `imageDigest` for `createExam`, and the image reference as `ghcr.io/abdulrashidreshamwala/paperseal-tee@sha256:<digest>`.
+A new GHCR package starts private and Actions cannot change that. The first time, open the package's settings on GitHub, set visibility to public, and re-run the release job. Then read the release notes: they hold `commit` and `imageDigest` for `createExam`, and the image reference as `ghcr.io/<owner>/paperseal-tee@sha256:<digest>`.
 
 ## 3. Google Cloud
 
@@ -70,9 +70,9 @@ Estimated cost of one `n2d-standard-2` Confidential VM in `asia-south2` running 
 
 **Stop the VM after a demo:** `./stop-tee.sh`. Stopping ends the instance, so its in-memory question bank and keys are gone. Only stop it once the exam is released. The static IP is billed while reserved. `./teardown.sh` removes everything (VM, firewall rule, IP, bucket with all its files, service account). It prints the list and needs you to type the project ID.
 
-## 4. DNS: `tee.abdulrashid.dev`
+## 4. DNS: `<your-tee-host>`
 
-In Cloudflare, add an `A` record `tee` pointing to the static IP, with the proxy on (orange cloud). The TEE serves HTTPS on port 8080 with a self-signed certificate it generates in memory at startup, so keep the zone's SSL/TLS encryption mode on **Full** (not Full strict, which would reject that certificate, and not Flexible, which would use plain HTTP). Add a Cloudflare Origin Rule (rewrite destination port to 8080) because Cloudflare otherwise connects to the origin on 443.
+Pick a host in a zone you control, such as `tee.example.org` (the upstream demo uses `tee.abdulrashid.dev`). In Cloudflare, add an `A` record for it pointing to the static IP, with the proxy on (orange cloud). The TEE serves HTTPS on port 8080 with a self-signed certificate it generates in memory at startup, so keep the zone's SSL/TLS encryption mode on **Full** (not Full strict, which would reject that certificate, and not Flexible, which would use plain HTTP). Add a Cloudflare Origin Rule (rewrite destination port to 8080) because Cloudflare otherwise connects to the origin on 443.
 
 The certificate has no trust role. Apps do not trust the transport: they verify the TEE's attestation token against Google's root and the on-chain settings, and encrypt to the key that token binds. Cloudflare can block the TEE but cannot make an app trust a fake one.
 
@@ -82,11 +82,11 @@ Set at build time for `apps/web` and `apps/verifier` (viewers can change them in
 
 | Variable | Value |
 | --- | --- |
-| `VITE_TEE_URL` | `https://tee.abdulrashid.dev` |
+| `VITE_TEE_URL` | `https://<your-tee-host>`, from step 4 |
 | `VITE_RPC_URL` | your Sepolia RPC URL (a public one, because it is not secret here) |
 | `VITE_REGISTRY_ADDRESS` | `REGISTRY` from step 1 |
 | `VITE_EXAM_ID` | the published exam ID, as a fallback |
 | `VITE_STORAGE_URL` | `https://storage.googleapis.com/<BUCKET>` |
 | `VITE_TEE_STORAGE_BUCKET` | `<BUCKET>`, the one environment value the token check allows |
-| `VITE_RELEASES_REPO` | only if you use a fork |
+| `VITE_RELEASES_REPO` | your fork as `owner/name`, so the apps read TEE releases from it (upstream's `AbdulRashidReshamwala/paperseal` when unset) |
 

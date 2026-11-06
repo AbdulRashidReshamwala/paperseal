@@ -2,6 +2,8 @@
 
 The board-hosted app, on port 5171. `/board`, `/setter`, `/centre` and `/keyholder` are lazy route areas, so each role downloads only its own code. Each area is one guided page: the exam's state picks the one screen to show, so there are no tabs, and old links such as `/board/outbox` or `/centre/unlock` land on the screen the state calls for. Set `VITE_TEE_URL`, `VITE_RPC_URL`, `VITE_REGISTRY_ADDRESS` and `VITE_EXAM_ID` at build time.
 
+`VITE_RELEASES_REPO` is optional. It is the `owner/name` GitHub repository the board reads sealed machine versions from, `AbdulRashidReshamwala/paperseal` when unset, so a fork can set its own. Any other shape is an error.
+
 `VITE_VERIFIER_URL` is optional. The public verifier is a separate app, hosted on its own, so the board's last screen links to this address. It must be `http` or `https`. If it is unset or invalid, that screen says the link is not set, and nothing else changes.
 
 The release flow in `src/release` is shared by `/centre` and `/keyholder`, so it must stay free of paper and `K_priv` handling. That code lives in `src/areas/centre`. ESLint rules in `apps/eslint.config.mjs` and `src/boundaries.test.ts` enforce this.

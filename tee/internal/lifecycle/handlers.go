@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 	"unicode/utf8"
@@ -21,9 +22,6 @@ import (
 )
 
 var _ api.Backend = (*Machine)(nil)
-
-// maxOwner bounds the owner name, which goes on the public list.
-const maxOwner = 256
 
 func badRequest(code, msg string) error { return api.Errorf(http.StatusBadRequest, code, msg) }
 
@@ -118,8 +116,9 @@ func (m *Machine) Register(_ context.Context, req api.RegisterRequest) error {
 	if s := m.Stage(); s != StageOnboard {
 		return wrongStage(StageOnboard, s)
 	}
-	if req.Owner == "" || len(req.Owner) > maxOwner || !utf8.ValidString(req.Owner) {
-		return badRequest("invalid_owner", "owner must be 1 to 256 bytes of UTF-8")
+	// The owner goes on the public list, so it has the list's bound.
+	if maxOwner := spec.C.Limits.OwnerBytes; req.Owner == "" || len(req.Owner) > maxOwner || !utf8.ValidString(req.Owner) {
+		return badRequest("invalid_owner", fmt.Sprintf("owner must be 1 to %d bytes of UTF-8", maxOwner))
 	}
 	if err := hashing.CheckPublicKey(req.PasskeyPublicKey); err != nil {
 		return badRequest("invalid_key", "passkeyPublicKey: "+err.Error())

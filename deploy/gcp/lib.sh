@@ -21,7 +21,27 @@ need_env() {
 : "${NETWORK_TAG:=paperseal-tee}"
 : "${NETWORK:=default}"
 : "${MACHINE_TYPE:=n2d-standard-2}"
-: "${IMAGE_REPO:=ghcr.io/abdulrashidreshamwala/paperseal-tee}"
+
+# origin_owner prints the GitHub owner of this checkout's origin remote,
+# lowercased, from git@github.com:Owner/repo.git or https://github.com/Owner/repo.
+# It reads local git config only and fails if origin is not on GitHub.
+origin_owner() {
+  local url owner
+  url="$(git -C "$(dirname "${BASH_SOURCE[0]}")" remote get-url origin 2>/dev/null)" || return 1
+  case "$url" in
+    git@github.com:*) url="${url#git@github.com:}" ;;
+    ssh://git@github.com/*) url="${url#ssh://git@github.com/}" ;;
+    https://github.com/*|https://*@github.com/*) url="${url#*github.com/}" ;;
+    *) return 1 ;;
+  esac
+  owner="$(printf '%s' "${url%%/*}" | tr '[:upper:]' '[:lower:]')"
+  case "$owner" in ''|*[!a-z0-9-]*) return 1 ;; esac
+  printf '%s' "$owner"
+}
+
+# The image a fork's repro.yml publishes: ghcr.io/<origin owner>/paperseal-tee,
+# or upstream's if origin can't be read.
+: "${IMAGE_REPO:=ghcr.io/$(origin_owner || echo abdulrashidreshamwala)/paperseal-tee}"
 
 init_common() {
   need_env PROJECT_ID REGION ZONE

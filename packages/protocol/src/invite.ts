@@ -3,7 +3,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 
 import { equalBytes, fromHex, toHex, utf8ToBytes } from './bytes';
 import { roles, setterOwner, type ApprovedListEntry } from './encoding';
-import { threshold } from './constants';
+import { limits, threshold } from './constants';
 import type { Hex } from './types';
 
 /*
@@ -17,8 +17,8 @@ import type { Hex } from './types';
  */
 
 export const inviteSecretBytes = 32;
-/** The TEE refuses an `owner` longer than this many bytes. */
-export const maxOwnerBytes = 256;
+/** The TEE refuses an `owner` longer than this many UTF-8 bytes, `limits.ownerBytes`, the same cap the approved list has. */
+export const maxOwnerBytes = limits.ownerBytes;
 
 export const inviteRoles = ['setter', 'keyholder', 'centre'] as const;
 /** The part someone is invited to play. The board decides the list `role` (spec/api.md) later. */
@@ -55,7 +55,7 @@ export function inviteTag(inviteSecret: Uint8Array, passkeyPublicKey: Uint8Array
 
 const hex32 = /^0x[0-9a-f]{64}$/;
 
-/** The `owner` rules the TEE enforces: not empty, valid UTF-8, at most 256 bytes. Also no edge spaces or control characters. */
+/** The `owner` rules the TEE enforces: not empty, valid UTF-8, at most `limits.ownerBytes` bytes. Also no edge spaces or control characters. */
 export function ownerProblem(owner: string): string | null {
   if (owner.length === 0) return 'The name is empty.';
   if (owner !== owner.trim()) return 'The name starts or ends with a space.';

@@ -254,7 +254,7 @@ All bodies are JSON. Every route allows any origin, without credentials. Bytes f
 | `POST /v1/release/share` | `{passkeyPublicKey, challenge, sealed}` | `{}` |
 | `GET /v1/release/log` | None | `{examId, entries, entriesHash, teeSignature, instancePublicKey}` |
 
-`release.released` lists the passkey public keys of holders whose shares were accepted. In an outbox message, `examId` sits at the top level, and `fields` holds the other `build` message fields, with `selected` and `bankSize` as decimal strings. `stage` is one of `onboard`, `submit`, `lock`, `build`, `distribute`, `unlock`, `released`, `failed`. `register`'s passkey signature covers the `registration` message.
+`release.released` lists the passkey public keys of holders whose shares were accepted. In an outbox message, `examId` sits at the top level, and `fields` holds the other `build` message fields, with `selected` and `bankSize` as decimal strings. `stage` is one of `onboard`, `submit`, `lock`, `build`, `distribute`, `unlock`, `released`, `failed`. `register`'s passkey signature covers the `registration` message. `register` refuses an `owner` that is empty, not valid UTF-8 or longer than `limits.ownerBytes`, the same limit readers apply to the approved list, so every registration fits on the list.
 
 ## Unlock Instance
 

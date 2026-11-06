@@ -39,7 +39,24 @@ import type { LogVerdict, ReleaseProgress } from './unlock';
  * its step and reaches the top of the page, and a step can only be done when `complete` says so.
  */
 
-export const REPOSITORY = 'AbdulRashidReshamwala/paperseal';
+export const defaultRepository = 'AbdulRashidReshamwala/paperseal';
+
+const repositoryPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+
+/**
+ * The repository the code and build links point at: VITE_RELEASES_REPO, or the default. A fork
+ * sets it to its own `owner/name`, the same variable the board app reads its releases from.
+ */
+export function repository(
+  env: Record<string, string | undefined> = import.meta.env as Record<string, string | undefined>,
+): string {
+  const given = env.VITE_RELEASES_REPO?.trim();
+  if (!given) return defaultRepository;
+  if (!repositoryPattern.test(given)) throw new Error(`VITE_RELEASES_REPO must look like owner/name, not "${given}".`);
+  return given;
+}
+
+export const REPOSITORY = repository();
 
 export type Label = string | { code: string };
 
