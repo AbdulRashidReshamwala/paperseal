@@ -173,11 +173,11 @@ export function holderTests(lab: () => Lab): void {
         const a = await actor(name, uiRole);
         await a.flow('register', async () => {
           await registerName(a, published, `${name}-owner.${demoParent}`, area);
-          await a.see(/You are registered/, 30_000);
+          await a.see(/You.re registered/, 30_000);
           await a.shot(`11-${area}-registered`);
           // A reload comes back to the same place, from the stored credential.
           await a.page.reload();
-          await a.see(/You are registered/, 30_000);
+          await a.see(/You.re registered/, 30_000);
         });
       }
       expect(lab().tee.state.registrations.length).toBeGreaterThanOrEqual(3);
