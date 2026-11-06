@@ -25,6 +25,7 @@ var (
 	bytes32Type = abiType("bytes32")
 	bytesType   = abiType("bytes")
 	uint32Type  = abiType("uint32")
+	uint64Type  = abiType("uint64")
 )
 
 func abiType(name string) abi.Type {
@@ -53,6 +54,9 @@ func Bytes(name string, b []byte) Field { return Field{name, bytesType, b} }
 
 // Uint32 is a count, such as selected or bankSize.
 func Uint32(name string, v uint32) Field { return Field{name, uint32Type, v} }
+
+// Uint64 is a drand round, such as builtRound.
+func Uint64(name string, v uint64) Field { return Field{name, uint64Type, v} }
 
 // Message is a tagged list of fields with its encoding.
 type Message struct {
@@ -196,6 +200,7 @@ type BuildFields struct {
 	Selected            uint32
 	BankSize            uint32
 	CriteriaHash        [32]byte
+	BuiltRound          uint64 // The newest verified drand round when the paper was sealed.
 }
 
 // Build commits to the approved list, the stored files and the selection.
@@ -208,7 +213,8 @@ func Build(f BuildFields) Message {
 		Bytes32("saltedPaperHash", f.SaltedPaperHash),
 		Uint32("selected", f.Selected),
 		Uint32("bankSize", f.BankSize),
-		Bytes32("criteriaHash", f.CriteriaHash)))
+		Bytes32("criteriaHash", f.CriteriaHash),
+		Uint64("builtRound", f.BuiltRound)))
 }
 
 // SaltedPaper is the preimage of build.saltedPaperHash. The plaintext is never

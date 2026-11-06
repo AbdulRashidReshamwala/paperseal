@@ -101,7 +101,7 @@ describe('abi.encode messages', () => {
     ).toBe(toHex(expected));
   });
 
-  it('encodes build with uint32 counts in table order', () => {
+  it('encodes build with uint32 counts and the built round in table order', () => {
     const fields = {
       examId: fill(1),
       approvedListHash: fill(2),
@@ -111,10 +111,11 @@ describe('abi.encode messages', () => {
       selected: 20,
       bankSize: 300,
       criteriaHash: fill(6),
+      builtRound: 35732267n,
     };
     const expected = abi(
-      ['string', 'bytes32', 'bytes32', 'bytes32', 'bytes32', 'bytes32', 'uint32', 'uint32', 'bytes32'],
-      ['paperseal/v1/build', ...[1, 2, 3, 4, 5].map((n) => toHex(fill(n))), 20, 300, toHex(fill(6))],
+      ['string', 'bytes32', 'bytes32', 'bytes32', 'bytes32', 'bytes32', 'uint32', 'uint32', 'bytes32', 'uint64'],
+      ['paperseal/v1/build', ...[1, 2, 3, 4, 5].map((n) => toHex(fill(n))), 20, 300, toHex(fill(6)), 35732267n],
     );
     expect(toHex(encodeMessage('build', fields))).toBe(toHex(expected));
   });
@@ -157,9 +158,12 @@ describe('abi.encode messages', () => {
   it('rejects malformed fields', () => {
     expect(() => encodeMessage('releaseLog', { examId: fill(1, 31), entriesHash: fill(2), filesHash: fill(3) })).toThrow('examId must be 32 bytes');
     expect(() => encodeMessage('releaseLog', { examId: fill(1), entriesHash: fill(2), filesHash: fill(3, 31) })).toThrow('filesHash must be 32 bytes');
-    const build = { examId: fill(1), approvedListHash: fill(1), paperHash: fill(1), storageManifestHash: fill(1), saltedPaperHash: fill(1), bankSize: 1, criteriaHash: fill(1) };
+    const build = { examId: fill(1), approvedListHash: fill(1), paperHash: fill(1), storageManifestHash: fill(1), saltedPaperHash: fill(1), bankSize: 1, criteriaHash: fill(1), builtRound: 1n };
     expect(() => encodeMessage('build', { ...build, selected: -1 })).toThrow(RangeError);
     expect(() => encodeMessage('build', { ...build, selected: 2 ** 32 })).toThrow(RangeError);
+    expect(() => encodeMessage('build', { ...build, selected: 1, builtRound: -1n })).toThrow(RangeError);
+    expect(() => encodeMessage('build', { ...build, selected: 1, builtRound: 1n << 64n })).toThrow(RangeError);
+    expect(() => encodeMessage('build', { ...build, selected: 1, builtRound: 1 as unknown as bigint })).toThrow('uint64');
     expect(() => encodeMessage('questionReceipt', { examId: fill(1), passkeyPublicKey: fill(4, 64), questionHash: fill(1) })).toThrow('65-byte');
     expect(() => encodeMessage('questionReceipt', { examId: fill(1), passkeyPublicKey: fill(2, 65), questionHash: fill(1) })).toThrow('0x04');
     expect(() => encodeMessage('registration', { derivedPublicKey: fill(4, 64), holderId: fill(1, 1), challenge: fill(1, 1), inviteTag: fill(1, 32) })).toThrow('65-byte');
@@ -414,7 +418,7 @@ describe('tee/ cross-language vectors', () => {
     const fields = Object.fromEntries(
       vector.fields.map(({ name: field, type, value }) => [
         field,
-        type === 'uint32' ? Number(BigInt(value)) : type === 'string' ? value : fromHex(value),
+        type === 'uint32' ? Number(BigInt(value)) : type === 'uint64' ? BigInt(value) : type === 'string' ? value : fromHex(value),
       ]),
     ) as never;
     expect(constants.domainTags[name]).toBe(vector.tag);

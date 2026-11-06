@@ -106,6 +106,7 @@ const emptyBuild = {
   saltedPaperHash: zero32,
   selected: 0,
   bankSize: 0,
+  builtRound: 0n,
   postedAt: 0n,
   criteriaHash: zero32,
   teeSignature: '0x',
@@ -143,9 +144,27 @@ describe('ExamRegistry ABI', () => {
   });
 });
 
+describe('postBuild', () => {
+  it('takes the Build fields as one struct ending in builtRound', () => {
+    const fn = examRegistryAbi.find((e) => e.type === 'function' && e.name === 'postBuild');
+    const struct = fn?.inputs[1] as { components: { name: string }[] } | undefined;
+    expect(fn?.inputs.map((i) => i.name)).toEqual(['examId', 'fields', 'teeSignature', 'instancePublicKey']);
+    expect(struct?.components.map((c) => c.name)).toEqual([
+      'approvedListHash',
+      'paperHash',
+      'storageManifestHash',
+      'saltedPaperHash',
+      'selected',
+      'bankSize',
+      'criteriaHash',
+      'builtRound',
+    ]);
+  });
+});
+
 describe('createExamRegistry', () => {
   it('returns a posted record', async () => {
-    const build = { ...emptyBuild, selected: 30, bankSize: 300, postedAt: 5n };
+    const build = { ...emptyBuild, selected: 30, bankSize: 300, builtRound: 35732267n, postedAt: 5n };
     const registry = createExamRegistry({
       address,
       transport: rpc(() => build),
@@ -153,6 +172,7 @@ describe('createExamRegistry', () => {
     expect(await registry.getBuild(examId)).toMatchObject({
       selected: 30,
       bankSize: 300,
+      builtRound: 35732267n,
       postedAt: 5n,
     });
   });

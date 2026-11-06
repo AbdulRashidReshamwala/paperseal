@@ -24,7 +24,7 @@ const registryABIJSON = `[
   "outputs":[{"name":"","type":"tuple","components":[
     {"name":"approvedListHash","type":"bytes32"},{"name":"paperHash","type":"bytes32"},
     {"name":"storageManifestHash","type":"bytes32"},{"name":"saltedPaperHash","type":"bytes32"},
-    {"name":"selected","type":"uint32"},{"name":"bankSize","type":"uint32"},{"name":"postedAt","type":"uint64"},
+    {"name":"selected","type":"uint32"},{"name":"bankSize","type":"uint32"},{"name":"builtRound","type":"uint64"},{"name":"postedAt","type":"uint64"},
     {"name":"criteriaHash","type":"bytes32"},{"name":"teeSignature","type":"bytes"},{"name":"instancePublicKey","type":"bytes"}]}]},
  {"type":"event","name":"ExamCreated","anonymous":false,"inputs":[
     {"name":"examId","type":"bytes32","indexed":true},{"name":"commitHash","type":"bytes20","indexed":false},
@@ -76,6 +76,7 @@ type buildTuple struct {
 	SaltedPaperHash     [32]byte
 	Selected            uint32
 	BankSize            uint32
+	BuiltRound          uint64
 	PostedAt            uint64
 	CriteriaHash        [32]byte
 	TeeSignature        []byte

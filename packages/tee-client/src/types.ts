@@ -97,7 +97,10 @@ export interface QuestionReceipt {
   teeSignature: Hex;
 }
 
-/** The only outbox message kind is the Build. `teeSignature` covers the `build` message. */
+/**
+ * The only outbox message kind is the Build. `teeSignature` covers the `build` message. `fields` holds the
+ * message fields after `examId`, with `selected` and `bankSize` as numbers or decimal strings and `builtRound` as a decimal string.
+ */
 export interface OutboxMessage {
   kind: 'build';
   examId: Hex;

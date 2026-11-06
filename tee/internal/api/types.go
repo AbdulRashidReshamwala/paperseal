@@ -118,6 +118,7 @@ type BuildFields struct {
 	Selected            uint32 `json:"selected"`
 	BankSize            uint32 `json:"bankSize"`
 	CriteriaHash        Hex    `json:"criteriaHash"`
+	BuiltRound          uint64 `json:"builtRound,string"`
 }
 
 // OutboxMessage is one message for the board to post.

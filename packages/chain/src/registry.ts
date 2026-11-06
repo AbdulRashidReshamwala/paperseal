@@ -235,31 +235,26 @@ export function createExamRegistry(options: ExamRegistryOptions) {
     ) => write('createExam', [commitHash, imageDigest, settings, criteria]),
     postApprovedList: (examId: ExamId, entries: Hex) =>
       write('postApprovedList', [examId, entries]),
+    /** `fields` are the `build` message fields after `examId`, in hash order. */
     postBuild: (
       examId: ExamId,
-      approvedListHash: Hex,
-      paperHash: Hex,
-      storageManifestHash: Hex,
-      saltedPaperHash: Hex,
-      selected: number,
-      bankSize: number,
-      criteriaHash: Hex,
+      fields: BuildFieldsArgs,
       teeSignature: Hex,
       instancePublicKey: Hex,
-    ) =>
-      write('postBuild', [
-        examId,
-        approvedListHash,
-        paperHash,
-        storageManifestHash,
-        saltedPaperHash,
-        selected,
-        bankSize,
-        criteriaHash,
-        teeSignature,
-        instancePublicKey,
-      ]),
+    ) => write('postBuild', [examId, fields, teeSignature, instancePublicKey]),
   };
+}
+
+/** The contract's `BuildFields` struct: the TEE's `build` message after `examId`. `builtRound` is a drand round. */
+export interface BuildFieldsArgs {
+  approvedListHash: Hex;
+  paperHash: Hex;
+  storageManifestHash: Hex;
+  saltedPaperHash: Hex;
+  selected: number;
+  bankSize: number;
+  criteriaHash: Hex;
+  builtRound: bigint;
 }
 
 export type ExamRegistry = ReturnType<typeof createExamRegistry>;

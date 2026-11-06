@@ -110,6 +110,7 @@ type Build struct {
 	Selected            uint32
 	BankSize            uint32
 	CriteriaHash        [32]byte
+	BuiltRound          uint64
 	TEESignature        []byte
 	InstancePublicKey   []byte
 }
@@ -441,7 +442,7 @@ func (r *RPC) Build(ctx context.Context) (Build, error) {
 	return Build{
 		ApprovedListHash: b.ApprovedListHash, PaperHash: b.PaperHash,
 		StorageManifestHash: b.StorageManifestHash, SaltedPaperHash: b.SaltedPaperHash,
-		Selected: b.Selected, BankSize: b.BankSize, CriteriaHash: b.CriteriaHash,
+		Selected: b.Selected, BankSize: b.BankSize, CriteriaHash: b.CriteriaHash, BuiltRound: b.BuiltRound,
 		TEESignature: b.TeeSignature, InstancePublicKey: b.InstancePublicKey,
 	}, nil
 }

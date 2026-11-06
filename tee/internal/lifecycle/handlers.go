@@ -298,7 +298,7 @@ func (m *Machine) Outbox(ctx context.Context) (api.OutboxResponse, error) {
 			Fields: api.BuildFields{
 				ApprovedListHash: msg.ApprovedListHash[:], PaperHash: msg.PaperHash[:],
 				StorageManifestHash: msg.StorageManifestHash[:], SaltedPaperHash: msg.SaltedPaperHash[:],
-				Selected: msg.Selected, BankSize: msg.BankSize, CriteriaHash: msg.CriteriaHash[:],
+				Selected: msg.Selected, BankSize: msg.BankSize, CriteriaHash: msg.CriteriaHash[:], BuiltRound: msg.BuiltRound,
 			},
 			TEESignature: msg.TEESignature[:], InstancePublicKey: msg.InstancePublicKey,
 		})

@@ -345,6 +345,8 @@ func fieldText(v any) string {
 		return v
 	case uint32:
 		return fmt.Sprint(v)
+	case uint64:
+		return fmt.Sprint(v)
 	}
 	panic(fmt.Sprintf("vectors: no text form for %T", v))
 }
@@ -406,6 +408,7 @@ func Build() (File, error) {
 		return File{}, err
 	}
 	criteriaHash := criteriaMessage.Sum()
+	const builtRound uint64 = 35732267 // A drand round, as the Build builtRound.
 	selected, err := sampleCriteria.Selected()
 	if err != nil {
 		return File{}, err
@@ -444,6 +447,7 @@ func Build() (File, error) {
 		Selected:            selected,
 		BankSize:            240,
 		CriteriaHash:        criteriaHash,
+		BuiltRound:          builtRound,
 	}), nil)
 	add(hashing.SaltedPaper(first, []byte(`{"questions":[]}`)))
 	add(hashing.ShareHash([]byte("share-bytes")))

@@ -13,7 +13,7 @@ import type { Hex } from './types';
  */
 
 /** ABI types used by the Signed Messages table. */
-export type FieldType = 'bytes32' | 'uint32' | 'bytes' | 'string';
+export type FieldType = 'bytes32' | 'uint32' | 'uint64' | 'bytes' | 'string';
 
 /** `key` fields are P-256 public keys: 65-byte uncompressed points, or empty when `optional`. */
 type Field = readonly [name: string, type: FieldType, check?: 'publicKey' | 'optionalPublicKey'];
@@ -64,6 +64,7 @@ export const messageSchemas = {
     ['selected', 'uint32'],
     ['bankSize', 'uint32'],
     ['criteriaHash', 'bytes32'],
+    ['builtRound', 'uint64'],
   ],
   paperHash: [
     ['seed', 'bytes32'],
@@ -83,7 +84,7 @@ export const messageSchemas = {
 
 export type MessageName = keyof typeof messageSchemas;
 
-type FieldValue<T extends FieldType> = T extends 'uint32' ? number : T extends 'string' ? string : Uint8Array;
+type FieldValue<T extends FieldType> = T extends 'uint32' ? number : T extends 'uint64' ? bigint : T extends 'string' ? string : Uint8Array;
 
 /** The named fields of a message, typed from its schema. */
 export type MessageFields<N extends MessageName> = {
@@ -96,7 +97,11 @@ function assertPublicKey(name: string, key: Uint8Array): void {
   }
 }
 
-function checkField([name, type, check]: Field, value: unknown): Uint8Array | number | string {
+function checkField([name, type, check]: Field, value: unknown): Uint8Array | number | bigint | string {
+  if (type === 'uint64') {
+    if (typeof value !== 'bigint' || value < 0n || value >= 1n << 64n) throw new RangeError(`${name} must be a uint64 bigint`);
+    return value;
+  }
   if (type === 'uint32') {
     if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value >= 2 ** 32) {
       throw new RangeError(`${name} must be a uint32`);
@@ -126,7 +131,7 @@ export function encodeMessage<N extends MessageName>(name: N, fields: MessageFie
     if (value === undefined) throw new TypeError(`${name} is missing ${field[0]}`);
     const checked = checkField(field, value);
     params.push({ type: field[1] === 'bytes' ? 'bytes' : field[1] });
-    args.push(typeof checked === 'number' || typeof checked === 'string' ? checked : toHex(checked));
+    args.push(typeof checked === 'number' || typeof checked === 'bigint' || typeof checked === 'string' ? checked : toHex(checked));
   }
   return fromHex(encodeAbiParameters(params, args));
 }

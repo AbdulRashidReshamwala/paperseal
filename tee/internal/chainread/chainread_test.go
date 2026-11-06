@@ -132,7 +132,7 @@ func (c *chain) handler(w http.ResponseWriter, r *http.Request) {
 			var b buildTuple
 			b.TeeSignature, b.InstancePublicKey = c.exampleSig, []byte{4}
 			if c.buildPosted {
-				b.PostedAt, b.Selected, b.BankSize = 9, 3, 30
+				b.PostedAt, b.Selected, b.BankSize, b.BuiltRound = 9, 3, 30, 777
 				b.PaperHash[0] = 1
 			}
 			out, err = m.Outputs.Pack(b)
@@ -365,7 +365,7 @@ func TestBuild(t *testing.T) {
 	}
 	c.buildPosted = true
 	b, err := r.Build(context.Background())
-	if err != nil || b.Selected != 3 || b.BankSize != 30 || b.PaperHash[0] != 1 || len(b.TEESignature) != 64 {
+	if err != nil || b.Selected != 3 || b.BankSize != 30 || b.BuiltRound != 777 || b.PaperHash[0] != 1 || len(b.TEESignature) != 64 {
 		t.Fatalf("build: %+v %v", b, err)
 	}
 }
