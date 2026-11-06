@@ -84,7 +84,7 @@ describe('a first visit', () => {
     world.stage.current = 'onboard';
     mount(world);
     fireEvent.click(await screen.findByRole('button', { name: 'Register your security key' }));
-    expect(await screen.findByText(/Your exam board has sent the list of people/)).toBeTruthy();
+    expect(await screen.findByText(/Questions open once your exam board has sent the list/)).toBeTruthy();
     // There is no list to check yet, so a check here could only raise a false alarm.
     expect(world.verifyToken).not.toHaveBeenCalled();
 
@@ -108,7 +108,7 @@ describe('a first visit', () => {
     const world = await makeWorld();
     world.stage.current = 'onboard';
     mount(world);
-    expect(await screen.findByText(/Your exam board has sent the list of people/)).toBeTruthy();
+    expect(await screen.findByText(/Questions open once your exam board has sent the list/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Use a different security key' })).toBeNull();
     cleanup();
     holdInvite({ examId, role: 'setter', inviteSecret: `0x${'5a'.repeat(32)}` });
