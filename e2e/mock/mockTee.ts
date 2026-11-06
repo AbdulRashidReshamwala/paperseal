@@ -314,6 +314,8 @@ export async function startMockTee(options: MockTeeOptions): Promise<MockTee> {
       selected: selected.length,
       bankSize: bank.length,
       criteriaHash: settings?.criteriaHash as Hex,
+      // The newest drand round when the paper was sealed. The real machine reads it from the relay, this one from the clock.
+      builtRound: BigInt(roundAtSeconds(Math.floor(Date.now() / 1000))),
     };
     const teeSignature = await instance.sign(
       encodeMessage('build', {
@@ -325,12 +327,13 @@ export async function startMockTee(options: MockTeeOptions): Promise<MockTee> {
         selected: fields.selected,
         bankSize: fields.bankSize,
         criteriaHash: fromHex(fields.criteriaHash),
+        builtRound: fields.builtRound,
       }),
     );
     outbox.push({
       kind: 'build',
       examId,
-      fields: { ...fields, selected: String(fields.selected), bankSize: String(fields.bankSize) },
+      fields: { ...fields, selected: String(fields.selected), bankSize: String(fields.bankSize), builtRound: fields.builtRound.toString() },
       teeSignature,
       instancePublicKey: toHex(instance.publicKey),
     });
