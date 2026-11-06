@@ -37,6 +37,15 @@ export function examStatus(snapshot: Snapshot, nowMs: number): ExamStatus {
     : { label: 'Collecting', needsBoard: false };
 }
 
+/**
+ * An exam on the chain whose start has passed with no Build. It can't be deleted from the contract, so
+ * the list hides it. Only a read that came back says so: no snapshot, or an exam not found, hides nothing.
+ */
+export function isAbandoned(snapshot: Snapshot | null, nowMs: number): boolean {
+  const settings = snapshot?.found?.exam.settings;
+  return Boolean(snapshot && settings && !snapshot.build && nowMs >= Number(settings.examStart) * 1000);
+}
+
 export type HomeRow =
   | { kind: 'draft'; key: string; at: number | null; draft: StoredDraft; title: string; progress: string }
   | { kind: 'exam'; key: string; at: number | null; exam: KnownExam; title: string };

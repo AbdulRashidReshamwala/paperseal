@@ -238,7 +238,8 @@ describe('the status on each published exam', () => {
     expect(within(row('waiting')).getByText('Collecting')).toBeTruthy();
     expect(within(row('posted')).getByText('Posted')).toBeTruthy();
     expect(within(row('finished')).getByText('Finished')).toBeTruthy();
-    expect(within(row('unposted')).getByText('Failed')).toBeTruthy();
+    // Started with no Build: abandoned, so it is not listed.
+    expect(screen.queryByText('unposted')).toBeNull();
     expect(within(row('slow')).getByText('Checking…')).toBeTruthy();
     expect(row('slow').querySelector('.board-skeleton-bar')?.getAttribute('aria-hidden')).toBe('true');
     expect(within(row('slow')).getByRole('status').textContent).toBe('Checking…');
