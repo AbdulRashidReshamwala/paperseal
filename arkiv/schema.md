@@ -10,6 +10,7 @@ Paper Seal mirrors an exam's unlock evidence to Arkiv's Rabdi testnet. The full 
 | `paperseal.v1.release-token` | Unlock machine | The Google-signed PKI attestation token that proves which code the Unlock machine runs and which signing key it holds |
 | `paperseal.v1.exam` | Exam in a registry, for the exam index | Stage, start time, hashes and verified ENS name, copied from `ExamRegistry`'s events. Its writer edits it as the exam moves on |
 | `paperseal.v1.participant` | Entry on an exam's approved list | Role, owner (a setter's is already a hash) and key hashes, copied from `ApprovedListPosted` |
+| `paperseal.v1.backup` | Swarm backup of an exam's public files, per phase | Nothing in `body`. The columns say where the backup is: its Swarm reference, the hash of its `manifest.json` and the postage batch ([`swarm.md`](swarm.md)) |
 | `paperseal.v1.relay-heartbeat` | Minute a relay is watching an unlock | Nothing signed: `entriesHash` of the newest log seen and the TEE `stage`. It only tells readers the relay is alive, and never counts as evidence |
 
 ## Fields
@@ -36,18 +37,30 @@ Index fields:
 | `role`, `owner`, `passkeyKeyHash` | `str` | Yes, to find a person's exams | Participant |
 | `derivedKeyHash` | `str` | No | Participant |
 
-Readers query by `examId`, `registry`, and `$creator` in the writers they trust. The index is also queried by `registry` alone (every exam), and by `owner` or `passkeyKeyHash` (a person's exams). The reader supports both, and the verifier's search uses `owner`. Then they parse `body` and check it, and never trust the other columns over it.
+Backup fields ([`spec/arkiv.md`](../spec/arkiv.md), "Backups"):
+
+| Field | Type | Indexed | Holds |
+| --- | --- | --- | --- |
+| `examId`, `registry` | `str`, `addr` | Yes, to find an exam's backups | The exam, as in the evidence rows |
+| `phase` | `str` | Yes, because unlock files are read only from an `unlock` backup | `build` for the files the Build covers, or `unlock`, which adds the unlock files |
+| `swarmRef` | `str` | Yes, for the writer's duplicate check | **The Swarm reference** of the collection: 64 hex characters, never an encrypted 128-character one |
+| `swarmNetwork` | `str` | No | `sepolia` now, `mainnet` once the build moves |
+| `manifestHash` | `str` | No | SHA-256 of the collection's `manifest.json`. Readers check it against the Build's `storageManifestHash` on Sepolia |
+| `files` | `i32` | No | Number of files in the collection |
+| `batchId` | `str` | No | The postage batch the upload was stamped with |
+
+Readers query by `examId`, `registry`, and `$creator` in the writers they trust. The index is also queried by `registry` alone (every exam), and by `owner` or `passkeyKeyHash` (a person's exams). The reader supports both, and the verifier's search uses `owner`. Backups are queried by `examId` and `registry`. Then they parse `body` and check it, and never trust the other columns over it.
 
 ## Ownership and Editing
 
 - The relay's wallet creates and owns each entity. Readers only accept rows whose `$creator` is a published writer, because ownership can be handed over.
-- Evidence, participant and heartbeat rows are created `readonly`, so nobody can change them, their owner included.
+- Evidence, participant, backup and heartbeat rows are created `readonly`, so nobody can change them, their owner included.
 - Exam rows are the one exception. Their writer patches them as an exam moves from published to listed to built. Readers never trust a row's stage, and take it from Sepolia instead.
 - Every entity also has `permissionlessExtension`, so anyone can pay to keep the evidence alive after the board loses interest.
 
 ## Expiry
 
-Evidence rows (logs and tokens) live for 180 days (`lifetimeDays`), just under Arkiv's limit of about 182.5. That covers an exam's results and appeals season, and anyone can extend them after that. Heartbeats live for 24 hours and can't be extended: they matter only while unlock is running, so Arkiv clears them away by itself.
+Evidence rows (logs and tokens) and backup rows live for 180 days (`lifetimeDays`), just under Arkiv's limit of about 182.5. That covers an exam's results and appeals season, and anyone can extend them after that. Heartbeats live for 24 hours and can't be extended: they matter only while unlock is running, so Arkiv clears them away by itself.
 
 ## Writer
 
