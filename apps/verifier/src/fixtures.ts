@@ -387,3 +387,27 @@ export async function buildWorld(options: WorldOptions = {}) {
 }
 
 export type World = Awaited<ReturnType<typeof buildWorld>>;
+
+/**
+ * The first `count` releases of the world's release log, signed as the TEE signs them. Signed by
+ * the Unlock instance unless another key is given, so a test can make a log no token attests.
+ */
+export async function signedReleaseLog(world: World, count: number, signer: Awaited<ReturnType<typeof p256>> = world.unlockSigning) {
+  const examBytes = fromHex(examId);
+  const entries = world.releaseLog.entries.slice(0, count);
+  const hash = entriesHash(
+    entries.map((e) => ({ passkeyPublicKey: fromHex(e.passkeyPublicKey), shareHash: fromHex(e.shareHash), round: BigInt(e.round) })),
+  );
+  // The TEE lists the key files only once the threshold is reached, as here the full log.
+  const files = count >= world.releaseLog.entries.length ? world.releaseLog.files : [];
+  const listed = filesHash(files.map((f) => ({ name: f.name, sha256: fromHex(f.sha256) })));
+  return {
+    examId,
+    entries,
+    entriesHash: toHex(hash),
+    files,
+    filesHash: toHex(listed),
+    teeSignature: toHex(await teeSign(signer.pair.privateKey, encodeMessage('releaseLog', { examId: examBytes, entriesHash: hash, filesHash: listed }))),
+    instancePublicKey: toHex(signer.publicKey),
+  };
+}

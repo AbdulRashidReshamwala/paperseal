@@ -16,6 +16,7 @@ import {
 
 import type { Build, Exam } from './attest';
 import { criteriaMatches, sameHex, type CheckResult } from './checks';
+import { readChecked } from './backup';
 import { fileSha256, utf8Text, type StorageReader } from './storage';
 
 export interface ProofChecks {
@@ -80,19 +81,39 @@ export async function runProof(input: ProofInput): Promise<ProofState> {
   if (!storage) return { state: 'not-ready', reason: 'Add where the public files are kept under "Check it yourself".' };
   if (!build) return { state: 'not-ready', reason: 'No paper is recorded to compare with.' };
 
-  const keyPrivFile = await storage.get(storageNames.keyPriv);
-  if (!keyPrivFile) {
-    return keyPrivSha256
-      ? { state: 'failed', step: 'files', message: `The file that opens the paper (${storageNames.keyPriv}) was removed from the public files after the unlock recorded it.` }
-      : { state: 'sealed' };
+  // Read only once there is a `key-priv.tlock` to open them with.
+  let others: Promise<[Uint8Array | null, Uint8Array | null]> | null = null;
+  const files = () => (others ??= Promise.all([storage.get(storageNames.keyPub), storage.get(storageNames.paper)]));
+  // A copy counts only if it has the hash the signed release log lists, when there is one, and opens
+  // the paper the Build recorded. A backup copy that does not is ignored (spec/arkiv.md "Backups").
+  const opened = await readChecked(storage, storageNames.keyPriv, async (keyPrivFile) => {
+    if (keyPrivSha256 && !sameHex(fileSha256(keyPrivFile), keyPrivSha256)) {
+      const message = `The file that opens the paper (${storageNames.keyPriv}) was changed after the unlock recorded it.`;
+      return { pass: false, value: { state: 'failed', step: 'files', message } satisfies ProofState, reason: message };
+    }
+    const state = await openWith(keyPrivFile, await files(), { examId, exam, build, criteria, client });
+    return { pass: state.state === 'opened' && state.checks.saltedHash === 'pass', value: state, reason: failureOf(state) };
+  });
+  if (opened) return opened;
+  // The public files failing to answer is not the backup copy's fault, so it is not "sealed".
+  if (others) await others;
+  if (keyPrivSha256) {
+    return { state: 'failed', step: 'files', message: `The file that opens the paper (${storageNames.keyPriv}) was removed from the public files after the unlock recorded it.` };
   }
-  if (keyPrivSha256 && !sameHex(fileSha256(keyPrivFile), keyPrivSha256)) {
-    return { state: 'failed', step: 'files', message: `The file that opens the paper (${storageNames.keyPriv}) was changed after the unlock recorded it.` };
-  }
-  const [keyPubFile, paperFile] = await Promise.all([
-    storage.get(storageNames.keyPub),
-    storage.get(storageNames.paper),
-  ]);
+  return { state: 'sealed' };
+}
+
+/** Why a copy of `key-priv.tlock` did not open the recorded paper, for the evidence. */
+function failureOf(state: ProofState): string {
+  if (state.state === 'failed') return state.message;
+  return `The paper it opens does not give the Build's saltedPaperHash.`;
+}
+
+async function openWith(
+  keyPrivFile: Uint8Array,
+  [keyPubFile, paperFile]: [Uint8Array | null, Uint8Array | null],
+  { examId, exam, build, criteria, client }: { examId: Hex; exam: Exam; build: Build; criteria: Hex | null; client: ChainClient },
+): Promise<ProofState> {
   if (!keyPubFile || !paperFile) {
     const missing = [!keyPubFile && storageNames.keyPub, !paperFile && storageNames.paper].filter(Boolean);
     return { state: 'failed', step: 'files', message: `The public files have no ${missing.join(' or ')}.` };

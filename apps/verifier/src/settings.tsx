@@ -1,8 +1,11 @@
+import { arkiv, createArkivReader } from '@paperseal/arkiv';
 import { createExamRegistry } from '@paperseal/chain';
 import { quicknetClient, type ChainClient } from '@paperseal/crypto';
 import type { Hex } from '@paperseal/protocol';
+import { swarm } from '@paperseal/swarm';
 import { createTeeClient } from '@paperseal/tee-client';
 import { createContext, use, useMemo, useState, type ReactNode } from 'react';
+import { getAddress, isAddress } from 'viem';
 
 import { createStorage } from './storage';
 
@@ -14,6 +17,12 @@ export interface Settings {
   storageUrl: string;
   registryAddress: string;
   examId: string;
+  /** The Arkiv node the evidence mirror is read from. */
+  arkivRpcUrl: string;
+  /** The Arkiv writers this viewer trusts to find rows, comma-separated. Empty turns Arkiv off. */
+  arkivWriters: string;
+  /** The Swarm API backups are read through, the viewer's own Bee node by default. Empty turns backups off. */
+  swarmApiUrl: string;
 }
 
 const STORAGE_KEY = 'paperseal.verifier.settings';
@@ -27,7 +36,67 @@ export const defaultSettings: Settings = {
   storageUrl: env.VITE_STORAGE_URL ?? '',
   registryAddress: env.VITE_REGISTRY_ADDRESS ?? '',
   examId: env.VITE_EXAM_ID ?? '',
+  arkivRpcUrl: arkiv.network.rpcUrl,
+  arkivWriters: env.VITE_ARKIV_WRITERS ?? '',
+  swarmApiUrl: swarm.defaultApiUrl,
 };
+
+/** The writer addresses in `arkivWriters`, in the order given. Empty entries are skipped. */
+export const arkivWriterList = (text: string): Hex[] =>
+  text
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part !== '') as Hex[];
+
+/** Where a writer the page reads came from: the exam's name, the viewer, or this page's build. */
+export type WriterOrigin = 'name' | 'own' | 'built';
+
+export interface SourcedWriter {
+  address: Hex;
+  /** Every place that lists it, in that order. */
+  from: WriterOrigin[];
+}
+
+/** A writer with its checksum. One with a bad checksum is kept as written, so reading it fails loudly. */
+function checksummed(writer: string): Hex {
+  try {
+    return getAddress(writer);
+  } catch {
+    return writer as Hex;
+  }
+}
+
+/**
+ * The writers to read, as spec/arkiv.md "Writers" says: the ones the exam's name lists now, if
+ * any, and the viewer's own, each once. A viewer's writer that is also built into this page counts
+ * as built in. Without a name, these are the viewer's own writers.
+ */
+export function arkivWriters(own: string, fromName: readonly string[] | null, built: string = defaultSettings.arkivWriters): SourcedWriter[] {
+  const builtIn = new Set(arkivWriterList(built).map(checksummed));
+  const merged = new Map<Hex, WriterOrigin[]>();
+  const add = (writer: string, origin: WriterOrigin) => {
+    const address = checksummed(writer);
+    const from = merged.get(address) ?? [];
+    if (!from.includes(origin)) from.push(origin);
+    merged.set(address, from);
+  };
+  for (const writer of fromName ?? []) add(writer, 'name');
+  for (const writer of arkivWriterList(own)) add(writer, builtIn.has(checksummed(writer)) ? 'built' : 'own');
+  return [...merged].map(([address, from]) => ({ address, from }));
+}
+
+/** Each writer must be an address, and one written in mixed case must have a valid checksum. */
+function writerError(text: string): string | undefined {
+  for (const writer of arkivWriterList(text)) {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(writer)) {
+      return 'Enter each address as 0x followed by 40 letters or digits, with commas between them.';
+    }
+    if (!isAddress(writer, { strict: true })) {
+      return `${writer} has a typing mistake in its capital letters. Copy it again, or write it all in lower case.`;
+    }
+  }
+  return undefined;
+}
 
 export type SettingsErrors = Partial<Record<keyof Settings, string>>;
 
@@ -51,6 +120,14 @@ export function validateSettings(settings: Settings): SettingsErrors {
   if (settings.registryAddress && !/^0x[0-9a-fA-F]{40}$/.test(settings.registryAddress)) {
     errors.registryAddress = 'Enter 0x followed by 40 letters or digits.';
   }
+  if (settings.arkivRpcUrl && !isHttpUrl(settings.arkivRpcUrl)) {
+    errors.arkivRpcUrl = 'Enter a web address that starts with http:// or https://.';
+  }
+  if (settings.swarmApiUrl && !isHttpUrl(settings.swarmApiUrl)) {
+    errors.swarmApiUrl = 'Enter a web address that starts with http:// or https://.';
+  }
+  const writers = writerError(settings.arkivWriters);
+  if (writers) errors.arkivWriters = writers;
   if (settings.examId && !isExamId(settings.examId)) {
     errors.examId = 'Enter an exam ID: 0x followed by 64 letters or digits.';
   }
@@ -100,7 +177,7 @@ export function clearSettings(storage = browserStorage()): void {
  * follow an offchain lookup to a gateway: `ExamRegistry` never asks for one, and on a name route its
  * address came from ENS.
  */
-export function endpoints(settings: Settings) {
+export function endpoints(settings: Pick<Settings, 'rpcUrl' | 'teeUrl' | 'storageUrl' | 'registryAddress' | 'examId'>) {
   const { rpcUrl, teeUrl, storageUrl, registryAddress, examId } = settings;
   return {
     /** The public files. Needs the exam ID too, because they live under it. */
@@ -114,10 +191,22 @@ export function endpoints(settings: Settings) {
   };
 }
 
+/**
+ * The Arkiv mirror, read with the viewer's own node and writers. Off, with nothing read, until both
+ * are set. A name route adds the name's writers to these, and reads them with the same node.
+ */
+export function arkivSource(settings: Pick<Settings, 'arkivRpcUrl' | 'arkivWriters'>) {
+  const writers = arkivWriterList(settings.arkivWriters);
+  return settings.arkivRpcUrl && writers.length > 0
+    ? { reader: createArkivReader({ rpcUrl: settings.arkivRpcUrl }), writers }
+    : null;
+}
+
 /** Clients for the viewer's own endpoints. Each is null until its settings are present. */
 export function connect(settings: Settings) {
   return {
     ...endpoints(settings),
+    arkiv: arkivSource(settings),
     /** drand quicknet, pinned to the chain hash and public key in spec/constants.json. */
     drand: quicknetClient(),
   };

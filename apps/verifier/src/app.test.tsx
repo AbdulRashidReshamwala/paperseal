@@ -5,8 +5,11 @@ import { renderToString } from 'react-dom/server';
 import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { arkiv } from '@paperseal/arkiv';
 import { criteriaHash, encodeApprovedList, approvedListHash, encodeCriteria, fromHex, toHex, type Hex } from '@paperseal/protocol';
 import type { ExamRegistry } from '@paperseal/chain';
+import { getAddress } from 'viem';
+
 import sampleCode from '../../../spec/fixtures/registry-code.json';
 import { App } from './App';
 import { chainChecks, loadChain } from './checks';
@@ -14,6 +17,8 @@ import { examLink, routeOfHash } from './link';
 import {
   clearSettings,
   connect,
+  arkivWriterList,
+  arkivWriters,
   defaultSettings,
   loadSettings,
   saveSettings,
@@ -29,6 +34,9 @@ const custom: Settings = {
   storageUrl: 'https://files.example/bucket',
   registryAddress: `0x${'ab'.repeat(20)}`,
   examId: `0x${'11'.repeat(32)}`,
+  arkivRpcUrl: 'https://arkiv.example',
+  arkivWriters: '',
+  swarmApiUrl: 'http://bee.example:1633',
 };
 
 function memoryStorage() {
@@ -160,7 +168,7 @@ describe('runtime settings', () => {
 
   it('validates each field and allows empty', () => {
     expect(validateSettings(custom)).toEqual({});
-    expect(validateSettings({ rpcUrl: '', teeUrl: '', storageUrl: '', registryAddress: '', examId: '' })).toEqual({});
+    expect(validateSettings({ rpcUrl: '', teeUrl: '', storageUrl: '', registryAddress: '', examId: '', arkivRpcUrl: '', arkivWriters: '', swarmApiUrl: '' })).toEqual({});
     expect(
       Object.keys(
         validateSettings({
@@ -169,9 +177,49 @@ describe('runtime settings', () => {
           storageUrl: 'file:///x',
           registryAddress: '0x1',
           examId: '0x2',
+          arkivRpcUrl: 'ws://x',
+          arkivWriters: '0x1234',
+          swarmApiUrl: 'bzz://x',
         }),
       ).sort(),
-    ).toEqual(['examId', 'registryAddress', 'rpcUrl', 'storageUrl', 'teeUrl']);
+    ).toEqual(['arkivRpcUrl', 'arkivWriters', 'examId', 'registryAddress', 'rpcUrl', 'storageUrl', 'swarmApiUrl', 'teeUrl']);
+  });
+
+  it('accepts Arkiv writers in lower case or with a valid checksum, and catches a mistyped one', () => {
+    const lower = `0x${'ab'.repeat(20)}`;
+    // vitalik.eth, written with its checksum.
+    const checksummed = '0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045';
+    expect(validateSettings({ ...custom, arkivWriters: `${lower}, ${checksummed}` })).toEqual({});
+    const typo = validateSettings({ ...custom, arkivWriters: '0xD8da6BF26964aF9D7eEd9e03E53415D37aA96045' });
+    expect(typo.arkivWriters).toMatch(/typing mistake/);
+    expect(validateSettings({ ...custom, arkivWriters: `${lower},nope` }).arkivWriters).toMatch(/0x followed by 40/);
+    expect(arkivWriterList(` ${lower} ,, ${checksummed} `)).toEqual([lower, checksummed]);
+  });
+
+  it('defaults the Swarm API to the viewer\'s own Bee node in spec/arkiv.json', () => {
+    expect(defaultSettings.swarmApiUrl).toBe(arkiv.swarm.defaultApiUrl);
+    expect(validateSettings({ ...custom, swarmApiUrl: '' })).toEqual({});
+  });
+
+  it('defaults the Arkiv node to the one in spec/arkiv.json, and turns Arkiv off with no writers', () => {
+    expect(defaultSettings.arkivRpcUrl).toBe(arkiv.network.rpcUrl);
+    expect(connect(custom).arkiv).toBeNull();
+    expect(connect({ ...custom, arkivRpcUrl: '', arkivWriters: `0x${'ab'.repeat(20)}` }).arkiv).toBeNull();
+    expect(connect({ ...custom, arkivWriters: `0x${'ab'.repeat(20)}` }).arkiv?.writers).toEqual([`0x${'ab'.repeat(20)}`]);
+  });
+
+  it("merges the name's Arkiv writers with the viewer's own, once each and checksummed, and says where each came from", () => {
+    const a = getAddress(`0x${'a1'.repeat(20)}`);
+    const b = getAddress(`0x${'b2'.repeat(20)}`);
+    const c = getAddress(`0x${'c3'.repeat(20)}`);
+    expect(arkivWriters(`${b.toLowerCase()}, ${c.toLowerCase()}, ${c}`, [a, b], c.toLowerCase())).toEqual([
+      { address: a, from: ['name'] },
+      { address: b, from: ['name', 'own'] },
+      { address: c, from: ['built'] },
+    ]);
+    // Without a name, only the viewer's own.
+    expect(arkivWriters(a.toLowerCase(), null, '')).toEqual([{ address: a, from: ['own'] }]);
+    expect(arkivWriters('', null, '')).toEqual([]);
   });
 
   it('calls the endpoints the viewer chose', async () => {
@@ -223,8 +271,8 @@ describe('runtime settings', () => {
   });
 
   it('connects to nothing until settings exist', () => {
-    const nothing = connect({ rpcUrl: '', teeUrl: '', storageUrl: '', registryAddress: '', examId: '' });
-    expect([nothing.tee, nothing.registry, nothing.examId, nothing.storage]).toEqual([null, null, null, null]);
+    const nothing = connect({ rpcUrl: '', teeUrl: '', storageUrl: '', registryAddress: '', examId: '', arkivRpcUrl: '', arkivWriters: '', swarmApiUrl: '' });
+    expect([nothing.tee, nothing.registry, nothing.examId, nothing.storage, nothing.arkiv]).toEqual([null, null, null, null, null]);
   });
 });
 

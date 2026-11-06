@@ -3,12 +3,14 @@ import type { ExamNameCheck, ExamNameResult, PasskeyNameResult, PasskeyNameState
 import { decodeApprovedList, fromHex, passkeyRecordValue, toHex, type Hex } from '@paperseal/protocol';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
+import { getAddress } from 'viem';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from './App';
 import { teeStorageBucket } from './attest';
 import { VerifierPage } from './page';
-import { buildWorld, examId, offlineQuicknet, registryAddress, registryMatches, type World } from './fixtures';
+import { buildWorld, examId, offlineQuicknet, registryAddress, registryMatches, signedReleaseLog, type World } from './fixtures';
+import type { ArkivSource } from './load';
 import { SettingsProvider, type Settings } from './settings';
 
 let chainData: unknown;
@@ -49,6 +51,21 @@ vi.mock('@paperseal/chain', async (original) => {
   };
 });
 
+/** The Arkiv reader the page gets, and the options it asked for one with. */
+let arkivReader: ArkivSource | null = null;
+let arkivReaders: { rpcUrl?: string }[] = [];
+vi.mock('@paperseal/arkiv', async (original) => {
+  const real = await original<typeof import('@paperseal/arkiv')>();
+  return {
+    ...real,
+    createArkivReader: (options: { rpcUrl?: string }) => {
+      arkivReaders.push(options);
+      if (!arkivReader) throw new Error('no Arkiv reader in this test');
+      return arkivReader;
+    },
+  };
+});
+
 /** The bucket each record and fresh token was checked against. */
 let buckets: (string | undefined)[] = [];
 
@@ -83,6 +100,9 @@ const settings: Settings = {
   storageUrl: 'https://files.example/bucket',
   registryAddress,
   examId,
+  arkivRpcUrl: 'https://arkiv.example',
+  arkivWriters: '',
+  swarmApiUrl: 'http://bee.example:1633',
 };
 
 function arrange(world: World, files: Record<string, Uint8Array> = {}) {
@@ -143,6 +163,8 @@ afterEach(() => {
   passkeyAnswer = null;
   passkeyReads = [];
   buckets = [];
+  arkivReader = null;
+  arkivReaders = [];
 });
 
 describe('one page', () => {
@@ -459,6 +481,253 @@ describe('step 6, unlock', () => {
   });
 });
 
+describe('step 6, the copy on Arkiv', () => {
+  const writer = '0x1111111111111111111111111111111111111111';
+  const latest = () => ({ number: 10_000n, time: Math.floor(Date.now() / 1000) });
+
+  /** A world with no release log in storage and a live machine that does not answer. */
+  async function silentBoard() {
+    const world = await buildWorld({ endRound: 99_999_999 });
+    const token = world.files.get('release-token.jwt');
+    if (!token) throw new Error('no release token');
+    world.files.delete('release-log.json');
+    world.files.delete('release-token.jwt');
+    arrange(world);
+    const storageFetch = vi.mocked(fetch).getMockImplementation() as (i: string | URL | Request) => Promise<Response>;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request) =>
+        String(input).startsWith('https://tee.example/') ? Promise.reject(new TypeError('fetch failed')) : storageFetch(input),
+      ),
+    );
+    return { world, token };
+  }
+
+  const row = (n: number, body: Uint8Array) => ({
+    entityKey: `0x${n.toString(16).padStart(64, '0')}` as const,
+    creator: writer as `0x${string}`,
+    createdAtBlock: 9_995n,
+    examId,
+    registry: registryAddress,
+    body,
+  });
+
+  it('is off with no writers, and reads nothing from Arkiv', async () => {
+    const releaseRows = vi.fn();
+    arkivReader = { releaseRows, latestBlock: vi.fn() } as never;
+    const world = await buildWorld({ endRound: 99_999_999 });
+    arrange(world);
+    open(1000);
+    const step = await findStep(/^6\. Paper unlocks for centres$/);
+    await within(step).findByText(/^Add who may write the copy on Arkiv/);
+    expect(arkivReaders).toEqual([]);
+    expect(releaseRows).not.toHaveBeenCalled();
+  });
+
+  it('keeps showing progress from Arkiv when the live machine goes silent', async () => {
+    tokenVerified = true;
+    const { world, token } = await silentBoard();
+    const log = await signedReleaseLog(world, 5);
+    const releaseRows = vi.fn(() =>
+      Promise.resolve({
+        tokens: [{ ...row(1, token), instanceKeyHash: '0x' }],
+        logs: [{ ...row(2, new TextEncoder().encode(JSON.stringify(log))), entriesHash: log.entriesHash }],
+        heartbeats: [],
+      }),
+    );
+    arkivReader = { releaseRows, latestBlock: () => Promise.resolve(latest()) };
+    open(1000, { teeUrl: 'https://tee.example', arkivWriters: writer, arkivRpcUrl: 'https://arkiv.example/rpc' });
+    const step = await findStep(/^6\. Paper unlocks for centres$/);
+    await within(step).findByText('Unlocked. 5 of the 8 needed key holders have released.', { exact: false }, { timeout: 5000 });
+    expect(within(step).getByText(/^Read from the copy on Arkiv/)).toBeTruthy();
+    expect(within(step).getByText('The copy on Arkiv')).toBeTruthy();
+    expect(within(step).getByText('Open this row in the Arkiv explorer')).toBeTruthy();
+    expect(stateOf(step)).toBe('current');
+    // token.jwt never traces back to Google's root in these tests, so only step 6 is looked at.
+    expect(screen.queryByRole('alert')?.textContent ?? '').not.toMatch(/Step 6/);
+    expect(arkivReaders).toEqual([{ rpcUrl: 'https://arkiv.example/rpc' }]);
+    expect(releaseRows).toHaveBeenCalledWith(examId, [writer], { registry: registryAddress });
+  });
+
+  it('is neutral when Arkiv cannot be read', async () => {
+    await silentBoard();
+    arkivReader = { releaseRows: () => Promise.reject(new Error('rate limited')), latestBlock: () => Promise.resolve(latest()) };
+    open(1000, { arkivWriters: writer });
+    const step = await findStep(/^6\. Paper unlocks for centres$/);
+    await within(step).findByText(/Could not be read: rate limited/, {}, { timeout: 5000 });
+    expect(stateOf(step)).not.toBe('failed');
+    // token.jwt never traces back to Google's root in these tests, so only step 6 is looked at.
+    expect(screen.queryByRole('alert')?.textContent ?? '').not.toMatch(/Step 6/);
+  });
+
+  it('refuses a writer that is not an address in "Check it yourself"', async () => {
+    const world = await buildWorld({ endRound: 99_999_999 });
+    arrange(world);
+    open(1000);
+    fireEvent.change(screen.getByLabelText(/^Who may write the copy on Arkiv/), { target: { value: '0x1234' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText(/Enter each address as 0x followed by 40 letters or digits/)).toBeTruthy();
+    expect(arkivReaders).toEqual([]);
+  });
+});
+
+describe('the backup on Swarm', () => {
+  const writer = '0x1111111111111111111111111111111111111111';
+  const swarmRef = 'ab'.repeat(32);
+  const entityKey = `0x${'0e'.repeat(32)}` as const;
+  const bee = 'http://bee.example:1633';
+
+  /** The bucket, empty or as built, a Swarm node with the world's files or none, and one backup row on Arkiv. */
+  function arrangeBackup(world: World, options: { bucket: 'empty' | 'full'; swarm: 'up' | 'down'; backupFiles?: Record<string, Uint8Array> }) {
+    arrange(world);
+    const storageFetch = vi.mocked(fetch).getMockImplementation() as (i: string | URL | Request) => Promise<Response>;
+    const swarmReads: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request) => {
+        const url = String(input);
+        if (url.startsWith(`${bee}/`)) {
+          swarmReads.push(url);
+          if (options.swarm === 'down') return Promise.reject(new TypeError('fetch failed'));
+          const name = decodeURIComponent(url.replace(`${bee}/bzz/${swarmRef}/`, ''));
+          const bytes = options.backupFiles?.[name] ?? world.files.get(name);
+          return Promise.resolve(bytes ? new Response(new Uint8Array(bytes)) : new Response('no', { status: 404 }));
+        }
+        return options.bucket === 'empty' ? Promise.resolve(new Response('no', { status: 404 })) : storageFetch(input);
+      }),
+    );
+    const backupRows = vi.fn(() =>
+      Promise.resolve([
+        {
+          entityKey,
+          creator: writer,
+          createdAtBlock: 9_000n,
+          examId,
+          registry: registryAddress,
+          phase: 'unlock',
+          swarmRef,
+          swarmNetwork: 'sepolia',
+          manifestHash: world.build.storageManifestHash,
+          files: world.files.size,
+          batchId: 'cd'.repeat(32),
+        },
+      ]),
+    );
+    arkivReader = {
+      releaseRows: () => Promise.resolve({ logs: [], tokens: [], heartbeats: [] }),
+      latestBlock: () => Promise.resolve({ number: 10_000n, time: Math.floor(Date.now() / 1000) }),
+      backupRows,
+    } as never;
+    return { swarmReads, backupRows };
+  }
+
+  it('opens the paper from the backup when the bucket is empty, and says which files came from it', async () => {
+    const world = await buildWorld();
+    const { backupRows } = arrangeBackup(world, { bucket: 'empty', swarm: 'up' });
+    open(1000, { arkivWriters: writer });
+    expect(await screen.findByText('Differentiate x squared.', {}, { timeout: 5000 })).toBeTruthy();
+    const step = stepNamed(/^7\. Paper opens to everyone$/);
+    expect(stateOf(step)).toBe('done');
+    expect(within(step).getByText('Backup on Swarm')).toBeTruthy();
+    for (const name of ['paper.bin', 'key-pub.tlock']) {
+      const row = within(step).getByText(name).closest('li') as HTMLElement;
+      expect(row.textContent).toMatch(/From the Swarm backup, checked against the exam's on-chain record\. The public files do not have it\./);
+      expect(within(step).getByText(`Open ${name} on Swarm`).getAttribute('href')).toBe(`${bee}/bzz/${swarmRef}/${name}`);
+    }
+    expect((within(step).getByText('key-priv.tlock').closest('li') as HTMLElement).textContent).toMatch(/From the Swarm backup\./);
+    expect(within(step).getByLabelText(`Copy Swarm reference: ${swarmRef}`)).toBeTruthy();
+    expect(within(step).getByLabelText(`Copy Arkiv entity key of the backup row: ${entityKey}`)).toBeTruthy();
+    expect(within(step).getByText('Open the backup row in the Arkiv explorer').getAttribute('href')).toMatch(new RegExp(`/entity/${entityKey}$`));
+    expect(within(step).queryByText('Fail')).toBeNull();
+
+    const sealed = stepNamed(/^5\. Paper built and sealed$/);
+    await within(sealed).findByText('Backup on Swarm');
+    expect((within(sealed).getAllByText('manifest.json')[0]?.closest('li') as HTMLElement).textContent).toMatch(/From the Swarm backup/);
+    expect((within(sealed).getByText(/^Manifest hash matches/).closest('li') as HTMLElement).textContent).toMatch(/Pass/);
+    // The test token does not lead to Google's root, so no token attests the backup's release log,
+    // and it is not used. It is only "not read", never a failure.
+    const unlock = stepNamed(/^6\. Paper unlocks for centres$/);
+    expect(within(unlock).queryByText('Open release-log.json on Swarm')).toBeNull();
+    expect(within(unlock).getByText(/^Not read from the Swarm backup\. 1 copy in the backup did not pass the checks in this step/)).toBeTruthy();
+    expect(stateOf(unlock)).not.toBe('failed');
+    expect(backupRows).toHaveBeenCalledWith(examId, [writer], { registry: registryAddress });
+  });
+
+  it('uses the backup release log once its token attests the key that signed it', async () => {
+    tokenVerified = true;
+    const world = await buildWorld();
+    arrangeBackup(world, { bucket: 'empty', swarm: 'up' });
+    open(1000, { arkivWriters: writer });
+    const unlock = await findStep(/^6\. Paper unlocks for centres$/);
+    expect(await within(unlock).findByText('Open release-log.json on Swarm', {}, { timeout: 5000 })).toBeTruthy();
+    expect(within(unlock).getByText('Open release-token.jwt on Swarm')).toBeTruthy();
+    expect(within(unlock).queryByText(/did not pass the checks in this step/)).toBeNull();
+  });
+
+  it('is neutral, and says the backup was not read, when Swarm does not answer', async () => {
+    const world = await buildWorld();
+    arrangeBackup(world, { bucket: 'empty', swarm: 'down' });
+    open(1000, { arkivWriters: writer });
+    const step = await findStep(/^5\. Paper built and sealed$/);
+    await within(step).findByText(/^Not read from the Swarm backup\. The backup could not be read/, {}, { timeout: 5000 });
+    expect(stateOf(step)).not.toBe('failed');
+    const open7 = stepNamed(/^7\. Paper opens to everyone$/);
+    await within(open7).findAllByText(/^Not read from the Swarm backup/);
+    expect(stateOf(open7)).not.toBe('failed');
+    expect(screen.queryByRole('alert')?.textContent ?? '').not.toMatch(/Step [567]/);
+  });
+
+  it('ignores a backup key-priv.tlock that does not open the paper, without failing or warning', async () => {
+    const world = await buildWorld();
+    arrangeBackup(world, { bucket: 'empty', swarm: 'up', backupFiles: { 'key-priv.tlock': new TextEncoder().encode('junk') } });
+    open(1000, { arkivWriters: writer });
+    const step = await findStep(/^7\. Paper opens to everyone$/);
+    await within(step).findByText(/^Not read from the Swarm backup\. 1 copy in the backup did not pass the checks in this step/, {}, { timeout: 5000 });
+    expect(within(step).getByText(new RegExp(`^A copy in the Swarm backup ${swarmRef} did not pass the checks in this step, so it was not used\\.`))).toBeTruthy();
+    expect(stateOf(step)).not.toBe('failed');
+    expect(within(step).queryByText('Fail')).toBeNull();
+    expect(screen.queryByText('Differentiate x squared.')).toBeNull();
+    expect(screen.queryByRole('alert')?.textContent ?? '').not.toMatch(/Step 7/);
+  });
+
+  it('reads no backup without writers, or with no Swarm API', async () => {
+    const world = await buildWorld();
+    const first = arrangeBackup(world, { bucket: 'empty', swarm: 'up' });
+    const view = open(1000);
+    await within(await findStep(/^5\. Paper built and sealed$/)).findByText(/manifest.json is not in storage yet/);
+    view.unmount();
+    expect(first.backupRows).not.toHaveBeenCalled();
+    expect(first.swarmReads).toEqual([]);
+
+    const second = arrangeBackup(world, { bucket: 'empty', swarm: 'up' });
+    open(1000, { arkivWriters: writer, swarmApiUrl: '' });
+    await within(await findStep(/^5\. Paper built and sealed$/)).findByText(/manifest.json is not in storage yet/);
+    expect(second.backupRows).not.toHaveBeenCalled();
+    expect(second.swarmReads).toEqual([]);
+  });
+
+  it('reads nothing from Swarm while the bucket works', async () => {
+    const world = await buildWorld();
+    const { swarmReads, backupRows } = arrangeBackup(world, { bucket: 'full', swarm: 'up' });
+    open(1000, { arkivWriters: writer });
+    expect(await screen.findByText('Differentiate x squared.', {}, { timeout: 5000 })).toBeTruthy();
+    expect(screen.queryByText('Backup on Swarm')).toBeNull();
+    expect(backupRows).not.toHaveBeenCalled();
+    expect(swarmReads).toEqual([]);
+  });
+
+  it('can be pointed at another Swarm API, or turned off, under "Check it yourself"', async () => {
+    const world = await buildWorld();
+    arrange(world);
+    open(1000);
+    const field = screen.getByLabelText(/^Where to read the backup on Swarm/);
+    expect((field as HTMLInputElement).value).toBe(bee);
+    fireEvent.change(field, { target: { value: 'bzz://nope' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findAllByText('Enter a web address that starts with http:// or https://.')).toHaveLength(1);
+  });
+});
+
 describe('step 7, proof', () => {
   it('opens the paper after the end round and shows each of the 7 checks as Pass', async () => {
     const world = await buildWorld();
@@ -600,7 +869,7 @@ describe('verify by name', () => {
   const saved = { registryAddress: `0x${'99'.repeat(20)}`, examId: `0x${'33'.repeat(32)}` };
   const passed = (over: Partial<ResolvedExamName> = {}): ExamNameResult => ({
     ok: true,
-    value: { name, label: 'jee-main-2026', parent: 'board.eth', examId, registry: registryAddress, board, teeUrl: null, storageUrl: null, bucket: null, ...over },
+    value: { name, label: 'jee-main-2026', parent: 'board.eth', examId, registry: registryAddress, board, teeUrl: null, storageUrl: null, bucket: null, arkivWriters: null, arkivWritersIgnored: [], ...over },
   });
   const failed = (check: ExamNameCheck): ExamNameResult => ({ ok: false, failed: check, reason: 'The record says otherwise.', partial: { name } });
   const noteOf = (step: HTMLElement) => step.querySelector('.ps-step-note')?.textContent ?? '';
@@ -683,6 +952,48 @@ describe('verify by name', () => {
     expect(new Set(buckets)).toEqual(new Set([teeStorageBucket]));
   });
 
+  describe('Arkiv writers', () => {
+    const fromName = getAddress(`0x${'a1'.repeat(20)}`);
+    const both = getAddress(`0x${'b2'.repeat(20)}`);
+    const own = getAddress(`0x${'c3'.repeat(20)}`);
+    const quiet = () => {
+      const releaseRows = vi.fn(() => Promise.resolve({ logs: [], tokens: [], heartbeats: [] }));
+      arkivReader = { releaseRows, latestBlock: () => Promise.resolve({ number: 10_000n, time: 1_900_000_000 }) };
+      return releaseRows;
+    };
+
+    it("reads the name's writers with the viewer's own, once each, and says where each came from", async () => {
+      const world = await buildWorld({ endRound: 99_999_999 });
+      arrange(world);
+      const releaseRows = quiet();
+      nameAnswer = () => passed({ arkivWriters: [fromName, both], arkivWritersIgnored: ['not-a-writer'] });
+      open(1000, { ...saved, arkivWriters: `${both.toLowerCase()}, ${own.toLowerCase()}` }, `/name/${name}`);
+      const step = await findStep(/^7\. Paper unlocks for centres$/);
+      await waitFor(() => {
+        expect(releaseRows).toHaveBeenCalledWith(examId, [fromName, both, own], { registry: registryAddress });
+      });
+      await within(step).findByText(fromName, { exact: false }, { timeout: 5000 });
+      expect(within(step).getByText('From the name')).toBeTruthy();
+      expect(within(step).getByText('From the name and your own choice')).toBeTruthy();
+      expect(within(step).getByText('Your own choice')).toBeTruthy();
+      expect(within(step).getByText(/^The exam's name also lists not-a-writer\. It is not an address/)).toBeTruthy();
+      // release-token.jwt never traces back to Google's root here, so only Arkiv is looked at.
+      expect(screen.queryByRole('alert')?.textContent ?? '').not.toMatch(/Arkiv|relay|writer/i);
+    });
+
+    it("reads the name's writers on the viewer's own Arkiv node when the viewer has none", async () => {
+      const world = await buildWorld({ endRound: 99_999_999 });
+      arrange(world);
+      const releaseRows = quiet();
+      nameAnswer = () => passed({ arkivWriters: [fromName] });
+      open(1000, saved, `/name/${name}`);
+      await waitFor(() => {
+        expect(releaseRows).toHaveBeenCalledWith(examId, [fromName], { registry: registryAddress });
+      });
+      expect(arkivReaders).toEqual([{ rpcUrl: settings.arkivRpcUrl }]);
+    });
+  });
+
   it.each([
     ['name', 'Not a valid name'],
     ['registry', 'No exam record'],
@@ -733,7 +1044,8 @@ describe('verify by name', () => {
       expect(noteOf(step)).toMatch(/^Can't read the name\./);
     });
     expect(stateOf(step)).toBe('current');
-    expect(screen.queryByRole('alert')).toBeNull();
+    // token.jwt never traces back to Google's root in these tests, so only step 6 is looked at.
+    expect(screen.queryByRole('alert')?.textContent ?? '').not.toMatch(/Step 6/);
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('The exam name could not be read.');
     expect(document.querySelector('.ps-seal')).toBeNull();
     expect(chainReads).toEqual([]);

@@ -1,0 +1,34 @@
+{
+  "name": "@paperseal/relay",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Mirrors an exam's public unlock evidence (release log and release token), a registry's exam index and Swarm backups of an exam's storage files to Arkiv, as in spec/arkiv.md \"Writers\", \"Exam Index\" and \"Backups\".",
+  "scripts": {
+    "mirror": "node cli.mjs mirror",
+    "watch": "node cli.mjs watch",
+    "status": "node cli.mjs status",
+    "index": "node cli.mjs index",
+    "backup": "node cli.mjs backup",
+    "swarm-status": "node cli.mjs swarm-status",
+    "dry-check": "node cli.mjs dry-check",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@paperseal/arkiv": "workspace:*",
+    "@paperseal/attestation": "workspace:*",
+    "@paperseal/chain": "workspace:*",
+    "@paperseal/crypto": "workspace:*",
+    "@paperseal/protocol": "workspace:*",
+    "@paperseal/swarm": "workspace:*",
+    "@paperseal/tee-client": "workspace:*",
+    "tlock-js": "0.9.0",
+    "viem": "2.57.16",
+    "vite": "8.3.6"
+  },
+  "devDependencies": {
+    "vitest": "5.1.0"
+  }
+}

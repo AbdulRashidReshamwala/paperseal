@@ -339,6 +339,7 @@ A board may give an exam an ENS name `<name>.<parent>`, where `parent` is the bo
 | `text` `ens.records.tee` | The TEE URL |
 | `text` `ens.records.storage` | The public storage URL |
 | `text` `ens.records.bucket` | The storage bucket the TEE was started with |
+| `text` `ens.records.arkivWriters` | The Arkiv writers the board publishes, as addresses separated by commas (`arkiv.md`, "Writers") |
 
 A reader checks a name with the viewer's own RPC, on-chain only (`ens.ccipRead` is `false`, so no offchain gateway is asked), and fails unless all of these hold:
 

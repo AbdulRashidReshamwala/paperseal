@@ -43,7 +43,7 @@ const fixtures = JSON.parse(
 
 describe('exam names', () => {
   it('reads spec/ens.json', () => {
-    expect(ens.records).toEqual({ tee: 'paperseal.tee', storage: 'paperseal.storage', bucket: 'paperseal.bucket',
+    expect(ens.records).toEqual({ tee: 'paperseal.tee', storage: 'paperseal.storage', bucket: 'paperseal.bucket', arkivWriters: 'paperseal.arkiv-writers',
       passkey: 'paperseal.passkey', credential: 'paperseal.credential', directory: 'paperseal.directory',
     });
     expect(ens.directoryBytes).toBe(8192);

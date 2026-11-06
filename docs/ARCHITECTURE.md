@@ -13,7 +13,10 @@ How the design in the [README](../README.md) maps onto this repository. The READ
 | `packages/crypto` | TypeScript | HPKE, AES-256-GCM, XOR, timelock decrypt, and recovering a passkey's public key from a signature with `@noble/curves` |
 | `packages/keys` | TypeScript | The key interface over WebAuthn PRF |
 | `packages/attestation` | TypeScript | Confidential Space token checks |
+| `packages/arkiv` | TypeScript | The Arkiv mirror's schemas, a reader that returns only published writers' rows, and a writer that skips rows it already wrote (`spec/arkiv.md`) |
+| `packages/swarm` | TypeScript | A small Bee HTTP client: upload an unencrypted collection, read a file, and manage postage batches (`spec/arkiv.md`, "Backups") |
 | `packages/chain` | TypeScript | `ExamRegistry` reads and writes through viem, the code pin check (`checkRegistryCode`, `spec/registry.json`), the on-chain ENS name check (`resolveExamName`), and party and directory reads (`readPartyRecords`, `readDirectory`) |
+| `relay/` | TypeScript | CLI that mirrors an exam's signed release log and Unlock token from the TEE or storage to Arkiv, indexes a registry's exams and approved lists from its events, and backs up an exam's files to Swarm |
 | `packages/tee-client` | TypeScript | Typed client for the TEE HTTP API |
 | `packages/ui` | React | Shared components, tokens and the Chromium gate |
 | `apps/web` | React | The board-hosted app, with a route area per signed-in role |
@@ -43,6 +46,7 @@ The README names separate setter and centre apps. One app is simpler to host and
 - Shamir splitting and rebuilding exist only in `tee/`. No browser code handles `K_priv` shares beyond decrypting and forwarding its own.
 - The `ExamRegistry` ABI and runtime bytecode are generated from `contracts/` and copied into `packages/chain` by `make abi`. They are never edited by hand.
 - Only `packages/chain` reads ENS, and the verifier and `apps/web` use it. `tee/` and `contracts/` never read ENS.
+- Only `packages/arkiv` talks to Arkiv. The relay writes, and the verifier reads and checks every row with the same checks it uses on storage. `tee/` and `contracts/` never touch Arkiv.
 
 ## Lifecycle Ownership
 

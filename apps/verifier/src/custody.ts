@@ -1,3 +1,4 @@
+import { arkiv } from '@paperseal/arkiv';
 import type { ClaimCheck } from '@paperseal/attestation';
 import type { ExamNameCheck, ExamNameResult, PasskeyNameResult, ResolvedExamName } from '@paperseal/chain';
 import {
@@ -20,10 +21,14 @@ import {
 import type { CheckStatus, SealState, StepState, Tone } from '@paperseal/ui';
 
 import type { Build, Exam } from './attest';
+import type { BackupFile, BackupUse, BucketGap } from './backup';
 import { chainChecks, computedListHash, sameHex, type ChainData, type ChainProblem, type CheckResult } from './checks';
 import { roundStatus, type LatestRound } from './live';
 import {
+  ARKIV_STALE_AFTER_SECONDS,
   roundReached,
+  type ArkivIgnored,
+  type ArkivReport,
   type LiveReport,
   type ManifestResult,
   type Neutral,
@@ -32,7 +37,9 @@ import {
   type Sourced,
 } from './load';
 import type { Polled } from './poll';
+import { releaseTokenName } from './storage';
 import type { ProofChecks } from './proof';
+import type { SourcedWriter, WriterOrigin } from './settings';
 import type { LogVerdict, ReleaseFileReport, ReleaseFilesReport, ReleaseProgress } from './unlock';
 
 /*
@@ -149,9 +156,15 @@ export interface View {
    * proof of who holds a key, never a check the exam depends on. Absent where names are not read.
    */
   partyNames?: Polled<Record<string, PasskeyNameResult>>;
-  sources: { chain: boolean; storage: boolean; tee: boolean };
+  sources: { chain: boolean; storage: boolean; tee: boolean; arkiv: boolean };
   records: Polled<Records>;
   live: Polled<LiveReport | Neutral>;
+  /** The Arkiv mirror of the release evidence. Off until there are writers to trust. */
+  arkiv: Polled<ArkivReport | Neutral>;
+  /** The writers read from Arkiv, and where each came from. Left out, the report's list is shown untagged. */
+  arkivWriters?: readonly SourcedWriter[];
+  /** Entries in the exam name's writer record that are not addresses, so are not read. */
+  arkivWritersIgnored?: readonly string[];
   latest: LatestRound;
   /** Unix seconds. */
   now: number;
@@ -162,8 +175,9 @@ export interface View {
 
 const needsStorage = 'Add where the public files are kept under "Check it yourself" at the foot of the page.';
 const needsTee = 'Add the live machine address under "Check it yourself" at the foot of the page. Every other check works without it.';
+const needsArkiv = 'Add who may write the copy on Arkiv under "Check it yourself" at the foot of the page. Every other check works without it.';
 
-const roleNames: Record<number, string> = {
+export const roleNames: Record<number, string> = {
   1: 'Setter',
   2: 'Key holder',
   3: 'Centre holding part of the key',
@@ -257,6 +271,64 @@ function claimRow(check: ClaimCheck): Item {
   return fail({ code: check.claim }, 'The proof that Paper Seal runs the published code does not match what was published.', detail);
 }
 
+const gapWords: Record<BucketGap, string> = {
+  missing: 'The public files do not have it.',
+  unreadable: 'The public files could not be read.',
+  mismatch: 'The copy in the public files does not match.',
+};
+
+/**
+ * Which of this step's files came from the Swarm backup, and where, as spec/arkiv.md "Backups",
+ * "Reading", rule 4 says. A backup that could not be read is only "not read", never a failure.
+ */
+function backupItems(use: BackupUse | undefined, names: readonly string[]): Item[] {
+  if (!use) return [];
+  const wanted = new Set(names);
+  const served = use.served.filter((file) => wanted.has(file.name));
+  const notRead = use.missed.filter((miss) => wanted.has(miss.name) && miss.kind === 'not-read');
+  const rejected = use.rejected.filter((copy) => wanted.has(copy.name));
+  if (served.length === 0 && notRead.length === 0 && rejected.length === 0) return [];
+  const collections = new Map<string, BackupFile>();
+  for (const file of served) if (!collections.has(file.swarmRef)) collections.set(file.swarmRef, file);
+  const ignored = [
+    use.ignored.collections > 0 ? `${plural(use.ignored.collections, 'backup')} whose file list does not match the public record` : null,
+    use.ignored.files > 0 ? `${plural(use.ignored.files, 'file')} that did not match the file list` : null,
+  ].filter((part) => part !== null);
+  return [
+    { kind: 'heading', text: 'Backup on Swarm' },
+    ...served.flatMap((file): Item[] => [
+      file.inManifest
+        ? {
+            kind: 'check',
+            label: { code: file.name },
+            status: 'pass',
+            detail: `From the Swarm backup, checked against the exam's on-chain record. ${gapWords[file.bucket]}`,
+          }
+        : {
+            kind: 'fact',
+            label: { code: file.name },
+            value: `From the Swarm backup. ${gapWords[file.bucket]} It passed the checks in this step before it was used, as a copy in the public files must.`,
+          },
+      { kind: 'link', href: file.url, text: `Open ${file.name} on Swarm` },
+    ]),
+    ...[...collections.values()].flatMap((file): Item[] => [
+      { kind: 'hash', label: 'Swarm reference', value: file.swarmRef },
+      { kind: 'hash', label: 'Arkiv entity key of the backup row', value: file.entityKey },
+      { kind: 'link', href: `${arkiv.network.explorer}/entity/${file.entityKey}`, text: 'Open the backup row in the Arkiv explorer' },
+    ]),
+    ...notRead.map((miss) => notChecked({ code: miss.name }, `Not read from the Swarm backup. ${miss.reason}`)),
+    // A backup copy that failed is ignored, as a bad copy in the public files would be. Never a failure.
+    ...rejected.map(
+      (copy): Item => ({
+        kind: 'fact',
+        label: { code: copy.name },
+        value: `A copy in the Swarm backup ${copy.swarmRef} did not pass the checks in this step, so it was not used. ${copy.reason}`,
+      }),
+    ),
+    ...(ignored.length > 0 ? [{ kind: 'fact' as const, label: 'Backups ignored', value: ignored.join(', ') }] : []),
+  ];
+}
+
 interface Draft {
   id: StepId;
   label: string;
@@ -284,6 +356,7 @@ interface Context {
   checks: ReturnType<typeof chainChecks> | null;
   records: Records | null;
   live: LiveReport | null;
+  arkiv: ArkivReport | null;
   lockReached: boolean;
   unlockReached: boolean;
   endReached: boolean;
@@ -642,6 +715,7 @@ function attestedStep(c: Context): Draft {
     items: [
       { kind: 'heading', text: 'Published proof' },
       ...publishedTokenItems(c),
+      ...backupItems(c.records?.backup, [storageNames.token]),
       ...liveTokenItems(c),
       { kind: 'heading', text: 'Security key hardware' },
       ...hardware,
@@ -988,6 +1062,7 @@ function sealedStep(c: Context): Draft {
       ...sealedItems(c),
       signature.item,
       ...manifest.items,
+      ...backupItems(records?.backup, [storageNames.manifest]),
     ],
   };
 }
@@ -1137,19 +1212,182 @@ function liveReleaseItems(c: Context): Item[] {
   ];
 }
 
+type ProgressSource = 'storage' | 'tee' | 'arkiv';
+
+const sourceNames: Record<ProgressSource, string> = {
+  storage: 'The public files',
+  tee: 'The live machine',
+  arkiv: 'The copy on Arkiv',
+};
+
+/** The quiet line under the note, so the viewer knows which source the count came from. */
+const sourceAsides: Record<ProgressSource, string> = {
+  storage: 'Read from the public files.',
+  tee: 'Read from the live machine, which passed its check.',
+  arkiv: 'Read from the copy on Arkiv. Every row shown passed its check.',
+};
+
+/** How many keys a log shows as released, the approved ones and any others. */
+const releasedKeys = (progress: ReleaseProgress) => progress.count + progress.unknown.length;
+
+/**
+ * The verified progress with the most releases, and where it came from. Logs only grow, and every
+ * one here is signed by an attested key, so the larger one is simply the later one.
+ */
+function shownProgress(c: Context, published: ReleaseProgress | null): { progress: ReleaseProgress; source: ProgressSource } | null {
+  const trustedLive = c.live?.fresh.ok === true && c.live.fresh.value.trusted ? c.live.progress : null;
+  const candidates: { progress: ReleaseProgress | null | undefined; source: ProgressSource }[] = [
+    { progress: published, source: 'storage' },
+    { progress: trustedLive, source: 'tee' },
+    { progress: c.arkiv?.log?.progress, source: 'arkiv' },
+  ];
+  let best: { progress: ReleaseProgress; source: ProgressSource } | null = null;
+  for (const { progress, source } of candidates) {
+    if (progress && (!best || releasedKeys(progress) > releasedKeys(best.progress))) best = { progress, source };
+  }
+  return best;
+}
+
 /** Who has released, in the strongest words the evidence allows. */
 function releaseLine(c: Context, published: ReleaseProgress | null, said: ReleaseProgress | null): string {
-  const trustedLive = c.live?.fresh.ok === true && c.live.fresh.value.trusted ? c.live.progress : null;
-  const known = published ?? trustedLive;
+  const known = shownProgress(c, published)?.progress;
   if (known) return `${String(known.count)} of the ${String(known.required)} needed key holders have released.`;
   const unverified = said ?? c.live?.progress ?? null;
   if (unverified) return `${String(unverified.count)} of the ${String(unverified.required)} needed key holders may have released. This is not verified yet.`;
   return 'No release has been verified yet.';
 }
 
+function ignoredWords(ignored: ArkivIgnored): string {
+  const parts = [
+    ignored.tokens > 0 ? `${plural(ignored.tokens, 'release token')} that did not pass the check` : null,
+    ignored.unreadable > 0 ? `${plural(ignored.unreadable, 'release log')} that could not be read` : null,
+    ignored.unattested > 0 ? `${plural(ignored.unattested, 'release log')} not signed by a key a passing token attests` : null,
+    ignored.failed > 0 ? `${plural(ignored.failed, 'release log')} that did not pass the check` : null,
+  ].filter((part) => part !== null);
+  return parts.length > 0 ? parts.join(', ') : 'None';
+}
+
+const originWords: Record<WriterOrigin, string> = {
+  name: 'From the name',
+  own: 'Your own choice',
+  built: 'Built into this page',
+};
+
+/** `From the name and your own choice`. */
+function originTag(from: readonly WriterOrigin[]): string {
+  const words = from.map((origin, index) => (index === 0 ? originWords[origin] : originWords[origin].toLowerCase()));
+  return words.join(' and ');
+}
+
+/** Each writer read, and where it came from when the page knows. */
+function writerItems(c: Context, report: ArkivReport): Item[] {
+  const sourced = c.view.arkivWriters;
+  if (!sourced) return [{ kind: 'fact', label: 'Writers read', value: report.writers.join(', ') }];
+  const known = new Map(sourced.map((writer) => [writer.address.toLowerCase(), writer.from]));
+  return report.writers.map((address) => {
+    const from = known.get(address.toLowerCase()) ?? [];
+    return from.length > 0
+      ? { kind: 'tag' as const, label: 'Writer read', tone: 'neutral' as const, tag: originTag(from), value: address }
+      : { kind: 'fact' as const, label: 'Writer read', value: address };
+  });
+}
+
+/** The name's writer record entries that are not addresses. Never a failure: they are only not read. */
+function ignoredWriterItems(c: Context): Item[] {
+  const ignored = c.view.arkivWritersIgnored ?? [];
+  if (ignored.length === 0) return [];
+  const one = ignored.length === 1;
+  return [
+    {
+      kind: 'text',
+      text: `The exam's name also lists ${ignored.join(', ')}. ${one ? 'It is not an address' : 'They are not addresses'}, so this page does not read ${one ? 'it' : 'them'}.`,
+    },
+  ];
+}
+
+/**
+ * Arkiv evidence. Rows that don't verify are counted, never shown as progress, and never fail the
+ * step. Heartbeats only say a writer is running: they are shown, and never count.
+ */
+function arkivItems(c: Context, over: boolean): Item[] {
+  const heading: Item = { kind: 'heading', text: 'Copy on Arkiv, optional' };
+  const ignoredWriters = ignoredWriterItems(c);
+  if (!c.view.sources.arkiv) return [heading, { kind: 'text', text: needsArkiv }, ...ignoredWriters];
+  const polled = c.view.arkiv;
+  if (polled.state === 'error') return [heading, notChecked('Copy on Arkiv', `Could not be read: ${polled.message}`), ...ignoredWriters];
+  if (polled.state !== 'ready') return [heading, notChecked('Copy on Arkiv', 'Not read yet'), ...ignoredWriters];
+  if ('kind' in polled.value) return [heading, notChecked('Copy on Arkiv', polled.value.message), ...ignoredWriters];
+  const report = polled.value;
+  const { log, heartbeat } = report;
+  // Rule 4: only while unlock is open, and timed by Arkiv's blocks, never this device's clock.
+  const open = c.unlockReached && !over;
+  const age = report.ageSeconds;
+  const stale = open && age !== null && age > ARKIV_STALE_AFTER_SECONDS;
+  const silent = open && age === null;
+  const readAt = new Intl.DateTimeFormat('en-GB', { timeStyle: 'medium', ...(c.view.timeZone ? { timeZone: c.view.timeZone } : {}) });
+  return [
+    heading,
+    ...(stale
+      ? [
+          {
+            kind: 'text' as const,
+            tone: 'warn' as const,
+            text: `The Arkiv copy stopped updating ${plural(Math.floor(age / 60), 'minute')} ago. That does not mean no one has released since. This page keeps reading it.`,
+          },
+        ]
+      : []),
+    ...(silent
+      ? [
+          {
+            kind: 'text' as const,
+            tone: 'warn' as const,
+            text: 'No relay has written to Arkiv for this exam since unlock opened. That does not mean no one has released. This page keeps reading it.',
+          },
+        ]
+      : []),
+    ...(polled.stale
+      ? [{ kind: 'text' as const, text: `The copy on Arkiv could not be read again, so this shows what it said at ${readAt.format(polled.readAt)}. This page keeps trying.` }]
+      : []),
+    ...writerItems(c, report),
+    ...ignoredWriters,
+    {
+      kind: 'fact',
+      label: 'Rows read',
+      value: `${plural(report.read.logs, 'release log')}, ${plural(report.read.tokens, 'release token')}, ${plural(report.read.heartbeats, 'heartbeat')}`,
+    },
+    ...(log
+      ? ([
+          { kind: 'check', label: 'Release log signed by a key a passing release token attests', status: 'pass' },
+          { kind: 'hash', label: 'Entity key of the log shown', value: log.entityKey },
+          { kind: 'link', href: `${arkiv.network.explorer}/entity/${log.entityKey}`, text: 'Open this row in the Arkiv explorer' },
+          { kind: 'fact', label: 'Written by', value: log.creator },
+          { kind: 'fact', label: 'Written at', value: utcTime(log.writtenAt) },
+          ...(log.progress ? progressItems(log.progress, true) : []),
+        ] satisfies Item[])
+      : [
+          notChecked(
+            'Release log',
+            report.read.logs === 0 ? 'No release log on Arkiv yet' : 'No release log on Arkiv has passed its check yet',
+          ),
+        ]),
+    { kind: 'fact', label: 'Rows ignored', value: ignoredWords(report.ignored) },
+    ...(heartbeat
+      ? ([
+          { kind: 'fact', label: 'Newest heartbeat written at', value: utcTime(heartbeat.writtenAt) },
+          { kind: 'fact', label: 'Stage the relay last read, as it says', value: heartbeat.stage || 'Not given' },
+        ] satisfies Item[])
+      : []),
+    ...(report.newestAt === null ? [] : [{ kind: 'fact' as const, label: 'Relay last wrote at', value: utcTime(report.newestAt) }]),
+  ];
+}
+
 function unlockStep(c: Context, sealedOff: boolean): Draft {
   const { exam, build } = c;
   const logs = publishedLogItems(c.records?.log ?? null);
+  const fromArkiv = c.arkiv?.log?.progress ?? null;
+  const arkivComplete = fromArkiv !== null && fromArkiv.count >= fromArkiv.required;
+  const complete = logs.complete || arkivComplete;
+  const shown = shownProgress(c, logs.verified);
   const unlockAt = exam ? roundTimeSeconds(Number(exam.settings.unlockRound)) : null;
   const countdown: Item[] = exam
     ? [
@@ -1173,7 +1411,7 @@ function unlockStep(c: Context, sealedOff: boolean): Draft {
       ]
     : [];
   const noPaper = c.endReached && build === null;
-  const note = logs.complete
+  const note = complete
     ? releaseLine(c, logs.verified, logs.said)
     : noPaper
       ? 'No paper was made, so there is nothing to unlock.'
@@ -1184,19 +1422,25 @@ function unlockStep(c: Context, sealedOff: boolean): Draft {
           : c.unlockReached
             ? `Unlocked. ${releaseLine(c, logs.verified, logs.said)}`
             : `Opens to centres at ${c.when(unlockAt)}. Nothing can open it sooner.`;
+  // The source is named only where the note gives a count.
+  const counted = complete || (!noPaper && !sealedOff && exam !== null && c.unlockReached);
   return {
     id: 'unlock',
     label: 'Paper unlocks for centres',
-    complete: logs.complete,
+    complete,
     notApplicable: noPaper || sealedOff,
     at: unlockAt,
     round: exam ? Number(exam.settings.unlockRound) : null,
     note,
+    ...(counted && shown ? { aside: sourceAsides[shown.source] } : {}),
     items: [
       ...countdown,
+      ...(shown ? [{ kind: 'fact' as const, label: 'Progress shown is from', value: sourceNames[shown.source] }] : []),
       { kind: 'heading', text: 'Published release log' },
       ...logs.items,
+      ...backupItems(c.records?.backup, [storageNames.releaseLog, releaseTokenName]),
       ...liveReleaseItems(c),
+      ...arkivItems(c, complete || c.endReached || noPaper || sealedOff),
       ...(build ? machineFailed(c) : []),
     ],
   };
@@ -1261,6 +1505,9 @@ function proofItems(proof: Extract<ProofRun, { ok: true }>['result']): { items: 
   }
 }
 
+/** The files the proof reads. */
+const proofFiles = [storageNames.keyPriv, storageNames.keyPub, storageNames.paper];
+
 function openStep(c: Context): Draft {
   const { exam, build } = c;
   const endRound = exam ? Number(exam.settings.endRound) : null;
@@ -1290,10 +1537,21 @@ function openStep(c: Context): Draft {
   if (!c.view.sources.storage) return { ...base, complete: false, note: 'This page needs to know where the public files are kept.', items: [notChecked('Proof', needsStorage)] };
   if (!proof) return { ...base, complete: false, note: 'Opening the paper.', items: [notChecked('Proof', 'Opening the paper.')] };
   if (!proof.ok) {
-    return { ...base, complete: false, note: 'The paper could not be opened just now. This page tries again by itself.', items: [notChecked('Proof', `Could not be read: ${proof.message}`)] };
+    return {
+      ...base,
+      complete: false,
+      note: 'The paper could not be opened just now. This page tries again by itself.',
+      items: [notChecked('Proof', `Could not be read: ${proof.message}`), ...backupItems(proof.backup, proofFiles)],
+    };
   }
   const result = proofItems(proof.result);
-  return { ...base, complete: result.complete, notApplicable: proof.result.state === 'sealed', note: result.note, items: result.items };
+  return {
+    ...base,
+    complete: result.complete,
+    notApplicable: proof.result.state === 'sealed',
+    note: result.note,
+    items: [...result.items, ...backupItems(proof.backup, proofFiles)],
+  };
 }
 
 const label = (item: CheckItem) => (typeof item.label === 'string' ? item.label : item.label.code);
@@ -1435,12 +1693,13 @@ function verdictLine(c: Context, steps: readonly CustodyStep[], failures: readon
 export function custody(given: View): Custody {
   // On a name route the name comes first, and nothing read for the exam counts until it passes.
   const named = given.name ? nameStep(given.name) : null;
-  const view: View = named && !named.complete ? { ...given, records: { state: 'off' }, live: { state: 'off' }, proof: null } : given;
+  const view: View = named && !named.complete ? { ...given, records: { state: 'off' }, live: { state: 'off' }, arkiv: { state: 'off' }, proof: null } : given;
   const records = view.records.state === 'ready' ? view.records.value : null;
   const chain = records?.chain ?? null;
   const exam = chain?.exam ?? null;
   const build = chain?.build ?? null;
   const live = view.live.state === 'ready' && !('kind' in view.live.value) ? view.live.value : null;
+  const arkivReport = view.arkiv.state === 'ready' && !('kind' in view.arkiv.value) ? view.arkiv.value : null;
   const reached = (round: bigint | undefined) => round !== undefined && roundReached(Number(round), view.latest.round, view.now);
 
   const c: Context = {
@@ -1451,6 +1710,7 @@ export function custody(given: View): Custody {
     checks: chain ? chainChecks(view.examId, chain) : null,
     records,
     live,
+    arkiv: arkivReport,
     lockReached: reached(exam?.settings.lockRound),
     unlockReached: reached(exam?.settings.unlockRound),
     endReached: reached(exam?.settings.endRound),

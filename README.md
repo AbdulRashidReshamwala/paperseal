@@ -121,6 +121,18 @@ The verifier page shows, for each listed party with an ENS name, whether the rec
 
 If a key is lost, the person enrols a new one and the directory owner replaces both records. A passkey belongs to one domain, so moving the app to another domain means everyone enrols again.
 
+### Arkiv Copy
+
+The board runs the TEE and the public storage, so it could stop either one during unlock. A relay copies the unlock evidence to [Arkiv](https://docs.arkiv.network) as it appears, so anyone can keep watching. It copies the TEE's signed release log, and Google's token for the machine that signed it. Evidence rows can't be edited, they live for 180 days, and anyone can extend them. The verifier reads the rows from writers the viewer trusts, checks the token against the on-chain exam and the log under the key the token attests, and shows the largest verified progress from storage, the TEE or Arkiv. A row that doesn't verify never counts. While unlock runs, the relay also writes a heartbeat every minute, so a copy that stops updating, or a relay that never started, shows a warning. A board lists its writers in the exam's ENS name. Questions, shares and anything not already public never go on Arkiv. The same writers also keep an index of a registry's exams and their approved lists, copied from `ExamRegistry`'s events, because the registry can't list its own exams. The verifier's `#/exams` page lists and searches that index, and checks every exam against Sepolia. A backup of each exam's public files goes to [Swarm](https://www.ethswarm.org), with its reference on Arkiv. When the board's bucket can't give a file, the verifier takes it from the backup, but only if the backup's manifest matches the Build on Sepolia and the file matches the manifest. Unlock files, which no manifest lists, are checked like the bucket's copies, and one that fails is ignored. The key holder and centre pages don't use the backup yet ([`arkiv/swarm.md`](arkiv/swarm.md)). The rules are in [`spec/arkiv.md`](spec/arkiv.md), and the relay is in [`relay/`](relay).
+
+The demo's writer is [`0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b`](https://rabdi.explorer.arkiv.network/address/0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b) on Arkiv's Rabdi testnet. This query lists every release log it has mirrored. Swap the schema for `paperseal.v1.exam` to list the indexed exams:
+
+```bash
+curl -s https://rpc.rabdi.db-chain.testnet.arkiv.network -H "content-type: application/json" --data '{"jsonrpc":"2.0","id":1,"method":"arkiv_query","params":["arkiv.schema = str('"'"'paperseal.v1.release-log'"'"') AND $creator = addr(0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b)",{"select":{"key":true,"attributes":true,"count":true}}]}'
+```
+
+The mirrored evidence comes from Paper Seal's own demo exams, and this repository is [MIT](LICENSE) licensed. The [`arkiv/`](arkiv) folder answers the Arkiv prize's questions.
+
 ### Question Submission
 
 Setters talk to the TEE directly, and the board's infrastructure only ever carries ciphertext.
@@ -293,6 +305,10 @@ The paper stays with approved centres from `T−Δ` until the end round. At that
 - A light client or ZK proof, so the TEE can verify chain data without trusting the RPC operator
 - World ID for setters
 - Native setter app signed with a developer key
+
+## How AI Was Used
+
+Parts of this repository, including the ENS name check and the Arkiv copy, were written with Claude Code, an AI coding agent. It worked from the specs in `spec/`, and people reviewed and ran each change, including the tests and the live runs on Sepolia and Arkiv.
 
 ## License
 

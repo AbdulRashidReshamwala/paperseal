@@ -1,4 +1,6 @@
+import { createArkivReader } from '@paperseal/arkiv';
 import { checkPasskeyName, resolveExamName, type ExamNameResult, type PasskeyNameResult } from '@paperseal/chain';
+import { createSwarmClient } from '@paperseal/swarm';
 import { ownerEnsName, requireHardwareAttestation, roles, toHex, type Hex, type Paper } from '@paperseal/protocol';
 import {
   Button,
@@ -12,19 +14,21 @@ import {
   type Step,
 } from '@paperseal/ui';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 
 import { teeStorageBucket } from './attest';
+import { createBackupCache, type BackupSource } from './backup';
 import { loadChain, type ChainData } from './checks';
 import { clockTime, custody, dayTime, REPOSITORY, type Custody, type CustodyStep, type Failure } from './custody';
 import { Evidence } from './evidence';
 import { useExamLink } from './link';
 import { useLatestRound, useNow } from './live';
-import { loadLive, loadRecords, signedKeyPriv, useProof, type Records } from './load';
+import { loadArkiv, loadLive, loadRecords, signedKeyPriv, useProof, type Records } from './load';
 import { usePoll, type Polled } from './poll';
 import { approvedEntries } from './commitments';
 import { createStorage } from './storage';
 import {
+  arkivWriters,
   defaultSettings,
   endpoints,
   isExamId,
@@ -78,7 +82,7 @@ function usePartyNames(entries: Hex | null, rpcUrl: string, everyMs: number): Po
 
 function useExamView(pollMs: { records: number; live: number; proofRetry?: number }) {
   const connections = useConnections();
-  const { drand, settings, examId: savedExam } = connections;
+  const { drand, settings, examId: savedExam, arkiv } = connections;
   const link = useExamLink();
   const name = useExamName(link.kind === 'name' ? link.name : null, settings.rpcUrl, pollMs.records);
   const resolved = name?.state === 'ready' && name.value.ok ? name.value.value : null;
@@ -108,11 +112,41 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
   const latest = useLatestRound(drand);
   const now = useNow();
 
+  // The Arkiv mirror is read only from published writers: on a name route the ones the name lists
+  // now, plus the viewer's own (spec/arkiv.md, "Writers").
+  const nameWriters = onName ? (resolved?.arkivWriters ?? null) : null;
+  const nameWritersKey = nameWriters ? nameWriters.join(',') : null;
+  const writers = useMemo(
+    () => arkivWriters(settings.arkivWriters, nameWritersKey === null ? null : nameWritersKey.split(',').filter(Boolean)),
+    [settings.arkivWriters, nameWritersKey],
+  );
+  const wantsArkiv = writers.length > 0 && settings.arkivRpcUrl !== '';
+  const arkivReader = useMemo(
+    () => (wantsArkiv ? (arkiv?.reader ?? createArkivReader({ rpcUrl: settings.arkivRpcUrl })) : null),
+    [wantsArkiv, arkiv, settings.arkivRpcUrl],
+  );
+
+  // The Swarm backup, found on Arkiv from the same writers and read through the viewer's own Swarm
+  // API (spec/arkiv.md, "Backups"). Off without writers or without a Swarm API.
+  const swarmApiUrl = settings.swarmApiUrl;
+  const backup = useMemo<BackupSource | null>(() => {
+    if (!arkivReader || !swarmApiUrl || !registry || !examId) return null;
+    return {
+      rows: arkivReader,
+      swarm: createSwarmClient({ apiUrl: swarmApiUrl }),
+      swarmApiUrl,
+      writers: writers.map((writer) => writer.address),
+      examId,
+      registry: registry.address as Hex,
+      cache: createBackupCache(),
+    };
+  }, [arkivReader, swarmApiUrl, registry, examId, writers]);
+
   const loadRecordsNow = useMemo(() => {
     const chain = loadChain(registry, examId);
     if (!chain || !registry || !examId) return null;
-    return () => loadRecords({ chain, storage, examId, registry: registry.address as Hex, bucket });
-  }, [registry, examId, storage, bucket]);
+    return () => loadRecords({ chain, storage, examId, registry: registry.address as Hex, bucket, backup });
+  }, [registry, examId, storage, bucket, backup]);
   const records = usePoll(loadRecordsNow, pollMs.records);
 
   const chain = records.state === 'ready' ? records.value.chain : null;
@@ -129,6 +163,15 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
   }, [tee, registry, examId, examPublished, bucket]);
   const live = usePoll(loadLiveNow, pollMs.live);
 
+  // The Arkiv mirror is read as often as the live TEE.
+  const loadArkivNow = useMemo(() => {
+    if (!arkivReader || !registry || !examId || !examPublished) return null;
+    const addresses = writers.map((writer) => writer.address);
+    return () =>
+      loadArkiv({ reader: arkivReader, writers: addresses, chain: () => chainRef.current, examId, registry: registry.address as Hex, bucket });
+  }, [arkivReader, writers, registry, examId, examPublished, bucket]);
+  const arkivRead = usePoll(loadArkivNow, pollMs.live);
+
   const proof = useProof({
     storage,
     examId,
@@ -137,6 +180,7 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
     keyPrivSha256: records.state === 'ready' ? signedKeyPriv(records.value.log) : null,
     latest,
     now,
+    backup,
     ...(pollMs.proofRetry === undefined ? {} : { retryMs: pollMs.proofRetry }),
   });
 
@@ -144,10 +188,13 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
     examId,
     invalidLink: link.kind === 'invalid',
     ...(link.kind === 'name' && name ? { name: { name: link.name, result: name, used: { teeUrl, storageUrl, bucket }, configuredRegistry: settings.registryAddress } } : {}),
-    sources: { chain: registry !== null, storage: storage !== null, tee: tee !== null },
+    sources: { chain: registry !== null, storage: storage !== null, tee: tee !== null, arkiv: arkivReader !== null },
     records,
     partyNames,
     live,
+    arkiv: arkivRead,
+    arkivWriters: writers,
+    arkivWritersIgnored: resolved?.arkivWritersIgnored ?? [],
     latest,
     now,
     proof,
@@ -348,7 +395,17 @@ function ExamPicker({ current, invalid }: { current: boolean; invalid: boolean }
   );
 }
 
-function OwnConnection({ open }: { open: boolean }) {
+/** The way to the exam history, under the exam box. */
+function HistoryLink() {
+  return (
+    <p className="vf-more">
+      <Link to="/exams">See the exam history</Link>, or find the exams a person is listed for.
+    </p>
+  );
+}
+
+/** The viewer's own sources, saved in this browser. The exam history shows it too. */
+export function OwnConnection({ open }: { open: boolean }) {
   const { settings, apply, reset } = useConnections();
   const [draft, setDraft] = useState<SettingsValues>(settings);
   const [errors, setErrors] = useState<SettingsErrors>({});
@@ -395,6 +452,27 @@ function OwnConnection({ open }: { open: boolean }) {
           value={draft.registryAddress}
           error={errors.registryAddress}
           onChange={edit('registryAddress')}
+        />
+        <Field
+          label="Where to read the copy on Arkiv (optional)"
+          hint="The web address of an Arkiv node (the Arkiv RPC URL). A copy of the record of releases is kept there, so progress still shows when the live machine cannot be reached. It must allow requests from this page."
+          value={draft.arkivRpcUrl}
+          error={errors.arkivRpcUrl}
+          onChange={edit('arkivRpcUrl')}
+        />
+        <Field
+          label="Who may write the copy on Arkiv (optional)"
+          hint="The writer addresses your exam board publishes, with commas between them (the Arkiv writer addresses). Rows from anyone else are never read, and every row is checked before it counts. Leave this empty to turn the copy off."
+          value={draft.arkivWriters}
+          error={errors.arkivWriters}
+          onChange={edit('arkivWriters')}
+        />
+        <Field
+          label="Where to read the backup on Swarm (optional)"
+          hint="The web address of a Swarm node's API, usually your own Bee node (the Swarm API URL). The exam board can keep a second copy of the public files on Swarm, found through the copy on Arkiv. This page reads it only when the public files are missing or do not match, and checks every file against the public record before it counts. Leave this empty to turn the backup off."
+          value={draft.swarmApiUrl}
+          error={errors.swarmApiUrl}
+          onChange={edit('swarmApiUrl')}
         />
         <div className="vf-actions">
           <Button type="submit">Save</Button>
@@ -460,10 +538,12 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
         {chosen ? (
           <Panel title="Check a different exam">
             <ExamPicker current invalid={false} />
+            <HistoryLink />
           </Panel>
         ) : (
           <Panel title="Choose an exam">
             <ExamPicker current={false} invalid={view.invalidLink} />
+            <HistoryLink />
           </Panel>
         )}
         <section className="ps-panel vf-self-host">
