@@ -74,7 +74,7 @@ const reasonOf = (error: unknown) => (error instanceof Error ? error.message : S
 const byId = <T extends { examId: Hex }>(a: T, b: T) => (a.examId < b.examId ? -1 : a.examId > b.examId ? 1 : 0);
 
 /** Runs `task` on every item, at most `limit` at a time, so a long list doesn't flood the RPC. */
-async function eachLimited<T, R>(items: readonly T[], limit: number, task: (item: T) => Promise<R>): Promise<R[]> {
+export async function eachLimited<T, R>(items: readonly T[], limit: number, task: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = [];
   let next = 0;
   const worker = async () => {
