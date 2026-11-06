@@ -1,5 +1,6 @@
 import { toHex, roles, type ApprovedListEntry } from '@paperseal/protocol';
-import { Check, Hash, PrimaryAction, Row, Rows } from '@paperseal/ui';
+import { Button, Check, Hash, PrimaryAction, Row, Rows } from '@paperseal/ui';
+import { shortAddress } from '../../shared/wallet';
 import { useState, type HTMLInputTypeAttribute, type ReactNode } from 'react';
 
 import { useBoardForm } from './BoardForm';
@@ -22,6 +23,30 @@ export function Problem(props: { children: string }) {
         </Fold>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * The wallet's warning from `useBoardWallet`. On a wrong account it names both accounts and offers
+ * the wallet's own account picker.
+ */
+export function WalletProblem(props: { wallet: ReturnType<typeof useBoardWallet> }) {
+  const { problem, mismatch, chooseAccount } = props.wallet;
+  if (!problem) return null;
+  return (
+    <>
+      <Problem>{problem}</Problem>
+      {mismatch ? (
+        <>
+          <p className="board-blocked">
+            Connected: {shortAddress(mismatch.connected)}. The exam board uses: {shortAddress(mismatch.board)}.
+          </p>
+          <Button type="button" onClick={() => void chooseAccount()}>
+            Choose the board’s account
+          </Button>
+        </>
+      ) : null}
+    </>
   );
 }
 
@@ -91,7 +116,8 @@ export function PostAction(props: {
   post: (onStage: (stage: WalletStage) => void) => Promise<PostOutcome>;
   onPosted: (outcome: PostOutcome) => void;
 }) {
-  const { ensureAccount, problem } = useBoardWallet();
+  const boardWallet = useBoardWallet();
+  const { ensureAccount } = boardWallet;
   const [progress, setProgress] = useState<Progress>({ state: 'idle' });
 
   async function send() {
@@ -118,7 +144,7 @@ export function PostAction(props: {
           <p className="ps-mono">{blocked.detail}</p>
         </Fold>
       ) : null}
-      {problem ? <Problem>{problem}</Problem> : null}
+      <WalletProblem wallet={boardWallet} />
       {progress.state === 'failed' ? <Problem>{progress.message}</Problem> : null}
       <PrimaryAction
         disabled={props.blocked !== null}

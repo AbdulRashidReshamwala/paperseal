@@ -45,7 +45,7 @@ async function sendFromBoard(
   if (!registryAddress || !publicClient || !createRegistry) {
     throw new PublishBlockedError('Posting is not set up on this page. Ask whoever installed Paper Seal to finish the setup, then reload.');
   }
-  const account = await currentAccount(provider);
+  const account = await currentAccount(provider, await createRegistry().board());
   if (!account) throw new PublishBlockedError('Connect your wallet, then press the button again.');
   // A wallet on the wrong network is asked to switch. If it declines or can't, the instruction below is shown.
   await switchToSepolia(provider);

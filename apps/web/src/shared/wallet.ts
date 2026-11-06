@@ -26,10 +26,43 @@ export async function requestAccount(provider: EIP1193Provider): Promise<Address
   return account;
 }
 
-/** The account the wallet currently exposes to this page, if any. Never prompts. */
-export async function currentAccount(provider: EIP1193Provider): Promise<Address | null> {
+/**
+ * The account the wallet exposes to this page, if any. Never prompts. When `wanted` is among the
+ * connected accounts it is the one returned, so a page connected to several accounts uses it.
+ */
+export async function currentAccount(provider: EIP1193Provider, wanted?: string | null): Promise<Address | null> {
   const accounts = await provider.request({ method: 'eth_accounts' });
-  return accounts[0] ?? null;
+  const match = wanted ? accounts.find((account) => account.toLowerCase() === wanted.toLowerCase()) : undefined;
+  return match ?? accounts[0] ?? null;
+}
+
+/**
+ * Asks the wallet to show its account picker for this page. Returns false if the person declined or
+ * the wallet can't, and never throws.
+ */
+export async function chooseAccounts(provider: EIP1193Provider): Promise<boolean> {
+  try {
+    await provider.request({ method: 'wallet_requestPermissions', params: [{ eth_accounts: {} }] } as never);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** `0x12…34`: enough to tell two accounts apart in a sentence. */
+export function shortAddress(address: string): string {
+  return address.length > 8 ? `${address.slice(0, 4)}…${address.slice(-2)}` : address;
+}
+
+/** Calls `onChange` when the wallet changes account or network. Returns the way to stop. */
+export function onWalletChange(provider: EIP1193Provider, onChange: () => void): () => void {
+  const target = provider as { on?: (event: string, listener: () => void) => void; removeListener?: (event: string, listener: () => void) => void };
+  if (typeof target.on !== 'function') return () => undefined;
+  const events = ['accountsChanged', 'chainChanged'];
+  for (const event of events) target.on(event, onChange);
+  return () => {
+    for (const event of events) target.removeListener?.(event, onChange);
+  };
 }
 
 export async function walletChainId(provider: EIP1193Provider): Promise<number> {

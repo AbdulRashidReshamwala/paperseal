@@ -7,7 +7,7 @@ import { setCurrentExamId } from '../../shared/currentExam';
 import { useBoardForm, useEvaluated } from './BoardForm';
 import { evaluatePublish, evaluateSchedule, formatClock } from './form';
 import { useBoardWallet, walletStageLabels, type WalletStage } from './hooks';
-import { Fold, Problem } from './Parts';
+import { Fold, Problem, WalletProblem } from './Parts';
 import { bankNeeded, formatWhen } from './plan';
 import { explainError, publishExam, type PublishRequest } from './publishFlow';
 import type { Releases } from './releases';
@@ -23,7 +23,8 @@ export function ReviewStep(props: { eyebrow: string; releases: Releases; onBack:
   const { plan, publish, setPublish, environment, addReceipt, resetDraft } = useBoardForm();
   const navigate = useNavigate();
   const { blueprint, schedule, scheduleInput } = useEvaluated();
-  const { wallet, problem, ensureAccount } = useBoardWallet();
+  const boardWallet = useBoardWallet();
+  const { wallet, ensureAccount } = boardWallet;
   const [progress, setProgress] = useState<Progress>({ state: 'idle' });
 
   const { fields } = evaluatePublish(publish, props.releases.verified);
@@ -98,7 +99,7 @@ export function ReviewStep(props: { eyebrow: string; releases: Releases; onBack:
             </Rows>
           </div>
           <VersionProblems releases={props.releases} />
-          {problem ? <Problem>{problem}</Problem> : null}
+          <WalletProblem wallet={boardWallet} />
           {progress.state === 'failed' ? <Problem>{progress.message}</Problem> : null}
           <PrimaryAction
             disabled={!request}
