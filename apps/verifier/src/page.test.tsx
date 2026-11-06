@@ -340,6 +340,37 @@ describe('step 6, unlock', () => {
     expect(within(step).queryByText('Fail')).toBeNull();
   });
 
+  it('shows each key file from a verified log as a check', async () => {
+    tokenVerified = true;
+    const world = await buildWorld();
+    arrange(world);
+    open(1000);
+    const step = await findStep(/^6\. Paper unlocks for centres$/);
+    await within(step).findByText('Lists the key file and one copy for each centre on the approved list', {}, { timeout: 5000 });
+    expect(within(step).getByText('key-priv.tlock')).toBeTruthy();
+    expect(within(step).getByText('recipient Approved centre')).toBeTruthy();
+  });
+
+  it('raises the alarm when a verified log lists a centre copy that was swapped', async () => {
+    tokenVerified = true;
+    const world = await buildWorld();
+    const name = world.releaseLog.files.find((file) => file.name.startsWith('key-priv/'))?.name ?? '';
+    arrange(world, { [name]: new Uint8Array(120) });
+    open(1000);
+    const step = await findStep(/^6\. Paper unlocks for centres$/);
+    expect(await screen.findByRole('alert', {}, { timeout: 5000 })).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toMatch(/The copy of the key for .* was changed after it was recorded/);
+    expect(stateOf(step)).toBe('failed');
+  });
+
+  it('checks no key file until the log has passed', async () => {
+    const world = await buildWorld();
+    arrange(world);
+    open(1000);
+    const step = await findStep(/^6\. Paper unlocks for centres$/);
+    await within(step).findByText('Not checked until the log and its proof pass', {}, { timeout: 5000 });
+  });
+
   describe('with the live TEE', () => {
     async function openLive(trusted: boolean) {
       freshTrusted = trusted;
@@ -420,6 +451,44 @@ describe('step 7, proof', () => {
     await within(step).findByText(/The paper cannot be opened/, { selector: '.ps-step-note' }, { timeout: 5000 });
     expect(stateOf(step)).toBe('not-applicable');
     expect(screen.queryByText('Differentiate x squared.')).toBeNull();
+  });
+
+  it('fails, and does not say sealed, when a verified log lists a deleted key-priv.tlock', async () => {
+    tokenVerified = true;
+    const world = await buildWorld();
+    world.files.delete('key-priv.tlock');
+    arrange(world);
+    open(1000);
+    const step = await findStep(/^7\. Paper opens to everyone$/);
+    await waitFor(() => {
+      expect(stateOf(step)).toBe('failed');
+    }, { timeout: 5000 });
+    expect(screen.getByRole('alert').textContent).toMatch(/was removed from the public files after the unlock recorded it/);
+    expect(screen.queryByText('Differentiate x squared.')).toBeNull();
+    expect(document.body.textContent).not.toMatch(/never unlocked/);
+  });
+
+  it('fails, and shows no paper, when a verified log lists a different key-priv.tlock', async () => {
+    tokenVerified = true;
+    const world = await buildWorld();
+    arrange(world, { 'key-priv.tlock': new TextEncoder().encode(await world.seal(world.kPriv)) });
+    open(1000);
+    const step = await findStep(/^7\. Paper opens to everyone$/);
+    await waitFor(() => {
+      expect(stateOf(step)).toBe('failed');
+    }, { timeout: 5000 });
+    expect(screen.getByRole('alert').textContent).toMatch(/was changed after the unlock recorded it/);
+    expect(screen.queryByText('Differentiate x squared.')).toBeNull();
+  });
+
+  it('stays sealed when the log naming key-priv.tlock has not passed its checks', async () => {
+    const world = await buildWorld();
+    world.files.delete('key-priv.tlock');
+    arrange(world);
+    open(1000);
+    const step = await findStep(/^7\. Paper opens to everyone$/);
+    await within(step).findByText(/The paper cannot be opened/, { selector: '.ps-step-note' }, { timeout: 5000 });
+    expect(stateOf(step)).toBe('not-applicable');
   });
 
   it('says when the paper opens before the end round, and shows no paper', async () => {

@@ -1,13 +1,13 @@
 import { describe, expect, beforeAll, it, vi } from 'vitest';
-import { roundTimeSeconds, type Hex } from '@paperseal/protocol';
+import { roundTimeSeconds, sortReleaseFiles, storageNames, toHex, type Hex } from '@paperseal/protocol';
 
 import { checkPublishedToken, checkRecordToken, type Build, type FreshVerdict } from './attest';
 import { approvedEntries, checkManifest, holdersOf } from './commitments';
 import { clockTime, custody, inWords, type Custody, type CustodyStep, type Item, type StepId, type View } from './custody';
-import { buildWorld, examId, registryAddress, type World } from './fixtures';
+import { buildWorld, examId, random, registryAddress, type World } from './fixtures';
 import type { LiveReport, ProofRun, Records } from './load';
 import type { ProofChecks, ProofState } from './proof';
-import { checkReleaseLog, parseReleaseLog, releaseProgress } from './unlock';
+import { checkReleaseFiles, checkReleaseLog, parseReleaseLog, releaseProgress } from './unlock';
 
 // The rounds of a fixture exam, with its times in the past or future as each test needs.
 const LOCK = 100;
@@ -24,14 +24,35 @@ const file = (name: string) => {
   return bytes;
 };
 
+/** A published log checked for real, the way `readLog` does, against `replace`d stored files. */
+async function checkedLog(w: World, replace: Record<string, Uint8Array | null> = {}, entries: Hex | null = w.entriesHex): Promise<Records['log']> {
+  const stored = w.files.get('release-log.json');
+  if (!stored) throw new Error('no log');
+  const parsed = parseReleaseLog(stored);
+  const list = approvedEntries(entries);
+  const token = await checkRecordToken({
+    exam: w.exam,
+    examId,
+    registry: registryAddress,
+    trustedRoot: w.pki.root,
+    token: text(w.files.get('release-token.jwt')),
+    instancePublicKey: parsed.instancePublicKey,
+  });
+  return {
+    kind: 'ready',
+    verdict: await checkReleaseLog(parsed, examId, parsed.instancePublicKey),
+    token,
+    progress: list ? releaseProgress(holdersOf(list), parsed.entries.map((entry) => entry.passkeyPublicKey)) : null,
+    files: await checkReleaseFiles(parsed, list, w.storage(replace)),
+  };
+}
+
 /** Every record checked for real, against the fixture's own root in place of Google's. */
 async function checkedRecords(): Promise<Records> {
   const { exam, build, pki } = world;
   const chain = { exam, build, list: { listHash: build.approvedListHash }, criteria: world.criteriaHex, entries: world.entriesHex } as Records['chain'];
   const args = { exam, examId, registry: registryAddress, trustedRoot: pki.root };
   const list = approvedEntries(world.entriesHex);
-  const parsed = parseReleaseLog(file('release-log.json'));
-  const token = await checkRecordToken({ ...args, token: text(file('release-token.jwt')), instancePublicKey: parsed.instancePublicKey });
   return {
     chain,
     token: { kind: 'ready', verdict: await checkPublishedToken({ ...args, token: world.token, build }), build, issuedAt: 1_800_000_000 },
@@ -41,12 +62,7 @@ async function checkedRecords(): Promise<Records> {
       build,
       owners: Object.fromEntries((list ? holdersOf(list) : []).map((h) => [h.derivedPublicKey, h.owner])),
     },
-    log: {
-      kind: 'ready',
-      verdict: await checkReleaseLog(parsed, examId, parsed.instancePublicKey),
-      token,
-      progress: releaseProgress(holdersOf(list ?? []), parsed.entries.map((entry) => entry.passkeyPublicKey)),
-    },
+    log: await checkedLog(world),
   };
 }
 
@@ -559,6 +575,134 @@ describe('step 7, exam ends and paper opens', () => {
     };
     expect(step(custody(base), 'open').note).toMatch(/^Opens to everyone at/);
     expect(step(custody({ ...base, latest: { round: null, error: 'down' } }), 'open').note).toBe('Opening the paper.');
+  });
+});
+
+describe('key files listed in the signed log', () => {
+  const unlocked = (records: Partial<Records>) => scene({ round: UNLOCK, records });
+  const centreCopy = (w: World) => {
+    const centre = w.entries.find((entry) => entry.role === 4);
+    if (!centre) throw new Error('no centre');
+    return { name: storageNames.centreKeyPriv(centre.derivedPublicKey), owner: centre.owner };
+  };
+  const failing = (result: Custody) => result.failures.map((failure) => failure.message);
+
+  it('passes each file, names each centre, and only then finishes the step', async () => {
+    const result = unlocked({ log: await checkedLog(world) });
+    const s = step(result, 'unlock');
+    expect(s.state).toBe('done');
+    expect(result.failures).toEqual([]);
+    const rows = checks(s).filter((c) => typeof c.label === 'object');
+    expect(rows).toHaveLength(9);
+    expect(rows.every((row) => row.status === 'pass')).toBe(true);
+    expect(rows.find((row) => row.detail === `recipient ${centreCopy(world).owner}`)).toBeTruthy();
+    expect(checks(s).find((c) => c.label === 'filesHash matches the files')?.status).toBe('pass');
+  });
+
+  it('fails a swapped centre copy', async () => {
+    const { name, owner } = centreCopy(world);
+    const result = unlocked({ log: await checkedLog(world, { [name]: random(120) }) });
+    expect(step(result, 'unlock').state).toBe('failed');
+    expect(failing(result)).toEqual([`The copy of the key for ${owner} was changed after it was recorded.`]);
+    expect(result.verdict).toMatch(/^One check failed/);
+  });
+
+  it('fails a centre copy missing from storage', async () => {
+    const { name, owner } = centreCopy(world);
+    const result = unlocked({ log: await checkedLog(world, { [name]: null }) });
+    expect(step(result, 'unlock').state).toBe('failed');
+    expect(failing(result)).toEqual([`The copy of the key for ${owner} was removed from the public files.`]);
+  });
+
+  it('fails a centre copy the signed log leaves out', async () => {
+    // `key-priv.tlock` sorts first, so the second file is a centre's copy.
+    const w = await buildWorld({ logFiles: (files) => files.filter((_, i) => i !== 1) });
+    const result = unlocked({ log: await checkedLog(w) });
+    expect(step(result, 'unlock').state).toBe('failed');
+    expect(failing(result)).toHaveLength(1);
+    expect(failing(result)[0]).toMatch(/^The copy of the key for .* is not in the signed log\.$/);
+  });
+
+  it('fails an extra file in the signed log, even one that is really stored', async () => {
+    const stranger = `key-priv/${toHex(random(65))}.bin`;
+    const w = await buildWorld({ logFiles: (files) => sortReleaseFiles([...files, { name: stranger, sha256: random(32) }]) });
+    const result = unlocked({ log: await checkedLog(w) });
+    expect(step(result, 'unlock').state).toBe('failed');
+    expect(failing(result)).toEqual(['The signed log lists a copy of the key for someone who is not on the approved list.']);
+  });
+
+  it('fails a log at the threshold that lists no files', async () => {
+    const w = await buildWorld({ logFiles: () => [] });
+    const result = unlocked({ log: await checkedLog(w) });
+    expect(step(result, 'unlock').state).toBe('failed');
+    expect(failing(result)).toContain('The file that opens the paper is not in the signed log.');
+  });
+
+  it('fails a swapped key-priv.tlock', async () => {
+    const result = unlocked({ log: await checkedLog(world, { [storageNames.keyPriv]: random(40) }) });
+    expect(step(result, 'unlock').state).toBe('failed');
+    expect(failing(result)).toEqual(['The file that opens the paper was changed after it was recorded.']);
+  });
+
+  it('is not a failure below the threshold, with no files listed, and never a pass', async () => {
+    const w = await buildWorld({ unlocked: false });
+    const result = unlocked({ log: await checkedLog(w) });
+    const s = step(result, 'unlock');
+    expect(result.failures).toEqual([]);
+    expect(s.state).toBe('current');
+    expect(checks(s).find((c) => c.label === 'Key files match the signed log')).toMatchObject({ status: 'not-checked', detail: expect.stringMatching(/^Not unlocked yet/) as string });
+  });
+
+  it('checks nothing against a log that has not passed, and does not finish', () => {
+    const log = fullRecords.log;
+    if (log.kind !== 'ready') throw new Error('expected a log');
+    const s = step(unlocked({ log: { ...log, files: null } }), 'unlock');
+    expect(s.state).toBe('current');
+    expect(checks(s).find((c) => c.label === 'Key files match the signed log')?.status).toBe('not-checked');
+  });
+
+  it('is not a pass while a stored file can not be read', async () => {
+    const { name } = centreCopy(world);
+    const log = await checkedLog(world);
+    if (log.kind !== 'ready' || !log.files) throw new Error('expected a report');
+    const parsed = parseReleaseLog(file('release-log.json'));
+    const flaky = { url: () => '', get: (n: string) => (n === name ? Promise.reject(new Error('error 500')) : world.storage().get(n)) };
+    const report = await checkReleaseFiles(parsed, approvedEntries(world.entriesHex), flaky);
+    const result = unlocked({ log: { ...log, files: report } });
+    expect(report.check).toBe('absent');
+    expect(result.failures).toEqual([]);
+    expect(step(result, 'unlock').state).toBe('current');
+  });
+
+  it('can not pass with no approved list to compare names with', async () => {
+    const log = await checkedLog(world, {}, null);
+    if (log.kind !== 'ready') throw new Error('expected a log');
+    expect(log.files?.names).toBe('absent');
+    expect(log.files?.check).toBe('absent');
+    expect(step(unlocked({ log }), 'unlock').state).toBe('current');
+  });
+
+  it('fails a list of files that does not match filesHash', async () => {
+    const log = await checkedLog(world);
+    if (log.kind !== 'ready') throw new Error('expected a log');
+    const result = unlocked({ log: { ...log, verdict: { ...log.verdict, filesHash: 'fail' } } });
+    expect(step(result, 'unlock').state).toBe('failed');
+    expect(failing(result)).toEqual(['The list of key files has been changed after it was signed.']);
+  });
+
+  it('can not read as a pass once the paper is open', async () => {
+    const { name } = centreCopy(world);
+    const result = scene({ round: END, proof: opened(), records: { log: await checkedLog(world, { [name]: random(120) }) } });
+    expect(step(result, 'open').state).toBe('done');
+    expect(result.headline).toBe('The paper is open, but it did not pass every check.');
+    expect(result.verdict).toMatch(/^One check failed/);
+  });
+
+  it('puts a removed key file at the top of the page, not only a paper that would not open', () => {
+    const message = 'The file that opens the paper (key-priv.tlock) was removed from the public files after the unlock recorded it.';
+    const result = scene({ round: END, proof: { ok: true, result: { state: 'failed', step: 'files', message } } });
+    expect(step(result, 'open').state).toBe('failed');
+    expect(failing(result)).toContain(message);
   });
 });
 

@@ -18,7 +18,7 @@ import { clockTime, custody, dayTime, REPOSITORY, type Custody, type CustodyStep
 import { Evidence } from './evidence';
 import { useExamLink } from './link';
 import { useLatestRound, useNow } from './live';
-import { loadLive, loadRecords, useProof, type Records } from './load';
+import { loadLive, loadRecords, signedKeyPriv, useProof, type Records } from './load';
 import { usePoll, type Polled } from './poll';
 import { createStorage } from './storage';
 import {
@@ -72,6 +72,7 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
     examId,
     client: drand,
     chain,
+    keyPrivSha256: records.state === 'ready' ? signedKeyPriv(records.value.log) : null,
     latest,
     now,
     ...(pollMs.proofRetry === undefined ? {} : { retryMs: pollMs.proofRetry }),

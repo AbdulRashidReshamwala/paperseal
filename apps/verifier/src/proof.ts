@@ -16,7 +16,7 @@ import {
 
 import type { Build, Exam } from './attest';
 import { criteriaMatches, sameHex, type CheckResult } from './checks';
-import { utf8Text, type StorageReader } from './storage';
+import { fileSha256, utf8Text, type StorageReader } from './storage';
 
 export interface ProofChecks {
   /** `paper.bin` is the file the Build's `paperHash` covers. */
@@ -40,9 +40,9 @@ export type ProofState =
   | { state: 'not-ready'; reason: string }
   /** The end round has not been published. */
   | { state: 'waiting'; endRound: number; opensAt: number }
-  /** The end round passed and storage has no `key-priv.tlock`, so no unlock happened. */
+  /** The end round passed, storage has no `key-priv.tlock` and no valid log lists one, so no unlock happened. */
   | { state: 'sealed' }
-  /** A file is missing, or the paper would not open. */
+  /** A file is missing or was changed, or the paper would not open. */
   | { state: 'failed'; step: 'files' | 'timelock' | 'decrypt'; message: string }
   /** The paper opened. `paper` is set only when its salted hash matched the Build. */
   | { state: 'opened'; checks: ProofChecks; paper: Paper | null; parseError?: string };
@@ -56,6 +56,11 @@ export interface ProofInput {
   criteria: Hex | null;
   /** The latest drand round, or null if drand has not answered. The clock stands in then. */
   currentRound: number | null;
+  /**
+   * The hash of `key-priv.tlock` in a release log whose signature and token passed, or null if
+   * there is no such log. It is what tells a key that was removed from one that was never written.
+   */
+  keyPrivSha256: Hex | null;
   /** Unix seconds. */
   now: number;
   client: ChainClient;
@@ -64,7 +69,7 @@ export interface ProofInput {
 const verdict = (ok: boolean): CheckResult => (ok ? 'pass' : 'fail');
 
 export async function runProof(input: ProofInput): Promise<ProofState> {
-  const { storage, examId, exam, build, criteria, client } = input;
+  const { storage, examId, exam, build, criteria, keyPrivSha256, client } = input;
   if (!examId || !exam) return { state: 'not-ready', reason: 'The exam is not on the public record yet.' };
 
   const endRound = Number(exam.settings.endRound);
@@ -76,7 +81,14 @@ export async function runProof(input: ProofInput): Promise<ProofState> {
   if (!build) return { state: 'not-ready', reason: 'No paper is recorded to compare with.' };
 
   const keyPrivFile = await storage.get(storageNames.keyPriv);
-  if (!keyPrivFile) return { state: 'sealed' };
+  if (!keyPrivFile) {
+    return keyPrivSha256
+      ? { state: 'failed', step: 'files', message: `The file that opens the paper (${storageNames.keyPriv}) was removed from the public files after the unlock recorded it.` }
+      : { state: 'sealed' };
+  }
+  if (keyPrivSha256 && !sameHex(fileSha256(keyPrivFile), keyPrivSha256)) {
+    return { state: 'failed', step: 'files', message: `The file that opens the paper (${storageNames.keyPriv}) was changed after the unlock recorded it.` };
+  }
   const [keyPubFile, paperFile] = await Promise.all([
     storage.get(storageNames.keyPub),
     storage.get(storageNames.paper),

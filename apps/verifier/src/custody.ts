@@ -28,7 +28,7 @@ import {
 } from './load';
 import type { Polled } from './poll';
 import type { ProofChecks } from './proof';
-import type { LogVerdict, ReleaseProgress } from './unlock';
+import type { LogVerdict, ReleaseFileReport, ReleaseFilesReport, ReleaseProgress } from './unlock';
 
 /*
  * Turns everything the checks found into the chain of custody. It decides what each step's state
@@ -669,11 +669,44 @@ function logItems(result: LogVerdict, signatureLabel: string, signatureAbsent: s
   return [
     verdict('Log is for this exam', result.examId, { failure: 'The record of releases is for a different exam.' }),
     verdict('entriesHash matches the entries', result.entriesHash, { failure: 'The record of releases has been changed after it was signed.' }),
+    verdict('filesHash matches the files', result.filesHash, { failure: 'The list of key files has been changed after it was signed.' }),
     verdict(signatureLabel, result.signature, {
       failure: 'The record of releases is not signed by the right key.',
       absent: signatureAbsent,
     }),
     ...(result.error ? [fail('Log error', `The release log could not be checked: ${result.error}`, result.error)] : []),
+  ];
+}
+
+const keyFilesLabel = 'Key files match the signed log';
+
+/** Who a key file is for, in the words of the top of the page. */
+const keyFileWords = (file: { owner?: string }) => (file.owner === undefined ? 'The file that opens the paper' : `The copy of the key for ${file.owner}`);
+
+function storedFileItem(file: ReleaseFileReport): Item {
+  const recipient = file.owner === undefined ? {} : { detail: `recipient ${file.owner}` };
+  const base = { kind: 'check' as const, label: { code: file.name }, hash: file.sha256 };
+  if (file.result === 'pass') return { ...base, status: 'pass', ...recipient };
+  if (file.problem === 'removed') return { ...base, status: 'fail', detail: 'Removed', failure: `${keyFileWords(file)} was removed from the public files.` };
+  if (file.problem === 'changed') return { ...base, status: 'fail', detail: 'Changed', failure: `${keyFileWords(file)} was changed after it was recorded.` };
+  const message = typeof file.problem === 'object' ? file.problem.unreadable : 'Not read yet';
+  return { ...base, status: 'not-checked', detail: `Could not be read: ${message}` };
+}
+
+/** The log's files against the list and storage. Each row that fails reports its own failure. */
+function releaseFileItems(report: ReleaseFilesReport | null): Item[] {
+  if (!report) return [notChecked(keyFilesLabel, 'Not checked until the log and its proof pass')];
+  if (report.pending) return [notChecked(keyFilesLabel, 'Not unlocked yet. The log lists them once enough key holders have released.')];
+  const failure = 'The signed log does not list the right key files for this exam.';
+  const names: Item =
+    report.names === 'absent'
+      ? notChecked(keyFilesLabel, 'No approved list to compare with')
+      : { kind: 'check', label: 'Lists the key file and one copy for each centre on the approved list', status: report.names, failure, quiet: true };
+  return [
+    names,
+    ...report.missing.map((file) => fail({ code: file.name }, `${keyFileWords(file)} is not in the signed log.`, 'Not listed')),
+    ...report.extra.map((name) => fail({ code: name }, 'The signed log lists a copy of the key for someone who is not on the approved list.', 'Not on the approved list')),
+    ...report.files.map(storedFileItem),
   ];
 }
 
@@ -684,7 +717,7 @@ function publishedLogItems(log: Records['log'] | null): { items: Item[]; verifie
     return { ...empty, items: [fail('Release log format', `The release log can't be read: ${log.message}`, log.message)] };
   }
   if (log.kind !== 'ready') return { ...empty, items: [sourceGap('Published release log', log)] };
-  const { token, progress } = log;
+  const { token, progress, files } = log;
   const trusted = token?.verified === true;
   const failedClaims = token?.claims.filter((claim) => !claim.ok).map((claim) => claim.claim).join(', ') ?? '';
   const tokenProblem = token && !token.signature.ok ? token.signature.error.message : failedClaims;
@@ -695,7 +728,9 @@ function publishedLogItems(log: Records['log'] | null): { items: Item[]; verifie
       trusted &&
       log.verdict.examId === 'pass' &&
       log.verdict.entriesHash === 'pass' &&
+      log.verdict.filesHash === 'pass' &&
       log.verdict.signature === 'pass' &&
+      files?.check === 'pass' &&
       progress !== null &&
       progress.count >= progress.required,
     items: [
@@ -713,6 +748,7 @@ function publishedLogItems(log: Records['log'] | null): { items: Item[]; verifie
               tokenProblem,
             )
         : notChecked('release-token.jwt attests the key that signed the log', 'Not in storage yet or the exam is not published'),
+      ...releaseFileItems(files),
     ],
   };
 }
@@ -846,7 +882,9 @@ function proofItems(proof: Extract<ProofRun, { ok: true }>['result']): { items: 
       };
     case 'failed': {
       const label = proof.step === 'files' ? 'Files' : proof.step === 'timelock' ? 'Time lock' : 'Opening the paper';
-      return { complete: false, note: 'The paper could not be opened.', items: [fail(label, 'The paper could not be opened.', proof.message)] };
+      // A file that is gone or changed is the finding itself, so it goes to the top of the page.
+      const failure = proof.step === 'files' ? proof.message : 'The paper could not be opened.';
+      return { complete: false, note: 'The paper could not be opened.', items: [fail(label, failure, proof.message)] };
     }
     case 'opened': {
       const results = proofNames.map((name) =>
@@ -982,7 +1020,7 @@ function examWords(c: Context, steps: readonly CustodyStep[], seal: SealState | 
   const endAt = roundTimeSeconds(Number(exam.settings.endRound));
   const state = (id: StepId) => steps.find((step) => step.id === id)?.state;
   if (proofState === 'opened') {
-    return state('open') === 'done'
+    return state('open') === 'done' && steps.every((step) => step.state !== 'failed')
       ? { headline: 'The paper is open. Anyone can read it and check it.', next: 'Nothing more is needed. Anyone can repeat these checks at any time.' }
       : { headline: 'The paper is open, but it did not pass every check.', next: 'Contact your exam board and tell them which checks failed.' };
   }
