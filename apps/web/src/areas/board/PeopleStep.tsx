@@ -382,11 +382,6 @@ export function PeopleStep(props: { examId: Hex; snapshot: Snapshot; onPosted: (
           ) : null}
         </div>
       ) : null}
-      {machine.elsewhere ? (
-        <p className="board-problem" role="alert">
-          <Check status="pending">Paper Seal is not running this exam yet, so nobody can register. Ask whoever runs it to start it for this exam.</Check>
-        </p>
-      ) : null}
       <section className="board-draft-card board-people-job">
         {sampleSetters !== null && invites.length < sampleSetters ? (
           <DemoFill
