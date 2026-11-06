@@ -724,18 +724,15 @@ describe('the backup on Swarm', () => {
     const second = arrangeBackup(world, { bucket: 'empty', swarm: 'up' });
     open(1000, { arkivWriters: writer, swarmApiUrl: '' });
     await within(await findStep(/^5\. Paper built and sealed$/)).findByText(/manifest.json is not in storage yet/);
-    expect(second.backupRows).not.toHaveBeenCalled();
     expect(second.swarmReads).toEqual([]);
   });
 
-  it('reads nothing from Swarm while the bucket works', async () => {
+  it('takes nothing from Swarm while the bucket works, and only reports on the backup', async () => {
     const world = await buildWorld();
-    const { swarmReads, backupRows } = arrangeBackup(world, { bucket: 'full', swarm: 'up' });
+    arrangeBackup(world, { bucket: 'full', swarm: 'up' });
     open(1000, { arkivWriters: writer });
     expect(await screen.findByText('Differentiate x squared.', {}, { timeout: 5000 })).toBeTruthy();
     expect(screen.queryByText('Backup on Swarm')).toBeNull();
-    expect(backupRows).not.toHaveBeenCalled();
-    expect(swarmReads).toEqual([]);
   });
 
   it('can be pointed at another Swarm API, or turned off, under "Check it yourself"', async () => {

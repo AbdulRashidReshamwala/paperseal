@@ -88,7 +88,7 @@ export async function eachLimited<T, R>(items: readonly T[], limit: number, task
 }
 
 /** The first of `names` that passes the name check and resolves to this exam in this registry. */
-async function verifiedName(
+export async function verifiedName(
   names: readonly string[],
   examId: Hex,
   registry: Address,

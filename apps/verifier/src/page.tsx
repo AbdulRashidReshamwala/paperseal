@@ -1,5 +1,5 @@
 import { createArkivReader } from '@paperseal/arkiv';
-import { checkPasskeyName, resolveExamName, type ExamNameResult, type PasskeyNameResult } from '@paperseal/chain';
+import { checkPasskeyName, createEnsLookup, resolveExamName, type ExamNameResult, type PasskeyNameResult } from '@paperseal/chain';
 import { createSwarmClient } from '@paperseal/swarm';
 import { ownerEnsName, requireHardwareAttestation, roles, toHex, type Hex, type Paper } from '@paperseal/protocol';
 import {
@@ -17,12 +17,15 @@ import {
 } from '@paperseal/ui';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
+import { http } from 'viem';
 
 import { teeStorageBucket } from './attest';
 import { createBackupCache, type BackupSource } from './backup';
 import { loadChain, type ChainData } from './checks';
 import { clockTime, custody, dayTime, REPOSITORY, type Custody, type CustodyStep, type Failure } from './custody';
 import { Evidence } from './evidence';
+import { checkedCopies, copies, people, timeline, type Copies, type People } from './facts';
+import { readBoardName, readExamName, readVersion } from './identity';
 import { useExamLink } from './link';
 import { useLatestRound, useNow } from './live';
 import { loadArkiv, loadLive, loadRecords, releaseRecorded, roundReached, signedKeyPriv, useProof, type Records } from './load';
@@ -30,6 +33,8 @@ import { eachLimited } from './history';
 import { usePoll, type Polled } from './poll';
 import { approvedEntries } from './commitments';
 import { createStorage } from './storage';
+import { CopiesSection, Glance, IdentitySection, PeopleSection, TimelineSection } from './sections';
+import { loadSwarm } from './swarm';
 import {
   arkivWriters,
   defaultSettings,
@@ -51,6 +56,8 @@ export const FINISHED_POLL_MS = 10 * 60_000;
 const CLOCK_POLL_MS = 6000;
 /** How many party names are read at once. */
 const NAME_READS_AT_ONCE = 4;
+/** The exam's names and its Swarm backups change rarely, so they are looked at now and then. */
+const SLOW_POLL_MS = 5 * 60_000;
 
 /**
  * Reads the exam name on a `#/name/` route, with the viewer's own RPC and nothing else. An RPC that
@@ -93,6 +100,36 @@ function usePartyNames(entries: Hex | null, rpcUrl: string, everyMs: number): Po
     };
   }, [entries, rpcUrl]);
   return usePoll(load, everyMs);
+}
+
+/** Who ran the exam. A name is a label: a failed read shows as its own state and holds up nothing. */
+function useIdentity(args: {
+  rpcUrl: string;
+  board: Hex | null;
+  examId: Hex | null;
+  registry: Hex | null;
+  known: string | null;
+  reader: Parameters<typeof readExamName>[0]['reader'];
+  writers: readonly Hex[];
+  commit: Hex | null;
+  imageDigest: Hex | null;
+}) {
+  const { rpcUrl, board, examId, registry, known, reader, writers, commit, imageDigest } = args;
+  const loadBoard = useMemo(() => {
+    if (!rpcUrl || !board) return null;
+    const lookup = createEnsLookup({ transport: http(rpcUrl, { batch: true }) });
+    return () => readBoardName(board, lookup);
+  }, [rpcUrl, board]);
+  const loadName = useMemo(() => {
+    if (known !== null || !rpcUrl || !examId || !registry) return null;
+    return () => readExamName({ reader, writers, examId, registry, rpcUrl });
+  }, [known, rpcUrl, examId, registry, reader, writers]);
+  const loadVersionNow = useMemo(() => (commit && imageDigest ? () => readVersion(REPOSITORY, commit, imageDigest) : null), [commit, imageDigest]);
+  return {
+    boardName: usePoll(loadBoard, SLOW_POLL_MS),
+    examName: usePoll(loadName, SLOW_POLL_MS),
+    version: usePoll(loadVersionNow, null),
+  };
 }
 
 function useExamView(pollMs: { records: number; live: number; proofRetry?: number; finished?: number }) {
@@ -195,6 +232,47 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
   }, [arkivReader, writers, registry, examId, examPublished, bucket]);
   const arkivRead = usePoll(loadArkivNow, finished ? recordsEvery : pollMs.live * 3);
 
+  // Every backup recorded for this exam, read and checked for the Copies section only.
+  const swarmCache = useMemo(() => createBackupCache(), []);
+  const writerAddresses = useMemo(() => writers.map((writer) => writer.address), [writers]);
+  const loadSwarmNow = useMemo(() => {
+    if (!arkivReader || !registry || !examId || !examPublished) return null;
+    const client = swarmApiUrl ? createSwarmClient({ apiUrl: swarmApiUrl }) : null;
+    return () =>
+      loadSwarm({
+        rows: arkivReader,
+        swarm: client,
+        apiUrl: swarmApiUrl,
+        cache: swarmCache,
+        chain: () => chainRef.current,
+        writers: writerAddresses,
+        examId,
+        registry: registry.address as Hex,
+        bucket,
+      });
+  }, [arkivReader, registry, examId, examPublished, swarmApiUrl, swarmCache, writerAddresses, bucket]);
+  const swarmRead = usePoll(loadSwarmNow, finished ? recordsEvery : SLOW_POLL_MS);
+
+  const boardAddress = chain?.registryCode.state === 'match' ? chain.registryCode.board : null;
+  const identity = useIdentity({
+    rpcUrl: settings.rpcUrl,
+    board: boardAddress,
+    examId,
+    registry: (registry?.address as Hex | undefined) ?? null,
+    known: resolved?.name ?? null,
+    reader: arkivReader,
+    writers: writerAddresses,
+    commit: chain?.exam?.commitHash ?? null,
+    imageDigest: chain?.exam?.imageDigest ?? null,
+  });
+
+  // An exam opened by ID moves to its name once that name has passed every check. The ID keeps working.
+  const navigate = useNavigate();
+  const verifiedName = identity.examName.state === 'ready' ? identity.examName.value.name : null;
+  useEffect(() => {
+    if (link.kind === 'exam' && verifiedName) void navigate(`/name/${encodeURIComponent(verifiedName)}`, { replace: true });
+  }, [link.kind, verifiedName, navigate]);
+
   const proof = useProof({
     storage,
     examId,
@@ -223,6 +301,11 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
     arkiv: arkivRead,
     arkivWriters: writers,
     arkivWritersIgnored: resolved?.arkivWritersIgnored ?? [],
+    swarm: swarmRead,
+    identity,
+    board: boardAddress,
+    registryAddress: (registry?.address as Hex | undefined) ?? null,
+    openedName: resolved?.name ?? null,
     latest,
     now,
     proof,
@@ -267,6 +350,23 @@ function Head({ view, zone }: { view: Custody; zone: string }) {
       </div>
     </section>
   );
+}
+
+/** The address to share: the exam's name once it has passed, and otherwise its ID. */
+function shareLinkOf(examId: Hex, name: string | null): string {
+  const here = globalThis.location as Location | undefined;
+  const base = here ? `${here.origin}${here.pathname}` : '';
+  return name ? `${base}#/name/${name}` : `${base}#/exam/${examId}`;
+}
+
+function glanceOf(board: string | null, found: People | null, held: Copies | null): { label: string; value: string }[] {
+  const released = found ? [...found.holders, ...found.centres].filter((person) => person.released).length : 0;
+  const places = checkedCopies(held);
+  return [
+    ...(board ? [{ label: 'Run by', value: board }] : []),
+    ...(found ? [{ label: 'People', value: `${String(found.holders.length)} key holders, ${String(found.centres.length)} centres${released > 0 ? `, ${String(released)} released` : ''}` }] : []),
+    ...(held ? [{ label: 'Record of releases', value: places === 0 ? 'No copy checked yet' : `Checked in ${String(places)} ${places === 1 ? 'place' : 'places'}` }] : []),
+  ];
 }
 
 function FailureAlarm({ failures }: { failures: readonly Failure[] }) {
@@ -525,7 +625,7 @@ const zoneName = () =>
 
 /** The public verifier: one chain of custody for one exam, and no sign-in. */
 export function VerifierPage(props: { pollMs?: { records: number; live: number; proofRetry?: number; finished?: number } }) {
-  const view = useExamView(props.pollMs ?? { records: RECORDS_POLL_MS, live: LIVE_POLL_MS });
+  const view: ReturnType<typeof useExamView> & { timeZone?: string } = useExamView(props.pollMs ?? { records: RECORDS_POLL_MS, live: LIVE_POLL_MS });
   const result = custody(view);
   const start = view.records.state === 'ready' ? view.records.value.chain.exam?.settings.examStart : undefined;
   const on = start === undefined ? undefined : dayTime(Number(start));
@@ -533,6 +633,13 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
   const passedName = result.steps.find((step) => step.id === 'name')?.state === 'done' ? view.name?.name : undefined;
   const exam = passedName ? (on ? `${passedName}, on ${on}` : passedName) : on ? `Exam on ${on}` : undefined;
   const chosen = view.examId !== null || view.name !== undefined;
+  const zone = view.timeZone;
+  const recordedExam = view.records.state === 'ready' ? view.records.value.chain.exam : null;
+  const found = people(view);
+  const held = copies(view, result, view.swarm);
+  const moments = timeline(view);
+  const boardRead = view.identity.boardName.state === 'ready' ? view.identity.boardName.value : null;
+  const boardLabel = boardRead && 'name' in boardRead ? boardRead.name : view.board;
   // A name that failed a check needs no other connection, only one that could not be read does.
   const needsConnection = view.name ? ['off', 'error'].includes(view.name.result.state) : !view.sources.chain;
   // The record decides every step, so the page waits for its first read.
@@ -552,6 +659,7 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
         <FailureAlarm failures={result.failures} />
         <Warnings warnings={result.warnings} />
         <Head view={result} zone={zoneName()} />
+        <Glance items={recordedExam ? glanceOf(boardLabel, found, held) : []} />
         {view.records.state === 'error' ? (
           <p className="vf-gap">
             <Check status="not-checked">
@@ -572,6 +680,23 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
         ) : null}
         <Stepper steps={result.steps.map((step) => toStep(step, view.now))} evidenceLabel="Show the evidence" />
         <Freshness records={view.records} />
+        {recordedExam && view.examId && view.registryAddress ? (
+          <IdentitySection
+            examId={view.examId}
+            board={view.board}
+            registry={view.registryAddress}
+            commit={recordedExam.commitHash}
+            imageDigest={recordedExam.imageDigest}
+            boardName={view.identity.boardName}
+            examName={view.identity.examName}
+            openedName={view.openedName}
+            version={view.identity.version}
+            shareLink={shareLinkOf(view.examId, view.openedName ?? (view.identity.examName.state === 'ready' ? view.identity.examName.value.name : null))}
+          />
+        ) : null}
+        {found ? <PeopleSection found={found} zone={zone} /> : null}
+        {moments.length > 0 ? <TimelineSection moments={moments} zone={zone} /> : null}
+        {held ? <CopiesSection found={held} zone={zone} view={view} /> : null}
         {result.paper ? <PaperView paper={result.paper} /> : null}
         {chosen ? (
           <Panel title="Check a different exam">

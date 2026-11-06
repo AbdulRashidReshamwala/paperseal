@@ -197,3 +197,46 @@
   padding-left: 1.25em;
   margin: var(--ps-space-2) 0 0;
 }
+
+/* Three plain facts under the headline. */
+.vf-glance {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--ps-space-3);
+  padding-block: var(--ps-space-3);
+  margin: 0 0 var(--ps-space-5);
+  border-block: 1px solid var(--ps-rule-strong);
+}
+
+.vf-glance dt {
+  font-size: var(--ps-text-small);
+  color: var(--ps-ink-soft);
+}
+
+.vf-glance dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.vf-fold {
+  margin-top: var(--ps-space-3);
+}
+
+.vf-fold-body {
+  margin-top: var(--ps-space-2);
+}
+
+.vf-piece {
+  margin-top: var(--ps-space-4);
+}
+
+.vf-piece .vf-aside {
+  margin-bottom: var(--ps-space-2);
+}
+
+/* A value that fills its row. The row's own flex would otherwise squeeze it on a phone. */
+.vf-page .ps-rows li > span:last-child > .vf-aside,
+.vf-page .ps-rows li > span:last-child > .vf-link {
+  flex-basis: 100%;
+  margin-top: 0;
+}
