@@ -74,6 +74,64 @@ export function Button(props: ButtonHTMLAttributes<HTMLButtonElement>) {
   return <button type="button" className="ps-button" {...props} />;
 }
 
+/**
+ * Copies `text` (a function is read at the press, so a link always has its fragment) and says so.
+ * When the browser won't allow it, the text is shown to select by hand.
+ */
+export function CopyButton(props: {
+  text: string | (() => string);
+  children: ReactNode;
+  copied?: string;
+  "aria-label"?: string;
+}) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  const [shown, setShown] = useState("");
+  const onClick = () => {
+    const text = typeof props.text === "function" ? props.text() : props.text;
+    setShown(text);
+    // navigator.clipboard is missing outside a secure context.
+    const nav = globalThis.navigator as Navigator | undefined;
+    let written: Promise<void> | undefined;
+    try {
+      written = nav?.clipboard?.writeText(text);
+    } catch {
+      written = undefined;
+    }
+    if (!written) {
+      setState("failed");
+      return;
+    }
+    written.then(
+      () => {
+        setState("copied");
+      },
+      () => {
+        setState("failed");
+      },
+    );
+  };
+  return (
+    <span className="ps-copy">
+      <Button
+        {...(props["aria-label"] ? { "aria-label": props["aria-label"] } : {})}
+        onClick={onClick}
+      >
+        {state === "copied" ? (props.copied ?? "Copied") : props.children}
+      </Button>
+      {state === "failed" ? (
+        <>
+          <span role="status">
+            It could not be copied. Select the text below and copy it yourself.
+          </span>
+          <span className="ps-mono" style={{ whiteSpace: "pre-wrap" }}>
+            {shown}
+          </span>
+        </>
+      ) : null}
+    </span>
+  );
+}
+
 export function Field(props: {
   label: string;
   hint?: string;
@@ -203,6 +261,8 @@ export function Connected<T>(props: {
 export function ChromiumGate(props: {
   children: ReactNode;
   nav?: BrandedNavigator;
+  /** The address to copy. Defaults to this page's, with its fragment. */
+  href?: string;
 }) {
   const nav =
     props.nav ?? (globalThis.navigator as BrandedNavigator | undefined);
@@ -220,6 +280,17 @@ export function ChromiumGate(props: {
           <p>
             Open this page in Chrome or Edge on a computer. Then use your
             security key.
+          </p>
+          <p>
+            <CopyButton
+              text={() =>
+                props.href ??
+                (globalThis.location as Location | undefined)?.href ??
+                ""
+              }
+            >
+              Copy link
+            </CopyButton>
           </p>
         </Panel>
       </Screen>
