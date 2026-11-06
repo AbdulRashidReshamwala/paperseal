@@ -40,10 +40,10 @@ export function splitExamEnsName(name: string): { label: string; parent: string 
 }
 
 /*
- * Names for key holders and centres, from "Party Names" in spec/api.md. A party's `owner` may be an
- * ENS name. Setters never have one. The name is a label, and for a neutral key holder it can also be
- * a proof: the name's `ens.records.passkey` text record holds `passkeyRecordValue` of the passkey
- * public key that registered under it. Nothing here is read by the TEE or `ExamRegistry`.
+ * Names for key holders and centres, from "Party Names" in spec/api.md. A party's `owner` is a
+ * permanent ENS name. Setters never have one. The name's `ens.records.passkey` text record holds
+ * `passkeyRecordValue` of its security key, and `ens.records.credential` that key's credential ID, so
+ * a browser that never saw the key can find it. Nothing here is read by the TEE or `ExamRegistry`.
  */
 
 /** Whether `text` is written like an ENS name: no spaces, and at least two parts around dots. */
@@ -102,4 +102,71 @@ export function ownerEnsName(owner: string): string | null {
  */
 export function passkeyRecordValue(passkeyPublicKey: Uint8Array | Hex): Hex {
   return setterOwner(typeof passkeyPublicKey === 'string' ? fromHex(passkeyPublicKey) : passkeyPublicKey);
+}
+
+/** Whether a `ens.records.passkey` record names this value: any hex case, with spaces around it ignored. */
+export function passkeyRecordMatches(record: string, value: Hex): boolean {
+  return record.trim().toLowerCase() === value;
+}
+
+/** The credential ID in a `ens.records.credential` record, as lowercase hex. Null when it isn't hex. */
+export function credentialRecordValue(record: string): Hex | null {
+  const value = record.trim().toLowerCase();
+  return /^0x([0-9a-f]{2})+$/.test(value) ? (value as Hex) : null;
+}
+
+/**
+ * The names in a `ens.records.directory` record, without repeats. Refuses more than `ens.directoryBytes`
+ * bytes, anything but a JSON array of strings, and a name that isn't a normalised ENS name. The list is
+ * only a menu: each name is verified by its own records.
+ */
+export function parseDirectory(text: string): { ok: true; names: string[] } | { ok: false; reason: string } {
+  if (utf8ToBytes(text).length > ens.directoryBytes) return { ok: false, reason: `The directory is longer than ${String(ens.directoryBytes)} bytes.` };
+  let value: unknown;
+  try {
+    value = JSON.parse(text) as unknown;
+  } catch {
+    return { ok: false, reason: 'The directory is not valid JSON.' };
+  }
+  if (!Array.isArray(value)) return { ok: false, reason: 'The directory is not a list of names.' };
+  const names = new Set<string>();
+  for (const item of value as unknown[]) {
+    if (typeof item !== 'string') return { ok: false, reason: 'The directory holds something that is not a name.' };
+    const problem = partyNameProblem(item);
+    if (problem) return { ok: false, reason: `${item}: ${problem}` };
+    names.add(item);
+  }
+  return { ok: true, names: [...names] };
+}
+
+/* ------------------------------------------------------------------ Key cards */
+
+const KEY_CARD_KIND = 'paperseal-key-card';
+
+/** What a person sends the directory owner after enrolling. All of it is public. */
+export interface KeyCard {
+  /** `passkeyRecordValue` of the new passkey. */
+  passkey: Hex;
+  credentialId: Hex;
+  attestationObject: Hex;
+}
+
+export function keyCardText(card: KeyCard): string {
+  return JSON.stringify({ kind: KEY_CARD_KIND, version: 1, ...card }, null, 2);
+}
+
+/** Reads a key card. Lowercase hex only, and `passkey` is 32 bytes. Throws `Error` in plain words. */
+export function parseKeyCard(text: string): KeyCard {
+  let value: Partial<KeyCard> & { kind?: unknown; version?: unknown };
+  try {
+    value = JSON.parse(text) as typeof value;
+  } catch {
+    throw new Error('This is not a key card: it is not valid JSON.');
+  }
+  if (value.kind !== KEY_CARD_KIND || value.version !== 1) throw new Error('This is not a Paper Seal key card.');
+  const { passkey, credentialId, attestationObject } = value;
+  if (typeof passkey !== 'string' || !/^0x[0-9a-f]{64}$/.test(passkey)) throw new Error('The card has no valid passkey hash.');
+  if (typeof credentialId !== 'string' || !/^0x([0-9a-f]{2})+$/.test(credentialId)) throw new Error('The card has no valid credential ID.');
+  if (typeof attestationObject !== 'string' || !/^0x([0-9a-f]{2})*$/.test(attestationObject)) throw new Error('The card has no valid attestation object.');
+  return { passkey, credentialId, attestationObject };
 }

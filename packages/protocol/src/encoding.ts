@@ -3,7 +3,7 @@ import { keccak_256 } from '@noble/hashes/sha3.js';
 import { decodeAbiParameters, encodeAbiParameters, type AbiParameter } from 'viem';
 
 import { fromHex, toHex, utf8ToBytes } from './bytes';
-import { domainTags, limits, padding, threshold, type DomainTagName } from './constants';
+import { domainTags, limits, padding, threshold, webauthn, type DomainTagName } from './constants';
 import type { Hex } from './types';
 
 /*
@@ -34,6 +34,10 @@ export const messageSchemas = {
     ['encryptionPublicKey', 'bytes', 'publicKey'],
   ],
   setterOwner: [['passkeyPublicKey', 'bytes', 'publicKey']],
+  prfInput: [
+    ['prfSalt', 'bytes'],
+    ['examId', 'bytes32'],
+  ],
   registration: [
     ['derivedPublicKey', 'bytes', 'optionalPublicKey'],
     ['holderId', 'bytes'],
@@ -138,6 +142,14 @@ export function encodeMessage<N extends MessageName>(name: N, fields: MessageFie
 
 export function hashMessage<N extends MessageName>(name: N, fields: MessageFields<N>): Uint8Array {
   return sha256(encodeMessage(name, fields));
+}
+
+/**
+ * The WebAuthn PRF `first` input for one exam, the same in register, release and open. One passkey
+ * gives each exam its own derived key, so a leak of one opens no other exam's material.
+ */
+export function prfInput(examId: Uint8Array): Uint8Array {
+  return hashMessage('prfInput', { prfSalt: utf8ToBytes(webauthn.prfSalt), examId });
 }
 
 /**

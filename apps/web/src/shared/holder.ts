@@ -19,6 +19,16 @@ export function useHolderCredential(role: HolderRole): StoredCredential | null {
   return useMemo(() => holderCredential(role, exam), [role, exam]);
 }
 
+/** The entry under this name on the on-chain approved list. Null before the list is posted or if the name is not on it. */
+export async function listEntryForName(
+  registry: Pick<ExamRegistry, 'getApprovedListEntries'>,
+  exam: Hex,
+  owner: string,
+): Promise<ApprovedListEntry | null> {
+  const entries = await registry.getApprovedListEntries(exam);
+  return entries ? (decodeApprovedList(fromHex(entries)).find((entry) => entry.owner === owner) ?? null) : null;
+}
+
 /**
  * This credential's entry on the on-chain approved list, which carries the derived public key
  * that names its files in storage. Null before the list is posted or if the key is not on it.

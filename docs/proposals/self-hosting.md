@@ -178,7 +178,7 @@ Steps 1 to 3 change no image digest, so they can ship without a new TEE release.
 
 ## Risks and Open Questions
 
-- **Passkeys are tied to the domain:** `rpId` comes from `location.hostname`, so changing `web.appHost` after onboarding locks out every registered key. `doctor` should warn about this, and the guide should say to choose the domain first.
+- **Passkeys are tied to the domain:** `rpId` comes from `location.hostname`, so changing `web.appHost` after onboarding locks out every registered key. `doctor` should warn about this, and the guide should say to choose the domain first. This now conflicts more sharply with self-hosting: key holders and centres enrol one permanent passkey, published on an ENS name (spec/api.md, "Party Names"), and it works only on the domain it was made on. Two boards on two domains can't share a directory, and a board that moves domain needs everyone to enrol again and every record replaced. A shared `rpId` or related origins would be needed to change that, and neither is decided here.
 - **A single-exam VM limits reuse:** each new exam needs a new VM or a reboot, which is existing behaviour. This proposal doesn't change it.
 - **The hash alone no longer shows the mode:** anyone checking by hand must read the hash and the on-chain mode together. The verifier does this for them.
 - **A board can still choose `dev`:** it could run a real exam in demo mode. The mode is public and write-once, and the verifier warns about it, but nothing stops the choice.

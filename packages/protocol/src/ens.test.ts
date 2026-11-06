@@ -5,6 +5,11 @@ import { labelhash, namehash } from 'viem/ens';
 import { describe, expect, it } from 'vitest';
 
 import {
+  credentialRecordValue,
+  keyCardText,
+  parseDirectory,
+  parseKeyCard,
+  passkeyRecordMatches,
   ApprovedListError,
   checkPartyNames,
   partyNameProblem,
@@ -39,8 +44,9 @@ const fixtures = JSON.parse(
 describe('exam names', () => {
   it('reads spec/ens.json', () => {
     expect(ens.records).toEqual({ tee: 'paperseal.tee', storage: 'paperseal.storage', bucket: 'paperseal.bucket',
-      passkey: 'paperseal.passkey',
+      passkey: 'paperseal.passkey', credential: 'paperseal.credential', directory: 'paperseal.directory',
     });
+    expect(ens.directoryBytes).toBe(8192);
     expect(ens.ccipRead).toBe(false);
   });
 
@@ -143,5 +149,55 @@ describe('party names for key holders and centres', () => {
     for (const role of [roles.neutral, roles.centreKeyHolder, roles.centre]) {
       expect(() => checkPartyNames([entry(role, 'centre-1')])).toThrow(ApprovedListError);
     }
+  });
+});
+
+describe('directory', () => {
+  it('reads a JSON list of names, without repeats', () => {
+    expect(parseDirectory('["a.paperseal-demo.eth","b.paperseal-demo.eth","a.paperseal-demo.eth"]')).toEqual({
+      ok: true,
+      names: ['a.paperseal-demo.eth', 'b.paperseal-demo.eth'],
+    });
+  });
+
+  it('refuses anything else, and a value over the limit', () => {
+    expect(parseDirectory('not json')).toMatchObject({ ok: false });
+    expect(parseDirectory('{"a":1}')).toMatchObject({ ok: false });
+    expect(parseDirectory('[1]')).toMatchObject({ ok: false });
+    expect(parseDirectory('["Plain Name"]')).toMatchObject({ ok: false });
+    expect(parseDirectory('["Dr-Rao.eth"]')).toMatchObject({ ok: false });
+    const name = 'a'.repeat(50);
+    expect(parseDirectory(JSON.stringify(Array.from({ length: 200 }, (_, i) => `${name}${String(i)}.eth`)))).toMatchObject({ ok: false, reason: expect.stringContaining('longer') as string });
+  });
+});
+
+describe('records', () => {
+  it('compares a passkey record in any case, around spaces', () => {
+    const value = `0x${'ab'.repeat(32)}` as const;
+    expect(passkeyRecordMatches(` 0x${'AB'.repeat(32)}\n`, value)).toBe(true);
+    expect(passkeyRecordMatches(`0x${'ac'.repeat(32)}`, value)).toBe(false);
+  });
+
+  it('reads a credential record as lowercase hex', () => {
+    expect(credentialRecordValue(' 0xAB01 ')).toBe('0xab01');
+    expect(credentialRecordValue('0xabc')).toBeNull();
+    expect(credentialRecordValue('hello')).toBeNull();
+  });
+});
+
+describe('key cards', () => {
+  const card = { passkey: `0x${'ab'.repeat(32)}`, credentialId: '0x0102', attestationObject: '0xa0' } as const;
+
+  it('round-trips, and names only public values', () => {
+    const text = keyCardText(card);
+    expect(parseKeyCard(text)).toEqual(card);
+    expect(Object.keys(JSON.parse(text) as object).sort()).toEqual(['attestationObject', 'credentialId', 'kind', 'passkey', 'version']);
+  });
+
+  it('refuses something else', () => {
+    expect(() => parseKeyCard('nope')).toThrow('not valid JSON');
+    expect(() => parseKeyCard('{}')).toThrow('not a Paper Seal key card');
+    expect(() => parseKeyCard(keyCardText({ ...card, passkey: '0x12' }))).toThrow('passkey hash');
+    expect(() => parseKeyCard(keyCardText({ ...card, credentialId: '0x' }))).toThrow('credential ID');
   });
 });

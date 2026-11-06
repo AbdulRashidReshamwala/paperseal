@@ -42,6 +42,11 @@ A working list for the team at ETHGlobal Mumbai, from a read of the whole reposi
 | S10 | Low | `checkToken` throws on a malformed token instead of returning a failed verdict. | [token.ts](../packages/attestation/src/token.ts) `checkToken` | Open |
 | S11 | Low | Only PKI attestation tokens are verified. OIDC (`kid` and JWKS) tokens return not-implemented. The TEE only issues PKI tokens. | [token.ts](../packages/attestation/src/token.ts) | Accepted |
 | S12 | Low | The keyholder boundary lint rule bans fewer names than its test, and doesn't cover `apps/web/src/shared/`, which keyholder pages import. | [apps/eslint.config.mjs](../apps/eslint.config.mjs), [boundaries.test.ts](../apps/web/src/boundaries.test.ts) | Open |
+| S13 | Medium | The directory owner decides which key belongs to a name. In the demo that is the board, so a neutral's name proves nothing about independence, and the board could swap a record to point at its own key before posting the list. The swap is public, and the verifier compares the list with the record, but the TEE doesn't. | [README](../README.md#board), [ens-setup.md](ens-setup.md) |
+| S14 | Medium | Nothing gates `POST /v1/register` beyond a challenge and a signature, and the registration store has no cap, so a sustained flood from software keys costs memory during Onboard and slows `GET /v1/registrations`. It can't change who is listed. This was already true with invites, because the TEE never saw a secret. | [Registration Flooding](../spec/api.md#registration-flooding), [registration.go](../tee/internal/registration/registration.go) |
+| S15 | Medium | A key card travels by any message. A directory owner who doesn't check where a card came from can publish an attacker's key on someone's name, and that person's own key then won't match. | [ens-setup.md](ens-setup.md) |
+| S16 | Low | Enrolling twice with one key in two browsers before the directory lists it makes two passkeys, because neither browser knows the other's. Only the card the directory owner publishes counts, and the other is unused. | [Enrol.tsx](../apps/web/src/shared/Enrol.tsx) |
+| S17 | Low | A browser that didn't enrol has no attestation object to resend, so with hardware attestation on it would be refused. Nothing publishes the object. S2 has to settle this: a third record, or pasting the card. | [RegisterByName.tsx](../apps/web/src/shared/RegisterByName.tsx) |
 
 ## Open: Bugs and Spec Mismatches
 
@@ -60,7 +65,7 @@ A working list for the team at ETHGlobal Mumbai, from a read of the whole reposi
 | --- | --- | --- |
 | D1 | If `VITE_TEE_STORAGE_BUCKET` isn't set at build time, every real attestation token fails, which blocks posting the list and the Build. | Set it for both apps. An exam's ENS name can supply it to the verifier |
 | D2 | The board app doesn't listen for account or chain changes, so its status goes stale after a wallet switch. | Reload the page after switching |
-| D3 | Invites and setters' notes live in the board's browser storage. Another browser, or cleared storage, loses them unless the board saved a backup. | Use one browser profile for the board, and save a backup |
+| D3 | Setter invites and notes, and the chosen names, live in the board's browser storage. Another browser, or cleared storage, loses them unless the board saved a backup, which covers invites. | Use one browser profile for the board, and save a backup |
 | D4 | Public Sepolia RPCs time out and rate-limit (HTTP 429), and the verifier polls them. A `cast send` can fail before or after the transaction goes out. | Use a keyed RPC for the apps when demoing, and check `cast nonce <address> --block pending` before sending again |
 | D5 | `stop-tee.sh` and `teardown.sh` don't check the exam's stage. Stopping mid-exam destroys the question bank and keys. | Check `GET /v1/status` first |
 | D6 | The board's review step reads GitHub releases without a token, which allows 60 requests an hour, and has no manual fallback. A fork needs its own release with `VITE_RELEASES_REPO` set. | Avoid reload loops while demoing |

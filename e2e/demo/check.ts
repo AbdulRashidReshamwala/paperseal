@@ -61,9 +61,9 @@ async function read(page: Page, credentialId: string): Promise<Reading> {
   return page.evaluate(async (id) => {
     const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
     const bytes = Uint8Array.from(id.match(/../g) ?? [], (h) => parseInt(h, 16));
-    const { createWebAuthnKeys } = (window as unknown as { PSKeys: { createWebAuthnKeys: (o: object) => { getPublicKey: (id: Uint8Array) => Promise<Uint8Array> } } }).PSKeys;
+    const { createWebAuthnKeys } = (window as unknown as { PSKeys: { createWebAuthnKeys: (o: object) => { getPublicKey: (id: Uint8Array, exam: Uint8Array) => Promise<Uint8Array> } } }).PSKeys;
     const keys = createWebAuthnKeys({ rpId: location.hostname, rpName: 'Paper Seal demo check' });
-    const derived = hex(await keys.getPublicKey(bytes));
+    const derived = hex(await keys.getPublicKey(bytes, new Uint8Array(32).fill(1)));
     const assertion = (await navigator.credentials.get({
       publicKey: {
         rpId: location.hostname,

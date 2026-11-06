@@ -19,6 +19,8 @@ import {
   filesHash,
   FormatError,
   fromHex,
+  noInviteTag,
+  prfInput,
   hashMessage,
   limits,
   pad,
@@ -38,6 +40,7 @@ import {
   unpad,
   unpadPaper,
   unpadQuestion,
+  type Hex,
 } from './index';
 
 const bytes = (n: number, fill: number) => new Uint8Array(n).fill(fill);
@@ -45,8 +48,8 @@ const point = (fill: number) => Uint8Array.from([4, ...bytes(64, fill)]);
 const sha = (data: Uint8Array) => new Uint8Array(createHash('sha256').update(data).digest());
 
 describe('constants and stages', () => {
-  it('has a schema for every one of the 13 domain tags', () => {
-    expect(Object.keys(constants.domainTags)).toHaveLength(13);
+  it('has a schema for every one of the 14 domain tags', () => {
+    expect(Object.keys(constants.domainTags)).toHaveLength(14);
     const sample = { examId: bytes(32, 1), encryptionPublicKey: point(2) };
     expect(constants.domainTags.instanceKey).toBe('paperseal/v1/instance-key');
     expect(encodeMessage('instanceKey', sample).length).toBeGreaterThan(0);
@@ -88,6 +91,34 @@ describe('instanceKey message', () => {
     expect(existsSync(vectorsPath), `${vectorsPath} is missing`).toBe(true);
     const vectors = JSON.parse(readFileSync(vectorsPath, 'utf8')) as { hash: { message: string }[] };
     expect(vectors.hash.some((v) => v.message === 'instanceKey')).toBe(true);
+  });
+});
+
+describe('prfInput', () => {
+  const vectors = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../../tee/testdata/vectors.json'), 'utf8')) as {
+    hash: { message: string; fields: { name: string; value: string }[]; encoded: string; hash: string }[];
+  };
+
+  it('matches the Go vectors, and differs per exam', () => {
+    const found = vectors.hash.filter((vector) => vector.message === 'prfInput');
+    expect(found).toHaveLength(2);
+    for (const vector of found) {
+      const examId = fromHex(vector.fields.find((field) => field.name === 'examId')?.value as Hex);
+      expect(toHex(prfInput(examId))).toBe(vector.hash);
+    }
+    expect(found[0]?.hash).not.toBe(found[1]?.hash);
+  });
+
+  it('pins a registration by name, with its zero tag', () => {
+    const vector = vectors.hash.find((item) => item.message === 'registration' && item.fields.some((field) => field.value === toHex(noInviteTag)));
+    const field = (name: string) => fromHex(vector?.fields.find((item) => item.name === name)?.value as Hex);
+    const message = hashMessage('registration', {
+      derivedPublicKey: field('derivedPublicKey'),
+      holderId: field('holderId'),
+      challenge: field('challenge'),
+      inviteTag: noInviteTag,
+    });
+    expect(toHex(message)).toBe(vector?.hash);
   });
 });
 

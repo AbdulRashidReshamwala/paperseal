@@ -8,7 +8,8 @@ import {
   fromHex,
   hashMessage,
   inviteTag as computeInviteTag,
-  newInviteSecret,
+  noInviteTag,
+  passkeyRecordValue,
   questionHash as hashQuestion,
   selectedCount,
   setterOwner,
@@ -23,7 +24,8 @@ import { isReleaseNotOpen, TeeApiError, type TeeClient } from '@paperseal/tee-cl
 import { boardSend, checkDeployment, connectChain } from './chainio';
 import { buildArgs, verifyOutboxBuild, type BuildPost } from './build';
 import { addParticipant, call, startLab, type Lab, type Participant } from './browser';
-import { composeFromInvites, issueInvites, openLink } from './invites';
+import { composeList, issueInvites, openLink } from './invites';
+import { writeNameRecords } from './names';
 import { gaps } from './config';
 import { checkLogFiles, checkLogHolders, checkSetterOwners, openPaper, verifySignedLog, waitForRound } from './proof';
 import { ownerNameOf, releaseOrder, roster, type Kind } from './roster';
@@ -184,7 +186,7 @@ interface Ctx {
   tee: TeeClient;
   /** The browser lab, once `setup` has started it. */
   lab?: Lab;
-  /** A registration made under an invited name without that invite's secret. It must never reach the list. */
+  /** A registration under a party's name with a key that is not on its record. It must never reach the list. */
   intruder?: Hex;
 }
 
@@ -260,38 +262,52 @@ async function attestation(ctx: Ctx): Promise<void> {
 async function register(ctx: Ctx): Promise<{ listHash: Hex; entries: Hex }> {
   const { rep, exam, tee } = ctx;
   return rep.step('b-register', async () => {
-    // The board makes one invite per person. Each is a link, and everything in it is in the URL fragment.
-    await rep.check('b-register', 'the board creates one invite per participant: a random 32-byte secret each, in a link whose fragment holds the role, owner and secret', () => {
-      const issued = issueInvites(exam.examId, roster);
+    // Each key holder and centre enrols once. Virtual keys die with the browser, so this run does it now.
+    const parties = ctx.people.filter((p) => p.kind !== 'setter');
+    const setterPeople = ofKind(ctx, 'setter');
+    await rep.check('b-register', 'each key holder and centre enrols a permanent passkey, and the run writes their records and the directory', async () => {
+      for (const p of parties) p.enrolled = (await call(p, 'enrol')) as NonNullable<Participant['enrolled']>;
+      const cards = parties.map((p) => {
+        const enrolled = p.enrolled as NonNullable<Participant['enrolled']>;
+        return { name: ownerNameOf(p) as string, card: { passkey: passkeyRecordValue(enrolled.passkeyPublicKey), credentialId: enrolled.credentialId, attestationObject: enrolled.attestationObject } };
+      });
+      await writeNameRecords(cards, (line) => {
+        rep.note(line);
+      });
+      return `${String(cards.length)} names, ${String(cards.length * 3 + 1)} transactions`;
+    });
+
+    // The board makes one invite per setter. Each is a link, and everything in it is in the URL fragment.
+    await rep.check('b-register', 'the board creates one invite per setter: a random 32-byte secret each, in a link whose fragment holds the role and secret', () => {
+      const issued = issueInvites(exam.examId, setterPeople);
       issued.forEach((invite, i) => {
-        (ctx.people[i] as Participant).invite = invite;
+        (setterPeople[i] as Participant).invite = invite;
       });
       if (new Set(issued.map((i) => i.inviteSecret)).size !== issued.length) throw new Error('two invites share a secret');
       for (const invite of issued) {
         const url = new URL(invite.link);
         if (url.search !== '' || url.pathname !== '/' || !url.hash.includes(invite.inviteSecret)) throw new Error(`${invite.name}: the invite is not held only in the URL fragment`);
-        if (invite.role === 'setter' && (url.hash.includes('owner') || url.hash.includes(invite.name))) throw new Error(`${invite.name}: a setter invite carries a name`);
+        if (url.hash.includes('owner') || url.hash.includes(invite.name)) throw new Error(`${invite.name}: a setter invite carries a name`);
       }
-      return `${String(issued.length)} invites, ${String(issued.filter((i) => i.role === 'setter').length)} of them setter invites with no owner`;
+      return `${String(issued.length)} setter invites with no owner`;
     });
-    if (ctx.people.some((p) => !p.invite)) throw new RunStopped('the invites could not be made');
+    if (setterPeople.some((p) => !p.invite)) throw new RunStopped('the invites could not be made');
 
-    for (const p of ctx.people) {
-      await rep.check('b-register', `register ${p.name} (${p.kind}) from its invite link, with the TEE through tee-client`, async () => {
+    for (const p of setterPeople) {
+      await rep.check('b-register', `register ${p.name} (setter) from its invite link, with the TEE through tee-client`, async () => {
         const invite = p.invite;
         if (!invite) throw new Error('no invite');
         // The registrant's app reads the invite from the link alone, strictly.
         const opened = openLink(invite.link);
-        if (opened.role !== invite.role || opened.owner !== invite.owner || opened.inviteSecret !== invite.inviteSecret || opened.examId !== exam.examId) {
+        if (opened.role !== invite.role || opened.inviteSecret !== invite.inviteSecret || opened.examId !== exam.examId) {
           throw new Error(`${p.name}: the link reads back as a different invite`);
         }
         const { challenge } = await teeRead(() => tee.registerChallenge());
-        const { credentialId, owner, request } = await call(p, 'register', opened.owner ?? null, opened.role === 'setter' ? 'setter' : 'holder', challenge, opened.inviteSecret);
+        const { credentialId, owner, request } = await call(p, 'register', challenge, opened.inviteSecret);
         p.credentialId = credentialId as Hex;
         p.owner = owner;
         p.passkeyPublicKey = request.passkeyPublicKey;
-        if (p.kind === 'setter' && owner !== setterOwner(fromHex(request.passkeyPublicKey))) throw new Error(`${p.name}: the owner is not the setterOwner hash of its passkey`);
-        if (p.kind !== 'setter' && owner !== ownerNameOf(p)) throw new Error(`${p.name}: registered under ${owner}, not the name in the invite`);
+        if (owner !== setterOwner(fromHex(request.passkeyPublicKey))) throw new Error(`${p.name}: the owner is not the setterOwner hash of its passkey`);
         const expectedTag = toHex(computeInviteTag(fromHex(opened.inviteSecret), fromHex(request.passkeyPublicKey)));
         if (request.inviteTag !== expectedTag) throw new Error(`${p.name}: the request tag is not HMAC-SHA-256(inviteSecret, passkeyPublicKey)`);
         if (JSON.stringify(request).includes(opened.inviteSecret.slice(2))) throw new Error(`${p.name}: the invite secret is in the request`);
@@ -299,7 +315,25 @@ async function register(ctx: Ctx): Promise<{ listHash: Hex; entries: Hex }> {
         p.derivedPublicKey = request.derivedPublicKey;
         // A POST that changes TEE state is sent once, never retried.
         await tee.register(request);
-        return `passkey ${short(request.passkeyPublicKey)}, tag ${short(request.inviteTag)}${request.derivedPublicKey === '0x' ? ', no derived key' : `, derived ${short(request.derivedPublicKey)}`}`;
+        return `passkey ${short(request.passkeyPublicKey)}, tag ${short(request.inviteTag)}, no derived key`;
+      });
+    }
+    for (const p of parties) {
+      await rep.check('b-register', `register ${p.name} (${p.kind}) by name, with no secret, from its permanent key`, async () => {
+        const enrolled = p.enrolled;
+        if (!enrolled) throw new Error('not enrolled');
+        const owner = ownerNameOf(p) as string;
+        const { challenge } = await teeRead(() => tee.registerChallenge());
+        const { request } = await call(p, 'registerByName', owner, exam.examId, enrolled.credentialId, passkeyRecordValue(enrolled.passkeyPublicKey), challenge, enrolled.attestationObject);
+        if (request.passkeyPublicKey !== enrolled.passkeyPublicKey) throw new Error(`${p.name}: recovered a different key from the assertion`);
+        if (request.inviteTag !== toHex(noInviteTag)) throw new Error(`${p.name}: the tag is not 32 zero bytes`);
+        p.credentialId = enrolled.credentialId;
+        p.owner = owner;
+        p.passkeyPublicKey = request.passkeyPublicKey;
+        p.inviteTag = request.inviteTag;
+        p.derivedPublicKey = request.derivedPublicKey;
+        await tee.register(request);
+        return `passkey ${short(request.passkeyPublicKey)}, derived ${short(request.derivedPublicKey)}`;
       });
     }
     updateRun((r) => {
@@ -314,8 +348,12 @@ async function register(ctx: Ctx): Promise<{ listHash: Hex; entries: Hex }> {
     });
     if (ctx.people.some((p) => !p.passkeyPublicKey)) throw new RunStopped('a registration failed, so there is no complete list to post');
 
-    // Someone who knows an invited name, but not that invite's secret. This is the problem invites fix.
+    // Someone who knows a party's name, with a key of their own. No secret gates this, so the record does.
     const victim = ofKind(ctx, 'neutral')[0] as Participant;
+    const signedFor = async (intruder: Participant, challenge: Hex) => {
+      const key = await call(intruder, 'enrol');
+      return call(intruder, 'registerByName', victim.owner as string, exam.examId, key.credentialId, passkeyRecordValue(key.passkeyPublicKey as Hex), challenge, key.attestationObject);
+    };
     const asIntruder = async <T>(use: (intruder: Participant) => Promise<T>): Promise<T> => {
       if (!ctx.lab) throw new Error('the browser lab is not running');
       const intruder = await addParticipant(ctx.lab, { name: 'intruder', kind: 'neutral', role: 2 });
@@ -325,12 +363,12 @@ async function register(ctx: Ctx): Promise<{ listHash: Hex; entries: Hex }> {
         await intruder.context.close().catch(() => undefined);
       }
     };
-    await rep.check('b-register', `a registration signed with a tag the passkey did not sign is refused by the TEE (a copy of ${victim.name}'s tag)`, async () => {
+    await rep.check('b-register', 'a registration whose tag differs from the one the passkey signed is refused by the TEE', async () => {
       await asIntruder(async (intruder) => {
         const { challenge } = await teeRead(() => tee.registerChallenge());
-        const { request } = await call(intruder, 'register', victim.owner as string, 'holder', challenge, newInviteSecret());
+        const { request } = await signedFor(intruder, challenge);
         try {
-          await tee.register({ ...request, inviteTag: victim.inviteTag as Hex });
+          await tee.register({ ...request, inviteTag: `0x${'77'.repeat(32)}` });
         } catch (error) {
           if (error instanceof TeeApiError && error.status === 400) return;
           throw error;
@@ -339,10 +377,10 @@ async function register(ctx: Ctx): Promise<{ listHash: Hex; entries: Hex }> {
       });
       return 'refused with 400, so a tag cannot be changed in transit';
     });
-    await rep.check('b-register', `a registration under the invited name ${String(victim.owner)}, with a secret the board never issued, is accepted by the TEE but is not on the list`, async () => {
+    await rep.check('b-register', `a registration under the name ${String(victim.owner)}, with a key that is not on its record, is accepted by the TEE but is not on the list`, async () => {
       ctx.intruder = await asIntruder(async (intruder) => {
         const { challenge } = await teeRead(() => tee.registerChallenge());
-        const { request } = await call(intruder, 'register', victim.owner as string, 'holder', challenge, newInviteSecret());
+        const { request } = await signedFor(intruder, challenge);
         await tee.register(request);
         return request.passkeyPublicKey;
       });
@@ -361,22 +399,23 @@ async function register(ctx: Ctx): Promise<{ listHash: Hex; entries: Hex }> {
       }
       const setterRegistrations = registered.filter((r) => r.derivedPublicKey === '0x');
       if (setterRegistrations.some((r) => r.owner !== setterOwner(fromHex(r.passkeyPublicKey)))) throw new Error('a setter is registered under something other than the setterOwner hash of its passkey');
-      return `${String(registered.length)} registrations, ${String(ctx.people.length)} of them invited; setters appear only as the hash of their passkey`;
+      return `${String(registered.length)} registrations, ${String(ctx.people.length)} of them expected; setters appear only as the hash of their passkey`;
     });
 
-    // Compose the approved list from the invites, exactly as the board app does: recompute each tag
-    // from the secret, keep a registration only if its tag and owner match, and refuse a doubled invite.
+    // Compose the approved list exactly as the board app does: recompute each setter's tag from its secret,
+    // and take a party's registration only if its key hashes to the name's record.
     let entries: ApprovedListEntry[] = [];
     let encoded: Hex = '0x';
     let listHash: Hex = '0x';
-    await rep.check('b-register', 'compose the approved list by matching the registrations to the invites (checkApprovedList, canonical encoding, 3 neutrals and 7 centre key holders)', () => {
-      const invites = ctx.people.map((p) => p.invite as NonNullable<Participant['invite']>);
-      const composed = composeFromInvites(invites, registered);
+    await rep.check('b-register', 'compose the approved list from the invites and the name records (checkApprovedList, canonical encoding, 3 neutrals and 7 centre key holders)', () => {
+      const invites = setterPeople.map((p) => p.invite as NonNullable<Participant['invite']>);
+      const names = parties.map((p) => ({ entry: p, record: passkeyRecordValue(p.passkeyPublicKey as Hex) }));
+      const composed = composeList(invites, names, registered);
       const unmatched = composed.matching.rows.filter((row) => row.state.kind !== 'matched').map((row) => `${row.invite.name} is ${row.state.kind}`);
       if (unmatched.length > 0) throw new Error(unmatched.join('; '));
-      if (!ctx.intruder || !composed.matching.unmatched.some((r) => r.passkeyPublicKey === ctx.intruder)) throw new Error('the registration without an issued secret was not left unmatched');
-      if (composed.entries.some((e) => toHex(e.passkeyPublicKey) === ctx.intruder)) throw new Error('the registration without an issued secret is on the list');
-      if (composed.matching.unmatched.length !== 1) throw new Error(`${String(composed.matching.unmatched.length)} registrations are unmatched, expected only the intruder`);
+      if (!ctx.intruder || !composed.strays.some((r) => r.passkeyPublicKey === ctx.intruder)) throw new Error('the registration with another key was not left out');
+      if (composed.entries.some((e) => toHex(e.passkeyPublicKey) === ctx.intruder)) throw new Error('the registration with another key is on the list');
+      if (composed.strays.length !== 1) throw new Error(`${String(composed.strays.length)} registrations are left out, expected only the intruder`);
       entries = composed.entries;
       if (entries.length !== ctx.people.length) throw new Error(`${String(entries.length)} entries for ${String(ctx.people.length)} participants`);
       for (const p of ctx.people) {
@@ -402,7 +441,7 @@ async function register(ctx: Ctx): Promise<{ listHash: Hex; entries: Hex }> {
       const emitted = await poll('ApprovedListPosted event bytes', () => ctx.io.read(() => ctx.io.registry.getApprovedListEntries(exam.examId)), { timeoutMs: 120_000, intervalMs: 3_000 });
       if (back.listHash.toLowerCase() !== listHash) throw new Error(`stored hash ${back.listHash} differs from ${listHash}`);
       if (emitted.toLowerCase() !== encoded) throw new Error('the emitted entries differ from the bytes posted');
-      if (decodeApprovedList(fromHex(emitted)).some((e) => toHex(e.passkeyPublicKey) === ctx.intruder)) throw new Error('the registration without an issued secret is on the posted list');
+      if (decodeApprovedList(fromHex(emitted)).some((e) => toHex(e.passkeyPublicKey) === ctx.intruder)) throw new Error('the registration with another key is on the posted list');
       updateRun((r) => (r.approvedList = { hash: listHash, transactionHash: sent.transactionHash, blockNumber: sent.blockNumber.toString() }));
       return `block ${sent.blockNumber.toString()}, tx ${sent.transactionHash}; the TEE sees it ${gaps.listDelay}`;
     });

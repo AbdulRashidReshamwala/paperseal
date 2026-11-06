@@ -1,7 +1,7 @@
 import { createPublicKey, createHash, verify } from 'node:crypto';
 
 import { hpkeContext, hpkeSeal } from '@paperseal/crypto';
-import { hashMessage, inviteTag, setterOwner, utf8ToBytes, webauthn } from '@paperseal/protocol';
+import { hashMessage, noInviteTag, passkeyRecordValue, prfInput, setterOwner, utf8ToBytes, webauthn } from '@paperseal/protocol';
 import { chromium, type Browser, type BrowserContext, type CDPSession, type Page } from 'playwright-core';
 import { createServer, type ViteDevServer } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -141,11 +141,11 @@ describe('createWebAuthnKeys against Chrome virtual authenticator', () => {
 
   it('getPublicKey returns the same 65-byte key on every call', async () => {
     await session.ps('clearRequests');
-    publicKey = ok(await session.ps('getPublicKey', credentialId));
+    publicKey = ok(await session.ps('getPublicKey', credentialId, toHex(EXAM_ID)));
     expect(fromHex(publicKey)).toHaveLength(65);
     expect(fromHex(publicKey)[0]).toBe(0x04);
-    expect(ok(await session.ps('getPublicKey', credentialId))).toBe(publicKey);
-    expect(ok(await session.ps('getPublicKey', credentialId))).toBe(publicKey);
+    expect(ok(await session.ps('getPublicKey', credentialId, toHex(EXAM_ID)))).toBe(publicKey);
+    expect(ok(await session.ps('getPublicKey', credentialId, toHex(EXAM_ID)))).toBe(publicKey);
 
     // Every request used the spec's salt and required user verification.
     const requests = await session.ps('requests');
@@ -154,14 +154,14 @@ describe('createWebAuthnKeys against Chrome virtual authenticator', () => {
       expect(request.kind).toBe('get');
       expect(request.userVerification).toBe(webauthn.userVerification);
       expect(request.userVerification).toBe('required');
-      expect(request.prfSaltHex).toBe(toHex(utf8ToBytes(webauthn.prfSalt)));
+      expect(request.prfSaltHex).toBe(toHex(prfInput(EXAM_ID)));
     }
   });
 
   it('returns the same key after a page reload in the same browser', async () => {
     await session.page.reload();
     await session.page.waitForFunction(() => 'ps' in window);
-    expect(ok(await session.ps('getPublicKey', credentialId))).toBe(publicKey);
+    expect(ok(await session.ps('getPublicKey', credentialId, toHex(EXAM_ID)))).toBe(publicKey);
   });
 
   it('decryptShare opens a value sealed with hpkeSeal to that key', async () => {
@@ -216,7 +216,7 @@ describe('createWebAuthnKeys against Chrome virtual authenticator', () => {
 
     const requests = await session.ps('requests');
     expect(requests).toHaveLength(1);
-    expect(requests[0]).toMatchObject({ kind: 'get', userVerification: 'required', prfSaltHex: toHex(utf8ToBytes(webauthn.prfSalt)) });
+    expect(requests[0]).toMatchObject({ kind: 'get', userVerification: 'required', prfSaltHex: toHex(prfInput(EXAM_ID)) });
     expect(released.share).toBe(toHex(share));
 
     const clientData = JSON.parse(Buffer.from(released.clientDataJSON, 'hex').toString('utf8')) as { challenge: string; type: string };
@@ -247,35 +247,47 @@ describe('register and keyPriv', () => {
   const challenge = new Uint8Array(32).fill(0x42);
   const inviteSecret = new Uint8Array(32).fill(0x24);
 
-  it('registers a key holder: the derived key matches getPublicKey and the passkey signs the registration message', async () => {
+  it('registers a key holder by name: two gets, a zero tag, and the derived key matches getPublicKey', async () => {
     const session = await openSession(browser);
-    const { credentialId, request } = ok(await session.ps('register', 'neutral-01', 'holder', toHex(challenge), toHex(inviteSecret)));
+    const key = ok(await session.ps('generateKey', USER.id, USER.name));
+    const passkey = passkeyRecordValue(`0x${key.passkeyPublicKey}`);
+    await session.ps('clearRequests');
+    const { request } = ok(await session.ps('registerByName', 'neutral-1.paperseal-demo.eth', toHex(EXAM_ID), key.credentialId, passkey, toHex(challenge)));
     const requests = await session.ps('requests');
-    log('holder register ceremonies', requests.map((r) => r.kind));
-    log('PRF at creation answered by Chrome virtual authenticator', requests.filter((r) => r.kind === 'get').length === 1);
-
-    expect(Object.keys(request).sort()).toEqual(
-      ['attestationObject', 'authenticatorData', 'challenge', 'clientDataJSON', 'derivedPublicKey', 'inviteTag', 'owner', 'passkeyPublicKey', 'signature'],
-    );
-    expect(request.owner).toBe('neutral-01');
-    expect(wire(request.inviteTag)).toEqual(inviteTag(inviteSecret, wire(request.passkeyPublicKey)));
-    expect(request.challenge).toBe(`0x${toHex(challenge)}`);
-    expect(wire(request.derivedPublicKey)).toHaveLength(65);
-    expect(wire(request.attestationObject).length).toBeGreaterThan(0);
-    // Same key as the one a later get derives, so the registered key can open a share.
-    expect(request.derivedPublicKey).toBe(`0x${ok(await session.ps('getPublicKey', credentialId))}`);
-
+    expect(requests.map((r) => r.kind)).toEqual(['get', 'get']);
+    expect(requests[0]?.prfSaltHex).toBe(toHex(prfInput(EXAM_ID)));
+    expect(requests[1]?.prfSaltHex).toBeNull();
+    expect(request.passkeyPublicKey).toBe(`0x${key.passkeyPublicKey}`);
+    expect(wire(request.inviteTag)).toEqual(noInviteTag);
+    expect(request.derivedPublicKey).toBe(`0x${ok(await session.ps('getPublicKey', key.credentialId, toHex(EXAM_ID)))}`);
     const message = hashMessage('registration', {
       derivedPublicKey: wire(request.derivedPublicKey),
-      holderId: utf8ToBytes('neutral-01'),
+      holderId: utf8ToBytes('neutral-1.paperseal-demo.eth'),
       challenge,
-      inviteTag: wire(request.inviteTag),
+      inviteTag: noInviteTag,
     });
     const clientData = JSON.parse(Buffer.from(request.clientDataJSON.slice(2), 'hex').toString('utf8')) as { challenge: string; type: string };
     expect(Buffer.from(clientData.challenge, 'base64url').toString('hex')).toBe(toHex(message));
     expect(clientData.type).toBe('webauthn.get');
-    expect(verifyPasskey(wire(request.passkeyPublicKey), request.authenticatorData.slice(2), request.clientDataJSON.slice(2), request.signature.slice(2))).toBe(true);
-    for (const r of requests) expect(r.userVerification).toBe('required');
+    await session.context.close();
+  });
+
+  it('gives each exam its own derived key from one passkey', async () => {
+    const session = await openSession(browser);
+    const key = ok(await session.ps('generateKey', USER.id, USER.name));
+    const other = new Uint8Array(32).fill(0x31);
+    const first = ok(await session.ps('getPublicKey', key.credentialId, toHex(EXAM_ID)));
+    expect(ok(await session.ps('getPublicKey', key.credentialId, toHex(other)))).not.toBe(first);
+    await session.context.close();
+  });
+
+  it('refuses a key that is not the one on the record, after one touch', async () => {
+    const session = await openSession(browser);
+    const key = ok(await session.ps('generateKey', USER.id, USER.name));
+    await session.ps('clearRequests');
+    const result = await session.ps('registerByName', 'x.paperseal-demo.eth', toHex(EXAM_ID), key.credentialId, `0x${'ab'.repeat(32)}`, toHex(challenge));
+    expect(result).toMatchObject({ ok: false, code: 'wrong_key' });
+    expect((await session.ps('requests')).length).toBe(1);
     await session.context.close();
   });
 
@@ -289,10 +301,10 @@ describe('register and keyPriv', () => {
         hasPrf: false, automaticPresenceSimulation: true, ...DEVICE_BOUND,
       },
     });
-    const holder = await session.ps('register', 'x', 'holder', toHex(challenge), toHex(inviteSecret));
+    const holder = await session.ps('generateKey', USER.id, USER.name);
     expect(holder).toMatchObject({ ok: false, code: 'prf_unavailable' });
 
-    const { request } = ok(await session.ps('register', null, 'setter', toHex(challenge), toHex(inviteSecret)));
+    const { request } = ok(await session.ps('register', toHex(challenge), toHex(inviteSecret)));
     expect(request.derivedPublicKey).toBe('0x');
     expect(request.owner).toBe(setterOwner(wire(request.passkeyPublicKey)));
     const message = hashMessage('registration', { derivedPublicKey: new Uint8Array(), holderId: utf8ToBytes(request.owner), challenge, inviteTag: wire(request.inviteTag) });
@@ -304,7 +316,9 @@ describe('register and keyPriv', () => {
 
   it('openKeyPriv opens a centre K_priv sealed with the keyPriv purpose, and nothing else', async () => {
     const session = await openSession(browser);
-    const { credentialId, request } = ok(await session.ps('register', 'centre-01', 'holder', toHex(challenge), toHex(inviteSecret)));
+    const key = ok(await session.ps('generateKey', USER.id, USER.name));
+    const { credentialId } = key;
+    const { request } = ok(await session.ps('registerByName', 'centre-1.paperseal-demo.eth', toHex(EXAM_ID), credentialId, passkeyRecordValue(`0x${key.passkeyPublicKey}`), toHex(challenge)));
     const kPriv = crypto.getRandomValues(new Uint8Array(32));
     const sealed = await sealFor(wire(request.derivedPublicKey), kPriv, 'keyPriv');
     expect(ok(await session.ps('openKeyPriv', credentialId, toHex(EXAM_ID), toHex(sealed)))).toBe(toHex(kPriv));
@@ -319,11 +333,11 @@ describe('empirical findings the demo depends on', () => {
   it('does a credential survive a new browser context in the same browser?', async () => {
     const first = await openSession(browser);
     const key = ok(await first.ps('generateKey', USER.id, USER.name));
-    const publicKey = ok(await first.ps('getPublicKey', key.credentialId));
+    const publicKey = ok(await first.ps('getPublicKey', key.credentialId, toHex(EXAM_ID)));
 
     // A new context gets a fresh virtual authenticator, because they are per-session and in-memory.
     const second = await openSession(browser);
-    const result = await second.ps('getPublicKey', key.credentialId);
+    const result = await second.ps('getPublicKey', key.credentialId, toHex(EXAM_ID));
     log('new context, new authenticator, same credential', result);
     expect(result.ok).toBe(false);
 
@@ -335,7 +349,7 @@ describe('empirical findings the demo depends on', () => {
     for (const credential of exported.credentials) {
       await second.cdp.send('WebAuthn.addCredential', { authenticatorId: second.authenticatorId, credential });
     }
-    const imported = await second.ps('getPublicKey', key.credentialId);
+    const imported = await second.ps('getPublicKey', key.credentialId, toHex(EXAM_ID));
     log('after addCredential into new authenticator, same PRF key?', imported.ok ? imported.value === publicKey : imported);
     // The exported credential has no PRF secret, so the copy signs in but derives nothing.
     expect(imported).toMatchObject({ ok: false, code: 'prf_unavailable' });
@@ -344,24 +358,41 @@ describe('empirical findings the demo depends on', () => {
     await second.context.close();
   });
 
+  it('a browser with nothing stored finds the key from a record: allowCredentials and PRF on the same key', async () => {
+    const first = await openSession(browser);
+    const key = ok(await first.ps('generateKey', USER.id, USER.name));
+    const publicKey = ok(await first.ps('getPublicKey', key.credentialId, toHex(EXAM_ID)));
+    // The same authenticator, as a security key is, on a page that knows only the credential ID and the hash.
+    await first.page.evaluate(() => {
+      localStorage.clear();
+    });
+    await first.page.reload();
+    await first.page.waitForFunction(() => 'ps' in window);
+    const passkey = passkeyRecordValue(`0x${key.passkeyPublicKey}`);
+    const { request } = ok(await first.ps('registerByName', 'n.paperseal-demo.eth', toHex(EXAM_ID), key.credentialId, passkey, toHex(new Uint8Array(32).fill(5))));
+    log('nothing stored, same authenticator: same derived key?', request.derivedPublicKey === `0x${publicKey}`);
+    expect(request.derivedPublicKey).toBe(`0x${publicKey}`);
+    await first.context.close();
+  });
+
   it('does a credential survive a browser restart?', async () => {
     const first = await openSession(browser);
     const key = ok(await first.ps('generateKey', USER.id, USER.name));
-    const publicKey = ok(await first.ps('getPublicKey', key.credentialId));
+    const publicKey = ok(await first.ps('getPublicKey', key.credentialId, toHex(EXAM_ID)));
     const exported = await first.cdp.send('WebAuthn.getCredentials', { authenticatorId: first.authenticatorId });
     await first.context.close();
 
     const restarted = await launch();
     try {
       const second = await openSession(restarted);
-      const result = await second.ps('getPublicKey', key.credentialId);
+      const result = await second.ps('getPublicKey', key.credentialId, toHex(EXAM_ID));
       log('after browser restart with a new authenticator', result);
       expect(result.ok).toBe(false);
 
       for (const credential of exported.credentials) {
         await second.cdp.send('WebAuthn.addCredential', { authenticatorId: second.authenticatorId, credential });
       }
-      const imported = await second.ps('getPublicKey', key.credentialId);
+      const imported = await second.ps('getPublicKey', key.credentialId, toHex(EXAM_ID));
       log('after browser restart and addCredential, same PRF key?', imported.ok ? imported.value === publicKey : imported);
       expect(imported).toMatchObject({ ok: false, code: 'prf_unavailable' });
       expect(publicKey).toHaveLength(130);

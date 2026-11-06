@@ -1,5 +1,6 @@
 import { hpkeContext, hpkeSeal } from '@paperseal/crypto';
-import { fromHex, hashMessage, inviteTag, setterOwner, toHex, utf8ToBytes, webauthn } from '@paperseal/protocol';
+import { p256 } from '@noble/curves/nist';
+import { fromHex, hashMessage, inviteTag, noInviteTag, prfInput, setterOwner, toHex, utf8ToBytes, webauthn, type Hex } from '@paperseal/protocol';
 import { describe, expect, it, vi } from 'vitest';
 
 import { assertDeviceBound, createWebAuthnKeys, KeyError, readBackupFlags } from './index';
@@ -57,8 +58,8 @@ function authenticator(
   };
 }
 
-const keysFor = (credentials: ReturnType<typeof authenticator>) =>
-  createWebAuthnKeys({ rpId: 'localhost', rpName: 'Paper Seal', credentials });
+const keysFor = (credentials: { create: unknown; get: unknown }) =>
+  createWebAuthnKeys({ rpId: 'localhost', rpName: 'Paper Seal', credentials: credentials as Pick<CredentialsContainer, 'create' | 'get'> });
 
 const codeOf = (promise: Promise<unknown>) =>
   promise.then(
@@ -134,25 +135,25 @@ describe('derived key', () => {
   it('is deterministic for one PRF output, sent with a fixed salt', async () => {
     const credentials = authenticator();
     const keys = keysFor(credentials);
-    const first = await keys.getPublicKey(credentialId);
-    expect(await keys.getPublicKey(credentialId)).toEqual(first);
+    const first = await keys.getPublicKey(credentialId, examId);
+    expect(await keys.getPublicKey(credentialId, examId)).toEqual(first);
     expect(first).toHaveLength(65);
     const salts = credentials.get.mock.calls.map((call) => {
       const [request] = call as unknown as [{ publicKey: PublicKeyCredentialRequestOptions }];
       return request.publicKey.extensions?.prf?.eval?.first;
     });
     expect(salts[0]).toEqual(salts[1]);
-    expect(salts[0]).toEqual(utf8ToBytes(webauthn.prfSalt));
+    expect(salts[0]).toEqual(prfInput(examId));
   });
 
   it('decrypts a share sealed to it', async () => {
     const keys = keysFor(authenticator());
-    const sealed = await sealTo(await keys.getPublicKey(credentialId), new Uint8Array([7, 7]));
+    const sealed = await sealTo(await keys.getPublicKey(credentialId, examId), new Uint8Array([7, 7]));
     expect(await keys.decryptShare(credentialId, examId, sealed)).toEqual(new Uint8Array([7, 7]));
   });
 
   it('fails when the PRF result is missing or the passkey has become synced', async () => {
-    expect(await codeOf(keysFor(authenticator({ prf: null })).getPublicKey(credentialId))).toBe(
+    expect(await codeOf(keysFor(authenticator({ prf: null })).getPublicKey(credentialId, examId))).toBe(
       'prf_unavailable',
     );
     expect(await codeOf(keysFor(authenticator({ flags: BS })).decryptShare(credentialId, examId, new Uint8Array()))).toBe(
@@ -164,7 +165,7 @@ describe('derived key', () => {
 describe('derived key purposes', () => {
   it('decryptShare rejects a keyPriv, and a share for another exam', async () => {
     const keys = keysFor(authenticator());
-    const publicKey = await keys.getPublicKey(credentialId);
+    const publicKey = await keys.getPublicKey(credentialId, examId);
     const keyPriv = await sealTo(publicKey, new Uint8Array(32).fill(1), 'keyPriv');
     await expect(keys.decryptShare(credentialId, examId, keyPriv)).rejects.toThrow();
     const share = await sealTo(publicKey, new Uint8Array([1]));
@@ -174,9 +175,9 @@ describe('derived key purposes', () => {
   it('openKeyPriv opens the 32-byte K_priv for a centre', async () => {
     const keys = keysFor(authenticator());
     const kPriv = new Uint8Array(32).fill(0x5a);
-    const sealed = await sealTo(await keys.getPublicKey(credentialId), kPriv, 'keyPriv');
+    const sealed = await sealTo(await keys.getPublicKey(credentialId, examId), kPriv, 'keyPriv');
     expect(await keys.openKeyPriv(credentialId, examId, sealed)).toEqual(kPriv);
-    const share = await sealTo(await keys.getPublicKey(credentialId), kPriv);
+    const share = await sealTo(await keys.getPublicKey(credentialId, examId), kPriv);
     await expect(keys.openKeyPriv(credentialId, examId, share)).rejects.toThrow();
   });
 });
@@ -184,62 +185,22 @@ describe('derived key purposes', () => {
 describe('register', () => {
   const challenge = new Uint8Array(32).fill(0x77);
   const inviteSecret = new Uint8Array(32).fill(0x33);
+  const challengeOf = (call: unknown) => (call as [{ publicKey: PublicKeyCredentialRequestOptions }])[0].publicKey.challenge;
 
-  const challengeOf = (call: unknown) =>
-    (call as [{ publicKey: PublicKeyCredentialRequestOptions }])[0].publicKey.challenge;
-
-  it('returns the POST /v1/register body, with the passkey signing the registration message', async () => {
-    const credentials = authenticator();
+  it('registers a setter with no PRF key and an empty derived key', async () => {
+    const credentials = authenticator({ prfEnabled: false, prf: null });
     const keys = keysFor(credentials);
-    const { credentialId: id, request } = await keys.register({ owner: 'centre-01', role: 'holder', challenge, inviteSecret });
+    const { request, owner, credentialId: id } = await keys.register({ role: 'setter', challenge, inviteSecret });
     expect(id).toEqual(credentialId);
-
-    const derived = await keys.getPublicKey(credentialId);
-    expect(request.derivedPublicKey).toBe(`0x${Buffer.from(derived).toString('hex')}`);
-    expect(request.owner).toBe('centre-01');
-    expect(request.challenge).toBe(`0x${'77'.repeat(32)}`);
-    expect(fromHex(request.passkeyPublicKey)).toHaveLength(65);
+    const [create] = credentials.create.mock.calls[0] as unknown as [{ publicKey: PublicKeyCredentialCreationOptions }];
+    expect(create.publicKey.extensions).toBeUndefined();
+    expect(request.derivedPublicKey).toBe('0x');
     expect(Object.keys(request).sort()).toEqual(
       ['attestationObject', 'authenticatorData', 'challenge', 'clientDataJSON', 'derivedPublicKey', 'inviteTag', 'owner', 'passkeyPublicKey', 'signature'],
     );
     // The tag is the HMAC of the invite secret over this passkey, and the secret itself is never sent.
     expect(request.inviteTag).toBe(toHex(inviteTag(inviteSecret, fromHex(request.passkeyPublicKey))));
     expect(JSON.stringify(request)).not.toContain(toHex(inviteSecret).slice(2));
-
-    // The WebAuthn challenge of the signing get is the registration message hash.
-    const expected = hashMessage('registration', {
-      derivedPublicKey: derived,
-      holderId: utf8ToBytes('centre-01'),
-      challenge,
-      inviteTag: fromHex(request.inviteTag),
-    });
-    expect(challengeOf(credentials.get.mock.calls[0])).toEqual(expected);
-  });
-
-  it('asks for the PRF output at creation and takes one create and one get when it is returned', async () => {
-    const credentials = authenticator();
-    await keysFor(credentials).register({ owner: 'n', role: 'holder', challenge, inviteSecret });
-    const [request] = credentials.create.mock.calls[0] as unknown as [{ publicKey: PublicKeyCredentialCreationOptions }];
-    expect(request.publicKey.extensions?.prf?.eval?.first).toEqual(utf8ToBytes(webauthn.prfSalt));
-    expect(credentials.create).toHaveBeenCalledTimes(1);
-    expect(credentials.get).toHaveBeenCalledTimes(1);
-  });
-
-  it('derives the key with an extra get when the authenticator gives no PRF output at creation', async () => {
-    const credentials = authenticator({ prfAtCreate: false });
-    const keys = keysFor(credentials);
-    const { request } = await keys.register({ owner: 'n', role: 'holder', challenge, inviteSecret });
-    expect(credentials.get).toHaveBeenCalledTimes(2);
-    expect(request.derivedPublicKey).toBe(`0x${Buffer.from(await keys.getPublicKey(credentialId)).toString('hex')}`);
-  });
-
-  it('registers a setter with no PRF key and an empty derived key', async () => {
-    const credentials = authenticator({ prfEnabled: false, prf: null });
-    const keys = keysFor(credentials);
-    const { request, owner } = await keys.register({ role: 'setter', challenge, inviteSecret });
-    const [create] = credentials.create.mock.calls[0] as unknown as [{ publicKey: PublicKeyCredentialCreationOptions }];
-    expect(create.publicKey.extensions).toBeUndefined();
-    expect(request.derivedPublicKey).toBe('0x');
     // No name goes anywhere: the owner is the hash of the new passkey's public key.
     expect(owner).toBe(setterOwner(fromHex(request.passkeyPublicKey)));
     expect(request.owner).toBe(owner);
@@ -255,9 +216,99 @@ describe('register', () => {
     expect(get.publicKey.userVerification).toBe(webauthn.userVerification);
   });
 
-  it('refuses a holder whose authenticator has no PRF, and any synced passkey', async () => {
-    expect(await codeOf(keysFor(authenticator({ prfEnabled: false })).register({ owner: 'n', role: 'holder', challenge, inviteSecret }))).toBe('prf_unavailable');
+  it('refuses a synced passkey', async () => {
     expect(await codeOf(keysFor(authenticator({ flags: UP | BE | BS })).register({ role: 'setter', challenge, inviteSecret }))).toBe('synced_passkey');
+  });
+});
+
+describe('enrolment', () => {
+  it('asks for a PRF passkey and passes the known keys as excludeCredentials', async () => {
+    const credentials = authenticator();
+    const known = new Uint8Array([7, 7]);
+    await keysFor(credentials).generateKey({ id: new Uint8Array(32), name: 'Paper Seal key' }, { excludeCredentials: [known] });
+    const [request] = credentials.create.mock.calls[0] as unknown as [{ publicKey: PublicKeyCredentialCreationOptions }];
+    expect(request.publicKey.extensions?.prf).toEqual({});
+    expect(request.publicKey.excludeCredentials?.map(({ id }) => id)).toEqual([known]);
+  });
+
+  it('turns a key that already holds one into already_enrolled, and keeps other failures', async () => {
+    const refused = authenticator();
+    refused.create.mockRejectedValueOnce(new DOMException('known', 'InvalidStateError'));
+    expect(await codeOf(keysFor(refused).generateKey({ id: new Uint8Array(32), name: 'k' }))).toBe('already_enrolled');
+    const cancelled = authenticator();
+    cancelled.create.mockRejectedValueOnce(new DOMException('no', 'NotAllowedError'));
+    await expect(keysFor(cancelled).generateKey({ id: new Uint8Array(32), name: 'k' })).rejects.toThrow('no');
+  });
+});
+
+describe('registerByName', () => {
+  const owner = 'centre-1.paperseal-demo.eth';
+  const challenge = new Uint8Array(32).fill(0x77);
+
+  /** A real software P-256 passkey, because the first touch recovers the public key from a signature. */
+  function signingKey() {
+    const secret = p256.utils.randomPrivateKey();
+    const publicKey = p256.getPublicKey(secret, false);
+    const clientDataJSON = utf8ToBytes('{"type":"webauthn.get"}');
+    const authenticatorData = authData(UP);
+    const get = vi.fn(async (options: { publicKey: PublicKeyCredentialRequestOptions }) => {
+      const clientHash = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', new Uint8Array(clientDataJSON)));
+      const signed = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', new Uint8Array([...authenticatorData, ...clientHash])));
+      const prfRequested = options.publicKey.extensions?.prf !== undefined;
+      return {
+        getClientExtensionResults: () => (prfRequested ? { prf: { results: { first: prfOutput.slice().buffer } } } : {}),
+        response: {
+          signature: p256.sign(signed, secret).toDERRawBytes().slice().buffer,
+          authenticatorData: authenticatorData.slice().buffer,
+          clientDataJSON: clientDataJSON.slice().buffer,
+        },
+      } as unknown as Credential;
+    });
+    return { publicKey, credentials: { create: vi.fn(), get } };
+  }
+
+  const options = (passkey: Hex) => ({
+    owner,
+    examId,
+    credentialId,
+    passkey,
+    challenge: () => Promise.resolve(challenge),
+  });
+
+  it('takes two gets: the exam PRF first, then the signature with a zero tag', async () => {
+    const { publicKey, credentials } = signingKey();
+    const keys = keysFor(credentials);
+    const { request } = await keys.registerByName(options(setterOwner(publicKey)));
+    expect(credentials.get).toHaveBeenCalledTimes(2);
+    const [first] = credentials.get.mock.calls[0] as unknown as [{ publicKey: PublicKeyCredentialRequestOptions }];
+    expect(first.publicKey.extensions?.prf?.eval?.first).toEqual(prfInput(examId));
+    expect(first.publicKey.allowCredentials?.map(({ id }) => id)).toEqual([credentialId]);
+    const [second] = credentials.get.mock.calls[1] as unknown as [{ publicKey: PublicKeyCredentialRequestOptions }];
+    expect(second.publicKey.extensions).toBeUndefined();
+    expect(request.passkeyPublicKey).toBe(toHex(publicKey));
+    expect(request.inviteTag).toBe(`0x${'00'.repeat(32)}`);
+    expect(request.attestationObject).toBe('0x');
+    expect(request.owner).toBe(owner);
+    const expected = hashMessage('registration', {
+      derivedPublicKey: fromHex(request.derivedPublicKey),
+      holderId: utf8ToBytes(owner),
+      challenge,
+      inviteTag: noInviteTag,
+    });
+    expect(second.publicKey.challenge).toEqual(expected);
+  });
+
+  it('resends the attestation object from enrolment', async () => {
+    const { publicKey, credentials } = signingKey();
+    const { request } = await keysFor(credentials).registerByName({ ...options(setterOwner(publicKey)), attestationObject: new Uint8Array([1, 2]) });
+    expect(request.attestationObject).toBe('0x0102');
+  });
+
+  it('stops after one touch when the key is not the published one', async () => {
+    const { credentials } = signingKey();
+    const other = setterOwner(fromHex(`0x04${'11'.repeat(64)}`));
+    expect(await codeOf(keysFor(credentials).registerByName(options(other)))).toBe('wrong_key');
+    expect(credentials.get).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -285,7 +336,7 @@ describe('releaseShare', () => {
   it('makes exactly one get, with the message as challenge and the PRF eval, and opens the share', async () => {
     const credentials = authenticator();
     const keys = keysFor(credentials);
-    const sealed = await sealTo(await keys.getPublicKey(credentialId), new Uint8Array([4, 5, 6]));
+    const sealed = await sealTo(await keys.getPublicKey(credentialId, examId), new Uint8Array([4, 5, 6]));
     credentials.get.mockClear();
 
     const message = new Uint8Array(32).fill(5);
@@ -296,7 +347,7 @@ describe('releaseShare', () => {
       { publicKey: PublicKeyCredentialRequestOptions },
     ];
     expect(request.publicKey.challenge).toEqual(message);
-    expect(request.publicKey.extensions?.prf?.eval?.first).toEqual(utf8ToBytes(webauthn.prfSalt));
+    expect(request.publicKey.extensions?.prf?.eval?.first).toEqual(prfInput(examId));
     expect(released.share).toEqual(new Uint8Array([4, 5, 6]));
     expect(released.signature.signature).toHaveLength(70);
   });

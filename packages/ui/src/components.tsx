@@ -137,6 +137,8 @@ export function Field(props: {
   hint?: string;
   error?: string | undefined;
   value: string;
+  /** The id of a `datalist` to suggest from. */
+  list?: string;
   onChange: (value: string) => void;
 }) {
   return (
@@ -145,6 +147,7 @@ export function Field(props: {
       <input
         className="ps-input"
         value={props.value}
+        {...(props.list ? { list: props.list } : {})}
         spellCheck={false}
         autoComplete="off"
         aria-invalid={props.error ? true : undefined}

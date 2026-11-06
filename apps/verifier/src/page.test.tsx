@@ -835,6 +835,8 @@ describe('party names', () => {
     expect(await within(step).findByText(/It does not show that the centre is independent/)).toBeTruthy();
     expect(within(rowFor(step, 'north.centres.maths-board.eth')).getByText('Label only')).toBeTruthy();
     expect(within(rowFor(step, 'north.centres.maths-board.eth')).queryByText('Not confirmed')).toBeNull();
+    expect(within(step).getByText(/Whoever controls centres\.maths-board\.eth vouches for the names under it/)).toBeTruthy();
+    expect(within(step).getByText(/, and whoever controls centres\.maths-board\.eth vouches for it/)).toBeTruthy();
   });
 
   it('keeps the evidence folded, and says Sepolia names prove nothing', async () => {

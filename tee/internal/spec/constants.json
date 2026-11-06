@@ -71,6 +71,7 @@
     "attestationNonce": "paperseal/v1/attestation-nonce",
     "instanceKey": "paperseal/v1/instance-key",
     "setterOwner": "paperseal/v1/setter-owner",
+    "prfInput": "paperseal/v1/prf-input",
     "registration": "paperseal/v1/registration",
     "criteria": "paperseal/v1/criteria",
     "approvedList": "paperseal/v1/approved-list",

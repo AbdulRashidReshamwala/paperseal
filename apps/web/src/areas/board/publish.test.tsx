@@ -444,7 +444,7 @@ describe('step 2, review and publish', () => {
     expect(screen.getByText('Topic: Mechanics')).toBeTruthy();
     fireEvent.click(publish);
 
-    expect(await screen.findByRole('heading', { name: 'Invite people' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Choose who takes part' })).toBeTruthy();
     expect(screen.queryByText('The exam is published')).toBeNull();
     expect(screen.getByText('Published')).toBeTruthy();
     expect(node.sent).toHaveLength(1);
@@ -468,7 +468,7 @@ describe('step 2, review and publish', () => {
     } as typeof node.provider;
     const publish = await toReview({ ...env, getProvider: () => provider });
     fireEvent.click(publish);
-    await screen.findByRole('heading', { name: 'Invite people' });
+    await screen.findByRole('heading', { name: 'Choose who takes part' });
     expect(shared).toBe(true);
   });
 

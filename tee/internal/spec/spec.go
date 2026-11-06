@@ -101,6 +101,7 @@ type Constants struct {
 		AttestationNonce   string `json:"attestationNonce"`
 		InstanceKey        string `json:"instanceKey"`
 		SetterOwner        string `json:"setterOwner"`
+		PRFInput           string `json:"prfInput"`
 		Registration       string `json:"registration"`
 		Criteria           string `json:"criteria"`
 		ApprovedList       string `json:"approvedList"`

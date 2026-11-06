@@ -1,9 +1,12 @@
 import {
+  credentialRecordValue,
   ens,
   ensNameProblem,
   examIdFromName,
   examNameProblem,
   looksLikeEnsName,
+  parseDirectory,
+  passkeyRecordMatches,
   passkeyRecordValue,
   splitExamEnsName,
   type Hex,
@@ -363,70 +366,69 @@ export async function checkPasskeyName(
   }
   const value = found?.trim() ?? '';
   if (value === '') return result('missing', `${name} has no ${key} record yet.`, null);
-  if (value.toLowerCase() === expected) return result('confirmed', `The ${key} record of ${name} matches this key.`, value);
+  if (passkeyRecordMatches(value, expected)) return result('confirmed', `The ${key} record of ${name} matches this key.`, value);
   return result('mismatch', `The ${key} record of ${name} is ${value}, not ${expected}.`, value);
 }
 
-/** What reading a party's name itself found: `found` has the name's `addr` record, `unset` has none. Other states are as for `PasskeyNameState`. */
-export type PartyNameLookup =
-  | { state: 'found'; name: string; address: Address }
-  | { state: 'unset' | 'refused' | 'unreadable' | 'invalid'; name: string; reason: string };
+/**
+ * What a party's name publishes. `found`: both records are set, so a browser can find the key and a
+ * board can check it. `missing`: the directory owner has not finished it. Other states are as for
+ * `PasskeyNameState`, and `refused` covers a credential record that isn't hex.
+ */
+export type PartyRecords =
+  | { state: 'found'; name: string; passkey: Hex; credentialId: Hex }
+  | { state: 'missing' | 'refused' | 'unreadable' | 'invalid'; name: string; reason: string };
 
-/** Whether a name a board typed resolves at all, on chain and with the viewer's own RPC. Never throws for a chain or RPC failure. */
-export async function lookupPartyName(name: string, options: EnsOptions & { lookup?: EnsLookup }): Promise<PartyNameLookup> {
+/** A failed read in words, on chain only. Never throws for a chain or RPC failure. */
+function failedRead(name: string, what: string, error: unknown): { state: 'refused' | 'unreadable'; name: string; reason: string } {
+  const failure = readFailure(error);
+  if (failure === 'unreadable') return { state: 'unreadable', name, reason: `The RPC failed before ${what} could be read: ${messageOf(error)}` };
+  return {
+    state: 'refused',
+    name,
+    reason:
+      failure === 'offchain'
+        ? `${what} needs an offchain gateway, and this reader reads ENS on chain only.`
+        : `${what} could not be read on chain: ${messageOf(error)}`,
+  };
+}
+
+/** Reads a party's `ens.records.passkey` and `ens.records.credential` records, on chain and with the viewer's own RPC. */
+export async function readPartyRecords(name: string, options: EnsOptions & { lookup?: EnsLookup }): Promise<PartyRecords> {
   const problem = looksLikeEnsName(name) ? ensNameProblem(name) : 'The name is not written like an ENS name.';
   if (problem) return { state: 'invalid', name, reason: problem };
   const lookup = options.lookup ?? createEnsLookup(options);
   try {
-    const address = await lookup.address(name);
-    return address
-      ? { state: 'found', name, address }
-      : { state: 'unset', name, reason: `${name} has no address record yet.` };
+    const [passkey, credential] = await Promise.all([lookup.text(name, ens.records.passkey), lookup.text(name, ens.records.credential)]);
+    const value = passkey?.trim().toLowerCase() ?? '';
+    if (value === '' || !credential?.trim()) {
+      return { state: 'missing', name, reason: `${name} has no security key published yet.` };
+    }
+    const credentialId = credentialRecordValue(credential);
+    if (!credentialId) return { state: 'refused', name, reason: `The ${ens.records.credential} record of ${name} is not a credential ID.` };
+    return { state: 'found', name, passkey: value as Hex, credentialId };
   } catch (error) {
-    const failure = readFailure(error);
-    if (failure === 'unreadable') return { state: 'unreadable', name, reason: `The RPC failed before ${name} could be read: ${messageOf(error)}` };
-    return {
-      state: 'refused',
-      name,
-      reason:
-        failure === 'offchain'
-          ? `${name} needs an offchain gateway, and this reader reads ENS on chain only.`
-          : `${name} could not be read on chain: ${messageOf(error)}`,
-    };
+    return failedRead(name, `The records of ${name}`, error);
   }
 }
 
-/**
- * Whether a name exists on the chain. `exists`: it has an address record or a `ens.records.passkey` record.
- * `missing`: it has neither, so nobody has set the name up. Other states are as for `PartyNameLookup`.
- */
-export type PartyNameExists =
-  | { state: 'exists'; name: string }
-  | { state: 'missing' | 'refused' | 'unreadable' | 'invalid'; name: string; reason: string };
+/** What a directory holds. `none`: its record is not set. `malformed`: it is set, but isn't a list of names. */
+export type Directory =
+  | { state: 'found'; name: string; names: string[] }
+  | { state: 'none' | 'malformed' | 'refused' | 'unreadable' | 'invalid'; name: string; reason: string };
 
-/**
- * Reads whether a name a board typed exists, on chain and with the viewer's own RPC. A neutral key holder may
- * have set only the passkey record, so that counts too. Never throws for a chain or RPC failure.
- */
-export async function checkPartyNameExists(name: string, options: EnsOptions & { lookup?: EnsLookup }): Promise<PartyNameExists> {
+/** Reads the `ens.records.directory` record of a parent name with one text lookup. The list is a menu: each name is verified on its own. */
+export async function readDirectory(name: string, options: EnsOptions & { lookup?: EnsLookup }): Promise<Directory> {
+  const problem = looksLikeEnsName(name) ? ensNameProblem(name) : 'The directory name is not written like an ENS name.';
+  if (problem) return { state: 'invalid', name, reason: problem };
   const lookup = options.lookup ?? createEnsLookup(options);
-  const found = await lookupPartyName(name, { ...options, lookup });
-  if (found.state === 'found') return { state: 'exists', name };
-  if (found.state !== 'unset') return { state: found.state, name, reason: found.reason };
+  let text: string | null;
   try {
-    const record = (await lookup.text(name, ens.records.passkey))?.trim() ?? '';
-    return record === ''
-      ? { state: 'missing', name, reason: `${name} has no address and no ${ens.records.passkey} record.` }
-      : { state: 'exists', name };
+    text = await lookup.text(name, ens.records.directory);
   } catch (error) {
-    const failure = readFailure(error);
-    return {
-      state: failure === 'unreadable' ? 'unreadable' : 'refused',
-      name,
-      reason:
-        failure === 'unreadable'
-          ? `The RPC failed before ${name} could be read: ${messageOf(error)}`
-          : `${name} could not be read on chain: ${messageOf(error)}`,
-    };
+    return failedRead(name, `The directory of ${name}`, error);
   }
+  if (!text?.trim()) return { state: 'none', name, reason: `${name} has no ${ens.records.directory} record yet.` };
+  const parsed = parseDirectory(text);
+  return parsed.ok ? { state: 'found', name, names: parsed.names } : { state: 'malformed', name, reason: parsed.reason };
 }

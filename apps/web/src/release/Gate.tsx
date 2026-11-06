@@ -1,7 +1,8 @@
 import { Stage } from '@paperseal/ui';
 import type { ReactNode } from 'react';
 
-import { Register, type RegisterRole } from '../shared/Register';
+import type { RegisterRole } from '../shared/Register';
+import { RegisterByName } from '../shared/RegisterByName';
 import type { GateStage, HolderProgress, ProgressActions } from './progress';
 
 /** The exact words a technical person needs, folded away from people under pressure. */
@@ -29,7 +30,7 @@ export function Gate(props: { stage: GateStage; role: RegisterRole; progress: Ho
         </Stage>
       );
     case 'register':
-      return <Register role={props.role} onRegistered={actions.registered} />;
+      return <RegisterByName onRegistered={actions.registered} />;
     case 'ended':
       return (
         <Stage
@@ -63,7 +64,7 @@ export function Gate(props: { stage: GateStage; role: RegisterRole; progress: Ho
         <Stage
           title="You are registered. Nothing to do yet."
           lede="Your exam board is still finishing the list of people for this exam."
-          next="This page moves on by itself once the list is ready. To use a different security key, ask your exam board for a new invitation link."
+          next="This page moves on by itself once the list is ready."
         />
       );
     case 'not-on-list':

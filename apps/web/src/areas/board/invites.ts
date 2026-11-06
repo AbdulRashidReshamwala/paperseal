@@ -1,34 +1,19 @@
-import {
-  checkInvite,
-  encodeInviteLink,
-  InviteError,
-  newInviteSecret,
-  ownerProblem,
-  partyNameProblem,
-  roles,
-  type Hex,
-  type Invite,
-  type InviteRole,
-} from '@paperseal/protocol';
+import { checkInvite, encodeInviteLink, InviteError, newInviteSecret, type Hex, type Invite, type InviteRole } from '@paperseal/protocol';
 
 /*
- * The board's invites, from "Invites" in spec/api.md. Each is one person's link: a random secret,
- * a role and, for key holders and centres, the ENS name that goes on the public list. They are kept in
- * this browser only, per exam, so the board's app can recompute every `inviteTag` and match it with
- * what the TEE lists. Neither the secrets nor setters' labels are sent anywhere or published.
+ * The board's invites, from "Invites" in spec/api.md. Only setters are invited. Each is one person's
+ * link: a random secret and a role. They are kept in this browser only, per exam, so the board's app
+ * can recompute every `inviteTag` and match it with what the TEE lists. Neither the secrets nor
+ * setters' labels are sent anywhere or published.
  */
 
 export interface BoardInvite {
   /** Stable across a reissue. Only used to tell invites apart here. */
   id: string;
   role: InviteRole;
-  /** The name on the approved list. Absent for a setter. */
-  owner?: string;
-  /** What the board calls this invite. For a setter it is the board's own note, never published. */
+  /** The board's own note for this invite, never published. */
   label: string;
   inviteSecret: Hex;
-  /** A key holder with an ENS name whose record is not confirmed, put on the list anyway by the board's choice. */
-  goAhead?: boolean;
 }
 
 const storageKey = (examId: Hex) => `paperseal.invites.${examId.toLowerCase()}`;
@@ -47,23 +32,14 @@ export function validInvites(examId: Hex, parsed: unknown): BoardInvite[] {
   return parsed.flatMap((item: unknown) => {
     const value = item as Partial<BoardInvite> | null;
     if (!value || typeof value.id !== 'string' || typeof value.label !== 'string') return [];
-    const invite = { examId, role: value.role as InviteRole, inviteSecret: value.inviteSecret as Hex, ...(value.owner === undefined ? {} : { owner: value.owner }) };
+    const invite = { examId, role: value.role as InviteRole, inviteSecret: value.inviteSecret as Hex };
     try {
       checkInvite(invite);
     } catch (error) {
       if (error instanceof InviteError) return [];
       throw error;
     }
-    return [
-      {
-        id: value.id,
-        role: invite.role,
-        label: value.label,
-        inviteSecret: invite.inviteSecret,
-        ...(invite.owner === undefined ? {} : { owner: invite.owner }),
-        ...(value.goAhead === true && invite.role === 'keyholder' ? { goAhead: true } : {}),
-      },
-    ];
+    return [{ id: value.id, role: invite.role, label: value.label, inviteSecret: invite.inviteSecret }];
   });
 }
 
@@ -85,34 +61,15 @@ export function saveInvites(examId: Hex, invites: readonly BoardInvite[]): void 
   }
 }
 
-export const inviteRoleNames: Record<InviteRole, string> = {
-  setter: 'Setter',
-  keyholder: 'Key holder',
-  centre: 'Centre',
-};
-
-/**
- * A new invite, or the reason it can't be made. Key holders and centres need a normalised ENS name
- * that isn't already invited (spec/api.md, "Party Names"): there are no plain names. Whether the name
- * exists on the chain is asked separately, because it needs a read. A setter's text is only the
- * board's own note, and may be empty.
- */
-export function createInvite(
-  existing: readonly BoardInvite[],
-  role: InviteRole,
-  text: string,
-): { ok: true; invite: BoardInvite } | { ok: false; reason: string } {
-  const name = text.trim();
-  const id = newInviteSecret().slice(2, 18);
-  if (role === 'setter') {
-    const label = name === '' ? `Setter ${String(existing.filter((invite) => invite.role === 'setter').length + 1)}` : name;
-    return { ok: true, invite: { id, role, label, inviteSecret: newInviteSecret() } };
-  }
-  if (name === '') return { ok: false, reason: 'Enter an ENS name, like iit-delhi.eth.' };
-  const problem = ownerProblem(name) ?? partyNameProblem(name);
-  if (problem) return { ok: false, reason: problem };
-  if (existing.some((invite) => invite.owner === name)) return { ok: false, reason: `${name} already has an invite.` };
-  return { ok: true, invite: { id, role, owner: name, label: name, inviteSecret: newInviteSecret() } };
+/** A new setter invite. The text is only the board's own note, and may be empty. */
+export function createInvite(existing: readonly BoardInvite[], text: string): BoardInvite {
+  const note = text.trim();
+  return {
+    id: newInviteSecret().slice(2, 18),
+    role: 'setter',
+    label: note === '' ? `Setter ${String(existing.length + 1)}` : note,
+    inviteSecret: newInviteSecret(),
+  };
 }
 
 const BACKUP_KIND = 'paperseal-invites';
@@ -144,29 +101,15 @@ export function parseBackup(text: string, examId: Hex): { ok: true; invites: Boa
 /** Adds the backup's invites to what is here. An invite already here, by id, stays as it is. */
 export function mergeInvites(existing: readonly BoardInvite[], restored: readonly BoardInvite[]): BoardInvite[] {
   const ids = new Set(existing.map((invite) => invite.id));
-  const owners = new Set(existing.flatMap((invite) => (invite.owner === undefined ? [] : [invite.owner])));
   const secrets = new Set(existing.map((invite) => invite.inviteSecret));
-  const added = restored.filter(
-    (invite) => !ids.has(invite.id) && !secrets.has(invite.inviteSecret) && (invite.owner === undefined || !owners.has(invite.owner)),
-  );
-  return [...existing, ...added];
+  return [...existing, ...restored.filter((invite) => !ids.has(invite.id) && !secrets.has(invite.inviteSecret))];
 }
 
 /** The same invite with a new secret, so the old link and any key registered with it stop counting. */
 export function reissueInvite(invite: BoardInvite): BoardInvite {
-  const { goAhead: _goAhead, ...rest } = invite;
-  return { ...rest, inviteSecret: newInviteSecret() };
+  return { ...invite, inviteSecret: newInviteSecret() };
 }
 
 export function linkFor(base: string, examId: Hex, invite: BoardInvite): string {
-  const full: Invite = {
-    examId,
-    role: invite.role,
-    ...(invite.owner === undefined ? {} : { owner: invite.owner }),
-    inviteSecret: invite.inviteSecret,
-  };
-  return encodeInviteLink(base, full);
+  return encodeInviteLink(base, { examId, role: invite.role, inviteSecret: invite.inviteSecret } satisfies Invite);
 }
-
-/** The roles a centre can be given. Key holders and setters have exactly one, set by the invite. */
-export const centreRoles: readonly number[] = [roles.centreKeyHolder, roles.centre];

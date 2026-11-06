@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { examRegistryAbi } from '@paperseal/chain';
 import {
   checkApprovedList,
-  encodeInviteLink,
+  ens,
   chain,
   checkSchedule,
   decodeCriteria,
@@ -14,6 +14,8 @@ import {
   fromHex,
   inviteTag,
   newInviteSecret,
+  noInviteTag,
+  passkeyRecordValue,
   ApprovedListError,
   ScheduleError,
   schedule as specSchedule,
@@ -30,11 +32,12 @@ import {
   type Question,
   type TaggedRegistration,
 } from '@paperseal/protocol';
-import { decodeFunctionData, getAbiItem, toFunctionSelector, type AbiFunction } from 'viem';
+import { decodeFunctionData, getAbiItem, parseAbi, toFunctionSelector, type AbiFunction } from 'viem';
 
 import { calldata, castSendArgs } from './cast';
 import { deployed, gapsFor, rpcHost } from './config';
-import { composeFromInvites, issueInvites, linkBase, openLink, type IssuedInvite } from './invites';
+import { composeList, issueInvites, openLink, type ChosenName, type IssuedInvite } from './invites';
+import { nameRecordCalls } from './names';
 import { parseReleaseBody } from './github';
 import { ownerNameOf, partyParent, releaseOrder, roster } from './roster';
 import { computeSchedule, examName, liveCriteria, plan, liveQuestion, questionsPerSetterPerTopic, questionText, runTeeArgs } from './schedule';
@@ -165,31 +168,40 @@ export async function dryCheck(): Promise<void> {
     out.fill(n, 1);
     return out;
   };
-  const registrationFor = (invite: IssuedInvite, index: number, secret: Hex = invite.inviteSecret, owner?: string): TaggedRegistration => {
+  const setterRoster = roster.filter((entry) => entry.kind === 'setter');
+  const partyRoster = roster.filter((entry) => entry.kind !== 'setter');
+  const setterRegistration = (invite: IssuedInvite, index: number, secret: Hex = invite.inviteSecret): TaggedRegistration => {
     const passkey = point(index + 1);
-    return {
-      owner: owner ?? (invite.role === 'setter' ? setterOwner(passkey) : (invite.owner as string)),
-      passkeyPublicKey: toHex(passkey),
-      derivedPublicKey: invite.role === 'setter' ? '0x' : toHex(point(100 + index)),
-      inviteTag: toHex(inviteTag(fromHex(secret), passkey)),
-    };
+    return { owner: setterOwner(passkey), passkeyPublicKey: toHex(passkey), derivedPublicKey: '0x', inviteTag: toHex(inviteTag(fromHex(secret), passkey)) };
   };
-  const issued = issueInvites(built.examId, roster);
-  const registered = issued.map((invite, i) => registrationFor(invite, i));
+  const partyRegistration = (entry: (typeof roster)[number], index: number): TaggedRegistration => ({
+    owner: ownerNameOf(entry) as string,
+    passkeyPublicKey: toHex(point(index + 20)),
+    derivedPublicKey: toHex(point(index + 120)),
+    inviteTag: toHex(noInviteTag),
+  });
+  const issued = issueInvites(built.examId, setterRoster);
+  const parties = partyRoster.map(partyRegistration);
+  const names: ChosenName[] = partyRoster.map((entry, i) => ({ entry, record: passkeyRecordValue((parties[i] as TaggedRegistration).passkeyPublicKey) }));
+  const registered = [...issued.map((invite, i) => setterRegistration(invite, i)), ...parties];
 
-  await check('invites: one random 32-byte secret per participant, and each link keeps its role, owner and secret in the URL fragment only', () => {
-    expect(issued.length === roster.length, 'one invite per participant');
-    expect(new Set(issued.map((i) => i.inviteSecret)).size === roster.length, 'secrets repeat');
+  await check('invites: one random 32-byte secret per setter, and each link keeps its role and secret in the URL fragment only', () => {
+    expect(issued.length === setterRoster.length, 'one invite per setter');
+    expect(new Set(issued.map((i) => i.inviteSecret)).size === issued.length, 'secrets repeat');
     expect(issued.every((i) => /^0x[0-9a-f]{64}$/.test(i.inviteSecret)), 'secret shape');
     for (const invite of issued) {
       const url = new URL(invite.link);
       expect(url.search === '' && url.pathname === '/', `${invite.name}: something is outside the fragment`);
       expect(url.hash.includes(invite.inviteSecret) && url.hash.includes(built.examId), `${invite.name}: the fragment lacks the secret or exam`);
       const opened = openLink(invite.link);
-      expect(opened.role === invite.role && opened.owner === invite.owner && opened.inviteSecret === invite.inviteSecret, `${invite.name}: the link reads back differently`);
-      if (invite.role === 'setter') expect(opened.owner === undefined && !url.hash.includes('owner') && !url.hash.includes(invite.name), `${invite.name}: a setter invite carries a name`);
+      expect(opened.role === 'setter' && opened.inviteSecret === invite.inviteSecret, `${invite.name}: the link reads back differently`);
+      expect(!url.hash.includes('owner') && !url.hash.includes(invite.name), `${invite.name}: a setter invite carries a name`);
     }
-    for (const bad of [`${issued[0]?.link ?? ''}&x=1`, (issued[0]?.link ?? '').replace('secret=0x', 'secret=0X'), (issued[3]?.link ?? '').replace(/&owner=[^&]*/, '')]) {
+    for (const bad of [
+      `${issued[0]?.link ?? ''}&extra=1`,
+      (issued[0]?.link ?? '').replace(/secret=0x[0-9a-f]+/, (match) => match.toUpperCase()),
+      (issued[0]?.link ?? '').replace('role=setter', 'role=keyholder'),
+    ]) {
       let refused = false;
       try {
         openLink(bad);
@@ -198,70 +210,77 @@ export async function dryCheck(): Promise<void> {
       }
       expect(refused, 'a damaged link was accepted');
     }
-    return `${String(issued.length)} links; a link with an extra part, an uppercase secret or a missing owner is refused`;
+    return `${String(issued.length)} links; a link with an extra part, an uppercase secret or another role is refused`;
   });
 
-  await check('invites: a key holder or centre can be invited by ENS name only, so a plain name is refused in the link and in the list', () => {
-    expect(issued.filter((i) => i.role !== 'setter').every((i) => i.owner?.endsWith(`.${partyParent}`)), 'a key holder or centre is not named under the demo parent');
-    for (const owner of ['neutral-1', 'Centre 1', 'Neutral-1.Paperseal-Demo.eth']) {
-      let refused = false;
-      try {
-        encodeInviteLink(linkBase, { ...(issued[2] as IssuedInvite), owner });
-      } catch {
-        refused = true;
-      }
-      expect(refused, `a plain owner ${owner} was accepted in a link`);
-    }
-    let listRefused = false;
-    try {
-      composeFromInvites(
-        issued.map((i) => (i.name === 'neutral-1' ? { ...i, owner: 'neutral-1' } : i)),
-        registered.map((r, n) => (issued[n]?.name === 'neutral-1' ? { ...r, owner: 'neutral-1' } : r)),
-      );
-    } catch {
-      listRefused = true;
-    }
-    expect(listRefused, 'a list with a plain owner was composed');
-    return 'neutral-1, Centre 1 and an unnormalised name are refused in a link, and a list with a plain owner is not composed';
-  });
-
-  await check('compose from invites: every participant matches its own invite, and the entries pass checkApprovedList with the roster roles', () => {
-    const composed = composeFromInvites(issued, registered);
-    expect(composed.entries.length === roster.length && composed.matching.unmatched.length === 0, 'entries or unmatched');
+  await check('compose: every setter matches its invite, every party its record, and the entries pass checkApprovedList with the roster roles', () => {
+    const composed = composeList(issued, names, registered);
+    expect(composed.entries.length === roster.length && composed.strays.length === 0, 'entries or strays');
     expect(composed.matching.rows.every((r) => r.state.kind === 'matched'), 'an invite is not matched');
-    for (const [i, r] of roster.entries()) {
-      const entry = composed.entries.find((e) => toHex(e.passkeyPublicKey) === registered[i]?.passkeyPublicKey);
+    for (const r of roster) {
+      const entry = composed.entries.find((e) => (r.kind === 'setter' ? e.role === 1 : e.owner === ownerNameOf(r)));
       expect(entry?.role === r.role, `${r.name} has role ${String(entry?.role)}, expected ${String(r.role)}`);
     }
-    return '13 matched; 3 neutrals, 7 centre key holders, 1 centre without a share and 2 setters';
+    return '13 entries: 3 neutrals, 7 centre key holders, 1 centre without a share and 2 setters';
   });
 
-  await check('compose from invites: a name without its secret, a copied tag, another name and a doubled invite are all kept off the list', () => {
-    const neutral = issued.findIndex((i) => i.role === 'keyholder');
-    const base = issued[neutral] as IssuedInvite;
-    const intruder = { ...registrationFor(base, 50, newInviteSecret()) }; // knows the name, not the secret
-    const copied = { ...registrationFor(base, 51), inviteTag: registered[neutral]?.inviteTag as Hex }; // another passkey with a tag made for this one
-    const renamed = { ...registrationFor(base, 52), owner: 'someone-else' }; // the right secret under another name
-    const wrongKind = { ...registrationFor(base, 53), derivedPublicKey: '0x' as Hex }; // a setter-shaped key on a holder invite
-    for (const [what, extra] of [['name only', intruder], ['copied tag', copied], ['renamed', renamed], ['wrong key kind', wrongKind]] as const) {
-      const composed = composeFromInvites(issued, [...registered, extra]);
-      expect(composed.matching.unmatched.length === 1 && composed.matching.unmatched[0]?.passkeyPublicKey === extra.passkeyPublicKey, `${what}: not unmatched`);
-      expect(composed.entries.length === roster.length && !composed.entries.some((e) => toHex(e.passkeyPublicKey) === extra.passkeyPublicKey), `${what}: reached the list`);
-      expect(composed.matching.rows[neutral]?.state.kind === 'matched', `${what}: the real registration lost its place`);
-    }
-    // Two passkeys on one invite: neither is listed, so the list is short and cannot be composed, until the invite is reissued.
-    const twin = registrationFor(base, 54);
+  await check('compose: a key that is not on the record, a tag on a name and a plain name are kept off the list', () => {
+    expect(names.every((n) => ownerNameOf(n.entry)?.endsWith(`.${partyParent}`)), 'a party is not named under the demo parent');
+    const victim = parties[0] as TaggedRegistration;
+    const stranger = { ...victim, passkeyPublicKey: toHex(point(200)), derivedPublicKey: toHex(point(201)) };
+    const composed = composeList(issued, names, [...registered, stranger]);
+    expect(composed.strays.length === 1 && composed.strays[0]?.passkeyPublicKey === stranger.passkeyPublicKey, 'a stranger under a name is not left out');
+    const refuses = (run: () => unknown): boolean => {
+      try {
+        run();
+        return false;
+      } catch {
+        return true;
+      }
+    };
+    const noRecord = names.map((n, i) => (i === 0 ? { ...n, record: passkeyRecordValue(point(202)) } : n));
+    expect(refuses(() => composeList(issued, noRecord, registered)), 'a name whose record names another key was listed');
+    const tagged = registered.map((r) => (r === victim ? { ...r, inviteTag: `0x${'77'.repeat(32)}` as Hex } : r));
+    expect(refuses(() => composeList(issued, names, tagged)), 'a tagged registration matched a name');
+    const plainRoster = names.map((n, i) => (i === 0 ? { ...n, entry: { ...n.entry, kind: 'setter' as const } } : n));
+    expect(refuses(() => composeList(issued, plainRoster, registered)), 'a party with no name was listed');
+    return 'each is left out or refused, and the real registration keeps its place';
+  });
+
+  await check('compose: a doubled setter invite is listed for neither key, until the invite is reissued', () => {
+    const base = issued[0] as IssuedInvite;
+    const twin = { ...setterRegistration(base, 40) };
     let refused = false;
     try {
-      composeFromInvites(issued, [...registered, twin]);
+      composeList(issued, names, [...registered, twin]);
     } catch (error) {
       refused = error instanceof ApprovedListError;
     }
-    expect(refused, 'a doubled invite was listed, or failed with the wrong error');
-    const reissued = issued.map((i, k) => (k === neutral ? { ...i, inviteSecret: newInviteSecret() } : i));
+    // Setters have no required count, so a doubled invite shortens the list instead of failing it.
+    const doubled = matchInvites(issued, [...registered, twin]);
+    expect(doubled.rows[0]?.state.kind === 'conflict' || refused, 'a doubled invite was matched');
+    const reissued = issued.map((i, k) => (k === 0 ? { ...i, inviteSecret: newInviteSecret() } : i));
     const after = matchInvites(reissued, [...registered, twin]);
-    expect(after.rows[neutral]?.state.kind === 'waiting' && after.unmatched.length === 2, 'a reissued invite still matches an old key');
-    return 'each is unmatched or refused, and a reissued invite matches neither old key';
+    expect(after.rows[0]?.state.kind === 'waiting', 'a reissued invite still matches an old key');
+    return 'neither is listed, and a reissued invite matches neither old key';
+  });
+
+  await check('directory: the record commands are setAddress and setText on the parent resolver, with encoded names', () => {
+    const cards = parties.slice(0, 2).map((party, i) => ({
+      name: party.owner,
+      card: { passkey: passkeyRecordValue(party.passkeyPublicKey), credentialId: `0x0${String(i)}ab` as Hex },
+    }));
+    const calls = nameRecordCalls(cards);
+    expect(calls.length === 7, 'three calls per name, and one for the directory');
+    const abi = parseAbi(['function setAddress(bytes name, uint256 coinType, bytes value)', 'function setText(bytes name, string key, string value)']);
+    const decoded = calls.map(({ data }) => decodeFunctionData({ abi, data }));
+    expect(decoded.filter((d) => d.functionName === 'setAddress').length === 2, 'two address records');
+    const texts = decoded.flatMap((d) => (d.functionName === 'setText' ? [d.args[1]] : []));
+    expect(texts.filter((key) => key === ens.records.passkey).length === 2 && texts.filter((key) => key === ens.records.credential).length === 2, 'the text keys differ from spec/ens.json');
+    expect(texts.at(-1) === ens.records.directory, 'the directory comes last');
+    const last = decoded.at(-1);
+    expect(last?.functionName === 'setText' && JSON.parse(last.args[2]).length === 2, 'the directory does not list the two names');
+    return `${String(calls.length)} calls for 2 names and the directory`;
   });
 
   await check('the live questions include multiple choice, and every one passes the paper format', () => {
