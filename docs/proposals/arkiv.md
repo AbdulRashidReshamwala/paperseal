@@ -1,6 +1,6 @@
 # Proposal: Arkiv Evidence Mirror
 
-**Status:** proposed, 2026-11-06. Nothing here is implemented. If accepted, the behaviour moves to the [README](../../README.md) and the shared rules to `spec/`.
+**Status:** parts 1 and 3 (in part) are implemented: the live unlock feed, with the Unlock token mirrored so a mirrored log can be checked on its own. The behaviour is in the [README](../../README.md#arkiv-copy), the rules are in [`spec/arkiv.md`](../../spec/arkiv.md), the relay is in [`relay/`](../../relay), and the prize answers are in [`arkiv/`](../../arkiv). Part 2, the exam index, and the Swarm backup are still proposed, 2026-11-06.
 
 ## Summary
 

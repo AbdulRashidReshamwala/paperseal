@@ -14,6 +14,8 @@ How the design in the [README](../README.md) maps onto this repository. The READ
 | `packages/keys` | TypeScript | The key interface over WebAuthn PRF |
 | `packages/attestation` | TypeScript | Confidential Space token checks |
 | `packages/chain` | TypeScript | `ExamRegistry` reads and writes through viem, and the on-chain ENS name check (`resolveExamName`) |
+| `packages/arkiv` | TypeScript | The Arkiv mirror's schemas, a reader that returns only published writers' rows, and a writer that skips rows it already wrote (`spec/arkiv.md`) |
+| `relay/` | TypeScript | CLI that mirrors an exam's signed release log and Unlock token from the TEE or storage to Arkiv |
 | `packages/tee-client` | TypeScript | Typed client for the TEE HTTP API |
 | `packages/ui` | React | Shared components, tokens and the Chromium gate |
 | `apps/web` | React | The board-hosted app, with a route area per signed-in role |
@@ -40,7 +42,8 @@ The README names separate setter and centre apps. One app is simpler to host and
 - `packages/crypto` holds no key state. `packages/keys` is the only code that touches WebAuthn.
 - Shamir splitting and rebuilding exist only in `tee/`. No browser code handles `K_priv` shares beyond decrypting and forwarding its own.
 - The `ExamRegistry` ABI and runtime bytecode are generated from `contracts/` and copied into `packages/chain` by `make abi`. They are never edited by hand.
-- Only `packages/chain` reads ENS, and only the verifier uses it. `tee/` and `contracts/` never read ENS.
+- Only `packages/chain` reads ENS, and only the verifier uses it.
+- Only `packages/arkiv` talks to Arkiv. The relay writes, and the verifier reads and checks every row with the same checks it uses on storage. `tee/` and `contracts/` never touch Arkiv. `tee/` and `contracts/` never read ENS.
 
 ## Lifecycle Ownership
 

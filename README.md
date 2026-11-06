@@ -106,6 +106,18 @@ An exam's name is a plain ENS label such as `jee-main-2026`, and its exam ID is 
 
 The verifier page fails the name unless it points to a contract running exactly `ExamRegistry`'s code, whose board address has that parent as its primary name, verified both ways. Every read is on-chain, through the viewer's own RPC. It then runs every other check as usual. ENS only helps people find the real exam. The TEE and `ExamRegistry` never read it, and a name that points somewhere wrong makes the later checks fail, not pass. On Sepolia anyone can register a look-alike name, so the check only means something with a mainnet name. [ENS setup](docs/ens-setup.md) shows how to name an exam.
 
+### Arkiv Copy
+
+The board runs the TEE and the public storage, so it could stop either one during unlock. A relay copies the unlock evidence to [Arkiv](https://docs.arkiv.network) as it appears, so anyone can keep watching. It copies the TEE's signed release log, and Google's token for the machine that signed it. Rows can't be edited, they live for 180 days, and anyone can extend them. The verifier reads the rows from writers the viewer trusts, checks the token against the on-chain exam and the log under the key the token attests, and shows the largest verified progress from storage, the TEE or Arkiv. A row that doesn't verify never counts, and a copy that stops updating shows a warning. Questions, shares and anything not already public never go on Arkiv. The rules are in [`spec/arkiv.md`](spec/arkiv.md), and the relay is in [`relay/`](relay).
+
+The demo's writer is [`0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b`](https://rabdi.explorer.arkiv.network/address/0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b) on Arkiv's Rabdi testnet. This query lists every release log it has mirrored:
+
+```bash
+curl -s https://rpc.rabdi.db-chain.testnet.arkiv.network -H "content-type: application/json" --data '{"jsonrpc":"2.0","id":1,"method":"arkiv_query","params":["arkiv.schema = str('"'"'paperseal.v1.release-log'"'"') AND $creator = addr(0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b)",{"select":{"key":true,"attributes":true,"count":true}}]}'
+```
+
+The mirrored evidence comes from Paper Seal's own demo exams, and this repository is [MIT](LICENSE) licensed. The [`arkiv/`](arkiv) folder answers the Arkiv prize's questions.
+
 ### Question Submission
 
 Setters talk to the TEE directly, and the board's infrastructure only ever carries ciphertext.
@@ -274,6 +286,10 @@ The paper stays with approved centres from `T−Δ` until the end round. At that
 - A light client or ZK proof, so the TEE can verify chain data without trusting the RPC operator
 - World ID for setters
 - Native setter app signed with a developer key
+
+## How AI Was Used
+
+Parts of this repository, including the ENS name check and the Arkiv copy, were written with Claude Code, an AI coding agent. It worked from the specs in `spec/`, and people reviewed and ran each change, including the tests and the live runs on Sepolia and Arkiv.
 
 ## License
 
