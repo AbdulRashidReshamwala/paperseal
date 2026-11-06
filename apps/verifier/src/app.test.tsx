@@ -62,14 +62,14 @@ describe('the page', () => {
     'an old link to %s still reaches the one page, with no sign-in',
     (path) => {
       const html = render(path);
-      expect(html).toContain('Steps for this exam');
+      expect(html).toContain('Exam ID or name');
       expect(html).toContain('Check it yourself');
       expect(html).not.toMatch(/sign in/i);
     },
   );
 
   it('with no TEE URL shows no failure and only neutral TEE wording', () => {
-    const html = render('/', { ...defaultSettings, teeUrl: '' });
+    const html = render('/', { ...defaultSettings, teeUrl: '', examId: custom.examId });
     expect(html).toContain('Live from the machine, optional');
     expect(html).toContain('Add the live machine address');
     expect(html).not.toMatch(/\bFail\b|data-status="fail"|data-tone="bad"|role="alert"/);

@@ -523,18 +523,17 @@ describe('step 5, paper built and sealed', () => {
     const result = scene({ records: { token: { ...token, verdict: bad } } });
     expect(step(result, 'sealed').state).toBe('failed');
     expect(step(result, 'attested').state).toBe('failed');
-    expect(result.seal).toBe(null);
+    expect(result.seal).toBe('broken');
     expect(result.headline).toBe('The paper is published, but it failed its checks.');
   });
 
-  it('shows no seal and does not say sealed when an earlier step failed', () => {
+  it('breaks the seal and does not say sealed when an earlier step failed', () => {
     const token = fullRecords.token;
     if (token.kind !== 'ready') throw new Error('no token');
     const signature = { ok: false as const, error: new Error('not Google') } as typeof token.verdict.signature;
     const result = scene({ records: { token: { ...token, verdict: { ...token.verdict, verified: false, signature } } } });
     expect(step(result, 'attested').state).toBe('failed');
-    expect(result.seal).toBe(null);
-    expect(result.noSeal).toBe('Not confirmed yet');
+    expect(result.seal).toBe('broken');
     expect(result.headline).toBe('The paper is published, but it failed its checks.');
   });
 
