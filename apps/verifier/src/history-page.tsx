@@ -8,6 +8,7 @@ import { dayTime } from './custody';
 import {
   examStatus,
   findParticipant,
+  isAbandoned,
   loadExamHistory,
   roleWords,
   statusWords,
@@ -89,20 +90,17 @@ function copyWords(copies: HistoryExam['copies']): string {
 
 function ExamRow({ exam, status }: { exam: HistoryExam; status: ExamStatus }) {
   return (
-    <Row label={<ExamLink examId={exam.examId} name={exam.name} />} muted={status === 'never-ran'}>
+    <Row label={<ExamLink examId={exam.examId} name={exam.name} />}>
       <Badge tone={statusTones[status]}>{statusWords[status]}</Badge>
-      <span>
-        {status === 'never-ran' ? 'Was due' : 'Starts'} {dayTime(Number(exam.examStart))}
-      </span>
+      <span>Starts {dayTime(Number(exam.examStart))}</span>
       {exam.people === null ? null : <span>{plural(exam.people, 'person', 'people')}</span>}
       <span>{copyWords(exam.copies)}</span>
-      {status === 'never-ran' ? <span className="vf-aside">No paper was built before its start.</span> : null}
       {exam.behind ? <span className="vf-aside">The Arkiv copy is behind.</span> : null}
     </Row>
   );
 }
 
-const statusOrder: readonly ExamStatus[] = ['setup', 'questions', 'waiting', 'sealed', 'under-way', 'finished', 'never-ran'];
+const statusOrder: readonly ExamStatus[] = ['setup', 'questions', 'waiting', 'sealed', 'under-way', 'finished'];
 
 function ExamList({ history, onReload }: { history: Polled<ExamHistory>; onReload: () => void }) {
   const { drand } = useConnections();
@@ -120,16 +118,15 @@ function ExamList({ history, onReload }: { history: Polled<ExamHistory>; onReloa
       </>
     );
   }
-  const { exams, unread, ignored } = history.value;
+  // Exams that never ran are left out, and nothing here counts them. Their own pages still open.
+  const exams = history.value.exams.filter((exam) => examStatus(exam, latest.round, now) !== 'never-ran');
+  const { unread, ignored } = history.value;
   const rowsIgnored = ignored.notOnChain + ignored.differs + ignored.malformed;
   const wanted = search.trim().toLowerCase();
   const shown = exams
     .map((exam) => ({ exam, status: examStatus(exam, latest.round, now) }))
     .filter(({ exam, status }) => (filter === 'all' || status === filter) && (wanted === '' || exam.examId.includes(wanted) || (exam.name ?? '').toLowerCase().includes(wanted)));
-  // Exams that never ran stay in the list, folded away until someone looks for them.
-  const foldable = filter === 'all' && wanted === '';
-  const main = foldable ? shown.filter(({ status }) => status !== 'never-ran') : shown;
-  const neverRan = foldable ? shown.filter(({ status }) => status === 'never-ran') : [];
+  const main = shown;
   const present = statusOrder.filter((status) => exams.some((exam) => examStatus(exam, latest.round, now) === status));
   return (
     <>
@@ -156,7 +153,7 @@ function ExamList({ history, onReload }: { history: Polled<ExamHistory>; onReloa
               </select>
             </label>
           </div>
-          {main.length === 0 && neverRan.length === 0 ? <p className="ps-empty">No exam matches this.</p> : null}
+          {main.length === 0 ? <p className="ps-empty">No exam matches this.</p> : null}
           <Rows>
             {main.map(({ exam, status }) => (
               <ExamRow key={exam.examId} exam={exam} status={status} />
@@ -169,18 +166,6 @@ function ExamList({ history, onReload }: { history: Polled<ExamHistory>; onReloa
                 ))
               : null}
           </Rows>
-          {neverRan.length > 0 ? (
-            <details className="vf-connection vf-fold">
-              <summary>{plural(neverRan.length, 'exam never ran', 'exams never ran')}</summary>
-              <div className="vf-fold-body">
-                <Rows>
-                  {neverRan.map(({ exam, status }) => (
-                    <ExamRow key={exam.examId} exam={exam} status={status} />
-                  ))}
-                </Rows>
-              </div>
-            </details>
-          ) : null}
           <p className="vf-aside">Copies are as recorded here. Open an exam to see each one checked.</p>
         </>
       )}
@@ -217,10 +202,12 @@ function ExamList({ history, onReload }: { history: Polled<ExamHistory>; onReloa
 }
 
 function ParticipantResults({ search, names }: { search: Polled<ParticipantSearch>; names: ReadonlyMap<Hex, string> }) {
+  const now = useNow();
   if (search.state === 'off') return null;
   if (search.state === 'loading') return <p className="ps-empty">Looking for this name.</p>;
   if (search.state === 'error') return <Unread message={search.message}>The search could not be finished. Try again.</Unread>;
-  const { exams, unchecked, ignored } = search.value;
+  const { unchecked, ignored } = search.value;
+  const exams = search.value.exams.filter((exam) => !isAbandoned(exam, now));
   const notOnList = ignored.notOnList + ignored.malformed;
   return (
     <>
