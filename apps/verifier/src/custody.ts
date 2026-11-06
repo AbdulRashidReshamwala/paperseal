@@ -1,6 +1,7 @@
 import type { ClaimCheck } from '@paperseal/attestation';
 import type { ExamNameCheck, ExamNameResult, PasskeyNameResult, ResolvedExamName } from '@paperseal/chain';
 import {
+  chain as chainSpec,
   decodeApprovedList,
   decodeCriteria,
   fromHex,
@@ -9,6 +10,7 @@ import {
   roles,
   roundAtSeconds,
   roundTimeSeconds,
+  scheduleBoundsProblem,
   storageNames,
   toHex,
   type ApprovedListEntry,
@@ -112,6 +114,8 @@ export interface Failure {
 export interface Custody {
   steps: CustodyStep[];
   failures: Failure[];
+  /** Plain sentences for the main view. Worth asking about, and never a failed check. */
+  warnings: string[];
   /** Null until the code has established a seal state. Never a stand-in for a check not run. */
   seal: SealState | null;
   /** Why the seal is not shown. */
@@ -130,6 +134,8 @@ export interface NameView {
   result: Polled<ExamNameResult>;
   /** What this view reads from: the name's records, or the viewer's own values where it sets none. */
   used: { teeUrl: string; storageUrl: string; bucket: string };
+  /** The registry this page is set to read, if any, to compare with the name's. */
+  configuredRegistry: string;
 }
 
 export interface View {
@@ -181,8 +187,13 @@ export function inWords(seconds: number): string {
 
 const inZone = (timeZone?: string) => (timeZone ? { timeZone } : {});
 
+/** Settings are not bounded on-chain, so a time can be past what a date can hold. It must still render, and fail its check. */
+const tooFar = (seconds: number) => !(Math.abs(seconds) * 1000 <= 8.64e15);
+const noDate = 'A date too far away to show';
+
 /** `Sat 7 Nov, 21:30`, in the viewer's own time zone. */
 export function dayTime(seconds: number, timeZone?: string): string {
+  if (tooFar(seconds)) return noDate;
   const day = new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', ...inZone(timeZone) });
   const time = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', ...inZone(timeZone) });
   return `${day.format(seconds * 1000).replace(',', '')}, ${time.format(seconds * 1000)}`;
@@ -190,13 +201,14 @@ export function dayTime(seconds: number, timeZone?: string): string {
 
 /** `21:30` today, and `Sat 7 Nov, 21:30` on any other day. */
 export function clockTime(seconds: number, now: number, timeZone?: string): string {
+  if (tooFar(seconds)) return noDate;
   const date = new Intl.DateTimeFormat('en-GB', { dateStyle: 'short', ...inZone(timeZone) });
   const full = dayTime(seconds, timeZone);
   return date.format(seconds * 1000) === date.format(now * 1000) ? full.slice(full.indexOf(', ') + 2) : full;
 }
 
 /** The exact moment, in UTC, for evidence someone may compare elsewhere. */
-export const utcTime = (seconds: number) => `${new Date(seconds * 1000).toISOString().replace('.000Z', '')} UTC`;
+export const utcTime = (seconds: number) => (tooFar(seconds) ? noDate : `${new Date(seconds * 1000).toISOString().replace('.000Z', '')} UTC`);
 
 const short = (value: unknown) => {
   const text = typeof value === 'string' ? value : (JSON.stringify(value) ?? 'undefined');
@@ -330,6 +342,25 @@ const nameFailures: Record<ExamNameCheck, string> = {
 
 const sepoliaName = 'On Sepolia, a test network, anyone can register a similar name, so this check is only a demo.';
 
+const otherRegistry =
+  'This name leads to a different exam record from the one this page is set up to read. Ask your exam board if this is the right exam before you rely on it.';
+
+/** The registry a name leads to, when this page was set up with a different one. */
+function differentRegistry(named: NameView): string | null {
+  const read = named.result.state === 'ready' ? named.result.value : null;
+  const registry = read?.ok ? read.value.registry : read?.partial.registry;
+  if (!registry || !named.configuredRegistry) return null;
+  return registry.toLowerCase() === named.configuredRegistry.toLowerCase() ? null : registry;
+}
+
+function otherRegistryRows(named: NameView): Item[] {
+  if (differentRegistry(named) === null) return [];
+  return [
+    { kind: 'text', tone: 'warn', text: otherRegistry },
+    { kind: 'hash', label: 'Exam record this page is set up to read', value: named.configuredRegistry },
+  ];
+}
+
 /** Where one locator came from: the name's record, or the viewer's own value where it sets none. */
 function located(label: string, record: string | null, used: string, fallback: string): Item {
   return {
@@ -377,8 +408,14 @@ function nameStep(named: NameView): Draft {
     const title = nameTitles[read.failed];
     return {
       ...base,
+      aside: sepoliaName,
       note: title,
-      items: [{ kind: 'fact', label: 'Name', value: named.name }, fail(title, `${title}. ${nameFailures[read.failed]}`, read.reason), ...partialRows(read.partial)],
+      items: [
+        { kind: 'fact', label: 'Name', value: named.name },
+        fail(title, `${title}. ${nameFailures[read.failed]}`, read.reason),
+        ...partialRows(read.partial),
+        ...otherRegistryRows(named),
+      ],
     };
   }
   const value = read.value;
@@ -392,6 +429,7 @@ function nameStep(named: NameView): Draft {
       { kind: 'check', label: 'Exam name, a valid ENS label', status: 'pass', detail: value.label },
       { kind: 'hash', label: 'Exam ID, the labelhash of the exam name', value: value.examId },
       { kind: 'check', label: 'Address record runs the ExamRegistry code for this board', status: 'pass', hash: value.registry },
+      ...otherRegistryRows(named),
       { kind: 'hash', label: 'Board, from the registry', value: value.board },
       { kind: 'check', label: "Board's primary name", status: 'pass', detail: value.parent },
       { kind: 'check', label: `${value.parent} points back to the board, so verified both ways`, status: 'pass' },
@@ -418,21 +456,59 @@ function held(draft: Draft): Draft {
   };
 }
 
+const registryCodeLabel = 'The exam record runs the published ExamRegistry code';
+
+/** The check that the address really is ExamRegistry, and the board its code holds. */
+function registryCodeItems(c: Context): Item[] {
+  const code = c.chain?.registryCode;
+  if (!code) return [notChecked(registryCodeLabel, 'Not read yet')];
+  if (code.state === 'match') {
+    return [
+      { kind: 'check', label: registryCodeLabel, status: 'pass' },
+      { kind: 'hash', label: 'Exam board, the only account that can write here', value: code.board },
+    ];
+  }
+  return code.state === 'none'
+    ? [fail(registryCodeLabel, 'There is no exam record at this address. Ask your exam board for the right address.', 'No code at this address')]
+    : [fail(registryCodeLabel, 'This address is not a Paper Seal exam record, so nothing it says can be trusted. Ask your exam board for the right address.', 'The code here differs from spec/registry.json')];
+}
+
+const boundFailures = {
+  delta_too_long: 'The paper reaches centres too long before the exam. Paper Seal does not allow a gap this long.',
+  end_too_far: 'This exam ends too long after it starts, so the paper may never open to everyone.',
+};
+
+function boundsItem(exam: Exam): Item {
+  const problem = scheduleBoundsProblem(exam.settings);
+  return verdict('Exam times are within the allowed limits', problem === null, { failure: problem ? boundFailures[problem] : '' });
+}
+
 function publishedStep(c: Context): Draft {
   const { exam } = c;
   const seconds = exam ? Number(exam.createdAt) : null;
+  const code = c.chain?.registryCode;
+  const wrongAddress = code !== undefined && code.state !== 'match';
   return {
     id: 'published',
     label: 'Exam published',
     complete: exam !== null,
+    stops: wrongAddress,
     at: seconds,
     round: roundOf(seconds),
-    note: exam
-      ? "The exam's rules and the exact version of the sealed machine's code are on the public record."
-      : 'The exam board has not published this exam.',
-    items: exam
-      ? [{ kind: 'check', label: 'Exam published', status: 'pass', detail: 'Published' }, ...settingsItems(exam, c.view.examId)]
-      : [notChecked('Exam published', 'Not published')],
+    ...(code?.state === 'match' ? { aside: `Only the exam board account ${code.board} can write this record.` } : {}),
+    note: wrongAddress
+      ? 'This page is not reading a Paper Seal exam record.'
+      : exam
+        ? "The exam's rules and the exact version of the sealed machine's code are on the public record."
+        : 'The exam board has not published this exam.',
+    items: [
+      ...registryCodeItems(c),
+      ...(exam
+        ? [{ kind: 'check' as const, label: 'Exam published', status: 'pass' as const, detail: 'Published' }, boundsItem(exam), ...settingsItems(exam, c.view.examId)]
+        : wrongAddress
+          ? []
+          : [notChecked('Exam published', 'Not published')]),
+    ],
   };
 }
 
@@ -536,6 +612,14 @@ function attestedStep(c: Context): Draft {
         : { text: demoWarning, tone: 'warn' as const }),
     },
     { kind: 'text', text: "This is the value in spec/constants.json when this verifier was built. The sealed machine's own value is part of its attested image." },
+    { kind: 'heading', text: 'How the public record is read' },
+    { kind: 'tag', label: { code: 'chain.readBlock' }, tone: chainSpec.readBlock === 'finalized' ? 'ok' : 'warn', tag: chainSpec.readBlock },
+    {
+      kind: 'text',
+      ...(chainSpec.readBlock === 'finalized'
+        ? { text: 'Paper Seal only reads entries that can no longer change.' }
+        : { text: 'In this demo, Paper Seal reads the newest entries, which can still change. A real exam must read only entries that can no longer change.', tone: 'warn' as const }),
+    },
   ];
   const complete = published?.verdict.verified === true || (build === null && freshPassed);
   const demo = requireHardwareAttestation ? '' : ' This is a demonstration: its security keys are simulated.';
@@ -798,6 +882,14 @@ function manifestItems(result: Sourced<ManifestResult>): { items: Item[]; ok: bo
   };
 }
 
+const lateBuild = 'The paper was recorded after its unlock time. This does not fail the exam, but ask your exam board why it was late.';
+
+/** Whether the Build reached the public record after the paper's unlock time. Worth a question, not a failure. */
+function isLate(c: Context): boolean {
+  const { build, exam } = c;
+  return build !== null && exam !== null && Number(build.postedAt) > roundTimeSeconds(Number(exam.settings.unlockRound));
+}
+
 function sealedStep(c: Context): Draft {
   const { build, records } = c;
   const signature = buildSignatureItem(records?.token ?? null);
@@ -827,6 +919,7 @@ function sealedStep(c: Context): Draft {
             { kind: 'hash', label: 'Signed by instance key', value: build.instancePublicKey },
           ] satisfies Item[])
         : []),
+      ...(isLate(c) ? [{ kind: 'text' as const, tone: 'warn' as const, text: lateBuild }] : []),
       signature.item,
       ...manifest.items,
     ],
@@ -994,13 +1087,17 @@ function unlockStep(c: Context, sealedOff: boolean): Draft {
   const unlockAt = exam ? roundTimeSeconds(Number(exam.settings.unlockRound)) : null;
   const countdown: Item[] = exam
     ? [
-        {
-          kind: 'countdown',
-          at: (unlockAt ?? 0) * 1000,
-          round: Number(exam.settings.unlockRound),
-          label: 'Paper unlocks',
-          reached: c.unlockReached ? 'Unlocked' : 'Due, waiting for the public clock',
-        },
+        ...(tooFar(unlockAt ?? 0)
+          ? []
+          : [
+              {
+                kind: 'countdown' as const,
+                at: (unlockAt ?? 0) * 1000,
+                round: Number(exam.settings.unlockRound),
+                label: 'Paper unlocks',
+                reached: c.unlockReached ? 'Unlocked' : 'Due, waiting for the public clock',
+              },
+            ]),
         c.view.latest.round !== null
           ? { kind: 'fact', label: 'Latest public clock round', value: c.view.latest.round.toLocaleString('en-GB') }
           : notChecked('Latest public clock round', c.view.latest.error ? 'Public clock not reached' : 'Loading'),
@@ -1215,6 +1312,9 @@ function noExamWords(view: View): Words | null {
 function examWords(c: Context, steps: readonly CustodyStep[], seal: SealState | null, proofState: string | null): Words {
   const { exam, build, chain } = c;
   const auto = 'This page updates by itself.';
+  if (chain && chain.registryCode.state !== 'match') {
+    return { headline: 'This is not a Paper Seal exam record.', next: 'Ask your exam board for the right address, then enter it under "Check it yourself" below.' };
+  }
   if (!exam) return { headline: 'This exam is not on the public record.', next: `Once the exam board publishes it, it will appear here. ${auto}` };
   const unlockAt = roundTimeSeconds(Number(exam.settings.unlockRound));
   const lockAt = roundTimeSeconds(Number(exam.settings.lockRound));
@@ -1313,6 +1413,7 @@ export function custody(given: View): Custody {
   return {
     steps,
     failures,
+    warnings: [...(given.name && differentRegistry(given.name) ? [otherRegistry] : []), ...(isLate(c) ? [lateBuild] : [])],
     seal,
     noSeal: build ? 'Not confirmed yet' : 'Not sealed yet',
     headline: words.headline,

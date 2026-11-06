@@ -47,6 +47,10 @@ export const examId: Hex = `0x${'11'.repeat(32)}`;
 export const registryAddress: Hex = '0x00000000000000000000000000000000000000aa';
 export const imageDigest: Hex = `0x${'ab'.repeat(32)}`;
 
+export const boardAddress: Hex = '0x000000000000000000000000000000000000b0a2';
+/** A registry whose code passed the check. */
+export const registryMatches = { state: 'match', board: boardAddress } as const;
+
 /** Real quicknet round 1000, signed by the real network. It is the only round tests can open. */
 export const beacon = {
   round: 1000,

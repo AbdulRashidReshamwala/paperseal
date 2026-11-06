@@ -92,7 +92,7 @@ Keys sit behind one small interface (`generateKey`, `getPublicKey`, `decryptShar
 
 The board posts one final list per exam on-chain, and the TEE reads it back over TLS, so the board's network can't change who is approved. The list is public, so anyone can see every key holder and approved centre, and which key each one holds. Setters appear only as a hash of their public key, and their names are never published, so the list doesn't show who to pressure.
 
-The TEE knows the board through its attested settings: they name `ExamRegistry`, and only that contract's fixed board address can write to it. The board announces the contract address on its official site, which is how everyone else knows it is the real board.
+The TEE knows the board through its attested settings: they name `ExamRegistry`, and only that contract's fixed board address can write to it. The TEE and the verifier page check that the code at that address is `ExamRegistry`'s, so a different contract can't stand in for it. The verifier shows the board address that code holds. The board announces the contract address on its official site, which is how everyone else knows it is the real board.
 
 1. **Register:** the board sends each setter, key holder and centre a private invite link with a secret, and each one registers with the TEE as in [Hardware Keys](#hardware-keys). The secret proves who an invite was for, so knowing someone's name isn't enough to take their place. Setters register a passkey only, because nothing is ever encrypted to them, and they need no name.
 2. **Post:** the board's address posts the list to `ExamRegistry`, where it can be written only once. Each entry has the owner, role, passkey public key and derived public key. The contract stores a hash of the list and emits the full list, so reading it doesn't depend on storage the board controls.
@@ -104,7 +104,7 @@ The TEE knows the board through its attested settings: they name `ExamRegistry`,
 
 An exam's name is a plain ENS label such as `jee-main-2026`, and its exam ID is that label's hash. A board can give an exam an ENS name under its own primary name, such as `jee-main-2026.paperseal.eth`, so anyone can check the exam by typing its name instead of a contract address and exam ID.
 
-The verifier page fails the name unless it points to a contract running exactly `ExamRegistry`'s code, whose board address has that parent as its primary name, verified both ways. Every read is on-chain, through the viewer's own RPC. It then runs every other check as usual. ENS only helps people find the real exam. The TEE and `ExamRegistry` never read it, and a name that points somewhere wrong makes the later checks fail, not pass. On Sepolia anyone can register a look-alike name, so the check only means something with a mainnet name. [ENS setup](docs/ens-setup.md) shows how to name an exam.
+The verifier page fails the name unless it points to a contract running exactly `ExamRegistry`'s code, whose board address has that parent as its primary name, verified both ways. Every read is on-chain, through the viewer's own RPC. It then runs every other check as usual. ENS only helps people find the real exam. The TEE and `ExamRegistry` never read it, and a name that points somewhere wrong makes the later checks fail, not pass. On Sepolia anyone can register a look-alike name, so the check only means something with a mainnet name. If a name leads to a different contract from the one the page is set up to read, the page warns about it first. [ENS setup](docs/ens-setup.md) shows how to name an exam.
 
 ### Party Names
 
@@ -152,7 +152,7 @@ A leak after a centre decrypts the paper can't be traced to that centre.
 Anyone can check that the TEE runs the exact open-source code, unchanged. The TEE runs on Google Confidential Space, which adds workload attestation on top of Confidential VMs.
 
 1. **Build:** a tagged commit builds into a single-architecture container image reproducibly, with pinned dependencies, base images and toolchain, and fixed timestamps. Rebuilding that commit gives the same image digest.
-2. **Publish:** each tagged version is built twice on a clean GitHub runner and published as a release with its commit hash and image digest, and the board picks a version in the app. The commit hash, image digest and exam settings go on-chain in `ExamRegistry` before Onboard, and can't be changed. The full selection criteria go on-chain with them, so anyone can read them and check `criteriaHash`. `ExamRegistry` stores `T` and `Δ` and rejects an unlock round that doesn't match them under quicknet's timing, and the verifier page shows each round as a clock time.
+2. **Publish:** each tagged version is built twice on a clean GitHub runner and published as a release with its commit hash and image digest, and the board picks a version in the app. The commit hash, image digest and exam settings go on-chain in `ExamRegistry` before Onboard, and can't be changed. The full selection criteria go on-chain with them, so anyone can read them and check `criteriaHash`. `ExamRegistry` stores `T` and `Δ` and rejects an unlock round that doesn't match them under quicknet's timing, and the verifier page shows each round as a clock time. The TEE, the board app and the verifier page also limit `Δ` to 24 hours and the end round to 7 days after `T`, so the paper can't be set to open at a round that never comes.
 3. **Deploy:** the image is deployed by digest, never by tag, on the production Confidential Space image. Its startup arguments carry the exam settings: the exam ID, `T`, `Δ`, lock round, unlock round, end round, selection criteria hash, `ExamRegistry` address, chain ID and RPC operator host. They are passed with `tee-cmd`, so the image sets the `tee.launch_policy.allow_cmd_override=true` label.
 4. **Attest:** the TEE generates a keypair and requests a Google-signed attestation token, with a hash of its public key and the exam ID as the nonce. Tokens last about an hour, so apps ask for a fresh one when they connect, and anything published uses the PKI token type so it can be checked later.
 5. **Verify:** the setter app, centre app and verifier page each check the token before trusting the TEE. Setter apps encrypt questions to the TEE's key only after this check passes.
@@ -173,7 +173,7 @@ Anyone can check that the TEE runs the exact open-source code, unchanged. The TE
 | `submods.container.args`, `submods.container.cmd_override`, `submods.container.env_override` | The arguments match the on-chain exam settings, and the operator set only the storage bucket |
 | `eat_nonce` | The hash of the TEE's public key and the exam ID |
 
-A TEE given fake exam settings fails this check, whichever Google Cloud project it runs in. A copy given the real settings can't post anything, because `ExamRegistry` accepts writes only from the board's address, and each write after the list is signed by the TEE.
+A TEE given fake exam settings fails this check, whichever Google Cloud project it runs in. A copy given the real settings can't post anything, because `ExamRegistry` accepts writes only from the board's address. The contract only checks the format of a Build's signature. Apps and any fresh TEE instance verify it against the attestation token, so a Build the TEE didn't sign fails those checks.
 
 The verifier page shows each check, and anyone can rebuild the commit themselves and compare digests. It needs no private key and all its data is public, so anyone can host their own copy instead of trusting a hosted one. The [Reproducible build](.github/workflows/repro.yml) action does this for any commit on a clean GitHub runner:
 
@@ -205,6 +205,7 @@ The paper stays with approved centres from `T−Δ` until the end round. At that
 
 - The board chooses the key holders. Key ownership is public, so anyone can judge whether the neutral parties are really neutral.
 - The exam date is written once to `ExamRegistry` and can't be changed, even by the board.
+- `ExamRegistry` doesn't compare a Build with block time, so the board could post one late. The verifier page flags a Build posted after the unlock time, as a warning that doesn't fail the exam.
 - `ExamRegistry` accepts writes only from the board's address. The board could route setters to a different TEE instance, but the receipt check shows this after the Build, and an unusually low question count would show on-chain.
 
 ### Selection

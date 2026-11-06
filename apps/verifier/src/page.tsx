@@ -143,7 +143,7 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
   return {
     examId,
     invalidLink: link.kind === 'invalid',
-    ...(link.kind === 'name' && name ? { name: { name: link.name, result: name, used: { teeUrl, storageUrl, bucket } } } : {}),
+    ...(link.kind === 'name' && name ? { name: { name: link.name, result: name, used: { teeUrl, storageUrl, bucket }, configuredRegistry: settings.registryAddress } } : {}),
     sources: { chain: registry !== null, storage: storage !== null, tee: tee !== null },
     records,
     partyNames,
@@ -210,6 +210,17 @@ function FailureAlarm({ failures }: { failures: readonly Failure[] }) {
         ))}
       </ul>
     </section>
+  );
+}
+
+function Warnings({ warnings }: { warnings: readonly string[] }) {
+  if (warnings.length === 0) return null;
+  return (
+    <ul className="vf-warnings" role="status">
+      {warnings.map((warning) => (
+        <li key={warning}>{warning}</li>
+      ))}
+    </ul>
   );
 }
 
@@ -423,6 +434,7 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
       <RoleHeader role="Public record" {...(exam ? { exam } : {})} note="Anyone can check this" />
       <main>
         <FailureAlarm failures={result.failures} />
+        <Warnings warnings={result.warnings} />
         <Head view={result} zone={zoneName()} />
         {view.records.state === 'error' ? (
           <p className="vf-gap">
