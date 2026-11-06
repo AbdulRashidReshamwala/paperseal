@@ -578,7 +578,7 @@ describe('step 7, exam status', () => {
     expect(recordValue(card, 'Text paperseal.bucket')).toMatch(/^exam-bucket(Copy)?$/);
     // This session didn't publish the exam, so it doesn't know the name, only its hash.
     expect(recordValue(card, 'Subname')).toBe('<exam name>');
-    expect(recordValue(card, 'Verifier link')).toBe('https://verify.example.org/#/name/<exam name>.<your-name>.eth');
+    expect(recordValue(card, 'Public page by name')).toBe('https://verify.example.org/#/name/<exam name>.<your-name>.eth');
     expect(within(card).getByRole('button', { name: 'Copy Text paperseal.tee' })).toBeTruthy();
   });
 
@@ -586,10 +586,10 @@ describe('step 7, exam status', () => {
     const { env } = await seeded('build');
     renderBoard(env, fakeTee());
     const card = (await screen.findByText('Give this exam an ENS name (optional)')).parentElement as HTMLElement;
-    expect(recordValue(card, 'Text paperseal.tee')).toMatch(/Not set\. Set VITE_TEE_URL\.$/);
-    expect(recordValue(card, 'Text paperseal.storage')).toMatch(/Not set\. Set VITE_STORAGE_URL\.$/);
-    expect(recordValue(card, 'Text paperseal.bucket')).toMatch(/Not set\. Set VITE_TEE_STORAGE_BUCKET\.$/);
-    expect(within(card).queryByText('Verifier link')).toBeNull();
+    expect(recordValue(card, 'Text paperseal.tee')).toMatch(/Ask whoever installed Paper Seal to set VITE_TEE_URL\.$/);
+    expect(recordValue(card, 'Text paperseal.storage')).toMatch(/Ask whoever installed Paper Seal to set VITE_STORAGE_URL\.$/);
+    expect(recordValue(card, 'Text paperseal.bucket')).toMatch(/Ask whoever installed Paper Seal to set VITE_TEE_STORAGE_BUCKET\.$/);
+    expect(within(card).queryByText('Public page by name')).toBeNull();
   });
 
   it('opens once the end time has passed', async () => {

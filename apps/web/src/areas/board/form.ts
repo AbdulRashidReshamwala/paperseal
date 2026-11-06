@@ -80,7 +80,11 @@ function parseUint(text: string): { value: number } | { error: string } {
 
 export function evaluateBlueprint(input: BlueprintInput): BlueprintResult {
   // One normalised ENS label, refused rather than fixed: another spelling hashes to another exam ID.
-  const nameError = input.name === '' ? 'Enter a name for the exam.' : examNameProblem(input.name);
+  // The two commonest slips keep their own plain sentence; @paperseal/protocol decides the rest.
+  let nameError: string | null;
+  if (input.name === '') nameError = 'Enter a name for the exam.';
+  else if (input.name !== input.name.trim()) nameError = 'The name cannot start or end with a space.';
+  else nameError = examNameProblem(input.name);
   const examId = nameError === null ? examIdFromName(input.name) : null;
 
   const percent = parseUint(input.maxSetterPercent);

@@ -63,12 +63,12 @@ function EnsName(props: { examName: string | null; registryAddress: Hex | null; 
             {entry.value ? (
               <RecordValue what={entry.record} known value={entry.value} />
             ) : (
-              <Check status="not-checked">{`Not set. Set ${entry.setting}.`}</Check>
+              <Check status="not-checked">{`Not set up yet. Ask whoever installed Paper Seal to set ${entry.setting}.`}</Check>
             )}
           </Row>
         ))}
         {props.verifier ? (
-          <Row label="Verifier link">
+          <Row label="Public page by name">
             <span className="ps-mono">{verifierNameUrl(props.verifier, `${label}.${parentPlaceholder}`)}</span>
           </Row>
         ) : null}

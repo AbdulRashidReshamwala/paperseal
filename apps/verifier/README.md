@@ -2,7 +2,7 @@
 
 The public verifier, on port 5172, with no sign-in. `pnpm build` writes `dist/` with relative paths, so it can be hosted from any domain or folder.
 
-`VITE_RPC_URL`, `VITE_TEE_URL`, `VITE_STORAGE_URL`, `VITE_REGISTRY_ADDRESS` and `VITE_EXAM_ID` set build-time defaults. Viewers can replace them under Connection, and the values stay in their browser.
+`VITE_RPC_URL`, `VITE_TEE_URL`, `VITE_STORAGE_URL`, `VITE_REGISTRY_ADDRESS` and `VITE_EXAM_ID` set build-time defaults. Viewers can replace them under "Check it yourself", and the values stay in their browser.
 
 `VITE_RELEASES_REPO` is optional. It is the `owner/name` GitHub repository the code, rebuild and self-hosting links point at, `AbdulRashidReshamwala/paperseal` when unset, so a fork can set its own. Any other shape is an error. Viewers cannot change it.
 
