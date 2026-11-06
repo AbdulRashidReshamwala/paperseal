@@ -19,6 +19,7 @@ import {
   examRegistryAbi,
   examRegistryRuntime,
   isExamRegistryCode,
+  lookupPartyName,
   resolveExamName,
   type EnsLookup,
 } from './index';
@@ -459,5 +460,19 @@ describe('checkPasskeyName', () => {
     expect(await checkPasskeyName(holderName, key, { transport })).toMatchObject({ state: 'refused' });
     expect(fetch).not.toHaveBeenCalled();
     await expect(Promise.resolve().then(() => checkPasskeyName(holderName, key, {}))).rejects.toThrow(/own RPC/);
+  });
+});
+
+describe('lookupPartyName', () => {
+  it('finds a name with an address, and reports an unset one, a refused read and an RPC failure', async () => {
+    const holder: Address = '0x00000000000000000000000000000000000000dd';
+    const at = (address: () => Promise<Address | null>) => lookup({ address });
+    expect(await lookupPartyName('dr-rao.eth', { lookup: at(() => Promise.resolve(holder)) })).toEqual({ state: 'found', name: 'dr-rao.eth', address: holder });
+    expect(await lookupPartyName('dr-rao.eth', { lookup: at(() => Promise.resolve(null)) })).toMatchObject({ state: 'unset' });
+    expect(await lookupPartyName('dr-rao.eth', { lookup: at(() => Promise.reject(needsGateway())) })).toMatchObject({ state: 'refused' });
+    expect(
+      await lookupPartyName('dr-rao.eth', { lookup: at(() => Promise.reject(new HttpRequestError({ url: 'https://rpc.example.org', status: 503 }))) }),
+    ).toMatchObject({ state: 'unreadable' });
+    expect(await lookupPartyName('Dr Rao', { lookup: at(() => Promise.resolve(holder)) })).toMatchObject({ state: 'invalid' });
   });
 });

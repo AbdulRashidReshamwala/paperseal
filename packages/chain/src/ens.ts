@@ -393,3 +393,32 @@ export async function checkPasskeyName(
   if (value.toLowerCase() === expected) return result('confirmed', `The ${key} record of ${name} matches this key.`, value);
   return result('mismatch', `The ${key} record of ${name} is ${value}, not ${expected}.`, value);
 }
+
+/** What reading a party's name itself found: `found` has the name's `addr` record, `unset` has none. Other states are as for `PasskeyNameState`. */
+export type PartyNameLookup =
+  | { state: 'found'; name: string; address: Address }
+  | { state: 'unset' | 'refused' | 'unreadable' | 'invalid'; name: string; reason: string };
+
+/** Whether a name a board typed resolves at all, on chain and with the viewer's own RPC. Never throws for a chain or RPC failure. */
+export async function lookupPartyName(name: string, options: EnsOptions & { lookup?: EnsLookup }): Promise<PartyNameLookup> {
+  const problem = looksLikeEnsName(name) ? ensNameProblem(name) : 'The name is not written like an ENS name.';
+  if (problem) return { state: 'invalid', name, reason: problem };
+  const lookup = options.lookup ?? createEnsLookup(options);
+  try {
+    const address = await lookup.address(name);
+    return address
+      ? { state: 'found', name, address }
+      : { state: 'unset', name, reason: `${name} has no address record yet.` };
+  } catch (error) {
+    const failure = readFailure(error);
+    if (failure === 'unreadable') return { state: 'unreadable', name, reason: `The RPC failed before ${name} could be read: ${messageOf(error)}` };
+    return {
+      state: 'refused',
+      name,
+      reason:
+        failure === 'offchain'
+          ? `${name} needs an offchain gateway, and this reader reads ENS on chain only.`
+          : `${name} could not be read on chain: ${messageOf(error)}`,
+    };
+  }
+}
