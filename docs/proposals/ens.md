@@ -48,7 +48,7 @@ Parts 1 to 3 could mostly work on ENSv1. These parts are new in v2:
 
 ### Neutral Parties Use Their Own Names
 
-Key holders and centres can be invited under an ENS name, which becomes their `owner`, and a plain name stays allowed. Setters never have one. A neutral key holder sets the text record `paperseal.passkey` on their own name to `setterOwner(passkeyPublicKey)`, the existing public hash of their security key, so `spec/constants.json` (also embedded in the TEE) gains no tag. A centre may use a board-issued subname with no record, which is a label only. The board app and verifier read the record on chain with CCIP-Read off. It stays out of the TEE and `ExamRegistry`, and a name that can't be confirmed never fails an exam. The code doesn't depend on ENSv2: it reads through viem's Universal Resolver, which may still run ENSv1.
+Key holders and centres are invited by ENS name only, which becomes their `owner`, and there are no plain names. The verifier shows any other owner on a list (an older exam, or a board that skipped the app) as "Not an ENS name", a warning that never fails the exam. Setters never have one. A neutral key holder sets the text record `paperseal.passkey` on their own name to `setterOwner(passkeyPublicKey)`, the existing public hash of their security key, so `spec/constants.json` (also embedded in the TEE) gains no tag. A centre may use a board-issued subname with no record, which is a label only. The board app and verifier read the record on chain with CCIP-Read off. It stays out of the TEE and `ExamRegistry`, and a name that can't be confirmed never fails an exam. The code doesn't depend on ENSv2: it reads through viem's Universal Resolver, which may still run ENSv1.
 
 ## Non-Goals
 

@@ -113,7 +113,7 @@ The sum of `questions` times `padding.questionBytes`, plus 1024 bytes for the pa
 
 ## Invites
 
-The board creates one invite per person, so nobody can register under a name they merely know. An invite holds a random 32-byte `inviteSecret`, the `role` and the `owner`, and is sent privately as a link. All of it sits in the URL fragment, so it never reaches a server. Setter invites have no `owner`, because a setter's `owner` is its `setterOwner` hash. For a key holder or a centre the `owner` is either a plain name or an ENS name (see "Party Names"). The invite link, the secret and the `inviteTag` match work the same for both.
+The board creates one invite per person, so nobody can register under a name they merely know. An invite holds a random 32-byte `inviteSecret`, the `role` and the `owner`, and is sent privately as a link. All of it sits in the URL fragment, so it never reaches a server. Setter invites have no `owner`, because a setter's `owner` is its `setterOwner` hash. For a key holder or a centre the `owner` is an ENS name and nothing else (see "Party Names"). The invite link, the secret and the `inviteTag` match work the same for both.
 
 The registrant's app computes `inviteTag = HMAC-SHA-256(inviteSecret, passkeyPublicKey)`, signs it inside the `registration` message and sends it to the TEE. The TEE stores the tag and returns it from `GET /v1/registrations`. It never sees the secret, so it can't check the tag.
 
@@ -121,9 +121,9 @@ The board's app keeps its invites in the browser and recomputes each tag. A regi
 
 ## Party Names
 
-A key holder or a centre may be invited under an ENS name instead of a plain display name. The name becomes the party's `owner`, exactly as a plain name would, so the TEE, `ExamRegistry`, the approved list and the invite match treat it as an opaque string of at most `limits.ownerBytes` bytes. Setters never have one: their names are never published, and their `owner` stays the `setterOwner` hash. A plain name stays allowed, because a teacher may have no ENS name, and the board chooses per person.
+A key holder or a centre is invited by ENS name only, and there is no plain name. The name becomes the party's `owner`, so the TEE, `ExamRegistry`, the approved list and the invite match treat it as an opaque string of at most `limits.ownerBytes` bytes. Setters never have one: their names are never published, and their `owner` stays the `setterOwner` hash.
 
-An `owner` is an ENS name when it has no spaces, has at least two parts around dots, and `normalize(owner)` returns it unchanged. Anything else is a plain name. The board app refuses an `owner` that is written like an ENS name but is not normalised, and says what to use, so every reader reaches the same answer.
+An `owner` is an ENS name when it has no spaces, has at least two parts around dots, and `normalize(owner)` returns it unchanged. The board app refuses any other `owner` for a key holder or a centre, and for one written like an ENS name that is not normalised it says what to use ("Did you mean ..."), so every reader reaches the same answer. `decodeInviteFragment`, `checkInvite` and the board's list composing refuse it too. The TEE and `ExamRegistry` do not check this, so an older exam or a board that skips the app can still list a plain `owner`. A reader shows such an owner as "Not an ENS name", a warning and never a failure.
 
 There are two kinds of name, and they prove different things:
 
@@ -134,7 +134,7 @@ A reader reads the record with the viewer's own RPC, on chain only (`ens.ccipRea
 
 This is a label and a proof of who holds a key, never a check the exam depends on. The TEE and `ExamRegistry` never read it. A key holder's name that is missing, wrong or unreadable shows as "not confirmed" in the verifier, and a centre's as a label only, and neither ever fails the exam. On Sepolia anyone can register a look-alike name, so a confirmed name there proves nothing.
 
-The board app resolves a name typed for a key holder or centre. For a key holder, a mismatch keeps them off the list, a missing record shows as waiting and the board may go ahead with it marked unconfirmed, and a match shows as confirmed. The registrant's Register screen shows a key holder with an ENS name the exact record value after they register. The invite is never overwritten once it has matched a registration.
+The board app resolves a name typed for a key holder or centre, and a name that does not exist on the chain (it has neither an address record nor a `paperseal.passkey` record) cannot be invited. When the chain cannot be read, the board is told and may try again, and the page keeps trying. A centre's name needs no record, so an existing name with none is accepted. For a key holder, a mismatch keeps them off the list, a missing record shows as waiting and the board may go ahead with it marked unconfirmed, and a match shows as confirmed. The registrant's Register screen shows a key holder with an ENS name the exact record value after they register. The invite is never overwritten once it has matched a registration.
 
 ## Approved List
 

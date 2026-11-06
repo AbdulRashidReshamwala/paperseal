@@ -69,7 +69,7 @@ Open the verifier, type the full name into the exam box, or open `<verifier>/#/n
 
 ## 4. Names for key holders and centres
 
-Optional. The board can invite a key holder or a centre under an ENS name by typing it in "Invite people". A person with no ENS name can be invited under a plain name instead. Setters never have one.
+Optional. The board can invite a key holder or a centre under an ENS name by typing it in "Invite people". There are no plain names: everyone invited this way needs an ENS name that exists. Setters never have one.
 
 - **A key holder uses their own name.** After they register, their Register page shows one value. They add a text record named `paperseal.passkey` to their own name with that value, using the ENS app on Sepolia. The board app then shows "Name confirmed". Until then it shows the key holder as waiting, and the board can choose to go ahead with the name marked unconfirmed.
 - **A centre uses a name the board issues,** such as `north-1.centres.paperseal-mumbai.eth`. It needs no record. The board can change such a name, so the verifier shows it as a label only, and it proves nothing about independence.
