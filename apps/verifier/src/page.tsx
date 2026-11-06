@@ -21,6 +21,7 @@ import { Link, useNavigate } from 'react-router';
 import { http } from 'viem';
 
 import { AgentCheck } from './agent-check';
+import { RecentExams } from './history-page';
 import { clockTime, custody, dayTime, REPOSITORY, type Custody, type CustodyStep, type Failure, type PartyName } from './custody';
 import { Evidence } from './evidence';
 import { teeStorageBucket } from './env';
@@ -685,7 +686,8 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
         <Head
           view={result}
           chosen={chosen}
-          agent={<AgentCheck examId={view.examId} registry={view.agent.registry} storageUrl={view.agent.storageUrl} />}
+          // The AI check needs an exam, so the start page leaves it out rather than showing it disabled.
+          agent={chosen ? <AgentCheck examId={view.examId} registry={view.agent.registry} storageUrl={view.agent.storageUrl} /> : null}
         />
         <Glance items={recordedExam ? glanceOf(boardLabel, found, held) : []} />
         {view.records.state === 'error' ? (
@@ -709,10 +711,13 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
         {chosen ? (
           <Stepper steps={result.steps.map((step) => toStep(step, view.now))} evidenceLabel="Show the evidence" />
         ) : (
-          <section className="ps-panel vf-choose">
-            <ExamPicker current={false} invalid={view.invalidLink} />
-            <HistoryLink />
-          </section>
+          <>
+            <section className="ps-panel vf-choose">
+              <ExamPicker current={false} invalid={view.invalidLink} />
+            </section>
+            {/* Its own link goes to the full history, so the box above needs none. */}
+            <RecentExams />
+          </>
         )}
         <Freshness records={view.records} zone={zoneName()} />
         {recordedExam && view.examId && view.registryAddress ? (

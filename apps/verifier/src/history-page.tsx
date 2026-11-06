@@ -278,9 +278,66 @@ function ParticipantForm({ onSearch }: { onSearch: (owner: string) => void }) {
 }
 
 /** `#/exams`: the exams the viewer's Arkiv writers have indexed, each checked against the public record. */
-export function HistoryPage() {
+/** The exam history from the trusted writers, each exam checked against the public record. Null while there is nothing to read from. */
+function useExamHistory(reads: number) {
   const { settings, registry, arkiv } = useConnections();
   const { rpcUrl } = settings;
+  const writers = useMemo(() => arkivWriters(settings.arkivWriters, null).map((writer) => writer.address), [settings.arkivWriters]);
+  const reader = arkiv?.reader ?? null;
+  const loadHistory = useMemo(() => {
+    if (!reader || !registry || writers.length === 0) return null;
+    void reads;
+    return () => loadExamHistory({ reader, registry, writers, checkName: (name) => resolveExamName(name, { rpcUrl }) });
+  }, [reader, registry, writers, rpcUrl, reads]);
+  return usePoll(loadHistory, null);
+}
+
+/** How many exams the start page lists before "See all exams". */
+const RECENT_COUNT = 5;
+
+/**
+ * The newest exams on the start page, so a visitor with no exam ID still has a way in. Search stays
+ * first: a list can't say which exam is the board's real one, so the note says to match the ID.
+ */
+export function RecentExams() {
+  const history = useExamHistory(0);
+  const { drand } = useConnections();
+  const latest = useLatestRound(drand, CLOCK_POLL_MS);
+  const now = useNow();
+  if (history.state === 'off') return null;
+  const exams =
+    history.state === 'ready'
+      ? history.value.exams
+          .map((exam) => ({ exam, status: examStatus(exam, latest.round, now) }))
+          .filter(({ status }) => status !== 'never-ran')
+          .sort((a, b) => Number(b.exam.examStart) - Number(a.exam.examStart))
+          .slice(0, RECENT_COUNT)
+      : [];
+  return (
+    <Panel title="Recent exams">
+      {history.state === 'loading' ? <p className="ps-empty">Reading recent exams. This takes a few seconds.</p> : null}
+      {history.state === 'error' ? <p className="ps-empty">Recent exams could not be read just now.</p> : null}
+      {history.state === 'ready' && exams.length === 0 ? <p className="ps-empty">No exams have been listed here yet.</p> : null}
+      {exams.length > 0 ? (
+        <Rows>
+          {exams.map(({ exam, status }) => (
+            <ExamRow key={exam.examId} exam={exam} status={status} />
+          ))}
+        </Rows>
+      ) : null}
+      <p className="vf-aside">
+        Listed by the writers this page trusts, and each checked against the public record. Always match the exam ID with your exam
+        board&apos;s own announcement.
+      </p>
+      <p className="vf-more">
+        <Link to="/exams">See all exams</Link>, or find the exams a person is listed for.
+      </p>
+    </Panel>
+  );
+}
+
+export function HistoryPage() {
+  const { settings, registry, arkiv } = useConnections();
   const writers = useMemo(() => arkivWriters(settings.arkivWriters, null).map((writer) => writer.address), [settings.arkivWriters]);
   const reader = arkiv?.reader ?? null;
   // Each press of "Read again" bumps this, which makes a new read below.
@@ -288,12 +345,7 @@ export function HistoryPage() {
   // A new object per search, so searching the same name again reads again.
   const [query, setQuery] = useState<{ owner: string } | null>(null);
 
-  const loadHistory = useMemo(() => {
-    if (!reader || !registry || writers.length === 0) return null;
-    void reads;
-    return () => loadExamHistory({ reader, registry, writers, checkName: (name) => resolveExamName(name, { rpcUrl }) });
-  }, [reader, registry, writers, rpcUrl, reads]);
-  const history = usePoll(loadHistory, null);
+  const history = useExamHistory(reads);
 
   const loadSearch = useMemo(() => {
     if (!reader || !registry || writers.length === 0 || query === null) return null;

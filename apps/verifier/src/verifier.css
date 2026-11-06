@@ -317,3 +317,143 @@
   border: 1px solid var(--ps-rule);
   border-radius: var(--ps-radius);
 }
+
+/* ---- Layout and hierarchy ----
+ * The verifier is read on wide screens as often as on phones, so it gets a wider page than the
+ * role screens, with prose kept to a readable measure. Cards lift a little off the paper, so the
+ * page reads as layers instead of outlines. */
+
+.vf-page {
+  --vf-lift: 0 1px 2px rgb(60 44 20 / 0.06), 0 8px 24px -14px rgb(60 44 20 / 0.22);
+  --vf-tint-ok: color-mix(in srgb, var(--ps-pass) 11%, var(--ps-field));
+  --vf-tint-bad: color-mix(in srgb, var(--ps-fail) 9%, var(--ps-field));
+  --vf-tint-warn: color-mix(in srgb, var(--ps-pending) 10%, var(--ps-field));
+  --vf-tint-now: color-mix(in srgb, var(--ps-wax) 9%, var(--ps-field));
+}
+
+:root[data-theme='dark'] .vf-page {
+  --vf-lift: none;
+}
+
+.ps-shell.vf-page {
+  max-width: 1040px;
+}
+
+.vf-page .ps-stage-lede,
+.vf-page .ps-stage-next,
+.vf-page .ps-step-note,
+.vf-page .ps-panel > p {
+  max-width: 68ch;
+}
+
+.vf-page .ps-stage-title {
+  font-size: clamp(1.875rem, 1.1rem + 2.2vw, 2.75rem);
+  line-height: 1.12;
+  letter-spacing: -0.015em;
+}
+
+.vf-page .ps-stage-lede {
+  font-size: 1.0625rem;
+}
+
+.vf-page .ps-stage-action,
+.vf-page .ps-panel,
+.vf-page .ps-stepper,
+.vf-glance > div {
+  box-shadow: var(--vf-lift);
+}
+
+.vf-page .ps-panel h2 {
+  font-size: 1.375rem;
+}
+
+/* At a glance: the label is quiet, the value is the thing to read. */
+.vf-glance dt {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.vf-glance dd {
+  margin-top: var(--ps-space-1);
+  font-family: var(--ps-serif);
+  font-size: 1.125rem;
+  font-weight: 400;
+  line-height: 1.35;
+}
+
+/* ---- The chain of custody ---- */
+
+.vf-page .ps-step-label {
+  font-size: 1.25rem;
+}
+
+@media (min-width: 720px) {
+  .vf-page .ps-step {
+    grid-template-columns: 9.5rem 24px minmax(0, 1fr);
+  }
+}
+
+/* Each step's state is a pill in its own colour, so a scan down the right edge shows the whole exam. */
+.vf-page .ps-step-state {
+  padding: 2px 10px;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  white-space: nowrap;
+  background: var(--ps-paper-deep);
+  border-radius: 999px;
+}
+
+.vf-page .ps-step[data-state='done'] .ps-step-state {
+  color: var(--ps-pass);
+  background: var(--vf-tint-ok);
+}
+
+.vf-page .ps-step[data-state='current'] .ps-step-state {
+  background: var(--vf-tint-now);
+}
+
+.vf-page .ps-step[data-state='failed'] .ps-step-state {
+  background: var(--vf-tint-bad);
+}
+
+.vf-page .ps-step[data-state='done'] .ps-step-marker {
+  background: var(--ps-pass);
+  border-color: var(--ps-pass);
+}
+
+.vf-page .ps-step[data-state='done'] .ps-step-rail::before {
+  background: var(--ps-pass);
+}
+
+/* ---- Alarms ----
+ * A failure must never look like the brand. The wax is a deep red seal; a failure is a tinted
+ * block with a heavy left rule, so the two can't be confused even side by side. */
+
+.vf-alarm {
+  background: var(--vf-tint-bad);
+  border-inline-start-width: 5px;
+  box-shadow: var(--vf-lift);
+}
+
+.vf-alarm h2 {
+  font-size: 1.375rem;
+}
+
+.vf-warnings {
+  background: var(--vf-tint-warn);
+  border-inline-start-width: 5px;
+}
+
+/* On a phone the seal is a badge beside the headline's start, not a poster above it. */
+@media (max-width: 719px) {
+  .vf-page .ps-stage-seal .ps-seal {
+    width: 96px;
+  }
+}
+
+/* The AI check card spans the column like the cards below it, so the page has one edge. */
+.vf-page .ps-stage-action.vf-agent {
+  max-width: none;
+}
