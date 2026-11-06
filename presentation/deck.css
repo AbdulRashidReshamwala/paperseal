@@ -51,6 +51,18 @@ h1 em{font-style:normal;color:var(--wax)}
 .quote cite{display:block;margin-top:44px;font-style:normal;font-size:28px;color:#aea897}
 .quote cite b{display:block;color:var(--paper);font-weight:600;font-size:32px}
 
+/* intro */
+.intro{justify-content:center}
+.intro .brand{display:flex;align-items:center;gap:20px;font-family:var(--serif);font-size:44px;margin-bottom:40px}
+.intro .brand svg{width:72px;height:72px}
+.intro .lede2{font-family:var(--serif);font-size:46px;line-height:1.3;color:var(--ink-soft);margin-top:32px;max-width:1500px}
+.three{display:grid;grid-template-columns:repeat(3,1fr);margin-top:72px;border-top:3px solid var(--ink);list-style:none;padding:0}
+.three li{padding:28px 40px 0 0}
+.three li+li{padding-left:40px;border-left:1px solid var(--rule)}
+.three .n{font-family:var(--code);font-size:22px;color:var(--wax)}
+.three h3{font-family:var(--serif);font-size:48px;margin:6px 0 10px}
+.three p{font-size:27px;line-height:1.4;color:var(--ink-soft)}
+
 /* chain */
 .chain{display:flex;margin-top:72px;border-top:3px solid var(--ink)}
 .chain li{list-style:none;flex:1;padding:24px 0 0}
