@@ -24,7 +24,7 @@ export function boardTests(lab: () => Lab): void {
   describe('board', () => {
     let board: Actor;
 
-    it('create, version, review, publish and the wrong account', async () => {
+    it('create, review, publish and the wrong account', async () => {
       const { web, chain } = lab();
       board = await openActor(lab().browser, 'board', null, { role: 'board', wallet: testWalletScript(chain.rpcUrl) });
       const page = board.page;
@@ -51,36 +51,31 @@ export function boardTests(lab: () => Lab): void {
         await board.shot('03-create-filled');
         await page.getByRole('button', { name: button.continue }).click();
       });
-      await board.flow('choose the version', async () => {
-        await board.seeHeading(text.versionHeading);
-        await board.shot('04-version-loading');
+      await board.flow('review, choose the version and publish', async () => {
+        await board.seeHeading(text.reviewHeading, 60_000);
+        await board.shot('04-review');
+        // The version is a row in the review. The newest checked one is already chosen, and another is folded away.
         const other = page.locator('summary', { hasText: fold.differentVersion });
         await other.waitFor({ timeout: 60_000 });
         await other.click();
         await page.locator('details', { has: other }).locator('select').selectOption({ label: 'v0.1.0' });
-        const use = page.getByRole('button', { name: button.useVersion });
-        await use.waitFor({ timeout: 30_000 });
         await unfold(page, fold.examRecord);
-        await board.see('The tag points at this commit');
-        await board.shot('05-version-picked');
-        await use.click();
-      });
-      await board.flow('review and publish', async () => {
-        await board.seeHeading(text.reviewHeading);
-        await board.shot('06-review');
+        await board.see('This version matches its published release', 60_000);
+        await board.shot('05-review-version-picked');
         await page.evaluate(() => {
           (window as unknown as { __testWalletIndex: number }).__testWalletIndex = 1;
         });
         await page.getByRole('button', { name: button.publish }).click();
         await board.see(text.wrongAccount);
-        await board.shot('07-review-wrong-account');
+        await board.shot('06-review-wrong-account');
         await page.evaluate(() => {
           (window as unknown as { __testWalletIndex: number }).__testWalletIndex = 0;
         });
         await page.getByRole('button', { name: button.publish }).click();
-        await board.seeHeading(text.publishedHeading, 60_000);
-        await board.shot('08-published');
-        await page.getByRole('button', { name: button.bringPeople }).click();
+        // A correct read-back goes straight to the invites, under a Published stamp.
+        await board.seeHeading(text.peopleHeading, 60_000);
+        await board.see(text.publishedStamp, 5_000);
+        await board.shot('07-published');
       });
       expect(await hashOf(page, 'exam ID').catch(() => '')).toBeDefined();
     });
@@ -139,8 +134,8 @@ export function boardTests(lab: () => Lab): void {
       });
       await board.flow('post the list is refused without a trusted TEE', async () => {
         const body = await board.text();
-        // 3 neutral parties and 7 centres with keys are needed, and a stub cannot attest.
-        expect(body).toMatch(/exactly 3 neutral|not trusted|attestation|sealed machine/i);
+        // 3 key holders and 7 centres holding part of the key are needed, and the stub has too few registered.
+        expect(body).toMatch(/exactly 3 key holders|not complete yet|Paper Seal is not ready/i);
         await board.shot('14-people-cannot-post');
       });
     });
@@ -163,13 +158,13 @@ export function boardTests(lab: () => Lab): void {
         await board.see(/Setters are sending questions/, 30_000);
         await board.shot('16-wait-submit');
         tee.state.stage = 'failed';
-        await board.seeHeading('The sealed machine stopped', 30_000);
+        await board.seeHeading('The paper could not be built', 30_000);
         await board.shot('17-wait-failed');
         tee.state.stage = 'submit';
       });
       await board.flow('wait screen after questions close', async () => {
         await open('UI wait closed', timings.over, 'submit');
-        await board.seeHeading('The sealed machine is building the paper');
+        await board.seeHeading('The paper is being built');
         await board.shot('18-wait-closed');
       });
     });

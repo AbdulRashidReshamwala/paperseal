@@ -92,13 +92,13 @@ export function holderTests(lab: () => Lab): void {
           await a.page.getByRole('button', { name: button.register }).waitFor();
           await a.shot(`10-${role}-register`);
           await a.page.getByRole('button', { name: button.register }).click();
-          await a.see(/security key is registered|You are registered|Waiting for your exam board/, 30_000).catch(async (e) => {
+          await a.see(/security key is registered|You are registered|Nothing to do yet/, 30_000).catch(async (e) => {
             throw new Error(`${role} after register: ${(await a.text()).slice(0, 400)} ${String(e).slice(0, 80)}`);
           });
           await a.shot(`11-${role}-registered`);
           // A reload comes back to the same place, from the stored credential.
           await a.page.reload();
-          await a.see(/security key is registered|You are registered|Waiting for your exam board/, 30_000);
+          await a.see(/security key is registered|You are registered|Nothing to do yet/, 30_000);
         });
       }
       expect(lab().tee.state.registrations.length).toBeGreaterThanOrEqual(3);
@@ -160,7 +160,7 @@ export function holderTests(lab: () => Lab): void {
       });
       await kh.flow('key not on the list', async () => {
         await prep(timings.future, 'submit', 'list-without-me');
-        await kh.seeHeading(/not on the approved list/, 30_000);
+        await kh.seeHeading(/not on the list for this exam/, 30_000);
         await kh.shot('22-not-on-list');
       });
       await kh.flow('release is refused without a trusted machine', async () => {
@@ -176,30 +176,30 @@ export function holderTests(lab: () => Lab): void {
       });
       await kh.flow('machine states', async () => {
         const { me } = await prep(timings.unlocked, 'submit', 'list-with-me');
-        await kh.seeHeading(/Waiting for the sealed machine/, 30_000);
+        await kh.seeHeading(text.waitingForPaperSeal, 30_000);
         await kh.shot('25-machine-waiting');
         tee.state.stage = 'failed';
-        await kh.seeHeading(/sealed machine has stopped/, 30_000);
+        await kh.seeHeading(text.paperSealStopped, 30_000);
         await kh.shot('26-machine-failed');
         tee.state.stage = 'unlock';
         tee.state.mode = 'down';
         await kh.page.reload();
-        await kh.see(/can't be reached|Waiting for the sealed machine|Checking the exam/, 30_000);
+        await kh.see(/Can.t connect right now|Waiting for Paper Seal|Checking the exam/, 30_000);
         tee.state.mode = 'drop';
         await kh.page.reload();
-        await kh.seeHeading(/can't be reached/, 40_000);
+        await kh.seeHeading(text.cantConnect, 40_000);
         await kh.shot('27-machine-unreachable');
         tee.state.mode = 'ok';
         tee.state.stage = 'unlock';
         tee.state.released = [me.passkeyPublicKey];
         await kh.page.reload();
-        await kh.seeHeading(/Done/, 30_000);
+        await kh.seeHeading(text.keyHolderDone, 30_000);
         await kh.shot('28-done-released');
         tee.state.released = [];
         tee.state.stage = 'released';
         await kh.page.reload();
-        await kh.seeHeading(/Done/, 30_000);
-        await kh.see(/not needed/);
+        await kh.seeHeading(text.keyHolderDone, 30_000);
+        await kh.see(/was not needed/);
         await kh.shot('29-not-needed');
       });
       await kh.flow('no exam published', async () => {
@@ -225,13 +225,13 @@ export function holderTests(lab: () => Lab): void {
       };
       await c.flow('no paper yet', async () => {
         await prep(timings.future, 'submit', true, false);
-        await c.seeHeading(/The paper has not been sealed yet/, 30_000);
+        await c.seeHeading(/The paper is not ready yet/, 30_000);
         await c.shot('40-awaiting-build');
       });
       await c.flow('download that cannot be checked', async () => {
         await prep(timings.future, 'submit', true, true);
-        await c.seeHeading(/Getting the sealed paper|sealed paper failed its check/, 30_000);
-        await c.see(/can't be downloaded yet|failed its check|Download check/, 30_000);
+        await c.seeHeading(/Getting the sealed paper|did not pass its check/, 30_000);
+        await c.see(/not ready to download yet|did not pass its check|Downloading and checking/, 30_000);
         await c.shot('41-files-unavailable');
       });
       await c.flow('release for a centre with a share is refused without a trusted machine', async () => {
@@ -249,10 +249,10 @@ export function holderTests(lab: () => Lab): void {
         await c.seeHeading(/Waiting for key holders/, 30_000);
         await c.shot('44-no-share-holders');
         tee.state.stage = 'submit';
-        await c.seeHeading(/Waiting for the sealed machine/, 30_000);
+        await c.seeHeading(text.waitingForPaperSeal, 30_000);
         await c.shot('45-machine-waiting');
         tee.state.stage = 'failed';
-        await c.seeHeading(/sealed machine has stopped/, 30_000);
+        await c.seeHeading(text.paperSealStopped, 30_000);
         await c.shot('46-machine-failed');
         tee.state.stage = 'released';
         await c.see(/Getting the sealed paper|Open the paper/, 30_000);
@@ -269,13 +269,13 @@ export function holderTests(lab: () => Lab): void {
         tee.state.mode = 'ok';
         await s.page.goto(`${lab().web.url}/#/setter?exam=${open.examId}`);
         await s.page.reload();
-        await s.seeHeading(/Registration hasn.t opened yet/, 30_000);
+        await s.seeHeading(/Nothing to do yet/, 30_000);
         await s.shot('50-not-open');
         tee.state.stage = 'onboard';
         const reg = await enroll(s, open, 'setter');
         await s.page.goto(`${lab().web.url}/#/setter?exam=${open.examId}`);
         await s.page.reload();
-        await s.seeHeading(/Waiting for your exam board/, 30_000);
+        await s.seeHeading(/Nothing to do yet/, 30_000);
         await s.shot('51-waiting');
         await postListDirect(chain, open.examId, listWith({ setter: reg }));
         tee.state.stage = 'submit';
@@ -284,7 +284,7 @@ export function holderTests(lab: () => Lab): void {
         await s.shot('52-write-refused-untrusted-machine');
         tee.state.mode = 'down';
         await s.page.reload();
-        await s.see(/Can.t reach the sealed system|Opening your exam/, 30_000);
+        await s.see(/Can.t connect right now|Opening your exam/, 30_000);
         await s.shot('53-unreachable');
         tee.state.mode = 'ok';
         await postBuildDirect(chain, open.examId, open.criteriaHash);
