@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { createExamRegistry } from '@paperseal/chain';
-import { encodeMessage, examIdFromName, firstRoundAtOrAfter, encodeCriteria, criteriaHash, fromHex, inviteTag, roles, setterOwner, toHex, type Hex, type InviteRole } from '@paperseal/protocol';
+import { createExamRegistry, type EnsLookup } from '@paperseal/chain';
+import { encodeMessage, ens, examIdFromName, passkeyRecordValue, firstRoundAtOrAfter, encodeCriteria, criteriaHash, fromHex, inviteTag, roles, setterOwner, toHex, type Hex, type InviteRole } from '@paperseal/protocol';
 import type { OutboxMessage, RegistrationEntry, StatusResponse, TeeClient } from '@paperseal/tee-client';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { createPublicClient, type Address } from 'viem';
@@ -672,5 +672,122 @@ describe('landing page', () => {
   it('ignores anything that is not an exam ID', () => {
     home('/?exam=0x1234');
     expect(getCurrentExamId()).toBeNull();
+  });
+});
+
+describe('step 3, ENS names for key holders and centres', () => {
+  const storedInvites = () => JSON.parse(localStorage.getItem(`paperseal.invites.${examId}`) ?? '[]') as BoardInvite[];
+  const addInvite = (role: string, text: string) => {
+    fireEvent.change(screen.getByLabelText('Role'), { target: { value: role } });
+    fireEvent.change(screen.getByLabelText(/^(Name to show on the public list|A note for yourself)/), { target: { value: text } });
+    fireEvent.click(button('Add invite'));
+  };
+
+  const asha = holder(0, 'asha.eth');
+  const ashaValue = passkeyRecordValue(asha.registration.passkeyPublicKey);
+  const others = [...neutrals.slice(1), ...centres, setter];
+
+  /** The reads of ENS, with `record` standing for what `asha.eth`'s paperseal.passkey says. */
+  function ensLookup(record: string | null | (() => Promise<string | null>), owner = 'asha.eth'): EnsLookup {
+    const read = typeof record === 'function' ? record : () => Promise.resolve(record);
+    return {
+      address: (n) => Promise.resolve(n === owner ? ('0x00000000000000000000000000000000000000ee' as Address) : null),
+      primaryName: () => Promise.resolve(null),
+      text: (n, k) => (n === owner && k === ens.records.passkey ? read() : Promise.resolve(null)),
+      code: () => Promise.resolve(undefined),
+      board: () => Promise.reject(new Error('not read')),
+    };
+  }
+
+  async function open(record: Parameters<typeof ensLookup>[0], registered: readonly Person[] = [asha, ...others]) {
+    const { env } = await seeded('exam');
+    stock([asha, ...others]);
+    renderBoard({ ...env, ensLookup: ensLookup(record) }, fakeTee({ registrations: registrationsOf(registered) }));
+  }
+
+  it('recognises an ENS name, refuses one that is not normalised, and still takes a plain name', async () => {
+    const { env } = await seeded('exam');
+    renderBoard({ ...env, ensLookup: ensLookup(null) }, fakeTee());
+    await screen.findByRole('heading', { name: 'Invite people' });
+    fireEvent.change(screen.getByLabelText(/^Name to show on the public list/), { target: { value: 'dr-rao.eth' } });
+    expect(screen.getByText(/This is an ENS name/)).toBeTruthy();
+    addInvite('keyholder', 'Dr-Rao.eth');
+    expect(await screen.findByText(/Did you mean dr-rao\.eth\?/)).toBeTruthy();
+    expect(storedInvites()).toHaveLength(0);
+    addInvite('keyholder', 'Dr. Rao');
+    await screen.findByText('Dr. Rao (Key holder)');
+    addInvite('keyholder', 'dr-rao.eth');
+    await screen.findByText('dr-rao.eth (Key holder)');
+    expect(storedInvites().map((i) => i.owner)).toEqual(['Dr. Rao', 'dr-rao.eth']);
+  });
+
+  it('shows a waiting ENS invite as found on the name, and says Sepolia names prove nothing', async () => {
+    const { env } = await seeded('exam');
+    stock([asha]);
+    renderBoard({ ...env, ensLookup: ensLookup(null) }, fakeTee());
+    await screen.findByText('Name found');
+    expect(screen.getByText('Waiting for them to register')).toBeTruthy();
+    expect(screen.getByText(/Sepolia, a test network, where anyone can register a similar name/)).toBeTruthy();
+  });
+
+  it('confirms a key holder whose record is the hash of the registered key, and lists them', async () => {
+    await open(ashaValue);
+    await screen.findByText('Name confirmed');
+    expect(screen.getByText('3 of 3')).toBeTruthy();
+  });
+
+  it('keeps a key holder off the list when the record names another key, whatever the board chooses', async () => {
+    await open(passkeyRecordValue(key(77)));
+    await screen.findByText(/is for a different security key, so they are not on the list/);
+    expect(screen.getByText('2 of 3')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Go ahead without the name/ })).toBeNull();
+    expect(button('Make a new link for asha.eth (Key holder)')).toBeTruthy();
+    expect(button('Post the list').disabled).toBe(true);
+  });
+
+  it('waits for a missing record, and lets the board go ahead with the name marked unconfirmed', async () => {
+    await open(null);
+    await screen.findByText(/Waiting for asha\.eth to be set up with their security key/);
+    expect(screen.getByText('2 of 3')).toBeTruthy();
+    fireEvent.click(button('Go ahead without the name for asha.eth (Key holder)'));
+    await screen.findByText('On the list, but asha.eth is not confirmed.');
+    expect(screen.getByText('3 of 3')).toBeTruthy();
+    expect(storedInvites().find((i) => i.owner === 'asha.eth')?.goAhead).toBe(true);
+    fireEvent.click(button('Wait for the name for asha.eth (Key holder)'));
+    await screen.findByText(/Waiting for asha\.eth/);
+    expect(storedInvites().find((i) => i.owner === 'asha.eth')?.goAhead).toBeUndefined();
+  });
+
+  it('treats a name the chain refuses to answer as unconfirmed, not as a failure', async () => {
+    await open(() => Promise.reject(new Error('gateway needed')));
+    await screen.findByText(/can't be read right now/);
+    expect(screen.getByText('2 of 3')).toBeTruthy();
+  });
+
+  it('reads a key holder only once their key has registered, so a waiting invite never reads a record', async () => {
+    const text = vi.fn(() => Promise.resolve(null));
+    const { env } = await seeded('exam');
+    stock([asha]);
+    renderBoard({ ...env, ensLookup: { ...ensLookup(null), text } }, fakeTee());
+    await screen.findByText('Name found');
+    expect(text).not.toHaveBeenCalled();
+  });
+
+  it('leaves a centre on the list whatever its name says, and says the name proves nothing about independence', async () => {
+    const north = holder(20, 'north.centres.maths-board.eth', 'centre');
+    const { env } = await seeded('exam');
+    stock([...everyone.filter((p) => p.invite.role !== 'centre' || p.invite.owner !== 'Centre 1'), north]);
+    const registered = [...registrationsOf(everyone.filter((p) => p.invite.owner !== 'Centre 1')), north.registration];
+    renderBoard({ ...env, ensLookup: ensLookup(null, 'north.centres.maths-board.eth') }, fakeTee({ registrations: registered }));
+    await screen.findByText(/is a name for the list\. It does not show that this centre is independent\./);
+    expect(screen.getByText('7 of 7')).toBeTruthy();
+  });
+
+  it('without a way to read names, keeps the key holder waiting and lets the board go ahead', async () => {
+    const { env } = await seeded('exam');
+    stock([asha, ...others]);
+    renderBoard(env, fakeTee({ registrations: registrationsOf([asha, ...others]) }));
+    await screen.findByText(/asha\.eth can't be read from this page/);
+    expect(screen.getByText('2 of 3')).toBeTruthy();
   });
 });
