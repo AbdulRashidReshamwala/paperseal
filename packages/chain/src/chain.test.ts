@@ -458,7 +458,7 @@ describe('scanEvents', () => {
   const built = (id: Hex, block: bigint) =>
     eventLog('BuildPosted', id, block, 1, [
       `0x${'44'.repeat(32)}`, `0x${'55'.repeat(32)}`, `0x${'66'.repeat(32)}`, `0x${'77'.repeat(32)}`, 30, 300,
-      criteriaHashOf(criteria), '0xaa', `0x04${'05'.repeat(64)}`,
+      criteriaHashOf(criteria), 900n, '0xaa', `0x04${'05'.repeat(64)}`,
     ]);
 
   /** Answers eth_blockNumber with `head`, and eth_getLogs with the `logs` inside the asked range. */

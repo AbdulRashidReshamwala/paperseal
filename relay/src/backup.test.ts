@@ -301,11 +301,8 @@ describe('backup refusals upload nothing and write nothing', () => {
 
   const unlocked = (replace: Record<string, Uint8Array | null> = {}) => {
     const files: Record<string, Uint8Array> = { ...buildFiles, [storageNames.manifest]: manifestBytes(), ...unlockStorage() };
-    for (const [name, bytes] of Object.entries(replace)) {
-      if (bytes === null) delete files[name];
-      else files[name] = bytes;
-    }
-    return files;
+    const entries = Object.entries({ ...files, ...replace }).filter((entry): entry is [string, Uint8Array] => entry[1] !== null);
+    return Object.fromEntries(entries);
   };
 
   it("when the release log's entriesHash is not its entries' hash", async () => {

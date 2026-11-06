@@ -308,7 +308,7 @@ export function timelockRound(bytes: Uint8Array): string {
   try {
     age = readAge(decodeArmor(text));
   } catch (error) {
-    throw new Error(`it is not an age file: ${errorText(error)}`);
+    throw new Error(`it is not an age file: ${errorText(error)}`, { cause: error });
   }
   if (age.header.version !== 'age-encryption.org/v1') throw new Error(`its age version is ${JSON.stringify(age.header.version)}`);
   if (age.header.recipients.length !== 1) throw new Error(`it has ${String(age.header.recipients.length)} recipient stanzas, not one`);
