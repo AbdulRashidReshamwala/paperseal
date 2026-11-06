@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import type { ReleaseContext } from '../../release/flow';
 import { Gate, TechnicalDetail } from '../../release/Gate';
-import { useExamTitle } from '../../shared/NamedExam';
+import { useExamTitle, useVerifiedExamName } from '../../shared/NamedExam';
 import { useHolderProgress, type HolderProgress, type ProgressActions } from '../../release/progress';
 import { ReleaseCount, ReleaseStage, releaseContext } from '../../release/ReleaseStage';
 import { HandOutStage } from './HandOut';
@@ -72,6 +72,7 @@ export function CentreView(props: {
 }) {
   const { progress, actions, context, files, open, justReleased } = props;
   const title = useExamTitle(progress.examId);
+  const examName = useVerifiedExamName(progress.examId);
   // Handing out is a demonstration kept in this page's memory, next to the paper.
   const handOut = useHandOut(props.handOutStepMs);
   const [handingOut, setHandingOut] = useState(false);
@@ -229,6 +230,8 @@ export function CentreView(props: {
     }
   }
 
+  const paper = open.paper ? <PaperSheet paper={open.paper} title={examName} onPrint={printPaper} /> : null;
+
   return (
     <Page header={<RoleHeader role="Exam centre" exam={title} {...(progress.credential ? { note: progress.credential.owner } : {})} />}>
       <div className="centre-noprint">
@@ -237,10 +240,11 @@ export function CentreView(props: {
             <Seal state={seal} size={stage === 'paper-open' ? 112 : 168} caption />
           </div>
         ) : null}
-        {/* A form reads left-aligned. Every other centre screen is centred under the seal. */}
-        <div className={stage === 'register' ? 'centre-form' : 'centre-stage'}>{body()}</div>
       </div>
-      {open.paper ? <PaperSheet paper={open.paper} /> : null}
+      {stage === 'paper-open' ? paper : null}
+      {/* A form reads left-aligned. Every other centre screen is centred under the seal. */}
+      <div className={`centre-noprint ${stage === 'register' ? 'centre-form' : 'centre-stage'}`}>{body()}</div>
+      {stage === 'paper-open' ? null : paper}
       {released ? <div className="centre-noprint">{props.log ?? <UnlockLog />}</div> : null}
     </Page>
   );

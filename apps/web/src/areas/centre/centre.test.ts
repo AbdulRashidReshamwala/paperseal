@@ -26,6 +26,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { StorageVerificationError } from '../../shared/storage';
 import { verifiedLogForUnlock, verifyReleaseLog, type CheckedLog } from './logCheck';
 import { downloadPaperFiles } from './download';
+import { paginate, paperItems } from './paperPages';
 import { KeyFileChangedError, PaperHashMismatchError, prepareUnlock, unlockPaper, type UnlockContext } from './unlock';
 
 const examId: Hex = `0x${'11'.repeat(32)}`;
@@ -343,5 +344,43 @@ describe('verifyReleaseLog', () => {
     expect((await verifyReleaseLog({ ...log, instancePublicKey: other.instancePublicKey }, { examId }, 'jwt', good)).signature).toBe(false);
     const changed = { ...log, entries: [{ ...(log.entries[0] as (typeof log.entries)[number]), round: '43' }] };
     expect(await verifyReleaseLog(changed, { examId }, 'jwt', good)).toMatchObject({ pass: false, entriesHash: false });
+  });
+});
+
+describe('the paper pages', () => {
+  it('numbers straight through and groups a topic that comes back', () => {
+    const items = paperItems({
+      examId: `0x${'11'.repeat(32)}`,
+      questions: [
+        { topic: 'Waves', text: 'one' },
+        { topic: 'Heat', text: 'two' },
+        { topic: 'Waves', text: 'three' },
+      ],
+    });
+    expect(items.map((item) => [item.number, item.question.text, item.opensTopic])).toEqual([
+      [1, 'one', true],
+      [2, 'three', false],
+      [3, 'two', true],
+    ]);
+  });
+
+  it('never splits a question, and covers every question once', () => {
+    expect(paginate([40, 40, 40, 40, 40], 100)).toEqual([
+      { start: 0, end: 2 },
+      { start: 2, end: 4 },
+      { start: 4, end: 5 },
+    ]);
+  });
+
+  it('gives a question taller than a page its own page, which grows, so nothing is cut off', () => {
+    expect(paginate([40, 250, 40], 100)).toEqual([
+      { start: 0, end: 1 },
+      { start: 1, end: 2, tallBy: 250 },
+      { start: 2, end: 3 },
+    ]);
+  });
+
+  it('has one empty page for no questions', () => {
+    expect(paginate([], 100)).toEqual([{ start: 0, end: 0 }]);
   });
 });

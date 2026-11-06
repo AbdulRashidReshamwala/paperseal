@@ -61,28 +61,150 @@
   color: var(--ps-ink-soft);
 }
 
-.paper-sheet {
-  max-width: 44rem;
-  padding-top: var(--ps-space-5);
-  margin: var(--ps-space-6) auto 0;
-  font-size: 1.25rem;
-  line-height: 1.6;
-  border-top: 1px solid var(--ps-rule);
+/* The paper in a viewer: white A4 pages on a grey desk, laid out at full size and scaled as a whole. */
+.paper-viewer {
+  --paper-width: min(100vw - var(--ps-space-4) * 2, 860px);
+
+  /* The pages need more room than the column, so the viewer stands wider than it, centred on it. */
+  width: var(--paper-width);
+  margin-block: var(--ps-space-5) var(--ps-space-6);
+  margin-left: calc((100% - var(--paper-width)) / 2);
+  overflow: hidden;
+  border: 1px solid var(--ps-rule);
+  border-radius: var(--ps-radius);
 }
 
-.paper-sheet-title {
-  margin: 0 0 var(--ps-space-5);
-  font-size: var(--ps-text-title);
+.paper-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-2) var(--ps-space-4);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--ps-space-1) var(--ps-space-2);
+  font: 500 var(--ps-text-small) / 1.3 var(--ps-sans);
+  color: var(--ps-ink);
+  background: var(--ps-field);
+  border-bottom: 1px solid var(--ps-rule);
 }
 
+.paper-toolbar-end {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-2) var(--ps-space-4);
+  align-items: center;
+}
+
+.paper-tools {
+  display: flex;
+  gap: var(--ps-space-1);
+  align-items: center;
+}
+
+.paper-tool {
+  min-width: 36px;
+  min-height: 36px;
+  padding: var(--ps-space-1) var(--ps-space-2);
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--ps-radius);
+}
+
+.paper-tool:hover:not(:disabled) {
+  background: var(--ps-paper-deep);
+}
+
+.paper-tool:disabled {
+  color: var(--ps-ink-soft);
+  cursor: not-allowed;
+}
+
+.paper-tool[aria-pressed='true'] {
+  border-color: var(--ps-rule-strong);
+}
+
+.paper-count {
+  color: var(--ps-ink-soft);
+}
+
+.paper-zoom {
+  min-width: 3em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The desk scrolls on its own, so the page below it stays reachable. */
+.paper-scroll {
+  max-height: min(72vh, 760px);
+  padding: var(--ps-space-4);
+  overflow: auto;
+  background: #d8d8dc;
+}
+
+.paper-viewer[data-view='raw'] .paper-scroll {
+  height: 0;
+  padding-block: 0;
+  overflow: hidden;
+  visibility: hidden;
+}
+
+/* A frame takes up the scaled page's room, because a transform leaves the layout at full size. */
+.paper-frame {
+  width: calc(210mm * var(--paper-scale));
+  height: calc(var(--page-height, 297mm) * var(--paper-scale));
+  margin: 0 auto var(--ps-space-3);
+}
+
+.paper-frame:last-child {
+  margin-bottom: 0;
+}
+
+.paper-page {
+  display: flex;
+  flex-direction: column;
+  width: 210mm;
+  height: var(--page-height, 297mm);
+  padding: 14mm 20mm 12mm;
+  font: 400 12pt / 1.5 var(--ps-serif);
+  color: black;
+  background: white;
+  box-shadow: 0 1px 6px rgb(0 0 0 / 25%);
+  transform: scale(var(--paper-scale));
+  transform-origin: top left;
+}
+
+.paper-page-head {
+  padding-bottom: 2mm;
+  margin: 0 0 6mm;
+  font: 400 10pt / 1.4 var(--ps-serif);
+  overflow-wrap: anywhere;
+  color: var(--ps-ink-soft);
+  text-align: center;
+  border-bottom: 1px solid var(--ps-rule);
+}
+
+.paper-page-body {
+  flex: 1;
+}
+
+.paper-page-foot {
+  margin: 4mm 0 0;
+  font-size: 10pt;
+  color: var(--ps-ink-soft);
+  text-align: center;
+}
+
+/* Spacing is padding, not margin, so a question's measured height is all the room it takes. */
 .paper-sheet-topic h3 {
-  margin: var(--ps-space-6) 0 var(--ps-space-3);
-  font-size: var(--ps-text-section);
+  padding-block: 3mm 2mm;
+  margin: 0;
+  font: 700 13pt / 1.4 var(--ps-serif);
+  overflow-wrap: anywhere;
 }
 
 .paper-sheet ol {
-  display: grid;
-  gap: var(--ps-space-4);
   padding-left: 2em;
   margin: 0;
 }
@@ -92,17 +214,40 @@
   white-space: pre-wrap;
 }
 
+.paper-sheet [data-block]:not(h3) {
+  padding-bottom: 3mm;
+}
+
 /* Options sit under their question as A, B, C, in the order the paper holds them. */
 .paper-sheet .paper-options {
-  gap: var(--ps-space-2);
   padding-left: 2em;
-  margin-top: var(--ps-space-2);
+  margin-top: 1mm;
   list-style-type: upper-alpha;
 }
 
+.paper-raw {
+  background: var(--ps-surface);
+}
+
+.paper-raw-copy {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--ps-space-2) var(--ps-space-2) 0;
+}
+
+.paper-raw pre {
+  max-height: min(72vh, 760px);
+  padding: var(--ps-space-2) var(--ps-space-4) var(--ps-space-4);
+  margin: 0;
+  overflow: auto;
+  font: 400 var(--ps-text-code) / 1.6 var(--ps-code);
+}
+
 @media print {
+  /* Each sheet is a page exactly as the viewer laid it out, margins included, so nothing moves between screen and print. */
   @page {
-    margin: 18mm;
+    size: A4;
+    margin: 0;
   }
 
   /* Black on white whatever the screen's theme, because carbon paper's ink would print pale. */
@@ -117,7 +262,9 @@
   }
 
   .ps-role,
-  .centre-noprint {
+  .centre-noprint,
+  .paper-toolbar,
+  .paper-raw {
     display: none;
   }
 
@@ -127,31 +274,53 @@
     padding: 0;
   }
 
-  .paper-sheet {
-    max-width: none;
-    padding: 0;
+  .paper-viewer {
+    width: auto;
     margin: 0;
-    font-size: 12pt;
-    line-height: 1.5;
-    color: black;
+    overflow: visible;
     border: 0;
+    border-radius: 0;
   }
 
-  .paper-sheet-title {
-    font-size: 18pt;
+  /* Printed from the raw data too: the pages are always the paper. */
+  .paper-scroll,
+  .paper-viewer[data-view='raw'] .paper-scroll {
+    height: auto;
+    max-height: none;
+    padding: 0;
+    overflow: visible;
+    visibility: visible;
+    background: none;
   }
 
-  .paper-sheet-topic h3 {
-    font-size: 14pt;
-    break-after: avoid;
+  .paper-frame {
+    width: auto;
+    height: auto;
+    margin: 0;
+    break-after: page;
   }
 
-  .paper-sheet li {
-    break-inside: avoid;
+  .paper-frame:last-child {
+    break-after: auto;
   }
 
-  .paper-sheet .paper-options {
-    gap: 2pt;
+  .paper-page {
+    box-shadow: none;
+    transform: none;
+  }
+
+  /* A question too tall for one sheet runs on to the next, because cutting it off would lose it. */
+  .paper-frame[data-tall] .paper-page {
+    height: auto;
+  }
+
+  .paper-page-head,
+  .paper-page-foot {
+    color: black;
+  }
+
+  .paper-page-head {
+    border-color: black;
   }
 }
 
