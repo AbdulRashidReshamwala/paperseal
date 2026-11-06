@@ -10,6 +10,11 @@ export default defineConfig(({ command, mode }) => {
   if (mode !== 'mock' && loadEnv(mode, process.cwd(), 'VITE_').VITE_MOCK_TRUST_ROOT) {
     throw new Error('VITE_MOCK_TRUST_ROOT is set outside mock mode. Unset it: a test attestation root must never reach a real build.');
   }
+  // Demo keys are planted from a public seed (src/shared/demoKeys.ts). They exist for dev servers only, never a build.
+  if (command === 'build' && mode === 'demo-keys') throw new Error('Demo keys are for `pnpm demo:keys` and cannot be built.');
+  if (mode !== 'demo-keys' && mode !== 'mock' && loadEnv(mode, process.cwd(), 'VITE_').VITE_DEMO_KEYS) {
+    throw new Error('VITE_DEMO_KEYS is set outside the demo. Unset it: planted keys must never reach a real build.');
+  }
   return config;
 });
 

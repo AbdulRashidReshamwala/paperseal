@@ -5,6 +5,7 @@ import { Check, KeyTouch, securityKeyProblem, Stage, type KeyTouchState } from '
 import { useState, type ReactNode } from 'react';
 
 import { useCurrentExamId } from './currentExam';
+import { credentialsOption } from './demoKeys';
 import { credentialIsForInvite, useInvite } from './invite';
 import { tee as defaultTee } from './tee';
 
@@ -64,7 +65,7 @@ export function saveCredential(examId: Hex, credential: StoredCredential): void 
 
 /** The browser's real WebAuthn keys. Passkeys only work on this page's domain. */
 export function browserKeys(): Keys {
-  return createWebAuthnKeys({ rpId: globalThis.location.hostname, rpName: 'Paper Seal' });
+  return createWebAuthnKeys({ rpId: globalThis.location.hostname, rpName: 'Paper Seal', ...credentialsOption() });
 }
 
 /** Plain words for a failure, never a stack trace. */
