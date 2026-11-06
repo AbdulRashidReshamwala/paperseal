@@ -240,7 +240,7 @@ A board may give an exam an ENS name `<name>.<parent>`, where `parent` is the bo
 A reader checks a name with the viewer's own RPC, on-chain only (`ens.ccipRead` is `false`, so no offchain gateway is asked), and fails unless all of these hold:
 
 1. The whole name is normalised, its first label is a valid exam name, and that label's `labelhash` is the `examId` used for every other check.
-2. The name's `addr` record is set, and the code at that address is exactly `ExamRegistry`'s deployed bytecode with its `board` immutable filled in by the address `board()` returns. So the record names a real `ExamRegistry`, and only that board can have written to it. Answering `board()` alone isn't enough, because any contract can return the real board's address.
+2. The name's `addr` record is set, and the code at that address is exactly `ExamRegistry`'s deployed bytecode with its `board` immutable filled in by the address `board()` returns. The CBOR metadata that solc appends to the end of the code is left out of the comparison. Its length is the code's last two bytes, plus those two bytes. It never runs, and it hashes the source including comments, so a comment edit would otherwise change it. So the record names a real `ExamRegistry`, and only that board can have written to it. Answering `board()` alone isn't enough, because any contract can return the real board's address.
 3. That board address's primary name, read by reverse resolution, is exactly `parent`.
 4. `parent`'s own `addr` record is that board address, so the primary name is verified both ways.
 

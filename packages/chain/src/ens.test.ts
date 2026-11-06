@@ -85,12 +85,51 @@ describe('isExamRegistryCode', () => {
     expect(isExamRegistryCode(examRegistryRuntime.bytecode, board)).toBe(false);
   });
 
-  it('refuses code that differs by one byte, or in length', () => {
-    const code = registryCode(board);
-    const flipped = `${code.slice(0, 10)}${code.slice(10, 12) === 'ff' ? '00' : 'ff'}${code.slice(12)}` as Hex;
-    expect(isExamRegistryCode(flipped, board)).toBe(false);
+  const code = registryCode(board);
+  /** Bytes in the code, and where solc's CBOR metadata starts: its length is the last two bytes, plus those two. */
+  const size = (code.length - 2) / 2;
+  const executable = size - parseInt(code.slice(-4), 16) - 2;
+  const flip = (hex: string, at: number) =>
+    `${hex.slice(0, 2 + at * 2)}${hex.slice(2 + at * 2, 4 + at * 2) === 'ff' ? '00' : 'ff'}${hex.slice(4 + at * 2)}` as Hex;
+
+  it('writes the board only in the executable part, before the metadata', () => {
+    expect(executable).toBeGreaterThan(0);
+    for (const offset of examRegistryRuntime.boardOffsets) expect(offset + 32).toBeLessThanOrEqual(executable);
+  });
+
+  it('refuses code that differs by one byte in the executable part, or in its length', () => {
+    for (const at of [0, 4, examRegistryRuntime.boardOffsets[0] + 31, executable - 1]) {
+      expect(isExamRegistryCode(flip(code, at), board), `byte ${at}`).toBe(false);
+    }
+    const metadata = code.slice(2 + executable * 2);
+    expect(isExamRegistryCode(`${code.slice(0, 2 + executable * 2)}00${metadata}` as Hex, board)).toBe(false);
+    expect(isExamRegistryCode(`${code.slice(0, 2 + (executable - 1) * 2)}${metadata}` as Hex, board)).toBe(false);
+  });
+
+  it('ignores the metadata, which a comment edit changes', () => {
+    // A different source hash: any byte between the executable part and the two length bytes.
+    for (const at of [executable, executable + 10, size - 3]) {
+      expect(isExamRegistryCode(flip(code, at), board), `byte ${at}`).toBe(true);
+    }
+    // Metadata of another length, with the same executable part.
+    const prefix = code.slice(0, 2 + executable * 2);
+    expect(isExamRegistryCode(`${prefix}a1ff000003` as Hex, board)).toBe(true);
+    expect(isExamRegistryCode(`${prefix}0000` as Hex, board)).toBe(true);
+    // The board is still checked, outside the metadata.
+    expect(isExamRegistryCode(flip(code, executable), '0x00000000000000000000000000000000000000cc')).toBe(false);
+  });
+
+  it('refuses code whose metadata length does not fit', () => {
+    // Appending a byte moves the length bytes, so they declare garbage.
     expect(isExamRegistryCode(`${code}00`, board)).toBe(false);
     expect(isExamRegistryCode(code.slice(0, -2) as Hex, board)).toBe(false);
+    // A length longer than the code, or one that swallows part of the executable code.
+    expect(isExamRegistryCode(`${code.slice(0, -4)}ffff` as Hex, board)).toBe(false);
+    expect(isExamRegistryCode(`${code.slice(0, -4)}${(size - executable - 1).toString(16).padStart(4, '0')}` as Hex, board)).toBe(false);
+    // Too short to hold the length, empty, odd-length or not hex.
+    for (const short of ['0x', '0x00', '0x0', `${code}0`, `${code.slice(0, -4)}zz00`]) {
+      expect(isExamRegistryCode(short as Hex, board), short.slice(-6)).toBe(false);
+    }
   });
 });
 

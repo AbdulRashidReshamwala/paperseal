@@ -396,11 +396,9 @@ describe('sync-abi.mjs', () => {
   });
 
   const abi = [{ type: 'event', name: 'X', inputs: [] }];
-  /** 70 bytes of code with one immutable used at bytes 2 and 38, each one word long. */
-  const deployedBytecode = (immutableReferences: unknown) => ({
-    object: `0x6080${'00'.repeat(32)}aabb${'00'.repeat(32)}CCDD`,
-    immutableReferences,
-  });
+  /** 76 bytes of code, the last 6 metadata, with one immutable used at bytes 2 and 38, each one word long. */
+  const code = `0x6080${'00'.repeat(32)}aabb${'00'.repeat(32)}CCDDa1a2a3a40004`;
+  const deployedBytecode = (immutableReferences: unknown, object = code) => ({ object, immutableReferences });
   const runWith = (file: string, contents: unknown) => {
     const artifact = join(dir, file);
     writeFileSync(artifact, JSON.stringify(contents));
@@ -413,10 +411,20 @@ describe('sync-abi.mjs', () => {
       [{}, '0 immutables'],
       [{ 1: [{ start: 2, length: 32 }], 2: [{ start: 38, length: 32 }] }, '2 immutables'],
       [{ 1: [{ start: 2, length: 20 }] }, '20 bytes long'],
-      [{ 1: [{ start: 60, length: 32 }] }, 'outside the 70-byte code'],
+      [{ 1: [{ start: 60, length: 32 }] }, 'outside the 76-byte code'],
+      [{ 1: [{ start: 40, length: 32 }] }, 'in the metadata after byte 70'],
     ];
     for (const [references, message] of cases) {
       const run = runWith('bad-code.json', { abi, deployedBytecode: deployedBytecode(references) });
+      expect(run.status, message).toBe(1);
+      expect(run.stderr).toContain(message);
+    }
+    const references = { 1: [{ start: 2, length: 32 }] };
+    for (const [object, message] of [
+      [`0x6080${'00'.repeat(32)}0045`, '71 bytes of metadata in 36 bytes of code'],
+      ['0xaa', 'too short to end in metadata'],
+    ]) {
+      const run = runWith('bad-metadata.json', { abi, deployedBytecode: deployedBytecode(references, object) });
       expect(run.status, message).toBe(1);
       expect(run.stderr).toContain(message);
     }
@@ -429,7 +437,7 @@ describe('sync-abi.mjs', () => {
     const source = readFileSync(output, 'utf8');
     expect(source).toContain('Do not edit by hand');
     expect(source).toContain('export const examRegistryAbi');
-    expect(source).toContain(`bytecode: '0x6080${'00'.repeat(32)}aabb${'00'.repeat(32)}ccdd'`);
+    expect(source).toContain(`bytecode: '${code.toLowerCase()}'`);
     expect(source).toContain('boardOffsets: [2, 38]');
   });
 });

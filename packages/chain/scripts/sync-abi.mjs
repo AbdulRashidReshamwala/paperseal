@@ -42,10 +42,19 @@ if (immutables.length !== 1) {
 const references = immutables[0];
 if (!Array.isArray(references) || references.length === 0) fail(`${artifactPath} has no board immutable references.`);
 const size = (bytecode.length - 2) / 2;
+// solc's CBOR metadata ends the code: its length is the last two bytes, plus those two. The reader leaves
+// it out of the comparison, so the board must be written only in the executable part before it.
+if (size < 2) fail(`${artifactPath} has ${size} byte of code, too short to end in metadata.`);
+const metadata = parseInt(bytecode.slice(-4), 16) + 2;
+if (metadata > size) fail(`${artifactPath} declares ${metadata} bytes of metadata in ${size} bytes of code.`);
+const executable = size - metadata;
 for (const { start, length } of references) {
   if (length !== 32) fail(`${artifactPath} has a board immutable reference ${length} bytes long, expected 32.`);
   if (!Number.isInteger(start) || start < 0 || start + length > size) {
     fail(`${artifactPath} has a board immutable reference at ${start}, outside the ${size}-byte code.`);
+  }
+  if (start + length > executable) {
+    fail(`${artifactPath} has a board immutable reference at ${start}, in the metadata after byte ${executable}.`);
   }
 }
 const boardOffsets = references.map(({ start }) => start).sort((a, b) => a - b);
