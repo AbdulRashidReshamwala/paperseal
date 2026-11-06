@@ -1,5 +1,5 @@
 import { roundTimeSeconds, type Hex } from '@paperseal/protocol';
-import { Check, Countdown, CopyButton, Row, Rows, Stage, type SealState } from '@paperseal/ui';
+import { Check, Countdown, CopyButton, Stage, type SealState } from '@paperseal/ui';
 import { Link } from 'react-router';
 
 import { useBoardForm } from './BoardForm';
@@ -49,31 +49,45 @@ export function StatusStep(props: { examId: Hex; snapshot: Snapshot }) {
     },
   };
 
+  // Once the exam is over the public page is what is left, so it joins the summary.
+  const publicPage = (
+    <div className="board-public">
+      <p className="ps-eyebrow">Public page</p>
+      {verifier ? (
+        <span className="board-public-links">
+          <a href={verifier} target="_blank" rel="noreferrer">
+            Open the public page
+          </a>
+          <CopyButton text={verifier}>Copy public link</CopyButton>
+        </span>
+      ) : (
+        <Check status="not-checked">The link is not set up yet. Ask whoever installed Paper Seal to add it.</Check>
+      )}
+    </div>
+  );
+
   return (
     <Stage title={copy[seal].title} lede={copy[seal].lede} next={copy[seal].next} seal={seal} stampSeal={justSealed}>
-      {seal === 'sealed' ? <Countdown at={unlockSeconds * 1000} round={unlockRound} label="Paper released to centres" reached="Now" /> : null}
-      {seal === 'opening' ? <Countdown at={endSeconds * 1000} round={endRound} label="Opens to the public" reached="Now" /> : null}
-      <Rows>
-        <Row label="Key holders released">
+      <div className="board-summary">
+        {seal === 'sealed' ? <Countdown at={unlockSeconds * 1000} round={unlockRound} label="Paper released to centres" reached="Now" /> : null}
+        {seal === 'opening' ? <Countdown at={endSeconds * 1000} round={endRound} label="Opens to the public" reached="Now" /> : null}
+        <div>
+          <p className="ps-eyebrow">Key holders released</p>
           {status ? (
-            `${String(status.release.released.length)} of ${String(status.release.required)} needed`
+            <>
+              <p className="board-figure">
+                <strong>{status.release.released.length}</strong>
+                <span> of {status.release.required} needed</span>
+              </p>
+              <progress className="board-progress" aria-label="Key holders released" max={status.release.required} value={Math.min(status.release.released.length, status.release.required)} />
+            </>
           ) : (
             <Check status="not-checked">{teeProblem ? plainWords(sayOf(teeProblem)) : 'Paper Seal has not answered yet.'}</Check>
           )}
-        </Row>
-        <Row label="Public page">
-          {verifier ? (
-            <span className="board-link">
-              <a href={verifier} target="_blank" rel="noreferrer">
-                Open the public page
-              </a>
-              <CopyButton text={verifier}>Copy public link</CopyButton>
-            </span>
-          ) : (
-            <Check status="not-checked">The link is not set up yet. Ask whoever installed Paper Seal to add it.</Check>
-          )}
-        </Row>
-      </Rows>
+        </div>
+        {seal === 'open' ? publicPage : null}
+      </div>
+      {seal === 'open' ? null : publicPage}
       <ExamRecord snapshot={snapshot} />
       <p className="board-quiet">
         <Link to="/board/new">Set up another exam</Link>
