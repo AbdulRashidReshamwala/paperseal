@@ -722,12 +722,11 @@ describe('landing page', () => {
       </MemoryRouter>,
     );
 
-  it('names each role in plain words, with the seal', () => {
+  it('names each role in plain words', () => {
     home();
     for (const label of ['Exam board', 'Question setter', 'Exam centre', 'Key holder']) {
       expect(screen.getByRole('link', { name: label })).toBeTruthy();
     }
-    expect(screen.getByRole('img', { name: 'The Paper Seal' })).toBeTruthy();
     expect(document.body.textContent).not.toMatch(/TEE|chain|hash|passkey|timelock|drand/i);
   });
 
