@@ -15,7 +15,8 @@
     "demo": "pnpm --filter @paperseal/e2e demo",
     "demo:check": "pnpm --filter @paperseal/e2e demo:check",
     "demo:keys": "pnpm --filter @paperseal/web demo:keys",
-    "demo:vm": "node e2e/demo/cli.mjs vm"
+    "demo:vm": "node e2e/demo/cli.mjs vm",
+    "video": "node e2e/videos-src/cli.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

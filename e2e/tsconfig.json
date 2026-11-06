@@ -22,6 +22,7 @@
     "vitest.config.ts",
     "ffmpegLink.ts",
     "ui",
+    "videos-src",
     "mock",
     "vitest.ui.config.ts"
   ]
