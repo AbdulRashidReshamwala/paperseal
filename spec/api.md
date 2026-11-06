@@ -266,6 +266,10 @@ Unlock may run on a different instance from the Build, so the log names its sign
 
 After decoding, readers also apply `limits.entries`, `limits.topics`, `limits.ownerBytes` and `limits.topicNameBytes`. `ExamRegistry` rejects oversized `entries` and `criteria` by length alone, and still doesn't decode them.
 
+`limits.entriesBytes` and `limits.entries` are set by what one transaction can carry. geth's mempool refuses a transaction over 131,072 bytes, and most public nodes run it, so a longer list would never reach a block. An entry with an owner at `limits.ownerBytes` takes 576 bytes, so 225 entries take 129,664 bytes with the array's head, and `limits.entriesBytes` is 130,000. Calldata adds at most 131 bytes to that, which leaves about 900 bytes for the transaction's own fields and signature. The board app refuses a list over either limit before it asks the wallet to sign.
+
+`ExamRegistry`'s own cap on `entries` is 327,680 bytes. That cap is an upper bound, and `limits.entriesBytes` is the working limit. Readers reject a list between the two.
+
 ## Exam Names
 
 An exam's human-readable name is one ENS label that is already normalised under ENSIP-15: `normalize(name)` returns `name` unchanged and it holds no `.`. So `jee-main-2026` is a name, but `Maths 2026`, `JEE-Main-2026` and `jee.main` are not. A name that normalises to something else would hash to a different `examId` than the one ENS finds, so the board app refuses it rather than fixing it. `spec/fixtures/exam-names.json` lists valid and invalid names with their `examId`.

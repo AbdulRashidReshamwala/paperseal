@@ -51,6 +51,20 @@ func TestEntryAndOwnerLimits(t *testing.T) {
 	}
 }
 
+// A list of the most entries with the longest owners must fit limits.entriesBytes,
+// so one that passes every other rule can always be posted.
+func TestLongestListFitsTheByteCap(t *testing.T) {
+	lim := spec.C.Limits
+	k := key(t, 1)
+	var tuples [][]byte
+	for range lim.Entries {
+		tuples = append(tuples, tuple(2, k, k, strings.Repeat("o", lim.OwnerBytes)))
+	}
+	if b := handList(tuples...); len(b) > lim.EntriesBytes {
+		t.Fatalf("%d entries take %d bytes, the cap is %d", lim.Entries, len(b), lim.EntriesBytes)
+	}
+}
+
 // allocated reports the heap bytes f allocates, after inputs are built.
 func allocated(f func()) uint64 {
 	var before, after runtime.MemStats

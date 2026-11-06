@@ -53,7 +53,7 @@ import (
 const RootsPath = "/etc/paperseal/roots.pem"
 
 // maxResponse bounds an RPC response. The approved list is the largest, and
-// limits.entriesBytes (320 KiB) as hex in a log fits well within 1 MiB.
+// limits.entriesBytes (130,000 bytes) as hex in a log fits well within 1 MiB.
 const maxResponse = 1 << 20
 
 // eventOverhead is room in event data for everything but the large value: the

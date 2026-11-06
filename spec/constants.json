@@ -42,9 +42,9 @@
     "requireHardwareAttestation": false
   },
   "limits": {
-    "entriesBytes": 327680,
+    "entriesBytes": 130000,
     "criteriaBytes": 16384,
-    "entries": 512,
+    "entries": 225,
     "topics": 64,
     "ownerBytes": 128,
     "topicNameBytes": 64,

@@ -410,6 +410,17 @@ function checkCriteriaLayout(encoded: Uint8Array): void {
 const utf8Length = (text: string): number => utf8ToBytes(text).length;
 
 /**
+ * Whether `abi.encode(Entry[])` bytes are over `limits.entriesBytes` or `limits.entries`. A list over either
+ * can't be read back, and a larger one may never reach a block ("Size Limits" in spec/api.md).
+ */
+export function entriesOverLimit(encoded: Uint8Array): boolean {
+  if (encoded.length > limits.entriesBytes) return true;
+  if (encoded.length < 2 * WORD) return false;
+  const count = encoded.subarray(WORD, 2 * WORD).reduce((sum, byte) => sum * 256 + byte, 0);
+  return count > limits.entries;
+}
+
+/**
  * Decodes `entries`, re-encodes it and rejects the list if the bytes differ,
  * then applies the list rules, as the TEE does.
  */
