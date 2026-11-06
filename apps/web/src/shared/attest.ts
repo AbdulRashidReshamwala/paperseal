@@ -4,6 +4,7 @@ import { attestation as attestationSpec, chain, fromHex, type ExamSettings, type
 import type { AttestationResponse, TeeClient } from '@paperseal/tee-client';
 
 import { teeStorageBucket } from './config';
+import { mockTrustedRoot, rootOption } from './mockMode';
 
 /*
  * The README's claim table, checked by `checkToken` against the exam on-chain. Nothing is sent to
@@ -86,6 +87,7 @@ export function attestationChecker(environment: AttestationEnvironment) {
     return checkToken(attestation.token, expected, {
       mode: 'live',
       now: environment.now?.() ?? Math.floor(Date.now() / 1000),
+      ...rootOption(),
     });
   };
 }
@@ -119,7 +121,7 @@ export function publishedTokenChecker(environment: AttestationEnvironment) {
         storageBucket: environment.storageBucket ?? teeStorageBucket,
       };
       const failures: string[] = [];
-      const signature = await verifyPkiToken(token);
+      const signature = await verifyPkiToken(token, mockTrustedRoot());
       if (!signature.ok) failures.push(`token signature: ${signature.error.message}`);
       const claims = checkClaims(decodeToken(token), expected, {
         mode: 'published',

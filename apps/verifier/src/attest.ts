@@ -15,6 +15,8 @@ import { verifyTeeSignature } from '@paperseal/crypto';
 import { attestation, chain, encodeMessage, fromHex, type ExamSettings, type Hex } from '@paperseal/protocol';
 import type { TeeClient } from '@paperseal/tee-client';
 
+import { rootOption } from './mockMode';
+
 /**
  * The bucket the TEE was started with, which `env_override` must name. Build-time, like the other
  * defaults, and an exam name's bucket record replaces it for that view. Unset, it is empty and the
@@ -130,7 +132,7 @@ export async function checkRecordToken(args: {
   const options = {
     mode: 'published' as const,
     now: Math.floor(Date.now() / 1000),
-    ...(args.trustedRoot ? { trustedRoot: args.trustedRoot } : {}),
+    ...(args.trustedRoot ? { trustedRoot: args.trustedRoot } : rootOption()),
   };
   let claims: ClaimCheck[];
   try {
@@ -179,7 +181,7 @@ export async function checkFreshToken(args: {
   const verdict = await checkToken(token, expectedClaims(args.exam, args.registry, args.examId, keys, args.bucket), {
     mode: 'live',
     now: Math.floor(Date.now() / 1000),
-    ...(args.trustedRoot ? { trustedRoot: args.trustedRoot } : {}),
+    ...(args.trustedRoot ? { trustedRoot: args.trustedRoot } : rootOption()),
   });
   return { ...verdict, instancePublicKey: keys.instancePublicKey };
 }
