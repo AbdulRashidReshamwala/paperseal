@@ -105,7 +105,7 @@ const lower = (hex: string) => hex.toLowerCase();
 export async function readBack(
   registry: Pick<ExamRegistry, 'getExam' | 'getCriteria'>,
   request: PublishRequest,
-  attempts = 5,
+  attempts = 10,
   wait: (ms: number) => Promise<void> = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 ): Promise<Pick<PublishOutcome, 'rows' | 'matches' | 'criteria'>> {
   let exam = null;
@@ -113,16 +113,16 @@ export async function readBack(
   let criteriaMismatch = false;
   // An RPC node can briefly lag the node that mined the block.
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    exam = await registry.getExam(request.examId);
     try {
+      exam = await registry.getExam(request.examId);
       criteriaHex = exam ? await registry.getCriteria(request.examId) : null;
     } catch (error) {
       // `missing`: the event isn't visible yet. `mismatch`: the bytes don't hash to what was stored.
-      if (!(error instanceof OnChainBytesError)) throw error;
-      criteriaMismatch = error.kind === 'mismatch';
+      // Anything else is a node behind the one that mined the block, which refuses a range past its head.
+      criteriaMismatch = error instanceof OnChainBytesError && error.kind === 'mismatch';
     }
     if (exam && (criteriaHex || criteriaMismatch)) break;
-    await wait(1000);
+    await wait(1500);
   }
   if (!exam || (!criteriaHex && !criteriaMismatch)) {
     throw new Error('The exam was sent, but it does not show yet. Wait a minute, then reload this page to see it.');

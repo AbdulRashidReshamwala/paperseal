@@ -51,7 +51,7 @@ export function demoTopics(): { name: string; questions: string }[] | null {
   return ['Mathematics', 'Physics'].map((name) => ({ name, questions: '2' }));
 }
 
-/** A four minute demo from now, in the date picker's local format. Null outside demo mode. */
+/** Six minutes to close: two to publish and start the machine, then four on camera. In the date picker's local format. Null outside demo mode. */
 export function demoTimes(now = new Date()): {
   examStart: string;
   lockTime: string;
@@ -68,7 +68,7 @@ export function demoTimes(now = new Date()): {
     const pad = (n: number) => String(n).padStart(2, '0');
     return `${String(at.getFullYear())}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(at.getHours())}:${pad(at.getMinutes())}`;
   };
-  return { examStart: local(6), lockTime: local(4), durationMinutes: '1', releaseMinutes: '1', maxSetterPercent: '50', minBankMultiple: '2' };
+  return { examStart: local(8), lockTime: local(6), durationMinutes: '1', releaseMinutes: '1', maxSetterPercent: '50', minBankMultiple: '2' };
 }
 
 /** How many setters a demo has, to fill the invites in one click. Null outside demo mode. */
