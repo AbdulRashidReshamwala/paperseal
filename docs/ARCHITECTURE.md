@@ -115,3 +115,11 @@ The README leaves these open. They are defaults for the build and can change.
 - CI for tests. `.github/workflows/repro.yml` covers the image rebuild only
 - Google Cloud project, Confidential Space deployment and the storage bucket
 - Sepolia deployment and funded board wallet
+
+## Mock run (test only)
+
+`pnpm --filter @paperseal/e2e ui:mock` runs the real-run script (`e2e/ui/examRun.ts`) in about ten minutes with no VM, Sepolia or bucket, to iterate on screens and recordings. It is not a real run and its videos are named `mock-*`.
+
+- **Real:** the apps, the `ExamRegistry` contract on a local anvil, Chrome with virtual security keys and PRF keys, HPKE, AES-GCM, ECDSA and every message and file of `spec/api.md`, the drand clock and beacons, and the GitHub release list.
+- **Replaced:** the Go TEE by a TypeScript machine in `e2e/mock` (random shares stand in for Shamir, it does not check WebAuthn signatures, and it always puts a multiple choice question on the paper when the bank has one), its attestation by a throwaway root, the board's Foundry wallet by anvil's test wallet, and the bucket by a local server.
+- **Guard:** the apps trust the throwaway root only when Vite runs in its own `mock` mode (`apps/*/src/mockMode.ts`), which also shows "Mock data" on every screen. `vite.config.ts` refuses to build in that mode and refuses `VITE_MOCK_TRUST_ROOT` in any other, and `mockMode.test.ts` builds each app and checks the output has no trace of the mock path.
