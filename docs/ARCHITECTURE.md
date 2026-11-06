@@ -13,7 +13,7 @@ How the design in the [README](../README.md) maps onto this repository. The READ
 | `packages/crypto` | TypeScript | HPKE, AES-256-GCM, XOR and timelock decrypt |
 | `packages/keys` | TypeScript | The key interface over WebAuthn PRF |
 | `packages/attestation` | TypeScript | Confidential Space token checks |
-| `packages/chain` | TypeScript | `ExamRegistry` reads and writes through viem, and the on-chain ENS name check (`resolveExamName`) |
+| `packages/chain` | TypeScript | `ExamRegistry` reads and writes through viem, the code pin check (`checkRegistryCode`, `spec/registry.json`), and the on-chain ENS name check (`resolveExamName`) |
 | `packages/tee-client` | TypeScript | Typed client for the TEE HTTP API |
 | `packages/ui` | React | Shared components, tokens and the Chromium gate |
 | `apps/web` | React | The board-hosted app, with a route area per signed-in role |

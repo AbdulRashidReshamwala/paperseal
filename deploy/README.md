@@ -26,6 +26,12 @@ forge script script/Deploy.s.sol --rpc-url sepolia --broadcast --account <keysto
 
 Keep the printed address as `REGISTRY`. A new board address needs a new deployment.
 
+Every reader checks the code at this address against `spec/registry.json`. If the contract's code changed, run `make abi` and commit the result, which updates the pin everywhere, then tag a new TEE version, because the pin is in the attested image. A new board or a comment edit doesn't change the pin. To check a deployment, read-only:
+
+```sh
+LIVE_REGISTRY=<REGISTRY> node e2e/live/cli.mjs registry-check
+```
+
 ### Verify the source on Etherscan
 
 Needs `ETHERSCAN_API_KEY` and `REGISTRY_ADDRESS` in `contracts/.env` (gitignored). Check out the commit that was deployed first; the compiler settings come from `foundry.toml` (solc 0.8.30, optimizer 200 runs, `prague`, no via-ir), and the constructor argument is `BOARD_ADDRESS`.
