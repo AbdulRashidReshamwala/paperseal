@@ -43,6 +43,8 @@ const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, 
 /** Between two people when they go one at a time. */
 export const PAUSE_BETWEEN_PEOPLE_MS = 0;
 const QUESTION_TRIES = 4;
+/** Per setter. */
+const QUESTIONS_AT_ONCE = 10;
 
 /** A public RPC or the machine may turn a burst away, so a failed question is sent again, not paced in advance. */
 async function retried<T>(send: () => Promise<T>): Promise<T> {
@@ -280,35 +282,42 @@ export async function questionJobs(
         const checked = await world.confirm();
         if (!checked.ok) throw new Error(checked.reasons.join(' '));
         const key = await plantedKey(persona.id);
+        const topics = add.flatMap(([topic, count]) => Array.from({ length: count }, () => topic));
         let sealed = 0;
-        for (const [topic, count] of add) {
-          for (let n = 0; n < count; n++) {
-            say(`${String(sealed)} of ${String(total)} sealed`);
-            const question = sampleQuestion(topic);
-            const receipt = await retried(() =>
-              sealAndSubmit(
-                {
-                  keys: world.keysFor(persona),
-                  tee,
-                  credentialId: toHex(key.credentialId),
-                  passkeyPublicKey: passkey,
-                  pending,
-                  keep: (exam, stored) => {
-                    world.storageOf(persona, () => {
-                      saveReceipt(exam, stored);
-                    });
-                  },
+        say(`0 of ${String(total)} sealed`);
+        const sealOne = async (topic: string) => {
+          const question = sampleQuestion(topic);
+          // Each question tracks its own send, so they can go at the same time.
+          const own: { current: PendingSubmission | null } = { current: null };
+          const receipt = await retried(() =>
+            sealAndSubmit(
+              {
+                keys: world.keysFor(persona),
+                tee,
+                credentialId: toHex(key.credentialId),
+                passkeyPublicKey: passkey,
+                pending: own,
+                keep: (exam, stored) => {
+                  world.storageOf(persona, () => {
+                    saveReceipt(exam, stored);
+                  });
                 },
-                checked.confirmed,
-                question,
-              ),
-            );
-            world.storageOf(persona, () => {
-              saveTopic(examId, receipt.questionHash, topic);
-            });
-            sealed += 1;
-          }
-        }
+              },
+              checked.confirmed,
+              question,
+            ),
+          );
+          world.storageOf(persona, () => {
+            saveTopic(examId, receipt.questionHash, topic);
+          });
+          sealed += 1;
+          say(`${String(sealed)} of ${String(total)} sealed`);
+        };
+        const queue = [...topics];
+        const worker = async () => {
+          for (let topic = queue.shift(); topic !== undefined; topic = queue.shift()) await sealOne(topic);
+        };
+        await Promise.all(Array.from({ length: QUESTIONS_AT_ONCE }, worker));
       },
     };
   });
