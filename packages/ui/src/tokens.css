@@ -338,6 +338,68 @@ a:hover {
   }
 }
 
+/* Registered: a big check, centred in the main area */
+
+.ps-registered {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100dvh - 220px);
+  padding: var(--ps-space-5) 0;
+  text-align: center;
+}
+
+.ps-registered-check {
+  width: 96px;
+  height: 96px;
+  margin-bottom: var(--ps-space-5);
+  color: var(--ps-ok);
+}
+
+.ps-registered-title {
+  margin: 0;
+  font-size: var(--ps-text-display);
+  font-weight: 400;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+
+.ps-registered-message,
+.ps-registered-next,
+.ps-registered-note {
+  max-width: 34rem;
+  margin: var(--ps-space-3) 0 0;
+  text-wrap: balance;
+}
+
+.ps-registered-message {
+  font-size: 1.0625rem;
+}
+
+.ps-registered-next {
+  color: var(--ps-ink-soft);
+}
+
+.ps-registered-note {
+  margin-top: var(--ps-space-5);
+  font-size: 0.8125rem;
+  color: var(--ps-ink-soft);
+}
+
+@media (max-width: 719px) {
+  .ps-registered-check {
+    width: 64px;
+    height: 64px;
+    margin-bottom: var(--ps-space-4);
+  }
+
+  .ps-registered-title {
+    font-size: var(--ps-text-title);
+  }
+}
+
 /* The primary action */
 
 .ps-primary {
