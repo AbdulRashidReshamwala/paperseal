@@ -16,7 +16,7 @@ const person = (id: string) => personas.find((persona) => persona.id === id) as 
 const examId = `0x${'ee'.repeat(32)}` as Hex;
 
 /** The real `navigator.credentials`, as a test sees it. */
-function realKey(result: () => Promise<unknown> = () => Promise.resolve({ rawId: new Uint8Array([9, 9]).buffer })) {
+function realKey(result: (options: { signal?: AbortSignal }) => Promise<unknown> = () => Promise.resolve({ rawId: new Uint8Array([9, 9]).buffer })) {
   const key = { create: vi.fn(result), get: vi.fn(result) } as unknown as { create: ReturnType<typeof vi.fn>; get: ReturnType<typeof vi.fn> } & Pick<CredentialsContainer, 'create' | 'get'>;
   Object.defineProperty(globalThis.navigator, 'credentials', { value: key, configurable: true });
   return key;
@@ -122,10 +122,14 @@ describe('the touch for show', () => {
   });
 
   it('gives up by itself when no key answers', async () => {
-    const key = realKey(() => new Promise(() => undefined));
-    key.create.mockImplementation((options: CredentialCreationOptions) => new Promise((_, reject) => {
-      options.signal?.addEventListener('abort', () => { reject(new DOMException('gone', 'AbortError')); });
-    }));
+    const key = realKey(
+      ({ signal }) =>
+        new Promise((_, reject) => {
+          signal?.addEventListener('abort', () => {
+            reject(new DOMException('gone', 'AbortError'));
+          });
+        }),
+    );
     await touchForShow(key, localStorage, 5);
     expect(key.create).toHaveBeenCalledTimes(1);
   });
