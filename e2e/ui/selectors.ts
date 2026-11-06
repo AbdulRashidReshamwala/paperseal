@@ -21,7 +21,7 @@ export const text = {
   recordBuildHeading: 'The paper is ready',
   wrongAccount: /not the exam board.s account/i,
   // Shared
-  keyRegisteredHeading: 'Your security key is registered',
+  keyRegisteredHeading: /You.re registered/,
   keyCardHeading: 'Your key card',
   alreadySetUpHeading: 'This security key is already set up',
   linkProblemHeading: /This invitation link doesn.t work/,

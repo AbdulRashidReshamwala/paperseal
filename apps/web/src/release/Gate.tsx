@@ -1,4 +1,4 @@
-import { Stage } from '@paperseal/ui';
+import { Registered, Stage } from '@paperseal/ui';
 import type { ReactNode } from 'react';
 
 import type { RegisterRole } from '../shared/Register';
@@ -53,18 +53,18 @@ export function Gate(props: { stage: GateStage; role: RegisterRole; progress: Ho
       );
     case 'no-exam':
       return (
-        <Stage
-          title="Nothing to do yet"
-          lede="Your exam board has not set up this exam yet."
-          next="This page moves on by itself, so you can leave it open or come back to this link later."
+        <Registered
+          message="Your security key is set for this exam."
+          next="Your exam board has not set up this exam yet. This page moves on by itself."
+          note="You can close this page and come back to this link later, in this same browser."
         />
       );
     case 'awaiting-list':
       return (
-        <Stage
-          title="You are registered. Nothing to do yet."
-          lede="Your exam board is still finishing the list of people for this exam."
-          next="This page moves on by itself once the list is ready."
+        <Registered
+          message="Your security key is set for this exam."
+          next="Your exam board is still finishing the list of people for this exam. This page moves on by itself once the list is ready."
+          note="You can close this page and come back to this link later, in this same browser."
         />
       );
     case 'not-on-list':

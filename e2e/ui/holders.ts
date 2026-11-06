@@ -161,10 +161,10 @@ export function holderTests(lab: () => Lab): void {
         await s.page.getByRole('button', { name: button.register }).waitFor();
         await s.shot('10-setter-register');
         await s.page.getByRole('button', { name: button.register }).click();
-        await s.see(/security key is registered|You are registered|Nothing to do yet/, 30_000);
+        await s.see(/You.re registered|Nothing to do yet/, 30_000);
         await s.shot('11-setter-registered');
         await s.page.reload();
-        await s.see(/security key is registered|You are registered|Nothing to do yet/, 30_000);
+        await s.see(/You.re registered|Nothing to do yet/, 30_000);
       });
       for (const [name, uiRole, area] of [
         ['keyholder-1', 'key holder', 'keyholder'],
@@ -253,7 +253,7 @@ export function holderTests(lab: () => Lab): void {
       });
       await kh.flow('registered, list not posted', async () => {
         await prep(timings.future, 'onboard', 'none');
-        await kh.seeHeading(/You are registered/, 30_000);
+        await kh.seeHeading(/You.re registered/, 30_000);
         await kh.shot('21-awaiting-list');
       });
       await kh.flow('key not on the list', async () => {
@@ -372,7 +372,7 @@ export function holderTests(lab: () => Lab): void {
         const reg = await registerSetter(s, open);
         await s.page.goto(`${lab().web.url}/#/setter?exam=${open.examId}`);
         await s.page.reload();
-        await s.seeHeading(/Nothing to do yet/, 30_000);
+        await s.seeHeading(/You.re registered/, 30_000);
         await s.shot('51-waiting');
         await postListDirect(chain, open.examId, listWith({ setter: reg }));
         tee.state.stage = 'submit';
