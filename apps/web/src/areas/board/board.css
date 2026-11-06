@@ -77,6 +77,10 @@
   gap: var(--ps-space-1);
 }
 
+.board-link .ps-button {
+  justify-self: start;
+}
+
 .board-link .ps-mono {
   font-size: var(--ps-text-small);
 }
@@ -128,7 +132,7 @@
 
 @media (min-width: 560px) {
   .board-invite-form {
-    grid-template-columns: 11em minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
   .board-invite-form .ps-button {
