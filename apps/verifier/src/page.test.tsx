@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import type { ExamNameCheck, ExamNameResult, ResolvedExamName } from '@paperseal/chain';
-import { decodeApprovedList, fromHex, toHex } from '@paperseal/protocol';
+import type { ExamNameCheck, ExamNameResult, PasskeyNameResult, PasskeyNameState, ResolvedExamName } from '@paperseal/chain';
+import { decodeApprovedList, fromHex, passkeyRecordValue, toHex, type Hex } from '@paperseal/protocol';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -25,6 +25,10 @@ vi.mock('./checks', async (original) => ({
   },
 }));
 
+/** What reading a party name against its key comes to. Null runs the real read, which needs an RPC. */
+let passkeyAnswer: ((name: string, key: Hex) => PasskeyNameState) | null = null;
+let passkeyReads: { name: string; key: Hex; rpcUrl: string | undefined }[] = [];
+
 /** What reading an exam name comes to. Null runs the real checks, which need no RPC for a name they refuse. */
 let nameAnswer: ((name: string) => ExamNameResult) | null = null;
 let nameReads: { name: string; rpcUrl: string | undefined }[] = [];
@@ -35,6 +39,12 @@ vi.mock('@paperseal/chain', async (original) => {
     resolveExamName: (name: string, options: { rpcUrl?: string }) => {
       nameReads.push({ name, rpcUrl: options.rpcUrl });
       return nameAnswer ? Promise.resolve(nameAnswer(name)) : real.resolveExamName(name, options);
+    },
+    checkPasskeyName: (name: string, key: Hex, options: { rpcUrl?: string }): Promise<PasskeyNameResult> => {
+      passkeyReads.push({ name, key, rpcUrl: options.rpcUrl });
+      if (!passkeyAnswer) return real.checkPasskeyName(name, key, options);
+      const state = passkeyAnswer(name, key);
+      return Promise.resolve({ state, name, expected: passkeyRecordValue(key), reason: state });
     },
   };
 });
@@ -129,6 +139,8 @@ afterEach(() => {
   chainReads = [];
   nameAnswer = null;
   nameReads = [];
+  passkeyAnswer = null;
+  passkeyReads = [];
   buckets = [];
 });
 
@@ -750,5 +762,87 @@ describe('verify by name', () => {
     await waitFor(() => {
       expect(nameReads.at(-1)?.name).toBe('Maths-2026.Board.eth');
     });
+  });
+});
+
+describe('party names', () => {
+  const ownerOf = (name: string) =>
+    name === 'Neutral 1' ? 'asha.eth' : name === 'Neutral 2' ? 'ben.eth' : name === 'Centre 1' ? 'north.centres.maths-board.eth' : name;
+  const peopleOf = (world: World) => decodeApprovedList(fromHex(world.entriesHex));
+  const keyOf = (world: World, owner: string) => toHex(peopleOf(world).find((entry) => entry.owner === owner)?.passkeyPublicKey ?? new Uint8Array());
+  const rowFor = (step: HTMLElement, owner: string) => within(step).getByText(owner).closest('li') as HTMLElement;
+
+  async function opened(answer: (world: World) => (name: string, key: Hex) => PasskeyNameState) {
+    const world = await buildWorld({ ownerOf });
+    arrange(world);
+    passkeyAnswer = answer(world);
+    open(1000);
+    return { world, step: await findStep(/^3\. People approved$/) };
+  }
+
+  it('shows "Name confirmed" for a key holder whose record matches, and reads with the viewer own RPC', async () => {
+    const { step } = await opened(() => () => 'confirmed');
+    await waitFor(() => {
+      expect(within(rowFor(step, 'asha.eth')).getByText('Name confirmed')).toBeTruthy();
+    });
+    expect(passkeyReads.length).toBeGreaterThan(0);
+    expect(passkeyReads.every((read) => read.rpcUrl === settings.rpcUrl)).toBe(true);
+    expect(screen.getByRole('alert').textContent).not.toMatch(/Step\s*3/);
+  });
+
+  it('reads only names, never a setter or a plain name', async () => {
+    const { world } = await opened(() => () => 'confirmed');
+    await waitFor(() => {
+      expect(passkeyReads.length).toBe(3);
+    });
+    expect(passkeyReads.map((read) => read.name).sort()).toEqual(['asha.eth', 'ben.eth', 'north.centres.maths-board.eth']);
+    const setterKey = toHex(peopleOf(world).find((entry) => entry.role === 1)?.passkeyPublicKey ?? new Uint8Array());
+    expect(passkeyReads.some((read) => read.key === setterKey)).toBe(false);
+  });
+
+  it('says "Not confirmed" in plain words for a missing or wrong record, and never fails the exam', async () => {
+    const { step } = await opened((w) => (_name, key) => (key === keyOf(w, 'asha.eth') ? 'mismatch' : 'missing'));
+    expect(await within(step).findByText('The record on asha.eth names a different security key.')).toBeTruthy();
+    expect(within(rowFor(step, 'asha.eth')).getByText('Not confirmed')).toBeTruthy();
+    expect(within(step).getByText('ben.eth has no record for this security key yet.')).toBeTruthy();
+    // The two failures on this page are the test PKI's, in steps 2 and 6. Step 3 has none.
+    expect(step.querySelector('.vf-step-failures')).toBeNull();
+    expect(screen.getByRole('alert').textContent).not.toMatch(/Step\s*3/);
+    expect(stateOf(step)).toBe('done');
+  });
+
+  it('treats a name that could not be read as not confirmed, and still passes the step', async () => {
+    const { step } = await opened(() => () => 'unreadable');
+    expect(await within(step).findByText('asha.eth could not be read just now.')).toBeTruthy();
+    expect(within(step).getAllByText('Not confirmed').length).toBe(2);
+    expect(stateOf(step)).toBe('done');
+    expect(screen.getByRole('alert').textContent).not.toMatch(/Step\s*3/);
+  });
+
+  it('shows a centre name as a label that proves nothing about independence', async () => {
+    const { step } = await opened(() => () => 'missing');
+    expect(await within(step).findByText(/It does not show that the centre is independent/)).toBeTruthy();
+    expect(within(rowFor(step, 'north.centres.maths-board.eth')).getByText('Label only')).toBeTruthy();
+    expect(within(rowFor(step, 'north.centres.maths-board.eth')).queryByText('Not confirmed')).toBeNull();
+  });
+
+  it('keeps the evidence folded, and says Sepolia names prove nothing', async () => {
+    const { step } = await opened(() => () => 'confirmed');
+    await waitFor(() => {
+      expect(within(step).getAllByText('Name confirmed').length).toBe(3);
+    });
+    expect(within(step).getByText(/anyone can register a similar name/)).toBeTruthy();
+    expect(step.querySelector('details')?.contains(within(step).getAllByText('Name confirmed')[0] as HTMLElement)).toBe(true);
+  });
+
+  it('reads nothing, and shows plain names as they are, when no party has an ENS name', async () => {
+    const world = await buildWorld();
+    arrange(world);
+    open(1000);
+    const step = await findStep(/^3\. People approved$/);
+    await within(step).findByText('Neutral 1');
+    expect(passkeyReads).toEqual([]);
+    expect(within(step).queryByText('Name confirmed')).toBeNull();
+    expect(within(step).queryByText('Not confirmed')).toBeNull();
   });
 });

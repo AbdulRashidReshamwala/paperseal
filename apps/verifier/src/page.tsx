@@ -1,5 +1,5 @@
-import { resolveExamName, type ExamNameResult } from '@paperseal/chain';
-import { requireHardwareAttestation, type Hex, type Paper } from '@paperseal/protocol';
+import { checkPasskeyName, resolveExamName, type ExamNameResult, type PasskeyNameResult } from '@paperseal/chain';
+import { ownerEnsName, requireHardwareAttestation, roles, toHex, type Hex, type Paper } from '@paperseal/protocol';
 import {
   Button,
   Check,
@@ -22,6 +22,7 @@ import { useExamLink } from './link';
 import { useLatestRound, useNow } from './live';
 import { loadLive, loadRecords, signedKeyPriv, useProof, type Records } from './load';
 import { usePoll, type Polled } from './poll';
+import { approvedEntries } from './commitments';
 import { createStorage } from './storage';
 import {
   defaultSettings,
@@ -54,6 +55,25 @@ function useExamName(name: string | null, rpcUrl: string, everyMs: number): Poll
   }, [name, rpcUrl]);
   const polled = usePoll(load, everyMs);
   return name === null ? undefined : polled;
+}
+
+/**
+ * Reads each listed party's ENS name against its security key, with the viewer's own RPC and nothing
+ * else. Setters have no name. A name is a label and a proof of who holds a key, never a check the exam
+ * depends on, so every answer comes back as a result and a failed read never fails anything.
+ */
+function usePartyNames(entries: Hex | null, rpcUrl: string, everyMs: number): Polled<Record<string, PasskeyNameResult>> {
+  const load = useMemo(() => {
+    const listed = approvedEntries(entries ?? null) ?? [];
+    const named = listed.flatMap((entry) => {
+      const name = entry.role === roles.setter ? null : ownerEnsName(entry.owner);
+      return name ? [{ name, key: toHex(entry.passkeyPublicKey) }] : [];
+    });
+    if (named.length === 0 || !rpcUrl) return null;
+    return async () =>
+      Object.fromEntries(await Promise.all(named.map(async ({ name, key }) => [key, await checkPasskeyName(name, key, { rpcUrl })] as const)));
+  }, [entries, rpcUrl]);
+  return usePoll(load, everyMs);
 }
 
 function useExamView(pollMs: { records: number; live: number; proofRetry?: number }) {
@@ -96,6 +116,7 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
   const records = usePoll(loadRecordsNow, pollMs.records);
 
   const chain = records.state === 'ready' ? records.value.chain : null;
+  const partyNames = usePartyNames(chain?.entries ?? null, settings.rpcUrl, pollMs.records);
   const chainRef = useRef<ChainData | null>(chain);
   useEffect(() => {
     chainRef.current = chain;
@@ -125,6 +146,7 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
     ...(link.kind === 'name' && name ? { name: { name: link.name, result: name, used: { teeUrl, storageUrl, bucket } } } : {}),
     sources: { chain: registry !== null, storage: storage !== null, tee: tee !== null },
     records,
+    partyNames,
     live,
     latest,
     now,
