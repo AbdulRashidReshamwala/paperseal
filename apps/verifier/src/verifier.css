@@ -240,3 +240,32 @@
   flex-basis: 100%;
   margin-top: 0;
 }
+
+/* Search and filter above the exam history. */
+.vf-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-3);
+  align-items: flex-start;
+  margin-bottom: var(--ps-space-3);
+}
+
+.vf-filters > :first-child {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.vf-filter {
+  display: grid;
+  gap: var(--ps-space-1);
+}
+
+.vf-filter select {
+  min-height: 44px;
+  max-width: 100%;
+  padding-inline: var(--ps-space-2);
+  font: inherit;
+  color: var(--ps-ink);
+  background: var(--ps-field);
+  border: 1px solid var(--ps-rule-strong);
+}
