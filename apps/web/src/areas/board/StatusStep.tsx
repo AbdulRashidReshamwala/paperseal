@@ -2,7 +2,6 @@ import { examIdFromName, roundTimeSeconds, type Hex } from '@paperseal/protocol'
 import { Check, Countdown, CopyButton, Row, Rows, Stage, type SealState } from '@paperseal/ui';
 import { Link } from 'react-router';
 
-import { useCurrentExamId } from '../../shared/currentExam';
 
 import { useBoardForm } from './BoardForm';
 import { ExamRecord } from './ExamRecord';
@@ -78,7 +77,7 @@ function EnsName(props: { examName: string | null; registryAddress: Hex | null; 
 }
 
 /** Step 7: the Build is posted. From here the board only watches. */
-export function StatusStep(props: { eyebrow: string; snapshot: Snapshot }) {
+export function StatusStep(props: { examId: Hex; snapshot: Snapshot }) {
   const { snapshot } = props;
   const { receipts, examName, environment } = useBoardForm();
   const now = useNow();
@@ -89,7 +88,7 @@ export function StatusStep(props: { eyebrow: string; snapshot: Snapshot }) {
   const endSeconds = roundTimeSeconds(endRound);
   const seal = sealStateAt(now, unlockSeconds * 1000, endSeconds * 1000);
   const { status, teeProblem } = snapshot;
-  const examId = useCurrentExamId();
+  const { examId } = props;
   const verifier = verifierUrl(undefined, examId);
   // The session's name only counts for the exam it hashes to, not one opened from a link.
   const named = examName && settings && examIdFromName(examName).toLowerCase() === settings.examId.toLowerCase() ? examName : null;
@@ -114,7 +113,7 @@ export function StatusStep(props: { eyebrow: string; snapshot: Snapshot }) {
   };
 
   return (
-    <Stage eyebrow={props.eyebrow} title={copy[seal].title} lede={copy[seal].lede} next={copy[seal].next} seal={seal} stampSeal={justSealed}>
+    <Stage title={copy[seal].title} lede={copy[seal].lede} next={copy[seal].next} seal={seal} stampSeal={justSealed}>
       {seal === 'sealed' ? <Countdown at={unlockSeconds * 1000} round={unlockRound} label="Paper released to centres" reached="Now" /> : null}
       {seal === 'opening' ? <Countdown at={endSeconds * 1000} round={endRound} label="Opens to the public" reached="Now" /> : null}
       <Rows>

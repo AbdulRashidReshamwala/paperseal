@@ -1,10 +1,9 @@
 import type { Directory } from '@paperseal/chain';
 import { matchInvites, ownerProblem, partyNameProblem, roles, setterEntries, threshold, type Hex, type InviteState } from '@paperseal/protocol';
 import type { RegistrationEntry, TeeClient } from '@paperseal/tee-client';
-import { Button, Check, Field, Hash, Panel, Row, Rows, Stage, Stamp } from '@paperseal/ui';
+import { Button, Check, Field, Hash, Row, Rows, Stamp } from '@paperseal/ui';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 
-import { useCurrentExamId } from '../../shared/currentExam';
 import { directoryName } from '../../shared/names';
 import { TEE_STATUS_POLL_MS } from '../../shared/TeeStatus';
 import { useBoardForm, useReader } from './BoardForm';
@@ -30,8 +29,7 @@ const RECHECK_MS = 10_000;
  * against the chain and be at Onboard. Runs when the exam changes, and again while it is blocked,
  * so a machine that comes up later unblocks the screen by itself.
  */
-function usePostGate(tee: TeeClient | null): PostGate {
-  const examId = useCurrentExamId();
+function usePostGate(tee: TeeClient | null, examId: Hex): PostGate {
   const reader = useReader();
   const [result, setResult] = useState<{ key: string; gate: Exclude<PostGate, { state: 'checking' }> } | null>(null);
   const [round, setRound] = useState(0);
@@ -285,12 +283,12 @@ function Count(props: { label: string; have: number; need: number }) {
 const expected = /^expected \d+ neutral and \d+ centre key holders/;
 
 /** Step 4: names to choose and setters to invite, then the list composed from whoever registered. */
-export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPosted: () => void }) {
+export function PeopleStep(props: { examId: Hex; snapshot: Snapshot; onPosted: () => void }) {
   const { environment, tee, addReceipt, receipts } = useBoardForm();
   const published = receipts.find((receipt) => receipt.kind === 'publish' && receipt.outcome.matches);
-  const examId = useCurrentExamId();
+  const { examId } = props;
   const reader = useReader();
-  const gate = usePostGate(tee);
+  const gate = usePostGate(tee, examId);
   const load = useMemo(() => (tee ? () => tee.registrations() : null), [tee]);
   const { value, problem } = usePoll(load, TEE_STATUS_POLL_MS);
   const registrations: readonly RegistrationEntry[] = useMemo(() => value?.registrations ?? [], [value]);
@@ -307,11 +305,12 @@ export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPoste
     [parties, records, registrations],
   );
   const entries = useMemo(() => [...partyEntries(partyRows), ...setterEntries(matching)], [partyRows, matching]);
-  const composed = useMemo(() => (examId && entries.length > 0 ? tryCompose(examId, entries) : null), [examId, entries]);
+  const composed = useMemo(() => (entries.length > 0 ? tryCompose(examId, entries) : null), [examId, entries]);
 
   const listed = useMemo(() => (directory.read?.state === 'found' ? directory.read.names : []), [directory.read]);
   const shown = useMemo(() => {
-    const all = [...new Set([...listed, ...chosenNames])];
+    // The names already chosen come first, so the page opens on the people it is waiting for.
+    const all = [...new Set([...chosenNames, ...listed])];
     const wanted = search.trim().toLowerCase();
     return wanted === '' ? all : all.filter((name) => name.includes(wanted));
   }, [listed, chosenNames, search]);
@@ -334,9 +333,7 @@ export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPoste
   const conflicts = matching.rows.filter(({ state }) => state.kind === 'conflict').length;
   const blocked = !tee
     ? 'Paper Seal is not connected, so nobody can register yet. Reload this page. If it stays like this, contact whoever runs Paper Seal.'
-    : !examId
-      ? 'No exam is open. Go back to the exam board page and open your exam.'
-      : entries.length === 0
+    : entries.length === 0
         ? parties.length === 0 && invites.length === 0
           ? 'Choose who takes part, then share the exam link.'
           : 'Waiting for people to register. You can close this page and come back.'
@@ -354,178 +351,172 @@ export function PeopleStep(props: { eyebrow: string; snapshot: Snapshot; onPoste
   const needs = props.snapshot.found?.criteria ? bankNeeded(props.snapshot.found.criteria) : null;
 
   return (
-    <Stage
-      eyebrow={props.eyebrow}
-      title="Choose who takes part"
-      lede="Tick each key holder and centre, and share the exam link with them once. Invite setters with a private link. When everyone has registered, post the list."
-      action={
-        <>
-          {published ? (
-            <div className="board-section">
-              <p className="board-stamp">
-                <Stamp press>Published</Stamp>
-              </p>
-              <p>Your exam is saved on the public record, and it matches what you entered.</p>
-              {published.outcome.rows.length > 0 ? (
-                <Fold summary="Details">
-                  <ReadBackRows rows={published.outcome.rows} />
-                </Fold>
-              ) : null}
-            </div>
+    <>
+      <h1 className="board-draft-title">Bring everyone in</h1>
+      <p className="board-draft-lede">Everyone registers their security key. Then you post the list, and setters can send questions.</p>
+      {published ? (
+        <div className="board-section board-people-published">
+          <Stamp press>Published</Stamp>
+          <p>Your exam is saved on the public record, and it matches what you entered.</p>
+          {published.outcome.rows.length > 0 ? (
+            <Fold summary="Details">
+              <ReadBackRows rows={published.outcome.rows} />
+            </Fold>
           ) : null}
-          <Panel title="Key holders and centres">
-            {examId ? (
-              <>
-                <p className="board-link">
-                  <span>Share this exam link once. It holds nothing secret.</span>
-                  <CopyLink label="Copy the exam link" url={examPageLink(base, examId)} />
-                </p>
-                <Field label="Search the directory" value={search} onChange={setSearch} />
-                {seen ? (
-                  <p className="board-note">
-                    {seen}{' '}
-                    {unreadDirectory ? <Button onClick={directory.retry}>Try again</Button> : null}
-                  </p>
-                ) : null}
-                {shown.length > 0 ? (
-                  <Rows>
-                    {shown.map((name) => {
-                      const row = partyRows.find(({ party }) => party.name === name);
-                      return (
-                        <PartyRow
-                          key={name}
-                          name={name}
-                          party={row?.party}
-                          state={row?.state}
-                          onTick={(ticked) => {
-                            tick(name, ticked);
-                          }}
-                          onRole={(role) => {
-                            setRole(name, role);
-                          }}
-                          onRetry={retry}
-                        />
-                      );
-                    })}
-                  </Rows>
-                ) : null}
-                <AddName
-                  taken={[...listed, ...chosenNames]}
-                  onAdd={(name) => {
-                    tick(name, true);
+        </div>
+      ) : null}
+      <section className="board-draft-card board-people-job">
+        <h2>
+          <span>1</span> Share the exam link
+        </h2>
+        <p className="board-link">
+          <span>Send this to every centre and neutral party once. It holds nothing secret.</span>
+          <CopyLink label="Copy the exam link" url={examPageLink(base, examId)} />
+        </p>
+        {seen ? (
+          <p className="board-note">
+            {seen} {unreadDirectory ? <Button onClick={directory.retry}>Try again</Button> : null}
+          </p>
+        ) : null}
+        {listed.length > 8 || parties.length > 8 ? <Field label="Search the directory" value={search} onChange={setSearch} /> : null}
+        {shown.length > 0 ? (
+          <Rows>
+            {shown.map((name) => {
+              const row = partyRows.find(({ party }) => party.name === name);
+              return (
+                <PartyRow
+                  key={name}
+                  name={name}
+                  party={row?.party}
+                  state={row?.state}
+                  onTick={(ticked) => {
+                    tick(name, ticked);
                   }}
+                  onRole={(role) => {
+                    setRole(name, role);
+                  }}
+                  onRetry={retry}
                 />
-              </>
-            ) : null}
-            <p className="board-note">
-              ENS names are read on Sepolia, a test network, where anyone can register a similar name. Whoever runs {directoryName} decides which key belongs to each name on it.
-            </p>
-          </Panel>
-          <Panel title="Setters">
-            {examId ? (
-              <AddInvite
-                invites={invites}
-                onAdd={(invite) => {
-                  update([...invites, invite]);
+              );
+            })}
+          </Rows>
+        ) : null}
+        <AddName
+          taken={[...listed, ...chosenNames]}
+          onAdd={(name) => {
+            tick(name, true);
+          }}
+        />
+        <p className="board-note">
+          ENS names are read on Sepolia, a test network, where anyone can register a similar name. Whoever runs {directoryName} decides which key belongs to each name on it.
+        </p>
+      </section>
+      <section className="board-draft-card board-people-job">
+        <h2>
+          <span>2</span> Invite the setters
+        </h2>
+        <p className="board-note">
+          {needs ? `You need at least ${String(needs.setters)}. ` : ''}Each link works for one setter only, so send it to them privately.
+        </p>
+        <AddInvite
+          invites={invites}
+          onAdd={(invite) => {
+            update([...invites, invite]);
+          }}
+        />
+        {invites.length > 0 ? (
+          <Rows>
+            {matching.rows.map(({ invite, state }) => (
+              <InviteRow
+                key={invite.id}
+                invite={invite}
+                state={state}
+                link={linkFor(base, examId, invite)}
+                onReissue={() => {
+                  update(invites.map((item) => (item.id === invite.id ? reissueInvite(invite) : item)));
                 }}
               />
-            ) : null}
-            {invites.length > 0 && examId ? (
-              <Rows>
-                {matching.rows.map(({ invite, state }) => (
-                  <InviteRow
-                    key={invite.id}
-                    invite={invite}
-                    state={state}
-                    link={linkFor(base, examId, invite)}
-                    onReissue={() => {
-                      update(invites.map((item) => (item.id === invite.id ? reissueInvite(invite) : item)));
-                    }}
-                  />
-                ))}
-              </Rows>
-            ) : null}
-            {examId ? <InviteBackup examId={examId} invites={invites} onRestore={update} /> : null}
-            <p className="board-note">
-              Each link works for one setter only, so send it to them privately. It is safe to close this page while you wait.
-            </p>
-          </Panel>
-          <Panel title="On the list">
-            <Rows>
-              <Count label="Key holders" have={counts(roles.neutral)} need={threshold.neutrals} />
-              <Count label="Centres holding part of the key" have={counts(roles.centreKeyHolder)} need={threshold.centres} />
-              <Row label="Centres getting the key at unlock">{counts(roles.centre)}</Row>
-              <Row label="Setters">
-                {counts(roles.setter)}
-                {needs ? `, at least ${String(needs.setters)} needed` : ''}
-              </Row>
-            </Rows>
-          </Panel>
-          <div className="board-section" aria-live="polite">
-            {problem ? <p className="board-blocked">Who has registered cannot be loaded right now. This page keeps trying.</p> : null}
-            {conflicts > 0 ? (
-              <p className="board-problem" role="alert">
-                <Check status="fail">An invite was used by two security keys, so neither is on the list. Make a new link for that invite, then send it to the right person.</Check>
-              </p>
-            ) : null}
-            {stray > 0 ? <p className="board-note">{stray === 1 ? '1 other registration matches nobody here, so it is not on the list.' : `${String(stray)} other registrations match nobody here, so they are not on the list.`}</p> : null}
-          </div>
-          <PostAction
-            label="Post the list"
-            blocked={blocked}
-            post={async (onStage) => {
-              if (!examId || !composed?.ok) throw new Error('The list is not ready to post yet. Check the numbers under "On the list".');
-              if (!tee || !reader) throw new Error('Paper Seal is not connected, so the list cannot be posted. Reload this page and try again.');
-              // Checked again right before sending: the result on screen may be minutes old.
-              await checkPostTarget({ tee, registry: reader, examId });
-              return postApprovedListFlow(environment, { examId, entries: composed.list.encoded }, onStage);
-            }}
-            onPosted={(outcome: PostOutcome) => {
-              addReceipt({ kind: 'list', outcome });
-              props.onPosted();
-            }}
-          />
-        </>
-      }
-      next="You can post the list only once, so wait until everyone has registered. Setters can then send questions, usually about 20 minutes later."
-    >
-      <ExamRecord snapshot={props.snapshot}>
-        {gate.state === 'ok' ? (
-          <Row label="Paper Seal">
-            <Check status="pass">Ready for the list</Check>
-          </Row>
-        ) : null}
-        {gate.state === 'ok' ? (
-          <Row label="Paper Seal key">
-            <Hash value={gate.target.instancePublicKey} label="instance key" />
-          </Row>
-        ) : null}
-        {composed?.ok ? (
-          <Row label="List fingerprint">
-            <Hash value={composed.list.hash} label="list fingerprint" />
-          </Row>
-        ) : null}
-      </ExamRecord>
-      {entries.length > 0 ? (
-        <Fold summary="Registered security keys">
-          <Rows>
-            {partyRows.map(({ party, state }) =>
-              state.kind === 'registered' ? (
-                <Row key={party.name} label={party.name}>
-                  <Hash value={state.registration.passkeyPublicKey} label="security key" />
-                </Row>
-              ) : null,
-            )}
-            {matching.rows.map(({ invite, state }) =>
-              state.kind === 'matched' ? (
-                <Row key={invite.id} label={invite.label}>
-                  <Hash value={state.registration.passkeyPublicKey} label="security key" />
-                </Row>
-              ) : null,
-            )}
+            ))}
           </Rows>
-        </Fold>
+        ) : null}
+        <InviteBackup examId={examId} invites={invites} onRestore={update} />
+      </section>
+      <section className="board-draft-card board-people-job">
+        <h2>
+          <span>3</span> Post the list
+        </h2>
+        <Rows>
+          <Count label="Neutral parties" have={counts(roles.neutral)} need={threshold.neutrals} />
+          <Count label="Centres holding part of the key" have={counts(roles.centreKeyHolder)} need={threshold.centres} />
+          <Row label="Centres getting the key at unlock">{counts(roles.centre)}</Row>
+          <Row label="Setters">
+            {counts(roles.setter)}
+            {needs ? `, at least ${String(needs.setters)} needed` : ''}
+          </Row>
+        </Rows>
+        <div className="board-section" aria-live="polite">
+          {problem ? <p className="board-blocked">Who has registered cannot be loaded right now. This page keeps trying.</p> : null}
+          {conflicts > 0 ? (
+            <p className="board-problem" role="alert">
+              <Check status="fail">An invite was used by two security keys, so neither is on the list. Make a new link for that invite, then send it to the right person.</Check>
+            </p>
+          ) : null}
+          {stray > 0 ? <p className="board-note">{stray === 1 ? '1 other registration matches nobody here, so it is not on the list.' : `${String(stray)} other registrations match nobody here, so they are not on the list.`}</p> : null}
+        </div>
+        <PostAction
+          label="Post the list"
+          blocked={blocked}
+          post={async (onStage) => {
+            if (!composed?.ok) throw new Error('The list is not ready to post yet. Check the numbers above.');
+            if (!tee || !reader) throw new Error('Paper Seal is not connected, so the list cannot be posted. Reload this page and try again.');
+            // Checked again right before sending: the result on screen may be minutes old.
+            await checkPostTarget({ tee, registry: reader, examId });
+            return postApprovedListFlow(environment, { examId, entries: composed.list.encoded }, onStage);
+          }}
+          onPosted={(outcome: PostOutcome) => {
+            addReceipt({ kind: 'list', outcome });
+            props.onPosted();
+          }}
+        />
+        <p className="board-note">You can post the list only once, so wait until everyone has registered. It is safe to close this page and come back.</p>
+      </section>
+    <ExamRecord snapshot={props.snapshot}>
+      {gate.state === 'ok' ? (
+        <Row label="Paper Seal">
+          <Check status="pass">Ready for the list</Check>
+        </Row>
       ) : null}
-    </Stage>
+      {gate.state === 'ok' ? (
+        <Row label="Paper Seal key">
+          <Hash value={gate.target.instancePublicKey} label="instance key" />
+        </Row>
+      ) : null}
+      {composed?.ok ? (
+        <Row label="List fingerprint">
+          <Hash value={composed.list.hash} label="list fingerprint" />
+        </Row>
+      ) : null}
+    </ExamRecord>
+    {entries.length > 0 ? (
+      <Fold summary="Registered security keys">
+        <Rows>
+          {partyRows.map(({ party, state }) =>
+            state.kind === 'registered' ? (
+              <Row key={party.name} label={party.name}>
+                <Hash value={state.registration.passkeyPublicKey} label="security key" />
+              </Row>
+            ) : null,
+          )}
+          {matching.rows.map(({ invite, state }) =>
+            state.kind === 'matched' ? (
+              <Row key={invite.id} label={invite.label}>
+                <Hash value={state.registration.passkeyPublicKey} label="security key" />
+              </Row>
+            ) : null,
+          )}
+        </Rows>
+      </Fold>
+    ) : null}
+    </>
   );
 }

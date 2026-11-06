@@ -27,7 +27,7 @@ function Questions(props: { snapshot: Snapshot }) {
 }
 
 /** Step 5: there is nothing to do here until the paper is built. */
-export function WaitStep(props: { eyebrow: string; snapshot: Snapshot }) {
+export function WaitStep(props: { snapshot: Snapshot }) {
   const { snapshot } = props;
   const now = useNow();
   const settings = snapshot.found?.exam.settings;
@@ -39,7 +39,6 @@ export function WaitStep(props: { eyebrow: string; snapshot: Snapshot }) {
   if (stage === 'failed') {
     return (
       <Stage
-        eyebrow={props.eyebrow}
         title="The paper could not be built"
         lede="This can happen when setters did not send enough questions. The exam cannot go ahead until it is fixed."
         next="Contact whoever runs Paper Seal and tell them what you see here. You can close this page."
@@ -51,7 +50,6 @@ export function WaitStep(props: { eyebrow: string; snapshot: Snapshot }) {
   }
   return (
     <Stage
-      eyebrow={props.eyebrow}
       title={closed ? 'The paper is being built' : `Nothing to do until ${formatTimeOnly(lockSeconds)}`}
       lede={
         closed

@@ -3,7 +3,6 @@ import { Check, Row, Rows, Stage } from '@paperseal/ui';
 import { useEffect, useState } from 'react';
 
 import { verifyTee } from '../../shared/attest';
-import { useCurrentExamId } from '../../shared/currentExam';
 import { useBoardForm, useReader } from './BoardForm';
 import { ExamRecord } from './ExamRecord';
 import type { Snapshot } from './examState';
@@ -18,17 +17,16 @@ type Checked = { state: 'checking' } | { state: 'ready'; build: BuildPost } | { 
  * Verifies the outbox message before the wallet can be asked: the TEE must attest for this exam,
  * and the Build must carry its signature under the attested key.
  */
-function useVerifiedBuild(snapshot: Snapshot): Checked {
+function useVerifiedBuild(snapshot: Snapshot, examId: Hex): Checked {
   const { tee } = useBoardForm();
   const reader = useReader();
-  const examId = useCurrentExamId();
   const message = snapshot.outbox[0] ?? null;
   const signature = message?.teeSignature ?? '';
   const [result, setResult] = useState<{ key: string; checked: Exclude<Checked, { state: 'checking' }> } | null>(null);
-  const key = `${examId ?? ''}:${signature}`;
+  const key = `${examId}:${signature}`;
 
   useEffect(() => {
-    if (!tee || !reader || !examId || !message) return;
+    if (!tee || !reader || !message) return;
     let live = true;
     const settle = (checked: Exclude<Checked, { state: 'checking' }>) => {
       if (live) setResult({ key, checked });
@@ -60,13 +58,12 @@ function useVerifiedBuild(snapshot: Snapshot): Checked {
 }
 
 /** Step 6: the machine has finished. One action puts its signed record on the public record. */
-export function BuildStep(props: { eyebrow: string; snapshot: Snapshot; onPosted: () => void }) {
+export function BuildStep(props: { examId: Hex; snapshot: Snapshot; onPosted: () => void }) {
   const { environment, addReceipt } = useBoardForm();
-  const checked = useVerifiedBuild(props.snapshot);
+  const checked = useVerifiedBuild(props.snapshot, props.examId);
   const build = checked.state === 'ready' ? checked.build : null;
   return (
     <Stage
-      eyebrow={props.eyebrow}
       title="The paper is ready"
       lede="Post the paper’s record so that anyone can check it is the paper centres receive."
       action={

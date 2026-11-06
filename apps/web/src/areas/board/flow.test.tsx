@@ -250,7 +250,7 @@ describe('step 3, bring people in', () => {
   it('makes a setter invite, keeps it in the browser and copies a link with the secret in the fragment', async () => {
     const { env } = await seeded('exam');
     renderBoard(env, fakeTee());
-    await screen.findByRole('heading', { name: 'Choose who takes part' });
+    await screen.findByRole('heading', { name: 'Bring everyone in' });
     addInvite('');
     await screen.findByText('Waiting for them to register');
     const writeText = vi.fn(() => Promise.resolve());
@@ -272,7 +272,7 @@ describe('step 3, bring people in', () => {
   it('shows one public exam link that holds no secret', async () => {
     const { env } = await seeded('exam');
     renderBoard(env, fakeTee());
-    await screen.findByRole('heading', { name: 'Choose who takes part' });
+    await screen.findByRole('heading', { name: 'Bring everyone in' });
     const writeText = vi.fn(() => Promise.resolve());
     vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
     fireEvent.click(button('Copy the exam link'));
@@ -328,7 +328,7 @@ describe('step 3, bring people in', () => {
   it('says plainly that invites live in this browser, and that a backup is private', async () => {
     const { env } = await seeded('exam');
     renderBoard(env, fakeTee());
-    await screen.findByRole('heading', { name: 'Choose who takes part' });
+    await screen.findByRole('heading', { name: 'Bring everyone in' });
     expect(screen.getByText(/kept in this browser only/)).toBeTruthy();
     expect(screen.getByText(/The backup is private, because it holds everyone’s links/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Save a backup' })).toBeNull();
@@ -355,7 +355,7 @@ describe('step 3, bring people in', () => {
 
     localStorage.removeItem(`paperseal.invites.${examId}`);
     renderBoard(env, fakeTee());
-    await screen.findByRole('heading', { name: 'Choose who takes part' });
+    await screen.findByRole('heading', { name: 'Bring everyone in' });
     expect(screen.queryByText('Setter 1')).toBeNull();
     const file = new File([text ?? ''], 'backup.json', { type: 'application/json' });
     fireEvent.change(screen.getByLabelText('Restore from a backup'), { target: { files: [file] } });
@@ -367,7 +367,7 @@ describe('step 3, bring people in', () => {
   it('refuses a backup that is not for this exam or not a backup at all', async () => {
     const { env } = await seeded('exam');
     renderBoard(env, fakeTee());
-    await screen.findByRole('heading', { name: 'Choose who takes part' });
+    await screen.findByRole('heading', { name: 'Bring everyone in' });
     const restore = async (content: string) => {
       fireEvent.change(screen.getByLabelText('Restore from a backup'), { target: { files: [new File([content], 'x.json')] } });
     };
@@ -382,7 +382,7 @@ describe('step 3, bring people in', () => {
     const { env } = await seeded('exam');
     stock([setter]);
     renderBoard(env, fakeTee());
-    await screen.findByRole('heading', { name: 'Choose who takes part' });
+    await screen.findByRole('heading', { name: 'Bring everyone in' });
     vi.stubGlobal('navigator', { ...navigator, clipboard: undefined });
     fireEvent.click(button('Copy the link for Setter 1'));
     expect(await screen.findByText(/#\/join\?exam=/)).toBeTruthy();

@@ -47,6 +47,43 @@ export function DraftShell(props: DraftRail & { children: ReactNode }) {
   );
 }
 
+const EXAM_STAGES = [
+  { stage: 'people', label: 'Bring everyone in' },
+  { stage: 'wait', label: 'Collect questions' },
+  { stage: 'post-build', label: 'Post the paper' },
+  { stage: 'status', label: 'Exam day' },
+] as const;
+
+export type ExamStage = (typeof EXAM_STAGES)[number]['stage'];
+
+/** Where a published exam stands, and what is still to come. State moves it on, so nothing here is pressed. */
+export function ExamShell(props: { step: ExamStage; children: ReactNode }) {
+  const here = EXAM_STAGES.findIndex(({ stage }) => stage === props.step);
+  return (
+    <div className="board-draft">
+      <nav aria-label="Stages of this exam">
+        <ol className="board-draft-rail">
+          <li data-state="done">
+            <div>
+              <span aria-hidden="true">1</span>
+              Exam created
+            </div>
+          </li>
+          {EXAM_STAGES.map(({ stage, label }, index) => (
+            <li key={stage} data-state={index === here ? 'here' : index < here ? 'done' : 'ahead'}>
+              <div aria-current={index === here ? 'step' : undefined}>
+                <span aria-hidden="true">{index + 2}</span>
+                {label}
+              </div>
+            </li>
+          ))}
+        </ol>
+      </nav>
+      <div className="board-draft-main">{props.children}</div>
+    </div>
+  );
+}
+
 /**
  * One page of the form: what to do, the fields in one surface, then Back and Continue. A `form` page
  * also continues on Enter. A page that holds a form of its own cannot be one.

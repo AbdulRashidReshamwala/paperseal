@@ -12,7 +12,7 @@ import { BoardFormProvider, useBoardForm, useEvaluated, useReader } from './Boar
 import { BoardHome } from './BoardHome';
 import { BuildStep } from './BuildStep';
 import { DetailsStep, TopicsStep } from './CreateStep';
-import { DraftShell } from './DraftFrame';
+import { DraftShell, ExamShell, type ExamStage } from './DraftFrame';
 import { decideStep, readSnapshot, type Snapshot } from './examState';
 import { usePoll } from './hooks';
 import { PeopleStep } from './PeopleStep';
@@ -208,10 +208,11 @@ function BoardFlow(props: { mode: Mode }) {
       />,
     );
   }
-  if (decided === 'people') return withLink(<PeopleStep eyebrow={step(3)} snapshot={value} onPosted={reload} />);
-  if (decided === 'wait') return withLink(<WaitStep eyebrow={step(4)} snapshot={value} />);
-  if (decided === 'post-build') return withLink(<BuildStep eyebrow={step(5)} snapshot={value} onPosted={reload} />);
-  return withLink(<StatusStep eyebrow={step(6)} snapshot={value} />);
+  const onExam = (step: ExamStage, children: ReactNode) => withLink(<ExamShell step={step}>{children}</ExamShell>);
+  if (decided === 'people') return onExam('people', <PeopleStep examId={examId} snapshot={value} onPosted={reload} />);
+  if (decided === 'wait') return onExam('wait', <WaitStep snapshot={value} />);
+  if (decided === 'post-build') return onExam('post-build', <BuildStep examId={examId} snapshot={value} onPosted={reload} />);
+  return onExam('status', <StatusStep examId={examId} snapshot={value} />);
 }
 
 /** `/board` is the home list, unless `?exam=` names an exam, which an older link still opens. */

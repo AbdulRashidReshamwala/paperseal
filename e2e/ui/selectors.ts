@@ -13,7 +13,7 @@ export const text = {
   // Board
   createHeading: 'Create the exam',
   reviewHeading: 'Preview and submit',
-  peopleHeading: 'Choose who takes part',
+  peopleHeading: 'Bring everyone in',
   /** The stamp above the invites once the read-back matched. */
   publishedStamp: 'Published',
   recordBuildHeading: 'The paper is ready',
