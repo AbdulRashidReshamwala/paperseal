@@ -45,7 +45,8 @@ Every file is already public and already encrypted or signed, so the collection 
 | [`packages/arkiv/src/schemas.ts`](../packages/arkiv/src/schemas.ts), [`writer.ts`](../packages/arkiv/src/writer.ts), [`reader.ts`](../packages/arkiv/src/reader.ts) | The `paperseal.v1.backup` entity: write, deduplicate and read |
 | [`relay/src/backup.ts`](../relay/src/backup.ts) | Checks every file against Sepolia, uploads, writes the Arkiv row, and reads it back |
 | [`relay/src/swarm-node.ts`](../relay/src/swarm-node.ts) | `swarm-status` and `buy-stamp` |
-| [`apps/verifier/src/backup.ts`](../apps/verifier/src/backup.ts) | Reads a file from Swarm when the bucket can't give a good one. It finds the backup through Arkiv and checks the manifest against Sepolia and each file against the manifest |
+| [`packages/verify/src/backup.ts`](../packages/verify/src/backup.ts) | Reads a file from Swarm when the bucket can't give a good one. It finds the backup through Arkiv and checks the manifest against Sepolia and each file against the manifest |
+| [`apps/verifier/src/swarm.ts`](../apps/verifier/src/swarm.ts) | Reads every backup recorded for an exam in the verifier, through the same checks as the bucket's copies, and shows which files came from Swarm |
 
 ## Run It Yourself
 
@@ -90,9 +91,9 @@ To be added by the team, with the timestamp where the bucket is switched off and
 5. **"Synced" is never exactly the chain tip.** Bee trails the tip by about 5 blocks, by design, so a check for `block == chainTip` never passes. We allow 10.
 6. **The price swings while syncing.** `/chainstate` showed 24,618, then 205,334, then 99,788 PLUR per chunk per block during the sync, so quotes were only good once synced.
 7. **There is no testnet gateway,** so judges would need their own node. We ran a read-only one on a VM for the event (Caddy in front of Bee, passing only `GET /bzz/*`), but we'd love a public, CORS-enabled testnet gateway, even a rate-limited one.
-10. **Moving a node is easy once you know how.** Copying the data directory (`keys`, `statestore`, `localstore`, `stamperstore`, 7 MB) to a new machine kept the wallet, the batch and the postage sync. The new node was ready in under a minute.
 8. **Depth 17 holds only about 45 KB reliably.** That surprised us, because it is the minimum depth and its theoretical size is 537 MB. The effective volume table is what matters, and it is easy to miss.
 9. **sBZZ only comes from a Uniswap testnet swap.** A faucet would be simpler.
+10. **Moving a node is easy once you know how.** Copying the data directory (`keys`, `statestore`, `localstore`, `stamperstore`, 7 MB) to a new machine kept the wallet, the batch and the postage sync. The new node was ready in under a minute.
 
 ## In Production
 
