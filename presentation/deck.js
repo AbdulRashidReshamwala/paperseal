@@ -18,6 +18,21 @@ function show(n, replay = false) {
   count.textContent = `${i + 1} / ${slides.length}`;
   bar.style.width = `${((i + 1) / slides.length) * 100}%`;
   history.replaceState(null, '', `#${i + 1}`);
+  rollDie();
+}
+// the seed dice tumbles through random faces, then lands on 5
+let dieTimer;
+function rollDie() {
+  clearInterval(dieTimer);
+  const use = slides[i].querySelector('#die use');
+  if (!use || deck.classList.contains('static')) return;
+  const start = performance.now() + 1500;
+  dieTimer = setInterval(() => {
+    const t = performance.now() - start;
+    if (t < 0) return;
+    if (t > 1250) { use.setAttribute('href', '#die-5'); clearInterval(dieTimer); return; }
+    use.setAttribute('href', `#die-${1 + Math.floor(Math.random() * 6)}`);
+  }, 90);
 }
 addEventListener('resize', fit);
 addEventListener('keydown', (e) => {

@@ -145,6 +145,10 @@ html,body{height:100%;background:#05070d;overflow:hidden}
 @keyframes gold{0%{background:#f7f3e8}100%{background:var(--gold);border-color:#a8832d;transform:scale(1.12)}}
 .s2 .seed{left:1060px;top:480px;width:240px;height:200px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;font:600 28px/1.2 var(--sans);padding:20px}
 .s2 .seed .ic{font-size:70px;color:var(--wax)}
+.s2 .seed .die{font-size:84px;transform-origin:50% 60%}
+@keyframes roll{0%{transform:translateY(-40px) rotate(0) scale(.6)}35%{transform:translateY(8px) rotate(300deg) scale(1.15)}55%{transform:translateY(-22px) rotate(520deg) scale(1.05)}78%{transform:translateY(3px) rotate(690deg) scale(1)}100%{transform:translateY(0) rotate(720deg) scale(1)}}
+.slide.on .s2 .seed .die,.slide.s2.on .seed .die{animation:roll 1.3s cubic-bezier(.3,.7,.4,1) 1.5s both}
+.static .seed .die{animation:none!important}
 .s2 .paperout{left:1380px;top:310px;width:430px;height:620px;padding:46px 40px}
 .s2 .ln{display:block;height:16px;background:#c7bfa8;border-radius:8px;margin-top:34px;transform-origin:left;animation:draw .5s ease-out var(--d) both}
 .s2 .ln:nth-child(odd){width:86%}
