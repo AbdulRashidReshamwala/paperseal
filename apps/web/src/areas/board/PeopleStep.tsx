@@ -14,6 +14,7 @@ import { ExamRecord } from './ExamRecord';
 import type { Snapshot } from './examState';
 import { InviteBackup } from './InviteBackup';
 import { Fold, PostAction, ReadBackRows } from './Parts';
+import { demoSetters } from '../../shared/demoKeys';
 import { createInvite, linkFor, reissueInvite, type BoardInvite } from './invites';
 import { defaultRole, partyEntries, partyRoles, partyState, useDirectoryNames, useParties, usePartyRecords, type ChosenParty, type PartyState } from './parties';
 import { bankNeeded, centresProblem, neutralsProblem } from './plan';
@@ -22,6 +23,8 @@ import { postApprovedListFlow, type PostOutcome } from './postFlow';
 import { explainError } from './publishFlow';
 import { roleNames, tryCompose } from './registrations';
 import { useInvites } from './useInvites';
+
+const sampleSetters = demoSetters();
 
 const RECHECK_MS = 10_000;
 
@@ -397,6 +400,17 @@ export function PeopleStep(props: { examId: Hex; snapshot: Snapshot; onPosted: (
             update([...invites, invite]);
           }}
         />
+        {sampleSetters !== null && invites.length < sampleSetters ? (
+          <Button
+            onClick={() => {
+              const next = [...invites];
+              while (next.length < sampleSetters) next.push(createInvite(next, `Setter ${String(next.length + 1)}`));
+              update(next);
+            }}
+          >
+            Add invites for all {sampleSetters} setters
+          </Button>
+        ) : null}
         {invites.length > 0 ? (
           <Rows>
             {matching.rows.map(({ invite, state }) => (

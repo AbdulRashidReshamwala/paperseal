@@ -51,6 +51,12 @@ export function demoTopics(): { name: string; questions: string }[] | null {
   return ['Mathematics', 'Physics', 'Chemistry', 'Biology', 'English'].map((name) => ({ name, questions: '5' }));
 }
 
+/** How many setters a demo has, to fill the invites in one click. Null outside demo mode. */
+export function demoSetters(): number | null {
+  if (!on) return null;
+  return 5;
+}
+
 /** The `credentials` option for `createWebAuthnKeys`, empty outside demo mode, so the browser's real one applies. */
 export function credentialsOption(): { credentials?: Pick<CredentialsContainer, 'create' | 'get'> } {
   if (!on) return {};
