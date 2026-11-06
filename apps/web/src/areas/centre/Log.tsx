@@ -1,17 +1,14 @@
 import { OnChainBytesError, type ExamRegistry } from '@paperseal/chain';
 import { decodeApprovedList, fromHex, roundTimeSeconds, toHex, type Hex } from '@paperseal/protocol';
-import type { ReleaseLogResponse } from '@paperseal/tee-client';
+import { isDeliveryPending, type ReleaseLogResponse } from '@paperseal/tee-client';
 import { Check, Row, Rows } from '@paperseal/ui';
 import { useMemo } from 'react';
 
-import { publishedTokenChecker } from '../../shared/attest';
-import { storageUrl } from '../../shared/config';
 import { useCurrentExamId } from '../../shared/currentExam';
 import { registry } from '../../shared/registry';
-import { storageFetcher } from '../../shared/storage';
 import { tee } from '../../shared/tee';
 import { usePoll } from '../../shared/usePoll';
-import { verifyReleaseLog, type LogVerdict } from './logCheck';
+import { readCheckedLog, type LogVerdict } from './logCheck';
 
 /** How long to wait before reading a log that could not be read. */
 const LOG_RETRY_MS = 15000;
@@ -76,6 +73,7 @@ export function LogView({ log, owners, problem, verdict }: LogViewProps) {
       )}
       <Rows>
         <Row label="The list of releases is complete">{result(verdict.entriesHash)}</Row>
+        <Row label="The list of files is complete">{result(verdict.files)}</Row>
         <Row label="Signed by Paper Seal">{result(verdict.signature)}</Row>
         <Row label="Paper Seal is the approved version">
           {result(verdict.token.passed)}
@@ -87,7 +85,8 @@ export function LogView({ log, owners, problem, verdict }: LogViewProps) {
   );
 }
 
-const logRead = (loaded: { verdict: LogVerdict }) => loaded.verdict.pass;
+/** Null is a log still being prepared, so it is read again. */
+const logRead = (loaded: { verdict: LogVerdict } | null) => loaded?.verdict.pass ?? false;
 
 /** The sealed machine's signed release log, folded away, with one clear result on the fold. */
 export function UnlockLog() {
@@ -97,28 +96,26 @@ export function UnlockLog() {
     const reader = registry;
     if (!client || !reader || !exam) return null;
     return async () => {
-      const [log, named] = await Promise.all([client.releaseLog(), readOwners(reader, exam)]);
-      let token: string | null = null;
-      if (storageUrl) {
-        try {
-          token = new TextDecoder().decode(await storageFetcher(storageUrl, exam)('release-token.jwt'));
-        } catch {
-          token = null;
-        }
+      try {
+        const [checked, named] = await Promise.all([readCheckedLog(client, reader, exam), readOwners(reader, exam)]);
+        return { ...checked, ...named };
+      } catch (error) {
+        if (isDeliveryPending(error)) return null;
+        throw error;
       }
-      const verdict = await verifyReleaseLog(log, { examId: exam }, token, publishedTokenChecker({ registry: reader, examId: exam }));
-      return { log, ...named, verdict };
     };
   }, [exam]);
   const { value: loaded, error, settled } = usePoll(load, LOG_RETRY_MS, logRead);
+  const preparing = settled && !loaded && !error;
 
   return (
     <details className="centre-log">
       <summary>
         Unlock log
-        {loaded ? <Check status={loaded.verdict.pass ? 'pass' : 'fail'} /> : <Check status={settled ? 'not-checked' : 'pending'} />}
+        {loaded ? <Check status={loaded.verdict.pass ? 'pass' : 'fail'} /> : <Check status={settled && !preparing ? 'not-checked' : 'pending'} />}
       </summary>
       {loaded ? <LogView {...loaded} /> : null}
+      {preparing ? <p className="centre-log-note">The log is still being prepared. This page keeps checking.</p> : null}
       {!loaded && error ? <p className="centre-log-note">The log can't be read right now. This page keeps trying.</p> : null}
       {!load ? <p className="centre-log-note">This page can't reach Paper Seal, so the log can't be read.</p> : null}
     </details>
