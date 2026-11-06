@@ -12,12 +12,15 @@ export interface BuildPost {
   selected: number;
   bankSize: number;
   criteriaHash: Hex;
+  /** The newest verified drand round when the TEE sealed the paper. */
+  builtRound: bigint;
   teeSignature: Hex;
   instancePublicKey: Hex;
 }
 
 const bytes32Fields = ['approvedListHash', 'paperHash', 'storageManifestHash', 'saltedPaperHash', 'criteriaHash'] as const;
 const countFields = ['selected', 'bankSize'] as const;
+const roundFields = ['builtRound'] as const;
 
 function bytes32(value: unknown, name: string): Hex {
   if (typeof value !== 'string' || !/^0x[0-9a-f]{64}$/.test(value)) throw new Error(`the Build field ${name} is not 32 bytes of lowercase hex`);
@@ -27,6 +30,13 @@ function bytes32(value: unknown, name: string): Hex {
 function count(value: unknown, name: string): number {
   const number = typeof value === 'string' && /^(0|[1-9][0-9]*)$/.test(value) ? Number(value) : value;
   if (typeof number !== 'number' || !Number.isInteger(number) || number < 0 || number >= 2 ** 32) throw new Error(`the Build field ${name} is not a uint32`);
+  return number;
+}
+
+function round(value: unknown, name: string): bigint {
+  if (typeof value !== 'string' || !/^(0|[1-9][0-9]*)$/.test(value)) throw new Error(`the Build field ${name} is not a decimal string`);
+  const number = BigInt(value);
+  if (number >= 2n ** 64n) throw new Error(`the Build field ${name} is not a uint64`);
   return number;
 }
 
@@ -41,7 +51,7 @@ export async function verifyOutboxBuild(
 ): Promise<BuildPost> {
   if (message.kind !== 'build') throw new Error(`unknown outbox message kind ${String(message.kind)}`);
   const { fields } = message;
-  const allowed = new Set<string>([...bytes32Fields, ...countFields]);
+  const allowed = new Set<string>([...bytes32Fields, ...countFields, ...roundFields]);
   const names = Object.keys(fields);
   if (names.length !== allowed.size || names.some((name) => !allowed.has(name))) {
     throw new Error(`the outbox message fields are ${names.join(', ')}, not exactly those of the build message`);
@@ -55,6 +65,7 @@ export async function verifyOutboxBuild(
     selected: count(fields.selected, 'selected'),
     bankSize: count(fields.bankSize, 'bankSize'),
     criteriaHash: bytes32(fields.criteriaHash, 'criteriaHash'),
+    builtRound: round(fields.builtRound, 'builtRound'),
   };
   if (message.examId !== build.examId || build.examId !== expected.examId.toLowerCase()) {
     throw new Error('the Build is for a different exam from this run');
@@ -71,6 +82,7 @@ export async function verifyOutboxBuild(
       selected: build.selected,
       bankSize: build.bankSize,
       criteriaHash: fromHex(build.criteriaHash),
+      builtRound: build.builtRound,
     }),
   );
   if (!valid) throw new Error('the TEE signature on the Build does not verify under its instance key');
@@ -80,5 +92,20 @@ export async function verifyOutboxBuild(
   return { ...build, teeSignature: message.teeSignature, instancePublicKey: message.instancePublicKey };
 }
 
+/** The arguments of `postBuild`: the exam, the `build` message's other fields as one tuple in hash order, then the signature and key. */
 export const buildArgs = (b: BuildPost) =>
-  [b.examId, b.approvedListHash, b.paperHash, b.storageManifestHash, b.saltedPaperHash, b.selected, b.bankSize, b.criteriaHash, b.teeSignature, b.instancePublicKey] as const;
+  [
+    b.examId,
+    {
+      approvedListHash: b.approvedListHash,
+      paperHash: b.paperHash,
+      storageManifestHash: b.storageManifestHash,
+      saltedPaperHash: b.saltedPaperHash,
+      selected: b.selected,
+      bankSize: b.bankSize,
+      criteriaHash: b.criteriaHash,
+      builtRound: b.builtRound,
+    },
+    b.teeSignature,
+    b.instancePublicKey,
+  ] as const;

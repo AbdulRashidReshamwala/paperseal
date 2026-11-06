@@ -319,8 +319,9 @@ export async function dryCheck(): Promise<void> {
     const word = (n: number) => `0x${n.toString(16).padStart(2, '0').repeat(32)}`;
     const sig = `0x${'11'.repeat(64)}`;
     const key = `0x04${'22'.repeat(64)}`;
-    const buildData = calldata('postBuild', [built.examId, word(1), word(2), word(3), word(4), 6, 12, built.criteriaHash, sig, key]);
-    const build = cast(['calldata', sigOf('postBuild'), built.examId, word(1), word(2), word(3), word(4), '6', '12', built.criteriaHash, sig, key]);
+    const buildData = calldata('postBuild', [built.examId, { approvedListHash: word(1), paperHash: word(2), storageManifestHash: word(3), saltedPaperHash: word(4), selected: 6, bankSize: 12, criteriaHash: built.criteriaHash, builtRound: 35732267n }, sig, key]);
+    const buildTuple = `(${[word(1), word(2), word(3), word(4), '6', '12', built.criteriaHash, '35732267'].join(',')})`;
+    const build = cast(['calldata', sigOf('postBuild'), built.examId, buildTuple, sig, key]);
     expect(build.status === 0 && build.stdout.trim() === buildData, 'postBuild calldata differs from cast');
     return 'all three equal';
   });

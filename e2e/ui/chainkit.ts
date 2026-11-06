@@ -158,12 +158,19 @@ export async function postBuildDirect(chain: Chain, examId: Hex, criteriaHash: H
   const client = createPublicClient({ chain: sepolia, transport: http(chain.rpcUrl) });
   const list = (await client.readContract({ address: chain.registry, abi: chain.abi, functionName: 'getApprovedList', args: [examId] })) as { listHash: Hex };
   const filler = (n: number): Hex => `0x${'ab'.repeat(n)}`;
+  // Made-up bytes, but a real round: the registry only needs it nonzero, and a reader compares it with the exam's rounds.
+  const exam = (await client.readContract({ address: chain.registry, abi: chain.abi, functionName: 'getExam', args: [examId] })) as { settings: { lockRound: bigint } };
   const wallet = createWalletClient({ account: chain.board, chain: sepolia, transport: http(chain.rpcUrl) });
   const hash = await wallet.writeContract({
     address: chain.registry,
     abi: chain.abi,
     functionName: 'postBuild',
-    args: [examId, list.listHash, filler(32), filler(32), filler(32), 6, 24, criteriaHash, filler(64), `0x04${'cd'.repeat(64)}`],
+    args: [
+      examId,
+      { approvedListHash: list.listHash, paperHash: filler(32), storageManifestHash: filler(32), saltedPaperHash: filler(32), selected: 6, bankSize: 24, criteriaHash, builtRound: exam.settings.lockRound },
+      filler(64),
+      `0x04${'cd'.repeat(64)}`,
+    ],
   });
   await waitMined(chain, hash);
   return hash;

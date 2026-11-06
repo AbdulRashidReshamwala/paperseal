@@ -545,6 +545,7 @@ async function buildStep(ctx: Ctx, listHash: Hex, receipts: { setter: string; qu
         ['selected', String(b.selected), String(stored.selected)],
         ['bankSize', String(b.bankSize), String(stored.bankSize)],
         ['criteriaHash', b.criteriaHash, stored.criteriaHash],
+        ['builtRound', String(b.builtRound), String(stored.builtRound)],
         ['teeSignature', b.teeSignature, stored.teeSignature],
         ['instancePublicKey', b.instancePublicKey, stored.instancePublicKey],
       ];
