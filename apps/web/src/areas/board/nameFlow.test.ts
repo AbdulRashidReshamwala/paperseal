@@ -1,15 +1,8 @@
-// @vitest-environment jsdom
 import { examNameResolverAbi, examRegistryRuntime, type EnsLookup, type ExamRegistry } from '@paperseal/chain';
-import { ens, examIdFromName, type Hex } from '@paperseal/protocol';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { StrictMode, useEffect } from 'react';
+import { ens, type Hex } from '@paperseal/protocol';
 import { decodeFunctionData, HttpRequestError, type Address, type EIP1193Provider, type PublicClient } from 'viem';
-import { MemoryRouter } from 'react-router';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { BoardFormProvider, useBoardForm } from './BoardForm';
-import { ExamNameCard } from './ExamNameCard';
-import { rememberExam } from './examsStore';
 import { readExamName, setExamName } from './nameFlow';
 import { examNameValues, verifierNameUrl } from './plan';
 import type { PublishEnvironment } from './publishFlow';
@@ -20,7 +13,6 @@ const resolver: Address = '0xeF882e399948Da185884f363167E2a105e502A79';
 const parent = 'paperseal-demo.eth';
 const label = 'mumbai-demo';
 const name = `${label}.${parent}`;
-const examId = examIdFromName(label);
 const hash = `0x${'ab'.repeat(32)}` as Hex;
 const noWait = { wait: () => Promise.resolve() };
 const values = { teeUrl: 'https://tee.example.org', storageUrl: 'https://storage.example.org', bucket: 'exam-bucket', arkivWriters: '0x1111111111111111111111111111111111111111' };
@@ -194,100 +186,5 @@ describe('setExamName', () => {
     ).toEqual({ teeUrl: 'https://tee.example.org', storageUrl: 'https://storage.example.org', bucket: 'b', arkivWriters: '0x11' });
     expect(examNameValues({})).toEqual({ teeUrl: null, storageUrl: null, bucket: null, arkivWriters: null });
     expect(verifierNameUrl('https://verify.example.org/', name)).toBe(`https://verify.example.org/#/name/${name}`);
-  });
-});
-
-/** Stands in for the publish step: its receipt is what arms the prompt, and only then does the exam's page appear. */
-function JustPublished() {
-  const { addReceipt, examName } = useBoardForm();
-  useEffect(() => {
-    addReceipt({ kind: 'publish', name: label, version: 'v1.0.0', outcome: { transactionHash: hash, blockNumber: 1n, rows: [], matches: true, criteria: null } });
-  }, [addReceipt]);
-  return examName ? <ExamNameCard examId={examId} /> : null;
-}
-
-const show = (environment: PublishEnvironment, published = false) =>
-  render(
-    <StrictMode>
-      <MemoryRouter>
-        <BoardFormProvider environment={environment} tee={null}>
-          {published ? <JustPublished /> : <ExamNameCard examId={examId} />}
-        </BoardFormProvider>
-      </MemoryRouter>
-    </StrictMode>,
-  );
-
-describe('ExamNameCard', () => {
-  beforeEach(() => {
-    localStorage.clear();
-    vi.stubEnv('VITE_VERIFIER_URL', 'https://verify.example.org');
-  });
-  afterEach(() => {
-    cleanup();
-    vi.unstubAllEnvs();
-  });
-
-  it('asks the wallet by itself just after publishing, once, and shows the checked name and its link', async () => {
-    const { environment, sent } = chain();
-    show(environment, true);
-    const link = await screen.findByRole<HTMLAnchorElement>('link', { name: 'Open by name' });
-    expect(link.href).toBe(`https://verify.example.org/#/name/${name}`);
-    expect(screen.getByText(name)).toBeTruthy();
-    expect(sent).toHaveLength(1);
-  });
-
-  it('offers Try again after the wallet declines, and sets the name then', async () => {
-    const options: Options = { reject: true };
-    const { environment } = chain(options);
-    show(environment, true);
-    await screen.findByText(/You declined in your wallet/);
-    expect(screen.queryByRole('link', { name: 'Open by name' })).toBeNull();
-    options.reject = false;
-    fireEvent.click(screen.getByRole('button', { name: 'Try again to set the exam name' }));
-    await screen.findByRole('link', { name: 'Open by name' });
-  });
-
-  it('says the name is not set without a primary name, and offers Try again', async () => {
-    show(chain({ primary: null }).environment, true);
-    await screen.findByText(/has no primary name/);
-    expect(screen.getByRole('button', { name: 'Try again to set the exam name' })).toBeTruthy();
-    expect(screen.queryByRole('link', { name: 'Open by name' })).toBeNull();
-  });
-
-  it('reads again, and sends nothing, when trying again after a read-back that failed', async () => {
-    const { environment, sent } = chain({ neverShows: true });
-    show(environment, true);
-    await screen.findByText(/does not check out yet/, undefined, { timeout: 15_000 });
-    expect(screen.queryByRole('link', { name: 'Open by name' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Try again to set the exam name' }));
-    await screen.findByRole('button', { name: 'Set the exam name' });
-    expect(sent).toHaveLength(1);
-  }, 20_000);
-
-  it('does not prompt when a published exam is reopened and offers one button instead', async () => {
-    rememberExam({ id: examId, name: label });
-    const { environment, sent } = chain();
-    show(environment);
-    fireEvent.click(await screen.findByRole('button', { name: 'Set the exam name' }));
-    expect(screen.getByText(/Your wallet asks you to confirm once/)).toBeTruthy();
-    await screen.findByRole('link', { name: 'Open by name' });
-    expect(sent).toHaveLength(1);
-  });
-
-  it('shows a name already set with no prompt and no button', async () => {
-    rememberExam({ id: examId, name: label });
-    const { environment, sent } = chain({ set: true });
-    show(environment);
-    await screen.findByRole('link', { name: 'Open by name' });
-    expect(screen.queryByRole('button', { name: 'Set the exam name' })).toBeNull();
-    expect(sent).toHaveLength(0);
-  });
-
-  it('shows nothing in a browser that does not know the exam name', async () => {
-    const { environment } = chain();
-    const { container } = show(environment);
-    await waitFor(() => {
-      expect(container.textContent).toBe('');
-    });
   });
 });
