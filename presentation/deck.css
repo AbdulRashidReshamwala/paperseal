@@ -19,63 +19,50 @@ html,body{height:100%;background:var(--ink);overflow:hidden}
 .foot .mark{display:flex;align-items:center;gap:12px;font-family:var(--serif);font-size:24px;color:var(--ink)}
 .foot .mark svg{width:32px;height:32px}
 .sheet{fill:var(--ink)}.wax{fill:var(--wax)}
-.kicker{font-family:var(--code);font-size:22px;color:var(--wax);letter-spacing:.04em;margin-bottom:20px}
-h1{font-family:var(--serif);font-weight:700;font-size:76px;line-height:1.12;max-width:1500px}
+.kicker{font-family:var(--code);font-size:24px;color:var(--wax);letter-spacing:.04em;margin-bottom:24px}
+h1{font-family:var(--serif);font-weight:700;font-size:120px;line-height:1.06;max-width:1660px}
 h1 em{font-style:normal;color:var(--wax)}
-.lede{font-size:32px;color:var(--ink-soft);max-width:1300px;margin-top:24px}
 .src{font-family:var(--code);font-size:17px;color:var(--ink-soft);line-height:1.5}
+.sources{margin-top:auto;padding-bottom:40px;max-width:1500px}
+.callout{margin-top:56px;font-family:var(--serif);font-size:48px}
+.mono{font-family:var(--code);font-size:24px;letter-spacing:.05em}
 
-/* news headline: the shocker */
-.news{justify-content:center}
-.news .dateline{display:flex;gap:40px;font-family:var(--code);font-size:24px;color:var(--wax);border-bottom:2px solid var(--ink);padding-bottom:16px;margin-bottom:56px}
-.news .dateline span+span{color:var(--ink-soft)}
-.news h1{font-size:152px;line-height:1.04;max-width:1700px;letter-spacing:-.01em}
-.news h1 em{font-style:normal;color:var(--wax)}
-.news .tags{list-style:none;padding:0;display:grid;grid-template-columns:repeat(3,auto);justify-content:start;gap:0;margin-top:64px;font-family:var(--code);font-size:25px}
-.news .tags li{padding:0 40px;border-left:2px solid var(--wax)}
-.news .tags li:first-child{padding-left:20px}
+/* coloured slides */
+.slide.wax{background:var(--wax);color:var(--on-wax)}
+.slide.ink{background:var(--ink);color:var(--paper)}
 
-/* quote slide: photo bleeds off the left edge */
+/* shocker */
+.news{justify-content:space-between;padding:96px 128px}
+.news h1{font-size:290px;line-height:.95;letter-spacing:-.02em;max-width:none}
+.news .sub{font-family:var(--serif);font-size:60px;line-height:1.2;max-width:1400px;margin-top:8px}
+.news .stamp{align-self:flex-start;border:3px solid var(--on-wax);padding:14px 24px}
+
+/* quote */
 .quote{flex-direction:row;padding:0;align-items:stretch}
 .quote figure{flex:none;width:700px;background:#14151c}
 .quote figure img{width:100%;height:100%;object-fit:cover;object-position:center 20%;display:block}
-.quote .q{flex:1;display:flex;flex-direction:column;justify-content:center;padding:0 128px 0 96px}
+.quote .q{flex:1;display:flex;flex-direction:column;justify-content:center;padding:0 128px 0 100px}
 .quote blockquote{font-family:var(--serif);font-weight:700;font-size:78px;line-height:1.12}
-.quote blockquote em{font-style:normal;color:var(--wax)}
-.quote .q2{font-family:var(--serif);font-size:38px;line-height:1.35;margin-top:48px;color:var(--ink-soft);border-left:4px solid var(--wax);padding-left:28px}
-.quote cite{display:block;margin-top:56px;font-style:normal;font-size:28px;color:var(--ink-soft)}
-.quote cite b{display:block;color:var(--ink);font-weight:600;font-size:32px}
+.quote blockquote em{font-style:normal;color:#e5857c}
+.quote .q2{font-family:var(--serif);font-size:38px;line-height:1.35;margin-top:48px;color:#cfc8b8;border-left:4px solid #e5857c;padding-left:28px}
+.quote cite{display:block;margin-top:56px;font-style:normal;font-size:28px;color:#aea897}
+.quote cite b{display:block;color:var(--paper);font-weight:600;font-size:32px}
 
 /* chain */
-.chain{display:flex;margin-top:72px;border-top:2px solid var(--ink)}
-.chain li{list-style:none;flex:1;padding:24px 20px 0 0}
-.chain li+li{padding-left:20px;border-left:1px solid var(--rule)}
-.chain .n{font-family:var(--code);font-size:20px;color:var(--ink-soft)}
-.chain h3{font-family:var(--serif);font-size:34px;margin:6px 0 8px}
-.chain p{font-size:22px;color:var(--ink-soft);line-height:1.4}
+.chain{display:flex;margin-top:72px;border-top:3px solid var(--ink)}
+.chain li{list-style:none;flex:1;padding:24px 0 0}
+.chain li+li{padding-left:24px;border-left:1px solid var(--rule)}
+.chain .n{font-family:var(--code);font-size:22px;color:var(--ink-soft)}
+.chain h3{font-family:var(--serif);font-size:38px;margin-top:6px}
 .chain li.hot h3{color:var(--wax)}
-.callout{margin-top:40px;font-family:var(--serif);font-size:40px;max-width:1500px}
-.callout em{font-style:normal;color:var(--wax)}
 
-/* ledger */
-.ledger{margin-top:32px;border-top:2px solid var(--ink)}
-.ledger .row{display:grid;grid-template-columns:460px 1fr;gap:40px;align-items:baseline;padding:18px 0;border-bottom:1px solid var(--rule)}
-.ledger .v{font-family:var(--serif);font-weight:700;font-size:56px;line-height:1;white-space:nowrap}
-.ledger .v.wax{color:var(--wax)}
-.ledger .t{font-size:28px;line-height:1.4}
-.ledger .t small{display:block;font-size:20px;color:var(--ink-soft)}
-
-/* stats */
-.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin-top:56px;border-top:2px solid var(--ink)}
-.stats div{padding:28px 32px 0 0}
-.stats div+div{padding-left:32px;border-left:1px solid var(--rule)}
-.stats .v{font-family:var(--serif);font-weight:700;font-size:112px;line-height:1;color:var(--wax)}
-.stats .l{font-size:27px;margin-top:14px;line-height:1.35}
-.stats .l small{display:block;font-size:20px;color:var(--ink-soft);margin-top:8px}
-.sources{margin-top:auto;padding-bottom:36px}
-
-/* video placeholder, for the demo slides */
-.video-ph{display:grid;place-items:center;border:2px dashed var(--rule-strong,#85796a);background:var(--paper-deep);color:var(--ink-soft);font-family:var(--code);font-size:26px}
+/* big numbers */
+.stats{display:grid;grid-template-columns:repeat(3,1fr);margin-top:72px;border-top:3px solid var(--ink)}
+.stats div{padding:32px 32px 0 0}
+.stats div+div{padding-left:40px;border-left:1px solid var(--rule)}
+.stats .v{font-family:var(--serif);font-weight:700;font-size:130px;line-height:1;color:var(--wax);white-space:nowrap}
+.stats .v .of{font-size:60px;color:var(--ink-soft)}
+.stats .l{font-size:30px;margin-top:18px;line-height:1.35;max-width:480px}
 
 #count{position:fixed;right:16px;bottom:10px;font:14px var(--code);color:#aea897}
 @page{size:1920px 1080px;margin:0}
