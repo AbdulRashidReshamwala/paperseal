@@ -3,6 +3,7 @@ import { createServer, type Server } from 'node:http';
 import type { Browser } from 'playwright-core';
 
 import { startApp, startChain, type Chain } from '../src/chain';
+import { startEnsRpc, type EnsRpc } from '../src/ens';
 import { stopAll } from '../src/procs';
 import { launchUiChrome } from './kit';
 import { startStubTee, type StubTee } from './stubTee';
@@ -42,6 +43,8 @@ export async function startStorage(): Promise<Storage> {
 
 export interface Lab {
   chain: Chain;
+  /** The chain's RPC with ENS answered from a table, which is what the apps read. Tests set up the names people are invited under. */
+  ens: EnsRpc;
   tee: StubTee;
   storage: Storage;
   web: { url: string };
@@ -52,9 +55,10 @@ export interface Lab {
 
 export async function startLab(): Promise<Lab> {
   const chain = await startChain();
+  const ens = await startEnsRpc(chain.rpcUrl);
   const tee = await startStubTee();
   const storage = await startStorage();
-  const common = { VITE_RPC_URL: chain.rpcUrl, VITE_REGISTRY_ADDRESS: chain.registry, VITE_STORAGE_URL: storage.url };
+  const common = { VITE_RPC_URL: ens.rpcUrl, VITE_REGISTRY_ADDRESS: chain.registry, VITE_STORAGE_URL: storage.url };
   const verifier = await startApp('apps/verifier', { ...common }, { host: 'localhost' });
   const web = await startApp(
     'apps/web',
@@ -77,6 +81,7 @@ export async function startLab(): Promise<Lab> {
   }
   return {
     chain,
+    ens,
     tee,
     storage,
     web,
@@ -88,6 +93,7 @@ export async function startLab(): Promise<Lab> {
       await verifier.stop();
       await storage.stop();
       await tee.stop();
+      await ens.stop();
       await chain.stop();
       await stopAll();
     },

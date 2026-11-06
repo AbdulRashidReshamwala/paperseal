@@ -69,9 +69,24 @@ Open the verifier, type the full name into the exam box, or open `<verifier>/#/n
 
 ## 4. Names for key holders and centres
 
-Optional. The board can invite a key holder or a centre under an ENS name by typing it in "Invite people". A person with no ENS name can be invited under a plain name instead. Setters never have one.
+Required for these roles. The board can invite a key holder or a centre under an ENS name by typing it in "Invite people". There are no plain names: everyone invited this way needs an ENS name that exists. Setters never have one.
 
 - **A key holder uses their own name.** After they register, their Register page shows one value. They add a text record named `paperseal.passkey` to their own name with that value, using the ENS app on Sepolia. The board app then shows "Name confirmed". Until then it shows the key holder as waiting, and the board can choose to go ahead with the name marked unconfirmed.
 - **A centre uses a name the board issues,** such as `north-1.centres.paperseal-mumbai.eth`. It needs no record. The board can change such a name, so the verifier shows it as a label only, and it proves nothing about independence.
 
 Both the board app and the verifier read these names on Sepolia through their own RPC, on chain only. The board app uses `VITE_RPC_URL`, and the verifier uses the RPC under "Check it yourself". A name that can't be read shows as not confirmed and never fails the exam.
+
+### What to create for a real run
+
+A full run has 3 key holders and 8 centres, so the board app needs 11 names that exist on Sepolia before it will add them:
+
+| Names | Count | What each needs before the invite |
+| --- | --- | --- |
+| `neutral-1.paperseal-demo.eth` to `neutral-3.paperseal-demo.eth` | 3 | An ETH address record, or the `paperseal.passkey` record, so the name exists. The `paperseal.passkey` record can only be set after they register, because it holds their new security key. Until then the board uses "Go ahead without it", or waits. |
+| `centre-1.paperseal-demo.eth` to `centre-8.paperseal-demo.eth` | 8 | An ETH address record, so the name exists. A centre needs no `paperseal.passkey` record. |
+
+Subnames under `paperseal-demo.eth` work for both roles, written the way section 2 writes an exam name: records on the parent's resolver, one transaction per record from the board wallet. That is 11 address records, plus up to 3 `paperseal.passkey` records after the key holders register. The ENS v2 behaviour here is the one section 2 relies on and was not re-checked for this change.
+
+A name the board issues proves nothing about a key holder's independence. The board controls the parent, so it can write, change or take back any record under it, and a record it writes says only that the board put it there. For a centre that is acceptable, because the board approves centres anyway. For a neutral key holder the point is independence from the board, so a real exam needs each neutral to use a name they own and control themselves. Subnames of `paperseal-demo.eth` are fine for the demo only.
+
+What it costs, as best known and not checked against a live quote: on Sepolia only test ETH for gas, plus the one-off registration of `paperseal-demo.eth` itself (about 8 USDC for a year, see section 1) if it is not already registered. On mainnet, each subname record is a transaction at that day's gas price, and each neutral's own `.eth` name is its own yearly fee, which the neutral pays and keeps.

@@ -160,8 +160,11 @@ export const paper: Paper = {
   ],
 };
 
+/** Key holders and centres are listed by ENS name: `Neutral 1` is `neutral-1.paperseal-demo.eth`. */
+export const ensOwnerOf = (name: string): string => `${name.toLowerCase().replace(/\s+/g, '-')}.paperseal-demo.eth`;
+
 /** The list holds a setter only as the hash of its own passkey public key, and never as a name. */
-export function approvedList(ownerOf: (name: string) => string = (name) => name): ApprovedListEntry[] {
+export function approvedList(ownerOf: (name: string) => string = ensOwnerOf): ApprovedListEntry[] {
   const key = (n: number) => Uint8Array.from([0x04, n, ...random(63)]);
   const entry = (role: number, name: string, n: number): ApprovedListEntry => {
     const passkeyPublicKey = key(n);

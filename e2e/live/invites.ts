@@ -1,5 +1,6 @@
 import {
   checkApprovedList,
+  checkPartyNames,
   decodeInviteFragment,
   encodeInviteLink,
   entriesFor,
@@ -15,7 +16,7 @@ import {
   type TaggedRegistration,
 } from '@paperseal/protocol';
 
-import type { Kind, RosterEntry } from './roster';
+import { ownerNameOf, type Kind, type RosterEntry } from './roster';
 
 /*
  * Invites, the way the board app does them (apps/web/src/areas/board/invites.ts): one random secret per
@@ -50,7 +51,7 @@ export function issueInvites(examId: Hex, people: readonly RosterEntry[]): Issue
     const invite: Invite = {
       examId,
       role,
-      ...(role === 'setter' ? {} : { owner: entry.name }),
+      ...(role === 'setter' ? {} : { owner: ownerNameOf(entry) as string }),
       inviteSecret: newInviteSecret(),
     };
     return { ...invite, name: entry.name, listRole: entry.role, link: encodeInviteLink(linkBase, invite) };
@@ -70,7 +71,7 @@ export interface Composed {
 /**
  * Matches the registrations against the invites and builds the entries, as the board does. A centre's
  * share place goes to the first seven, and the board's own choice covers the rest: here, the roster's.
- * Throws if the entries don't satisfy `checkApprovedList`.
+ * Throws if the entries don't satisfy `checkApprovedList`, or a key holder or centre owner is not an ENS name.
  */
 export function composeFromInvites(invites: readonly IssuedInvite[], registrations: readonly TaggedRegistration[]): Composed {
   const matching = matchInvites(invites, registrations);
@@ -80,5 +81,6 @@ export function composeFromInvites(invites: readonly IssuedInvite[], registratio
   }
   const entries = entriesFor(matching, picked);
   checkApprovedList(entries);
+  checkPartyNames(entries);
   return { matching, entries };
 }

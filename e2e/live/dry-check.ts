@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { examRegistryAbi } from '@paperseal/chain';
 import {
   checkApprovedList,
+  encodeInviteLink,
   chain,
   checkSchedule,
   decodeCriteria,
@@ -33,9 +34,9 @@ import { decodeFunctionData, getAbiItem, toFunctionSelector, type AbiFunction } 
 
 import { calldata, castSendArgs } from './cast';
 import { deployed, gapsFor, rpcHost } from './config';
-import { composeFromInvites, issueInvites, openLink, type IssuedInvite } from './invites';
+import { composeFromInvites, issueInvites, linkBase, openLink, type IssuedInvite } from './invites';
 import { parseReleaseBody } from './github';
-import { releaseOrder, roster } from './roster';
+import { ownerNameOf, partyParent, releaseOrder, roster } from './roster';
 import { computeSchedule, examName, liveCriteria, plan, liveQuestion, questionsPerSetterPerTopic, questionText, runTeeArgs } from './schedule';
 
 /* `dry-check`: everything that can be checked with no network, no chain, no TEE and no key. */
@@ -198,6 +199,30 @@ export async function dryCheck(): Promise<void> {
       expect(refused, 'a damaged link was accepted');
     }
     return `${String(issued.length)} links; a link with an extra part, an uppercase secret or a missing owner is refused`;
+  });
+
+  await check('invites: a key holder or centre can be invited by ENS name only, so a plain name is refused in the link and in the list', () => {
+    expect(issued.filter((i) => i.role !== 'setter').every((i) => i.owner?.endsWith(`.${partyParent}`)), 'a key holder or centre is not named under the demo parent');
+    for (const owner of ['neutral-1', 'Centre 1', 'Neutral-1.Paperseal-Demo.eth']) {
+      let refused = false;
+      try {
+        encodeInviteLink(linkBase, { ...(issued[2] as IssuedInvite), owner });
+      } catch {
+        refused = true;
+      }
+      expect(refused, `a plain owner ${owner} was accepted in a link`);
+    }
+    let listRefused = false;
+    try {
+      composeFromInvites(
+        issued.map((i) => (i.name === 'neutral-1' ? { ...i, owner: 'neutral-1' } : i)),
+        registered.map((r, n) => (issued[n]?.name === 'neutral-1' ? { ...r, owner: 'neutral-1' } : r)),
+      );
+    } catch {
+      listRefused = true;
+    }
+    expect(listRefused, 'a list with a plain owner was composed');
+    return 'neutral-1, Centre 1 and an unnormalised name are refused in a link, and a list with a plain owner is not composed';
   });
 
   await check('compose from invites: every participant matches its own invite, and the entries pass checkApprovedList with the roster roles', () => {
@@ -416,7 +441,7 @@ function syntheticList(): { entries: ApprovedListEntry[]; encoded: Hex } {
     role: r.role,
     passkeyPublicKey: point(i + 1),
     derivedPublicKey: r.role === 1 ? new Uint8Array() : point(100 + i),
-    owner: r.role === 1 ? setterOwner(point(i + 1)) : r.name,
+    owner: r.role === 1 ? setterOwner(point(i + 1)) : (ownerNameOf(r) as string),
   }));
   return { entries, encoded: toHex(encodeApprovedList(entries)) };
 }

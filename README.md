@@ -108,7 +108,7 @@ The verifier page fails the name unless it points to a contract running exactly 
 
 ### Party Names
 
-A key holder or a centre can be invited under an ENS name, such as `dr-rao.eth`, instead of a plain display name. The name goes on the public list exactly as a plain name would, and a person without an ENS name can still be invited under a plain one. Setters never have a name on the list.
+A key holder or a centre is invited by ENS name only, such as `dr-rao.eth`. There are no plain names. The name goes on the public list as typed, and a name that does not exist on the chain cannot be invited. Setters never have a name on the list.
 
 A key holder who uses their own ENS name proves it once, by setting one text record on it, `paperseal.passkey`, to the hash of their security key. After they register, the Register screen shows the exact value. The board app reads the record: a match shows "Name confirmed", a record that names another key keeps them off the list, and a missing record shows as waiting, which the board may choose to go ahead without, marked unconfirmed. A centre can use a subname the board issues, which needs no record. The board can change such a name, so it is a readable label and says nothing about independence, and the verifier shows it as a label only.
 

@@ -129,6 +129,9 @@ export function strangerKey(): Hex {
 
 export { inviteTag };
 
+/** Key holders and centres are named by ENS name only (spec/api.md, "Party Names"). */
+export const demoParent = 'paperseal-demo.eth';
+
 /**
  * A list that passes `checkApprovedList`: 1 setter, 3 neutral parties, 7 centres with a share and 1
  * without. `real` replaces entries by role slot with keys that live in a window. Everyone else is a
@@ -146,9 +149,9 @@ export function listWith(real: Partial<Record<'setter' | 'neutral' | 'centreHold
   };
   const out: ApprovedListEntry[] = [];
   out.push(entry(roles.setter, '', real.setter?.passkeyPublicKey));
-  for (let i = 1; i <= 3; i++) out.push(i === 1 && real.neutral ? entry(roles.neutral, real.neutral.owner ?? 'Neutral 1', real.neutral.passkeyPublicKey, real.neutral.derivedPublicKey) : entry(roles.neutral, `Neutral ${String(i)}`));
-  for (let i = 1; i <= 7; i++) out.push(i === 1 && real.centreHolder ? entry(roles.centreKeyHolder, real.centreHolder.owner ?? 'Centre 1', real.centreHolder.passkeyPublicKey, real.centreHolder.derivedPublicKey) : entry(roles.centreKeyHolder, `Centre ${String(i)}`));
-  out.push(real.centre ? entry(roles.centre, real.centre.owner ?? 'Centre 8', real.centre.passkeyPublicKey, real.centre.derivedPublicKey) : entry(roles.centre, 'Centre 8'));
+  for (let i = 1; i <= 3; i++) out.push(i === 1 && real.neutral ? entry(roles.neutral, real.neutral.owner ?? `neutral-1.${demoParent}`, real.neutral.passkeyPublicKey, real.neutral.derivedPublicKey) : entry(roles.neutral, `neutral-${String(i)}.${demoParent}`));
+  for (let i = 1; i <= 7; i++) out.push(i === 1 && real.centreHolder ? entry(roles.centreKeyHolder, real.centreHolder.owner ?? `centre-1.${demoParent}`, real.centreHolder.passkeyPublicKey, real.centreHolder.derivedPublicKey) : entry(roles.centreKeyHolder, `centre-${String(i)}.${demoParent}`));
+  out.push(real.centre ? entry(roles.centre, real.centre.owner ?? `centre-8.${demoParent}`, real.centre.passkeyPublicKey, real.centre.derivedPublicKey) : entry(roles.centre, `centre-8.${demoParent}`));
   return out;
 }
 

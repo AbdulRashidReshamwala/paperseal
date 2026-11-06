@@ -4,6 +4,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { equalBytes, fromHex, toHex, utf8ToBytes } from './bytes';
 import { roles, setterOwner, type ApprovedListEntry } from './encoding';
 import { limits, threshold } from './constants';
+import { partyNameProblem } from './ens';
 import type { Hex } from './types';
 
 /*
@@ -11,6 +12,9 @@ import type { Hex } from './types';
  * owner it was made for, sent as a link whose URL fragment holds all of it, so no server sees it.
  * `inviteTag = HMAC-SHA-256(inviteSecret, passkeyPublicKey)` is signed into the `registration`
  * message, and the board recomputes it from its own copy of the invite.
+ *
+ * A key holder's or centre's owner must be an ENS name (spec/api.md, "Party Names"): `checkInvite`, so
+ * also `encodeInviteFragment` and `decodeInviteFragment`, refuse anything else.
  *
  * Link shape (a design choice the spec leaves open): the app routes on the fragment, so the invite is
  * the query of the `/join` route: `<page>#/join?exam=0x..&role=keyholder&owner=Name&secret=0x..`.
@@ -80,7 +84,7 @@ export function checkInvite(invite: Invite): void {
     return;
   }
   if (invite.owner === undefined) throw new InviteError('The invite has no name.');
-  const problem = ownerProblem(invite.owner);
+  const problem = ownerProblem(invite.owner) ?? partyNameProblem(invite.owner);
   if (problem) throw new InviteError(problem);
 }
 

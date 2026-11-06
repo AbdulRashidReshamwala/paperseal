@@ -48,7 +48,7 @@ export const field = {
   questionsClose: 'Questions close',
   rpcHost: 'Public record address',
   inviteRole: 'Role',
-  inviteName: /Name to show on the public list|A note for yourself/,
+  inviteName: /ENS name|A note for yourself/,
   option: (letter: string) => `Option ${letter}`,
   examId: 'Exam ID',
   /** The select inside "Use a different version". */

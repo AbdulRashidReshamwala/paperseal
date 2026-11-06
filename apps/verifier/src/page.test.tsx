@@ -394,7 +394,7 @@ describe('step 6, unlock', () => {
     const step = await findStep(/^6\. Paper unlocks for centres$/);
     await within(step).findByText('Lists the key file and one copy for each centre on the approved list', {}, { timeout: 5000 });
     expect(within(step).getByText('key-priv.tlock')).toBeTruthy();
-    expect(within(step).getByText('recipient Approved centre')).toBeTruthy();
+    expect(within(step).getByText('recipient approved-centre.paperseal-demo.eth')).toBeTruthy();
   });
 
   it('raises the alarm when a verified log lists a centre copy that was swapped', async () => {
@@ -846,14 +846,20 @@ describe('party names', () => {
     expect(step.querySelector('details')?.contains(within(step).getAllByText('Name confirmed')[0] as HTMLElement)).toBe(true);
   });
 
-  it('reads nothing, and shows plain names as they are, when no party has an ENS name', async () => {
-    const world = await buildWorld();
+  it('reads nothing, and says "Not an ENS name" as a warning and not a failure, when no party has an ENS name', async () => {
+    // An older exam, or a board that skipped the app: the contract does not check the owner.
+    const world = await buildWorld({ ownerOf: (name) => name });
     arrange(world);
     open(1000);
     const step = await findStep(/^3\. People approved$/);
     await within(step).findByText('Neutral 1');
+    expect(within(rowFor(step, 'Neutral 1')).getByText('Not an ENS name')).toBeTruthy();
     expect(passkeyReads).toEqual([]);
     expect(within(step).queryByText('Name confirmed')).toBeNull();
     expect(within(step).queryByText('Not confirmed')).toBeNull();
+    expect(step.querySelector('.vf-step-failures')).toBeNull();
+    expect(stateOf(step)).toBe('done');
+    expect(document.querySelector('.vf-warnings')?.textContent).toMatch(/11 key holders or centres on the list are not named by an ENS name/);
+    expect(screen.getByRole('alert').textContent).not.toMatch(/Step\s*3/);
   });
 });

@@ -4,7 +4,7 @@ import ensSpec from '../../../spec/ens.json';
 
 import { fromHex, utf8ToBytes } from './bytes';
 import { limits } from './constants';
-import { setterOwner } from './encoding';
+import { ApprovedListError, roles, setterOwner, type ApprovedListEntry } from './encoding';
 import type { Hex } from './types';
 
 /*
@@ -61,6 +61,30 @@ export function ensNameProblem(text: string): string | null {
     return 'This is not a valid ENS name. Use lowercase letters, digits and hyphens, like maths-board.example.eth.';
   }
   return normalised === text ? null : `Use the normalised form of this name. Did you mean ${normalised}?`;
+}
+
+/** The one plain line shown for any `owner` of a key holder or centre that is not an ENS name. */
+export const ensNameExample = 'iit-delhi.eth';
+export const notAnEnsNameSentence = `Use an ENS name, like ${ensNameExample}.`;
+
+/**
+ * Null when `text` is a normalised ENS name fit to be a key holder's or centre's `owner`. Else a
+ * sentence: the plain line for anything not written like an ENS name, or "Did you mean ..." for one
+ * that is not normalised. There are no plain names for these roles (spec/api.md, "Party Names").
+ */
+export function partyNameProblem(text: string): string | null {
+  if (!looksLikeEnsName(text)) return notAnEnsNameSentence;
+  return ensNameProblem(text);
+}
+
+/** Refuses a list where a key holder or centre `owner` is not an ENS name. Setters are skipped: their `owner` is a hash. */
+export function checkPartyNames(entries: readonly ApprovedListEntry[]): void {
+  entries.forEach((entry, index) => {
+    if (entry.role === roles.setter) return;
+    if (ownerEnsName(entry.owner) === null) {
+      throw new ApprovedListError(`entry ${String(index)} owner ${JSON.stringify(entry.owner)} is not an ENS name`);
+    }
+  });
 }
 
 /**

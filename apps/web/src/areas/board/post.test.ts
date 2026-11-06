@@ -29,7 +29,7 @@ const examId: Hex = `0x${'11'.repeat(32)}`;
 const key = (seed: number): Hex => toHex(new Uint8Array([4, ...new Uint8Array(64).fill(seed)]));
 
 const records = Array.from({ length: 10 }, (_, i) => ({
-  owner: `holder-${String(i)}`,
+  owner: `holder-${String(i)}.maths-board.eth`,
   role: i < 3 ? roles.neutral : roles.centreKeyHolder,
   passkeyPublicKey: key(10 + i),
   derivedPublicKey: key(50 + i),
@@ -56,6 +56,12 @@ describe('registrations', () => {
     const list = composeApprovedList(examId, entries());
     expect(list.encoded).toBe(toHex(encodeApprovedList(entries())));
     expect(list.hash).toBe(toHex(approvedListHash(fromHex(examId), fromHex(list.encoded))));
+  });
+
+  it('refuses a key holder or centre whose owner is not an ENS name, and says which entry', () => {
+    const plain = entries().map((entry, index) => (index === 0 ? { ...entry, owner: 'holder-0' } : entry));
+    expect(() => composeApprovedList(examId, plain)).toThrow('entry 0 owner "holder-0" is not an ENS name');
+    expect(tryCompose(examId, plain)).toMatchObject({ ok: false });
   });
 
   it('refuses a setter whose owner is a plain name, or the hash of another key', () => {

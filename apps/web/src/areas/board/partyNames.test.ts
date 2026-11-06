@@ -26,9 +26,13 @@ describe('invite names', () => {
     expect(inviteEnsName({ role: 'centre', owner: 'north.centres.maths-board.eth' })).toBe('north.centres.maths-board.eth');
   });
 
-  it('makes an invite for an ENS name or a plain name, and refuses an ENS-like name that is not normalised', () => {
+  it('makes an invite for an ENS name only, and says what to use for anything else', () => {
     expect(createInvite([], 'keyholder', 'asha.eth')).toMatchObject({ ok: true, invite: { owner: 'asha.eth' } });
-    expect(createInvite([], 'keyholder', 'Asha Rao')).toMatchObject({ ok: true, invite: { owner: 'Asha Rao' } });
+    for (const role of ['keyholder', 'centre'] as const) {
+      expect(createInvite([], role, 'Asha Rao')).toEqual({ ok: false, reason: 'Use an ENS name, like iit-delhi.eth.' });
+      expect(createInvite([], role, 'centre-1')).toEqual({ ok: false, reason: 'Use an ENS name, like iit-delhi.eth.' });
+    }
+    expect(createInvite([], 'keyholder', '')).toMatchObject({ ok: false });
     expect(createInvite([], 'keyholder', 'Asha.eth')).toMatchObject({ ok: false, reason: expect.stringContaining('asha.eth') as string });
     expect(createInvite([], 'keyholder', `${'a'.repeat(126)}.eth`)).toMatchObject({ ok: false });
     const first = createInvite([], 'keyholder', 'asha.eth');
@@ -45,9 +49,9 @@ describe('invite names', () => {
 });
 
 describe('where a name stands', () => {
-  it('is plain for a plain name, whatever can be read', () => {
-    expect(nameStanding(keyholder({ owner: 'Asha Rao' }), undefined, true)).toEqual({ kind: 'plain' });
-    expect(mayBeListed(keyholder({ owner: 'Asha Rao' }), { kind: 'plain' })).toBe(true);
+  it('is plain for a setter, whatever can be read', () => {
+    expect(nameStanding({ role: 'setter' }, undefined, true)).toEqual({ kind: 'plain' });
+    expect(mayBeListed({ role: 'setter' }, { kind: 'plain' })).toBe(true);
   });
 
   it('confirms only a matching record', () => {
