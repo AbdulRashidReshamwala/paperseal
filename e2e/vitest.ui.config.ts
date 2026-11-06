@@ -2,6 +2,11 @@ import { resolve } from 'node:path';
 
 import { defineConfig } from 'vitest/config';
 
+import { browsersPath, linkInstalledFfmpeg } from './ffmpegLink';
+
+// The live run records videos, which needs the linked ffmpeg.
+linkInstalledFfmpeg();
+
 const packages = resolve(import.meta.dirname, '../packages');
 const alias = Object.fromEntries(
   ['protocol', 'crypto', 'keys', 'chain', 'attestation', 'tee-client'].map((name) => [`@paperseal/${name}`, resolve(packages, name, 'src/index.ts')]),
@@ -21,5 +26,6 @@ export default defineConfig({
     hookTimeout: 240_000,
     fileParallelism: false,
     maxWorkers: 1,
+    env: { PLAYWRIGHT_BROWSERS_PATH: browsersPath },
   },
 });

@@ -4,7 +4,7 @@ import { createServer, type ViteDevServer } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { freePort } from '../src/procs';
-import { openActor, writeReport, launchUiChrome, type Actor } from './kit';
+import { openActor, writeReport, launchUiChrome, UI_DIR, type Actor } from './kit';
 import { centre } from './selectors';
 import type { Browser } from 'playwright-core';
 
@@ -54,7 +54,7 @@ beforeAll(async () => {
   await server.listen();
   url = `http://localhost:${String(port)}/handout.html`;
   browser = await launchUiChrome();
-  actor = await openActor(browser, 'centre-handout', null, { role: 'centre' });
+  actor = await openActor(browser, 'centre-handout', null, { role: 'centre', videoDir: resolve(UI_DIR, 'video-handout') });
   // Count calls to print instead of opening the print dialog.
   await actor.page.addInitScript(() => {
     (window as unknown as { __prints: number }).__prints = 0;
@@ -65,6 +65,11 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // Closing the context finishes its video. This also proves the recording setup the live run uses works.
+  const video = actor?.page.video();
+  await actor?.person.context.close();
+  const file = video ? await video.path() : '';
+  expect(file).toMatch(/\.webm$/);
   writeReport('handout');
   await browser?.close();
   await server?.close();
@@ -76,6 +81,7 @@ describe('centre: hand out the paper', () => {
     await actor.flow('hand out', async () => {
       await page.goto(url);
       await actor.seeHeading(centre.paperOpenHeading, 60_000);
+      await actor.say('Centre: the paper is open');
       await actor.shot('handout-0-open');
       expect(await page.locator('.ps-primary').count()).toBe(1);
       await page.getByRole('button', { name: centre.handOut }).click();
