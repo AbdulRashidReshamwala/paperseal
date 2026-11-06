@@ -117,6 +117,8 @@ type Progress = { state: 'idle' } | { state: 'running'; stage: WalletStage } | {
 export function PostAction(props: {
   label: string;
   blocked: string | null;
+  /** Show only why posting must wait, and no button or wallet warning, until it can happen. */
+  hiddenWhileBlocked?: boolean;
   post: (onStage: (stage: WalletStage) => void) => Promise<PostOutcome>;
   onPosted: (outcome: PostOutcome) => void;
 }) {
@@ -140,6 +142,7 @@ export function PostAction(props: {
 
   const running = progress.state === 'running';
   const blocked = splitDetails(props.blocked ?? '');
+  const hidden = props.hiddenWhileBlocked === true && props.blocked !== null;
   return (
     <>
       {blocked.say ? <p className="board-blocked">{plainWords(blocked.say)}</p> : null}
@@ -148,16 +151,20 @@ export function PostAction(props: {
           <p className="ps-mono">{blocked.detail}</p>
         </Fold>
       ) : null}
-      <WalletProblem wallet={boardWallet} />
-      {progress.state === 'failed' ? <Problem>{progress.message}</Problem> : null}
-      <PrimaryAction
-        disabled={props.blocked !== null}
-        status={running ? 'busy' : 'idle'}
-        busyLabel={progress.state === 'running' ? walletStageLabels[progress.stage] : ''}
-        onClick={() => void send()}
-      >
-        {props.label}
-      </PrimaryAction>
+      {hidden ? null : (
+        <>
+          <WalletProblem wallet={boardWallet} />
+          {progress.state === 'failed' ? <Problem>{progress.message}</Problem> : null}
+          <PrimaryAction
+            disabled={props.blocked !== null}
+            status={running ? 'busy' : 'idle'}
+            busyLabel={progress.state === 'running' ? walletStageLabels[progress.stage] : ''}
+            onClick={() => void send()}
+          >
+            {props.label}
+          </PrimaryAction>
+        </>
+      )}
     </>
   );
 }

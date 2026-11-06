@@ -340,7 +340,8 @@ describe('real exam through the screens', () => {
     await step('board picks 11 names from the directory, makes 2 setter invites and copies the links (UI)', () =>
       board.flow('choose names and copy links', async () => {
         await board.seeHeading(text.peopleHeading, 60_000);
-        // Ticking in this order fills the neutral places, then the key places. The eighth centre has no default.
+        // The ten chosen while creating the exam are folded away. The eighth centre has no default.
+        await unfold(bp, 'Centres and neutral parties');
         for (const person of parties) await bp.getByLabel(`Include ${person.label}`).check({ timeout: 60_000 });
         await bp.getByLabel(`Role for centre-8.${partyParent}`).selectOption({ label: 'Centre getting the key at unlock' });
         await bp.getByRole('button', { name: button.copyExamLink }).click();

@@ -111,6 +111,7 @@ export function boardTests(lab: () => Lab): void {
         await page.reload();
         await board.seeHeading(text.peopleHeading);
         await board.shot('09-people-empty');
+        await unfold(page, 'Centres and neutral parties');
         await page.getByLabel(`Include ${KEYHOLDER}`).check({ timeout: 30_000 });
         await page.getByLabel(`Include ${CENTRE}`).check();
         await page.getByRole('button', { name: button.copyExamLink }).click();

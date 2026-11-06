@@ -15,7 +15,7 @@ import { InviteBackup } from './InviteBackup';
 import { Fold, PostAction, ReadBackRows } from './Parts';
 import { createInvite, linkFor, reissueInvite, type BoardInvite } from './invites';
 import { defaultRole, partyEntries, partyRoles, partyState, useDirectoryNames, useParties, usePartyRecords, type ChosenParty, type PartyState } from './parties';
-import { bankNeeded } from './plan';
+import { bankNeeded, centresProblem, neutralsProblem } from './plan';
 import { checkPostTarget, type PostGate } from './postGate';
 import { postApprovedListFlow, type PostOutcome } from './postFlow';
 import { explainError } from './publishFlow';
@@ -352,11 +352,15 @@ export function PeopleStep(props: { examId: Hex; snapshot: Snapshot; onPosted: (
   const base = 'location' in globalThis ? `${location.origin}${location.pathname}` : '';
   const needs = props.snapshot.found?.criteria ? bankNeeded(props.snapshot.found.criteria) : null;
 
+  // Names chosen while creating the exam need no more attention, so they stay folded.
+  const peopleChosen = centresProblem(parties) === null && neutralsProblem(parties) === null;
+  const registeredNames = partyRows.filter(({ state }) => state.kind === 'registered').length;
+
   if (!loaded) return <LoadingSeal />;
   return (
     <>
       <h1 className="board-draft-title">Bring everyone in</h1>
-      <p className="board-draft-lede">Everyone registers their security key. Then you post the list, and setters can send questions.</p>
+      <p className="board-draft-lede">Share the link and invite your setters. Once everyone has registered, post the list.</p>
       {published ? (
         <div className="board-section board-people-published">
           <Stamp press>Published</Stamp>
@@ -376,43 +380,45 @@ export function PeopleStep(props: { examId: Hex; snapshot: Snapshot; onPosted: (
           <span>Send this link to every centre and neutral party so they can register.</span>
           <CopyLink label="Copy the exam link" url={examPageLink(base, examId)} />
         </p>
-        {seen ? (
+        <Fold summary={`Centres and neutral parties, ${String(registeredNames)} of ${String(parties.length)} registered`} open={!peopleChosen}>
+          {seen ? (
+            <p className="board-note">
+              {seen} {unreadDirectory ? <Button onClick={directory.retry}>Try again</Button> : null}
+            </p>
+          ) : null}
+          {listed.length > 8 || parties.length > 8 ? <Field label="Search the directory" value={search} onChange={setSearch} /> : null}
+          {shown.length > 0 ? (
+            <Rows>
+              {shown.map((name) => {
+                const row = partyRows.find(({ party }) => party.name === name);
+                return (
+                  <PartyRow
+                    key={name}
+                    name={name}
+                    party={row?.party}
+                    state={row?.state}
+                    onTick={(ticked) => {
+                      tick(name, ticked);
+                    }}
+                    onRole={(role) => {
+                      setRole(name, role);
+                    }}
+                    onRetry={retry}
+                  />
+                );
+              })}
+            </Rows>
+          ) : null}
+          <AddName
+            taken={[...listed, ...chosenNames]}
+            onAdd={(name) => {
+              tick(name, true);
+            }}
+          />
           <p className="board-note">
-            {seen} {unreadDirectory ? <Button onClick={directory.retry}>Try again</Button> : null}
+            ENS names are read on Sepolia, a test network, where anyone can register a similar name. Whoever runs {directoryName} decides which key belongs to each name on it.
           </p>
-        ) : null}
-        {listed.length > 8 || parties.length > 8 ? <Field label="Search the directory" value={search} onChange={setSearch} /> : null}
-        {shown.length > 0 ? (
-          <Rows>
-            {shown.map((name) => {
-              const row = partyRows.find(({ party }) => party.name === name);
-              return (
-                <PartyRow
-                  key={name}
-                  name={name}
-                  party={row?.party}
-                  state={row?.state}
-                  onTick={(ticked) => {
-                    tick(name, ticked);
-                  }}
-                  onRole={(role) => {
-                    setRole(name, role);
-                  }}
-                  onRetry={retry}
-                />
-              );
-            })}
-          </Rows>
-        ) : null}
-        <AddName
-          taken={[...listed, ...chosenNames]}
-          onAdd={(name) => {
-            tick(name, true);
-          }}
-        />
-        <p className="board-note">
-          ENS names are read on Sepolia, a test network, where anyone can register a similar name. Whoever runs {directoryName} decides which key belongs to each name on it.
-        </p>
+        </Fold>
       </section>
       <section className="board-draft-card board-people-job">
         <h2>
@@ -468,6 +474,7 @@ export function PeopleStep(props: { examId: Hex; snapshot: Snapshot; onPosted: (
         </div>
         <PostAction
           label="Post the list"
+          hiddenWhileBlocked
           blocked={blocked}
           post={async (onStage) => {
             if (!composed?.ok) throw new Error('The list is not ready to post yet. Check the numbers above.');

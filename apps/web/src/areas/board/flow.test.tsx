@@ -409,7 +409,7 @@ describe('step 3, bring people in', () => {
     expect(screen.getByText('6 of 7')).toBeTruthy();
     expect(screen.getByText(/1, at least 5 needed/)).toBeTruthy();
     await screen.findByText(/needs exactly 3 key holders and 7 centres holding part of the key/);
-    expect(button('Post the list').disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Post the list' })).toBeNull();
     expect(node.sent).toHaveLength(sent);
   });
 
@@ -423,7 +423,7 @@ describe('step 3, bring people in', () => {
     expect(await screen.findAllByText('Name confirmed')).toHaveLength(10);
     expect(screen.getAllByText('Registered')).toHaveLength(1);
     await waitFor(() => {
-      expect(button('Post the list').disabled).toBe(false);
+      expect(button('Post the list')).toBeTruthy();
     });
     fireEvent.click(button('Post the list'));
     await waitFor(() => {
@@ -440,11 +440,11 @@ describe('step 3, bring people in', () => {
     renderBoard(env, fakeTee({ registrations: registrationsOf(everyone) }));
     const role = await screen.findByLabelText('Role for centre-1.paperseal-demo.eth');
     await waitFor(() => {
-      expect(button('Post the list').disabled).toBe(false);
+      expect(button('Post the list')).toBeTruthy();
     });
     fireEvent.change(role, { target: { value: '' } });
     await waitFor(() => {
-      expect(button('Post the list').disabled).toBe(true);
+      expect(screen.queryByRole('button', { name: 'Post the list' })).toBeNull();
     });
     expect(screen.getByText('6 of 7')).toBeTruthy();
   });
@@ -482,7 +482,7 @@ describe('step 3, bring people in', () => {
     stock(everyone);
     renderBoard(env, fakeTee({ registrations: registrationsOf(everyone), status: { stage: 'submit' } }));
     await screen.findByText(/Stage: submit\./);
-    expect(button('Post the list').disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Post the list' })).toBeNull();
     expect(node.sent).toHaveLength(sent);
   });
 
@@ -492,7 +492,7 @@ describe('step 3, bring people in', () => {
     stock(everyone);
     renderBoard(env, fakeTee({ registrations: registrationsOf(everyone) }));
     await screen.findByText(/network down/);
-    expect(button('Post the list').disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Post the list' })).toBeNull();
   });
 
   it('checks again right before sending', async () => {
@@ -502,7 +502,7 @@ describe('step 3, bring people in', () => {
     const tee = fakeTee({ registrations: registrationsOf(everyone) });
     renderBoard(env, tee);
     await waitFor(() => {
-      expect(button('Post the list').disabled).toBe(false);
+      expect(button('Post the list')).toBeTruthy();
     });
     verifyTee.mockRejectedValue(new TypeError('gone'));
     fireEvent.click(button('Post the list'));
@@ -514,7 +514,7 @@ describe('step 3, bring people in', () => {
     const { env } = await seeded('exam');
     renderBoard(env, null);
     await screen.findByText(/not connected, so nobody can register yet/);
-    expect(button('Post the list').disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Post the list' })).toBeNull();
   });
 });
 
@@ -774,7 +774,7 @@ describe('step 3, a name counts only by its record', () => {
     await screen.findByText(/asha\.eth with a different security key, so they are not on the list/);
     expect(screen.getByText('2 of 3')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Go ahead/ })).toBeNull();
-    expect(button('Post the list').disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Post the list' })).toBeNull();
   });
 
   it('never lets a name without a record through', async () => {

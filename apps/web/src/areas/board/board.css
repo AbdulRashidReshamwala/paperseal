@@ -635,8 +635,7 @@
   list-style: none;
 }
 
-.board-draft-rail button,
-.board-draft-rail li > div {
+.board-draft-rail button {
   display: flex;
   gap: var(--ps-space-3);
   align-items: center;
@@ -673,13 +672,11 @@
   border-radius: 50%;
 }
 
-.board-draft-rail [data-state='done'] button,
-.board-draft-rail [data-state='done'] > div {
+.board-draft-rail [data-state='done'] button {
   color: var(--ps-ink);
 }
 
-.board-draft-rail [data-state='here'] button,
-.board-draft-rail [data-state='here'] > div {
+.board-draft-rail [data-state='here'] button {
   font-weight: 600;
   color: var(--ps-ink);
   background: var(--ps-paper-deep);
@@ -1004,4 +1001,17 @@
 
 .board-people-published p {
   margin: 0;
+}
+
+/* A published exam is one column: the board has no steps to choose between here. */
+.board-draft.board-exam {
+  display: block;
+}
+
+.ps-shell:has(.board-exam) {
+  max-width: 760px;
+}
+
+.board-exam .board-draft-main {
+  max-width: none;
 }
