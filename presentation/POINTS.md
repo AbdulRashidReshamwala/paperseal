@@ -21,7 +21,7 @@ Theme to use where it fits: **no one can leak a paper they have never seen.**
 - The leak comes from **inside** (insiders, NTA staff, teachers, coaching owners) and sometimes from **outside** (hackers).
 - It repeats: the CBI reportedly found the 2025 paper compromised by the same racket.
 - Numbers on hand: 41 exams across 15 Indian states in five years (about 1.4 crore applicants). Iraq had 66 internet shutdowns in 2023, mostly for exams. Algeria lost about $199M in 2019.
-- **Gap:** I have no sourced example of an external hacker leak. We need one before we say it on stage.
+- **Outside example (sourced):** JEE Main 2021. The CBI arrested Russian national Mikhail Shargin in October 2022 and alleged he compromised the exam software and got remote access to exam-centre computers, so candidates' papers were solved from outside. Reports differ on how many candidates benefited, and a court granted him bail in November 2022. Say "the CBI alleges" on stage. Sources: The National, Careers360, DNA India.
 
 ### 1.4 What we need
 - A system that protects against **both** insiders and outsiders.
