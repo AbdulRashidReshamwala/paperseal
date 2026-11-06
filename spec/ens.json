@@ -2,7 +2,8 @@
   "records": {
     "tee": "paperseal.tee",
     "storage": "paperseal.storage",
-    "bucket": "paperseal.bucket"
+    "bucket": "paperseal.bucket",
+    "passkey": "paperseal.passkey"
   },
   "ccipRead": false
 }

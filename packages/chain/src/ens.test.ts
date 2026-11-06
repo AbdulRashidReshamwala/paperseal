@@ -10,10 +10,11 @@ import {
   type Hex,
 } from 'viem';
 import { sepolia } from 'viem/chains';
-import { ens } from '@paperseal/protocol';
+import { ens, passkeyRecordValue } from '@paperseal/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  checkPasskeyName,
   createEnsLookup,
   examRegistryAbi,
   examRegistryRuntime,
@@ -387,5 +388,76 @@ describe('createEnsLookup', () => {
     expect(() => createEnsLookup({})).toThrow('rpcUrl or transport');
     expect(() => createEnsLookup({ rpcUrl: '' })).toThrow('rpcUrl or transport');
     await expect(resolveExamName(name, {})).rejects.toThrow('rpcUrl or transport');
+  });
+});
+
+describe('checkPasskeyName', () => {
+  const holderName = 'dr-rao.maths-board.eth';
+  const key: Hex = `0x04${'ab'.repeat(64)}`;
+  const otherKey: Hex = `0x04${'cd'.repeat(64)}`;
+  const withRecord = (value: string | null) => lookup({ text: (n, k) => Promise.resolve(n === holderName && k === ens.records.passkey ? value : null) });
+
+  it('confirms a record that is the hash of the passkey, whatever its case or edge spaces', async () => {
+    const value = passkeyRecordValue(key);
+    expect(await checkPasskeyName(holderName, key, { lookup: withRecord(value) })).toMatchObject({ state: 'confirmed', expected: value });
+    expect(await checkPasskeyName(holderName, key, { lookup: withRecord(` ${value.toUpperCase().replace('0X', '0x')}\n`) })).toMatchObject({
+      state: 'confirmed',
+    });
+  });
+
+  it('reads the paperseal.passkey record', async () => {
+    const asked: string[] = [];
+    await checkPasskeyName(holderName, key, { lookup: lookup({ text: (_, k) => (asked.push(k), Promise.resolve(null)) }) });
+    expect(asked).toEqual(['paperseal.passkey']);
+  });
+
+  it('is a mismatch for another key, and missing when nothing is set', async () => {
+    expect(await checkPasskeyName(holderName, key, { lookup: withRecord(passkeyRecordValue(otherKey)) })).toMatchObject({
+      state: 'mismatch',
+      found: passkeyRecordValue(otherKey),
+    });
+    expect(await checkPasskeyName(holderName, key, { lookup: withRecord(null) })).toMatchObject({ state: 'missing', found: null });
+    expect(await checkPasskeyName(holderName, key, { lookup: withRecord('  ') })).toMatchObject({ state: 'missing' });
+  });
+
+  it('is refused, and asks no gateway, when the read needs one or reverts', async () => {
+    const offchain = () => Promise.reject(needsGateway());
+    expect(await checkPasskeyName(holderName, key, { lookup: lookup({ text: offchain }) })).toMatchObject({
+      state: 'refused',
+      reason: expect.stringContaining('needs an offchain gateway') as string,
+    });
+    expect(await checkPasskeyName(holderName, key, { lookup: lookup({ text: () => Promise.reject(reverted()) }) })).toMatchObject({
+      state: 'refused',
+    });
+  });
+
+  it('is unreadable when the RPC fails, and never throws', async () => {
+    const down = () => Promise.reject(new HttpRequestError({ url: 'https://rpc.example.org', status: 503 }));
+    expect(await checkPasskeyName(holderName, key, { lookup: lookup({ text: down }) })).toMatchObject({ state: 'unreadable' });
+  });
+
+  it('is invalid for a plain name or a name that is not normalised, and reads nothing', async () => {
+    const text = vi.fn(() => Promise.resolve(null));
+    for (const bad of ['Dr Rao', 'Dr-Rao.maths-board.eth', 'plain']) {
+      expect(await checkPasskeyName(bad, key, { lookup: lookup({ text }) }), bad).toMatchObject({ state: 'invalid' });
+    }
+    expect(text).not.toHaveBeenCalled();
+  });
+
+  it('asks only the viewer RPC with no gateway, through the real lookup', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch');
+    const transport = custom({
+      request: ({ method }: { method: string }) => {
+        if (method === 'eth_chainId') return Promise.resolve('0xaa36a7');
+        throw new RpcRequestError({
+          body: { method },
+          error: { code: 3, message: 'execution reverted', data: offchainLookup },
+          url: 'https://rpc.example.org',
+        });
+      },
+    });
+    expect(await checkPasskeyName(holderName, key, { transport })).toMatchObject({ state: 'refused' });
+    expect(fetch).not.toHaveBeenCalled();
+    await expect(Promise.resolve().then(() => checkPasskeyName(holderName, key, {}))).rejects.toThrow(/own RPC/);
   });
 });

@@ -4,7 +4,18 @@ import { resolve } from 'node:path';
 import { labelhash, namehash } from 'viem/ens';
 import { describe, expect, it } from 'vitest';
 
-import { ens, examIdFromName, examNameProblem, splitExamEnsName } from './index';
+import {
+  ens,
+  ensNameProblem,
+  examIdFromName,
+  examNameProblem,
+  limits,
+  looksLikeEnsName,
+  ownerEnsName,
+  passkeyRecordValue,
+  setterOwner,
+  splitExamEnsName,
+} from './index';
 
 /*
  * Checks against spec/fixtures/exam-names.json, whose examIds were computed with viem. The file is
@@ -23,7 +34,9 @@ const fixtures = JSON.parse(
 
 describe('exam names', () => {
   it('reads spec/ens.json', () => {
-    expect(ens.records).toEqual({ tee: 'paperseal.tee', storage: 'paperseal.storage', bucket: 'paperseal.bucket' });
+    expect(ens.records).toEqual({ tee: 'paperseal.tee', storage: 'paperseal.storage', bucket: 'paperseal.bucket',
+      passkey: 'paperseal.passkey',
+    });
     expect(ens.ccipRead).toBe(false);
   });
 
@@ -70,5 +83,37 @@ describe('exam names', () => {
   it('splits at the first dot only', () => {
     expect(splitExamEnsName('maths-2026.board.example.eth')).toEqual({ label: 'maths-2026', parent: 'board.example.eth' });
     for (const name of ['', 'maths-2026', '.eth', 'maths-2026.', '.']) expect(splitExamEnsName(name), name).toBeNull();
+  });
+});
+
+describe('party names', () => {
+  it('knows an ENS name from a plain name', () => {
+    for (const name of ['dr-rao.eth', 'north.centres.maths-board.eth', 'maths-board.eth']) expect(ownerEnsName(name), name).toBe(name);
+    for (const plain of ['Dr. Rao', 'Delhi Public School', 'Rao', 'dr rao.eth', '']) expect(ownerEnsName(plain), plain).toBeNull();
+  });
+
+  it('does not treat a name that is not normalised as one, and says what to use', () => {
+    expect(looksLikeEnsName('Dr-Rao.eth')).toBe(true);
+    expect(ownerEnsName('Dr-Rao.eth')).toBeNull();
+    expect(ensNameProblem('Dr-Rao.eth')).toContain('dr-rao.eth');
+    expect(ensNameProblem('dr_rao.eth')).toBeTruthy();
+    expect(ensNameProblem('dr-rao.eth')).toBeNull();
+  });
+
+  it('refuses a name over the owner limit in bytes, not characters', () => {
+    const long = `${'a'.repeat(limits.ownerBytes)}.eth`;
+    expect(ensNameProblem(long)).toContain(String(limits.ownerBytes));
+    expect(ownerEnsName(long)).toBeNull();
+    const wide = `${'é'.repeat(64)}.eth`;
+    expect(wide.length).toBeLessThan(limits.ownerBytes);
+    expect(ensNameProblem(wide)).toContain(String(limits.ownerBytes));
+  });
+
+  it('records the setterOwner hash of the passkey, a fixed vector', () => {
+    const key = new Uint8Array(65).fill(0xab);
+    key[0] = 4;
+    expect(passkeyRecordValue(key)).toBe(setterOwner(key));
+    expect(passkeyRecordValue(key)).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(passkeyRecordValue(`0x${Buffer.from(key).toString('hex')}`)).toBe(passkeyRecordValue(key));
   });
 });
