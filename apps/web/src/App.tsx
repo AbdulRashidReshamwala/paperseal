@@ -1,33 +1,34 @@
-import { LoadingSeal, Page, Row, Rows, RoleHeader, Seal, Stage } from '@paperseal/ui';
+import { LoadingSeal, Page } from '@paperseal/ui';
 import { lazy, Suspense, useEffect, type ComponentType, type LazyExoticComponent, type ReactNode } from 'react';
 import { Link, Route, Routes, useLocation } from 'react-router';
 
 import { RouteFade } from './shared/RouteFade';
+import './shared/home.css';
 
 // Lazy, so each role downloads only its own code. Do not import an area statically.
 const areas: { path: string; label: string; plain: string; Area: LazyExoticComponent<ComponentType> }[] = [
   {
     path: '/board',
     label: 'Exam board',
-    plain: 'You set up the exam and see it through to exam day.',
+    plain: 'Set up the exam and see it through.',
     Area: lazy(() => import('./areas/board/BoardArea')),
   },
   {
     path: '/setter',
     label: 'Question setter',
-    plain: 'You write questions for the exam.',
+    plain: 'Write the questions.',
     Area: lazy(() => import('./areas/setter/SetterArea')),
   },
   {
     path: '/centre',
     label: 'Exam centre',
-    plain: 'You receive the sealed paper and open it on exam day.',
+    plain: 'Open the sealed paper on exam day.',
     Area: lazy(() => import('./areas/centre/CentreArea')),
   },
   {
     path: '/keyholder',
     label: 'Key holder',
-    plain: 'You hold part of the key and release it on exam day.',
+    plain: 'Release your part of the key.',
     Area: lazy(() => import('./areas/keyholder/KeyholderArea')),
   },
 ];
@@ -38,23 +39,20 @@ const ExamPage = lazy(() => import('./shared/ExamPage'));
 
 function Home() {
   return (
-    <Page header={<RoleHeader role="Welcome" />}>
-      <Seal state="sealed" size={80} label="The Paper Seal" />
-      <Stage
-        title="What is your part in this exam?"
-        lede="Paper Seal keeps an exam paper sealed until it is due. No one person can open it."
-        action={
-          <Rows>
-            {areas.map(({ path, label, plain }) => (
-              <Row key={path} label={<Link to={path}>{label}</Link>}>
-                {plain}
-              </Row>
-            ))}
-            <Row label={<Link to="/enrol">Set up your security key</Link>}>You do this once, if you are a key holder or an exam centre.</Row>
-          </Rows>
-        }
-        next="Your page shows you the one thing to do next."
-      />
+    <Page>
+      <h1 className="ps-stage-title home-title">What is your part in this exam?</h1>
+      <p className="ps-stage-lede">Paper Seal keeps an exam paper sealed until it is due. No one person can open it.</p>
+      <ul className="home-tiles">
+        {areas.map(({ path, label, plain }) => (
+          <li key={path} className="home-tile">
+            <Link to={path}>{label}</Link>
+            <p>{plain}</p>
+          </li>
+        ))}
+      </ul>
+      <p className="home-setup">
+        Key holders and centres: <Link to="/enrol">set up your security key</Link> once, before exam day.
+      </p>
     </Page>
   );
 }

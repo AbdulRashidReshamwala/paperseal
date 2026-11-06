@@ -1,0 +1,65 @@
+.home-title {
+  margin-top: var(--ps-space-6);
+}
+
+.home-tiles {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--ps-space-3);
+  padding: 0;
+  margin: var(--ps-space-5) 0 0;
+  list-style: none;
+}
+
+/* The link inside stretches over the whole tile, so its name stays just the role. */
+.home-tile {
+  position: relative;
+  padding: var(--ps-space-5);
+  background: var(--ps-field);
+  border: 1px solid var(--ps-rule);
+  border-radius: 8px;
+  transition: border-color var(--ps-time-quick);
+}
+
+.home-tile:hover {
+  border-color: var(--ps-rule-strong);
+}
+
+.home-tile:focus-within {
+  outline: 2px solid var(--ps-ink);
+  outline-offset: 2px;
+}
+
+.home-tile a {
+  font-family: var(--ps-serif);
+  font-size: var(--ps-text-section);
+  text-decoration: none;
+}
+
+.home-tile a:focus-visible {
+  outline: none;
+}
+
+.home-tile a::after {
+  position: absolute;
+  inset: 0;
+  content: '';
+}
+
+.home-tile p {
+  margin: var(--ps-space-1) 0 0;
+  font-size: var(--ps-text-small);
+  color: var(--ps-ink-soft);
+}
+
+.home-setup {
+  margin: var(--ps-space-5) 0 0;
+  font-size: var(--ps-text-small);
+  color: var(--ps-ink-soft);
+}
+
+@media (width < 560px) {
+  .home-tiles {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

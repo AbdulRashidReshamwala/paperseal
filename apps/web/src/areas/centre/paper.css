@@ -67,7 +67,7 @@
   margin: var(--ps-space-6) auto 0;
   font-size: 1.25rem;
   line-height: 1.6;
-  border-top: 3px double var(--ps-ink);
+  border-top: 1px solid var(--ps-rule);
 }
 
 .paper-sheet-title {

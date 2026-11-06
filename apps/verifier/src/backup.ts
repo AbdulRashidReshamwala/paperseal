@@ -311,6 +311,7 @@ export function withBackup(bucket: StorageReader, backup: BackupSource | null, b
 
   return {
     url: bucket.url,
+    ...(bucket.modified ? { modified: bucket.modified } : {}),
     use,
     get: async (name) => {
       // An unlock file from a backup is only ever used once it passes the page's check, through `checked`.

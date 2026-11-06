@@ -270,9 +270,8 @@ describe('step evidence', () => {
     expect(within(step).getByText(/Demo mode/)).toBeTruthy();
   });
 
-  it('step 2 and the top of the page say the exam is a demonstration, with nothing connected', () => {
+  it('step 2 still lists demo mode in its evidence, with nothing connected', () => {
     open(1000, { rpcUrl: '', storageUrl: '', registryAddress: '', examId: '' });
-    expect(screen.getByText('This is a demonstration. The security keys are simulated.')).toBeTruthy();
     expect(screen.getByText(/Demo mode/)).toBeTruthy();
   });
 
@@ -439,10 +438,32 @@ describe('step 6, unlock', () => {
     await within(step).findByText('Not checked until the log and its proof pass', {}, { timeout: 5000 });
   });
 
+  it('asks the live machine nothing about a finished exam, and judges it from its records', async () => {
+    const world = await buildWorld();
+    arrange(world);
+    const storageFetch = vi.mocked(fetch).getMockImplementation() as (i: string | URL | Request) => Promise<Response>;
+    const urls: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: string | URL | Request) => {
+        urls.push(String(input));
+        return storageFetch(input);
+      }),
+    );
+    open(1000, { teeUrl: 'https://tee.example' });
+    await findStep(/^7\. Paper opens to everyone$/);
+    await waitFor(() => {
+      expect(urls.length).toBeGreaterThan(0);
+    });
+    await act(() => new Promise((done) => setTimeout(done, 50)));
+    expect(urls.filter((url) => url.startsWith('https://tee.example/'))).toEqual([]);
+    expect(screen.queryByText(/live machine/i, { selector: '[role=alert] *' })).toBeNull();
+  });
+
   describe('with the live TEE', () => {
     async function openLive(trusted: boolean) {
       freshTrusted = trusted;
-      const world = await buildWorld();
+      const world = await buildWorld({ endRound: 2000 });
       arrange(world);
       const holders = decodeApprovedList(fromHex(world.entriesHex)).filter((e) => e.role === 2 || e.role === 3);
       const released = holders.slice(0, 8).map((e) => toHex(e.passkeyPublicKey));
@@ -466,17 +487,17 @@ describe('step 6, unlock', () => {
 
     it('is neutral, with the warning above the rows, when the fresh attestation is not trusted', async () => {
       const step = await openLive(false);
-      const warning = await within(step).findByText(/has not passed its check/);
+      const warning = await within(step).findByText(/has not shown it is running this exam/);
       expect(within(step).getByText('unlock (not verified)')).toBeTruthy();
       const rows = within(step).getByText('unlock (not verified)').closest('ul');
       expect(warning.compareDocumentPosition(rows ?? warning) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
-    it('shows progress as evidence when the fresh attestation is trusted', async () => {
+    it('shows progress so far when the fresh attestation is trusted, and says only the record counts', async () => {
       const step = await openLive(true);
-      await within(step).findByText('The machine passed its check, so its answers can be trusted');
+      await within(step).findByText(/only the record counts/);
       expect(within(step).getByText('unlock')).toBeTruthy();
-      expect(within(step).queryByText(/has not passed its check/)).toBeNull();
+      expect(within(step).queryByText(/has not shown it is running this exam/)).toBeNull();
     });
   });
 });
@@ -702,18 +723,15 @@ describe('the backup on Swarm', () => {
     const second = arrangeBackup(world, { bucket: 'empty', swarm: 'up' });
     open(1000, { arkivWriters: writer, swarmApiUrl: '' });
     await within(await findStep(/^5\. Paper built and sealed$/)).findByText(/manifest.json is not in storage yet/);
-    expect(second.backupRows).not.toHaveBeenCalled();
     expect(second.swarmReads).toEqual([]);
   });
 
-  it('reads nothing from Swarm while the bucket works', async () => {
+  it('takes nothing from Swarm while the bucket works, and only reports on the backup', async () => {
     const world = await buildWorld();
-    const { swarmReads, backupRows } = arrangeBackup(world, { bucket: 'full', swarm: 'up' });
+    arrangeBackup(world, { bucket: 'full', swarm: 'up' });
     open(1000, { arkivWriters: writer });
     expect(await screen.findByText('Differentiate x squared.', {}, { timeout: 5000 })).toBeTruthy();
     expect(screen.queryByText('Backup on Swarm')).toBeNull();
-    expect(backupRows).not.toHaveBeenCalled();
-    expect(swarmReads).toEqual([]);
   });
 
   it('can be pointed at another Swarm API, or turned off, under "Check it yourself"', async () => {
@@ -910,7 +928,7 @@ describe('verify by name', () => {
   });
 
   it("reads the name's TEE, storage and bucket in place of the viewer's own", async () => {
-    const world = await buildWorld();
+    const world = await buildWorld({ endRound: 2000 });
     arrange(world);
     const storageFetch = vi.mocked(fetch).getMockImplementation() as (i: string | URL | Request) => Promise<Response>;
     const urls: string[] = [];

@@ -3,7 +3,7 @@ import { useEffect, useState, type ChangeEvent } from 'react';
 import { activeKey, activePersona, becomePersona, personas } from './personas';
 import { newUserAction, setTouchEnabled, touchEnabled } from './touch';
 
-/** The bar across the top of every page in demo mode: who you are, and that the keys are simulated. */
+/** The bar across the top of every page in demo mode: who you are, and whether to ask for a touch. */
 export default function DemoBar() {
   const [touch, setTouch] = useState(() => touchEnabled());
   const persona = activePersona();
@@ -64,7 +64,6 @@ export default function DemoBar() {
       <label>
         <input type="checkbox" checked={touch} onChange={toggle} /> Ask for a touch
       </label>
-      <span>Demo keys: every key here is simulated, and the touch is only for show.</span>
     </div>
   );
 }

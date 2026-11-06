@@ -112,7 +112,7 @@ describe('demo keys, one tab', () => {
 
     // ---------------------------------------------------------------- the bar
     await page.goto(web.url);
-    await page.getByText(/every key here is simulated/).waitFor();
+    await page.getByLabel('Acting as').waitFor();
     expect(await acting.locator('option').allInnerTexts()).toEqual(['Exam board', ...setters, ...keyHolders, ...centres]);
     await actor.shot('demo-00-bar');
 

@@ -5,6 +5,7 @@ import { isAddressEqual, sha256, type Address } from 'viem';
 
 import { sameHex } from './checks';
 import { roleNames } from './custody';
+import { roundReached } from './load';
 import { isExamId } from './settings';
 
 /*
@@ -14,7 +15,7 @@ import { isExamId } from './settings';
  */
 
 /** What the history reads from Arkiv. */
-export type HistoryReader = Pick<ArkivReader, 'examRows' | 'participantRows'>;
+export type HistoryReader = Pick<ArkivReader, 'examRows' | 'participantRows'> & Partial<Pick<ArkivReader, 'copyRows'>>;
 /** What the history reads from the registry, through the viewer's own RPC. */
 export type HistoryRegistry = Pick<ExamRegistry, 'address' | 'getExam' | 'getApprovedList' | 'getBuild' | 'getApprovedListEntries'>;
 /** "Exam Names" in spec/api.md, run in full. */
@@ -37,6 +38,36 @@ export interface HistoryExam {
   name: string | null;
   /** The writers whose rows matched the registry. */
   writers: Address[];
+  /** From the registry, for the exam's status. */
+  rounds: { lock: bigint; unlock: bigint; end: bigint };
+  /** How many people the registry's list holds. Null before a list is posted, or if it could not be read. */
+  people: number | null;
+  /**
+   * Which copies are recorded. Arkiv: a release log row exists. Swarm: a backup row names this exam's
+   * Build. Only the exam's own page checks them. Null if the rows could not be read.
+   */
+  copies: { arkiv: boolean; swarm: boolean } | null;
+}
+
+export type ExamStatus = 'setup' | 'questions' | 'waiting' | 'sealed' | 'under-way' | 'finished' | 'never-ran';
+
+export const statusWords: Record<ExamStatus, string> = {
+  setup: 'Setting up',
+  questions: 'Taking questions',
+  waiting: 'Waiting for the paper',
+  sealed: 'Sealed',
+  'under-way': 'Under way',
+  finished: 'Finished',
+  'never-ran': 'Never ran',
+};
+
+/** Where an exam stands. One with no paper past its start never ran, and nothing can change that now. */
+export function examStatus(exam: Pick<HistoryExam, 'examStart' | 'stage' | 'rounds'>, latest: number | null, now: number): ExamStatus {
+  const reached = (round: bigint) => roundReached(Number(round), latest, now);
+  if (exam.stage === 'built') return reached(exam.rounds.end) ? 'finished' : reached(exam.rounds.unlock) ? 'under-way' : 'sealed';
+  if (now >= Number(exam.examStart)) return 'never-ran';
+  if (reached(exam.rounds.lock)) return 'waiting';
+  return exam.stage === 'listed' ? 'questions' : 'setup';
 }
 
 export interface IgnoredExamRows {
@@ -74,7 +105,7 @@ const reasonOf = (error: unknown) => (error instanceof Error ? error.message : S
 const byId = <T extends { examId: Hex }>(a: T, b: T) => (a.examId < b.examId ? -1 : a.examId > b.examId ? 1 : 0);
 
 /** Runs `task` on every item, at most `limit` at a time, so a long list doesn't flood the RPC. */
-async function eachLimited<T, R>(items: readonly T[], limit: number, task: (item: T) => Promise<R>): Promise<R[]> {
+export async function eachLimited<T, R>(items: readonly T[], limit: number, task: (item: T) => Promise<R>): Promise<R[]> {
   const results: R[] = [];
   let next = 0;
   const worker = async () => {
@@ -88,7 +119,7 @@ async function eachLimited<T, R>(items: readonly T[], limit: number, task: (item
 }
 
 /** The first of `names` that passes the name check and resolves to this exam in this registry. */
-async function verifiedName(
+export async function verifiedName(
   names: readonly string[],
   examId: Hex,
   registry: Address,
@@ -110,6 +141,14 @@ async function verifiedName(
 }
 
 const READS_AT_ONCE = 4;
+
+function countOf(encoded: Hex): number | null {
+  try {
+    return decodeApprovedList(fromHex(encoded)).length;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * The registry's exams that `writers` have indexed, each checked against the registry: shown only
@@ -137,6 +176,9 @@ export async function loadExamHistory(args: {
     byExam.set(id, [...(byExam.get(id) ?? []), row]);
   }
 
+  // One read for every exam. Without it the exams still show, with their copies not read.
+  const copyRows = await (reader.copyRows ? reader.copyRows(registry.address, writers) : Promise.resolve(null)).catch(() => null);
+
   const unread: UnreadExam[] = [];
   const checked = await eachLimited([...byExam], READS_AT_ONCE, async ([examId, examRows]): Promise<HistoryExam | null> => {
     // One exam whose reads fail is shown as not read yet, and never stops the others.
@@ -160,6 +202,7 @@ export async function loadExamHistory(args: {
     const stage: ExamStage = build ? 'built' : list ? 'listed' : 'published';
     const furthest = Math.max(...matching.map((row) => rankOf(row.stage)));
     const names = [...new Set(matching.map((row) => row.name).filter((name) => name !== ''))];
+    const encoded = list ? await registry.getApprovedListEntries(examId).catch(() => null) : null;
     return {
       examId,
       examStart: exam.settings.examStart,
@@ -167,6 +210,14 @@ export async function loadExamHistory(args: {
       behind: furthest < stageRank[stage],
       name: await verifiedName(names, examId, registry.address, checkName, ignored),
       writers: [...new Set(matching.map((row) => row.creator))],
+      rounds: { lock: exam.settings.lockRound, unlock: exam.settings.unlockRound, end: exam.settings.endRound },
+      people: encoded ? countOf(encoded) : null,
+      copies: copyRows
+        ? {
+            arkiv: copyRows.logs.some((row) => row.examId === examId),
+            swarm: build !== null && copyRows.backups.some((row) => row.examId === examId && sameHex(row.manifestHash, build.storageManifestHash)),
+          }
+        : null,
     };
   });
 
