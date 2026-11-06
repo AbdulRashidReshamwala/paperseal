@@ -6,18 +6,21 @@ import { useMemo } from 'react';
 import { usePoll } from './usePoll';
 
 /*
- * Which exam the sealed machine was started for. It serves one exam at a time, and `GET /v1/status`
- * does not name it, so a page could otherwise show another exam's stage and registrations as this
- * exam's. This only picks what a page says: it does not verify the token, and `verifyTee` still
- * guards everything that sends or posts.
+ * Which exam the sealed machine was started for. It serves one exam at a time, so a page could
+ * otherwise show another exam's stage and registrations as this exam's. `GET /v1/status` names it,
+ * and a machine on an older image is read from its attestation's start arguments instead. This only
+ * picks what a page says: nothing here is verified, and `verifyTee` still guards everything that
+ * sends or posts.
  */
 
 const POLL_MS = 15_000;
 const EXAM_ARG = /^--exam-id=(0x[0-9a-fA-F]{64})$/;
 
-/** The exam in the machine's start arguments, or null if they cannot be read. */
-export async function machineExamId(tee: Pick<TeeClient, 'attestation'>): Promise<Hex | null> {
+/** The exam the machine says it runs, or null if that cannot be read. */
+export async function machineExamId(tee: Partial<Pick<TeeClient, 'status'>> & Pick<TeeClient, 'attestation'>): Promise<Hex | null> {
   try {
+    const named = (await tee.status?.())?.examId;
+    if (named) return named.toLowerCase() as Hex;
     const { token } = await tee.attestation();
     const claims = decodeToken(token) as unknown as { submods?: { container?: { args?: unknown } } };
     const args = claims.submods?.container?.args;
@@ -36,7 +39,7 @@ export async function machineExamId(tee: Pick<TeeClient, 'attestation'>): Promis
 export function useMachineElsewhere(tee: object | null | undefined, examId: Hex | null): { elsewhere: boolean; settled: boolean } {
   const load = useMemo(() => {
     if (!tee || !examId || !('attestation' in tee)) return null;
-    return () => machineExamId(tee as Pick<TeeClient, 'attestation'>);
+    return () => machineExamId(tee as Parameters<typeof machineExamId>[0]);
   }, [tee, examId]);
   const { value, settled } = usePoll(load, POLL_MS);
   return {

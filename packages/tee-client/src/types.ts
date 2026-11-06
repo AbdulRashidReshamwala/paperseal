@@ -34,6 +34,8 @@ export interface SignedApprovedList {
 /** `GET /v1/status`. `approvedList` is present once onboarding has finished. */
 export interface StatusResponse {
   stage: Stage;
+  /** The exam this instance was started for. An image from before this field does not send it. */
+  examId?: Hex;
   questionCount: number;
   approvedList?: SignedApprovedList;
   /** Hex identifiers of accepted releases (spec/api.md does not say which key), and the number needed. */

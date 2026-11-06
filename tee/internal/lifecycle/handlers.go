@@ -72,7 +72,7 @@ func (m *Machine) Attestation(ctx context.Context) (api.AttestationResponse, err
 func (m *Machine) Status(context.Context) (api.StatusResponse, error) {
 	m.mu.RLock()
 	resp := api.StatusResponse{
-		Stage: string(m.stage), QuestionCount: m.bankSize,
+		Stage: string(m.stage), ExamID: m.cfg.Exam.ExamID[:], QuestionCount: m.bankSize,
 		Release: api.ReleaseStatus{Released: []api.Hex{}, Required: spec.C.Threshold.Required},
 	}
 	stage := m.stage

@@ -67,6 +67,7 @@ type ReleaseStatus struct {
 // StatusResponse is GET /v1/status.
 type StatusResponse struct {
 	Stage         string              `json:"stage"`
+	ExamID        Hex                 `json:"examId"`
 	QuestionCount int                 `json:"questionCount"`
 	ApprovedList  *ApprovedListStatus `json:"approvedList,omitempty"`
 	Release       ReleaseStatus       `json:"release"`

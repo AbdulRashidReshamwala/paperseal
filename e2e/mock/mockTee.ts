@@ -430,6 +430,7 @@ export async function startMockTee(options: MockTeeOptions): Promise<MockTee> {
             const live: Stage = stage === 'distribute' && Date.now() >= unlockMs ? 'unlock' : stage;
             send(200, {
               stage: live,
+              ...(examId ? { examId } : {}),
               questionCount: bank.length,
               ...(list ? { approvedList: { examId, entries: list.encoded, hash: list.hash, teeSignature: list.teeSignature } } : {}),
               release: { released: released.map((e) => toHex(e.passkeyPublicKey)), required: threshold.required },

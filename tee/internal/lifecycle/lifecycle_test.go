@@ -52,6 +52,9 @@ func onboardAndSubmit(t *testing.T, w *world, m *lifecycle.Machine, c client, ke
 	if st.ApprovedList == nil || st.Stage != "submit" {
 		t.Fatalf("status %+v", st)
 	}
+	if !bytes.Equal(st.ExamID, w.exam.ExamID[:]) {
+		t.Fatalf("status names exam %x, want %x", st.ExamID, w.exam.ExamID)
+	}
 	msg, _ := hashing.ApprovedList(w.exam.ExamID, st.ApprovedList.Entries)
 	var sig [64]byte
 	copy(sig[:], st.ApprovedList.TEESignature)

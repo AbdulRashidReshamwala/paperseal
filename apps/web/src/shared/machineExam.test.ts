@@ -7,7 +7,12 @@ const tokenWith = (claims: unknown) => `h.${btoa(JSON.stringify(claims)).replace
 const tee = (token: string) => ({ attestation: () => Promise.resolve({ token }) }) as never;
 
 describe('machineExamId', () => {
-  it('reads the exam from the start arguments', async () => {
+  it('takes the exam the machine names in its status', async () => {
+    const status = () => Promise.resolve({ stage: 'onboard', examId: examId.toUpperCase().replace('0X', '0x') });
+    expect(await machineExamId({ status, attestation: () => Promise.reject(new Error('unused')) } as never)).toBe(examId);
+  });
+
+  it('falls back to the start arguments for an older machine', async () => {
     const token = tokenWith({ submods: { container: { args: ['/tee', `--exam-id=${examId}`, '--delta=15'] } } });
     expect(await machineExamId(tee(token))).toBe(examId);
   });

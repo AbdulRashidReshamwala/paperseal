@@ -371,7 +371,7 @@ All bodies are JSON. Every route allows any origin, without credentials. Bytes f
 | Route | Request | Response |
 | --- | --- | --- |
 | `GET /v1/attestation` | None | `{token, instancePublicKey, encryptionPublicKey, instanceKeySignature}` |
-| `GET /v1/status` | None | `{stage, questionCount, approvedList?: {examId, entries, hash, teeSignature}, release: {released: hex[], required}}` |
+| `GET /v1/status` | None | `{stage, examId, questionCount, approvedList?: {examId, entries, hash, teeSignature}, release: {released: hex[], required}}`. `examId` is the exam this instance was started for, because it serves only that one and `stage` says nothing about any other. |
 | `POST /v1/register/challenge` | `{}` | `{challenge}` |
 | `POST /v1/register` | `{owner, inviteTag, challenge, passkeyPublicKey, derivedPublicKey, attestationObject, clientDataJSON, signature, authenticatorData}` | `{}` |
 | `GET /v1/registrations` | None | `{registrations: [{owner, passkeyPublicKey, derivedPublicKey, inviteTag}]}` |
