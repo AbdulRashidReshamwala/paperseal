@@ -25,3 +25,10 @@ research/
 
 # Live run state and report from e2e/live/
 e2e/.live/
+
+# The operator's deploy settings, and OpenTofu's state and cache (deploy/tofu)
+deploy/deploy.json
+deploy/tofu/.terraform/
+deploy/tofu/*.tfstate
+deploy/tofu/*.tfstate.*
+deploy/tofu/*.tfplan

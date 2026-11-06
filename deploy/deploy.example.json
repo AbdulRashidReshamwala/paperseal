@@ -1,0 +1,19 @@
+{
+  "gcp": {
+    "project": "paperseal-demo",
+    "region": "asia-south2",
+    "zone": "asia-south2-a",
+    "machineType": "n2d-standard-2"
+  },
+  "image": { "repo": "ghcr.io/abdulrashidreshamwala/paperseal-tee" },
+  "storage": { "bucket": "paperseal-demo-paperseal-exams" },
+  "ingress": { "kind": "cloudflare", "teeHost": "tee.abdulrashid.dev" },
+  "web": { "appHost": "exams.board.example", "verifierHost": "verify.board.example" },
+  "chain": {
+    "chainId": 11155111,
+    "rpcUrl": "https://ethereum-sepolia-rpc.publicnode.com",
+    "rpcHost": "ethereum-sepolia-rpc.publicnode.com",
+    "registry": "0xc25F7e0004f0E9B77581CFf6B4B5Ae8b120658eb"
+  },
+  "apps": { "repository": "AbdulRashidReshamwala/paperseal" }
+}

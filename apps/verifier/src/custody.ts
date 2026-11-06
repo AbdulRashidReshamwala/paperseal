@@ -7,6 +7,7 @@ import {
   decodeCriteria,
   fromHex,
   ownerEnsName,
+  pick,
   requireHardwareAttestation,
   roles,
   roundAtSeconds,
@@ -17,6 +18,7 @@ import {
   type ApprovedListEntry,
   type Hex,
   type Paper,
+  type WebConfig,
 } from '@paperseal/protocol';
 import type { CheckStatus, SealState, StepState, Tone } from '@paperseal/ui';
 import {
@@ -54,6 +56,7 @@ import {
   type Sourced,
 } from './load';
 import type { Polled } from './poll';
+import { runtimeConfig, viteEnv, type ViteEnv } from './runtime-config';
 import type { SourcedWriter, WriterOrigin } from './settings';
 import { defaultRepository, repositoryPattern } from './repository';
 
@@ -70,14 +73,13 @@ export { defaultRepository };
 
 
 /**
- * The repository the code and build links point at: VITE_RELEASES_REPO, or the default. A fork
- * sets it to its own `owner/name`, the same variable the board app reads its releases from.
+ * The repository the code and build links point at: VITE_RELEASES_REPO, then `config.json`'s
+ * `repository`, then the default. A fork sets it to its own `owner/name`, the same variable the
+ * board app reads its releases from. A bad `VITE_` value is an error. A bad `config.json` value
+ * never arrives, because the file's invalid fields are dropped.
  */
-export function repository(
-  env: Record<string, string | undefined> = import.meta.env as Record<string, string | undefined>,
-): string {
-  const given = env.VITE_RELEASES_REPO?.trim();
-  if (!given) return defaultRepository;
+export function repository(env: ViteEnv = viteEnv, config: WebConfig = runtimeConfig()): string {
+  const given = pick(env.VITE_RELEASES_REPO, config.repository, defaultRepository);
   if (!repositoryPattern.test(given)) throw new Error(`VITE_RELEASES_REPO must look like owner/name, not "${given}".`);
   return given;
 }

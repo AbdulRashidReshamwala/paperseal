@@ -1,6 +1,8 @@
 import { createTeeClient, type TeeClient } from '@paperseal/tee-client';
 
-const teeUrl = (import.meta.env as Record<string, string | undefined>).VITE_TEE_URL;
+import { appEnv } from './runtime-config';
+
+const teeUrl = appEnv().VITE_TEE_URL;
 
 /** Null until VITE_TEE_URL is set. The TEE stays untrusted until attestation passes. */
 export const tee = teeUrl ? createTeeClient({ baseUrl: teeUrl }) : null;

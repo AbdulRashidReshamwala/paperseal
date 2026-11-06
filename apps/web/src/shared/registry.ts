@@ -1,7 +1,9 @@
 import { createExamRegistry } from '@paperseal/chain';
 import type { Hex } from '@paperseal/protocol';
 
-const env = import.meta.env as Record<string, string | undefined>;
+import { appEnv } from './runtime-config';
+
+const env = appEnv();
 const rpcUrl = env.VITE_RPC_URL;
 const address = env.VITE_REGISTRY_ADDRESS as Hex | undefined;
 

@@ -1,0 +1,78 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Paper Seal deploy.json",
+  "description": "See spec/deploy.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["gcp", "image", "ingress", "web", "chain"],
+  "properties": {
+    "gcp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project", "region", "zone"],
+      "properties": {
+        "project": { "type": "string", "pattern": "^[a-z][a-z0-9-]{4,28}[a-z0-9]$" },
+        "region": { "type": "string", "pattern": "^[a-z]+-[a-z]+[0-9]+$" },
+        "zone": { "type": "string", "pattern": "^[a-z]+-[a-z]+[0-9]+-[a-z]$" },
+        "machineType": { "type": "string", "default": "n2d-standard-2" }
+      }
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo"],
+      "properties": {
+        "repo": { "type": "string", "pattern": "^ghcr\\.io/[a-z0-9-]+/[a-z0-9._-]+$" }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bucket": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$" }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "teeHost"],
+      "properties": {
+        "kind": { "enum": ["cloudflare", "gcp-lb"] },
+        "teeHost": { "$ref": "#/definitions/host" }
+      }
+    },
+    "web": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["appHost", "verifierHost"],
+      "properties": {
+        "appHost": { "$ref": "#/definitions/host" },
+        "verifierHost": { "$ref": "#/definitions/host" }
+      }
+    },
+    "chain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["chainId", "rpcUrl", "rpcHost", "registry"],
+      "properties": {
+        "chainId": { "type": "integer", "minimum": 1 },
+        "rpcUrl": { "type": "string", "pattern": "^https://[^\\s]+$" },
+        "rpcHost": { "$ref": "#/definitions/host" },
+        "registry": { "type": "string", "pattern": "^0x[0-9a-fA-F]{40}$" }
+      }
+    },
+    "apps": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+        "arkivWriters": { "type": "string" },
+        "swarmApiUrl": { "type": "string", "pattern": "^https?://[^\\s]+$" },
+        "releaseTag": { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$" }
+      }
+    }
+  },
+  "definitions": {
+    "host": { "type": "string", "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$" }
+  }
+}

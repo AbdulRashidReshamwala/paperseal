@@ -2,11 +2,12 @@ import { arkiv, createArkivReader } from '@paperseal/arkiv';
 import { createExamRegistry } from '@paperseal/chain';
 import { quicknetClient, type ChainClient } from '@paperseal/crypto';
 import type { Hex } from '@paperseal/protocol';
-import { swarm } from '@paperseal/swarm';
 import { createTeeClient } from '@paperseal/tee-client';
 import { createStorage } from '@paperseal/verify';
 import { createContext, use, useMemo, useState, type ReactNode } from 'react';
 import { getAddress, isAddress } from 'viem';
+
+import { resolveDefaults } from './runtime-config';
 
 /** Who this viewer trusts. Stored in their browser, so the board can't choose for them. */
 export interface Settings {
@@ -14,6 +15,8 @@ export interface Settings {
   teeUrl: string;
   /** Base URL of the public bucket. Files live under `<examId>/` there. */
   storageUrl: string;
+  /** The bucket the TEE was started with, which the token's `env_override` must name. */
+  storageBucket: string;
   registryAddress: string;
   examId: string;
   /** The Arkiv node the evidence mirror is read from. */
@@ -26,18 +29,23 @@ export interface Settings {
 
 const STORAGE_KEY = 'paperseal.verifier.settings';
 
-const env = import.meta.env as Record<string, string | undefined>;
+const defaults = resolveDefaults();
 
-/** Build-time defaults. All empty means nothing is contacted until the viewer sets a URL. */
+/**
+ * Defaults for this build and host: a `VITE_` value, then `config.json`, then the built-in one.
+ * All empty means nothing is contacted until the viewer sets a URL. Read once, after main.tsx has
+ * set the config.
+ */
 export const defaultSettings: Settings = {
-  rpcUrl: env.VITE_RPC_URL ?? '',
-  teeUrl: env.VITE_TEE_URL ?? '',
-  storageUrl: env.VITE_STORAGE_URL ?? '',
-  registryAddress: env.VITE_REGISTRY_ADDRESS ?? '',
-  examId: env.VITE_EXAM_ID ?? '',
+  rpcUrl: defaults.rpcUrl,
+  teeUrl: defaults.teeUrl,
+  storageUrl: defaults.storageUrl,
+  storageBucket: defaults.storageBucket,
+  registryAddress: defaults.registryAddress,
+  examId: defaults.examId,
   arkivRpcUrl: arkiv.network.rpcUrl,
-  arkivWriters: env.VITE_ARKIV_WRITERS ?? '',
-  swarmApiUrl: env.VITE_SWARM_API_URL ?? swarm.defaultApiUrl,
+  arkivWriters: defaults.arkivWriters,
+  swarmApiUrl: defaults.swarmApiUrl,
 };
 
 /** The writer addresses in `arkivWriters`, in the order given. Empty entries are skipped. */
@@ -102,6 +110,9 @@ export type SettingsErrors = Partial<Record<keyof Settings, string>>;
 /** A 32-byte exam ID in the one form the verifier uses: lowercase hex. */
 export const isExamId = (value: string) => /^0x[0-9a-f]{64}$/.test(value);
 
+/** A bucket name, with the pattern in spec/web-config.schema.json. */
+const isBucketName = (value: string) => /^[a-z0-9][a-z0-9._-]{1,61}[a-z0-9]$/.test(value);
+
 function isHttpUrl(value: string): boolean {
   try {
     return ['http:', 'https:'].includes(new URL(value).protocol);
@@ -116,6 +127,9 @@ export function validateSettings(settings: Settings): SettingsErrors {
   if (settings.rpcUrl && !isHttpUrl(settings.rpcUrl)) errors.rpcUrl = 'Enter a web address that starts with http:// or https://.';
   if (settings.teeUrl && !isHttpUrl(settings.teeUrl)) errors.teeUrl = 'Enter a web address that starts with http:// or https://.';
   if (settings.storageUrl && !isHttpUrl(settings.storageUrl)) errors.storageUrl = 'Enter a web address that starts with http:// or https://.';
+  if (settings.storageBucket && !isBucketName(settings.storageBucket)) {
+    errors.storageBucket = 'Enter a bucket name: 3 to 63 lower-case letters, digits, dots, dashes or underscores, starting and ending with a letter or digit.';
+  }
   if (settings.registryAddress && !/^0x[0-9a-fA-F]{40}$/.test(settings.registryAddress)) {
     errors.registryAddress = 'Enter 0x followed by 40 letters or digits.';
   }

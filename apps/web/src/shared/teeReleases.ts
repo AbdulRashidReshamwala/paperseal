@@ -1,5 +1,7 @@
 import type { Hex } from '@paperseal/protocol';
 
+import { appEnv } from './runtime-config';
+
 /*
  * Versions of the Paper Seal TEE code, read from GitHub releases. See "TEE
  * Releases" in spec/api.md. This only fills in the board's form: the values
@@ -12,7 +14,7 @@ const repoPattern = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 
 /** The repository releases are read from: VITE_RELEASES_REPO, or the default. */
 export function releasesRepo(
-  env: Record<string, string | undefined> = import.meta.env as Record<string, string | undefined>,
+  env: Record<string, string | undefined> = appEnv(),
 ): string {
   const given = env.VITE_RELEASES_REPO?.trim();
   if (!given) return defaultReleasesRepo;

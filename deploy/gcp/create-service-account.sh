@@ -6,6 +6,7 @@
 # Run create-bucket.sh first. Safe to run again.
 # Usage: PROJECT_ID=... REGION=... ZONE=... [DRY_RUN=1] ./create-service-account.sh
 set -euo pipefail
+echo "deprecated: deploy/tofu now manages the service account and its roles from deploy.json. See deploy/tofu/README.md. This script still works." >&2
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 init_common
 
