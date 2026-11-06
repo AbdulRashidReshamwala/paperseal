@@ -72,7 +72,7 @@ describe('Register', () => {
     expect(screen.queryByRole('textbox')).toBeNull();
     fireEvent.click(registerButton());
     await waitFor(() => {
-      expect(screen.getByText('Your security key is registered')).toBeTruthy();
+      expect(screen.getByRole('heading', { name: 'You’re registered' })).toBeTruthy();
     });
     expect(screen.queryByText(/Registered as/)).toBeNull();
     expect(loadCredential(examId, 'setter')).toMatchObject({ owner: setterOwner(fromHex(passkey)), inviteTag: tagOf(inviteSecret) });
@@ -99,7 +99,7 @@ describe('Register', () => {
   it('keeps a stored key as registered, until a new invite is opened that it was not registered under', () => {
     saveCredential(examId, { owner: setterOwner(fromHex(passkey)), role: 'setter', credentialId: '0x02', passkeyPublicKey: passkey, inviteTag: tagOf(inviteSecret) });
     const same = mount(inviteFor());
-    expect(screen.getByText('Your security key is registered')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'You’re registered' })).toBeTruthy();
     expect(screen.queryByRole('button')).toBeNull();
     same.unmount();
     // A reissued invite has a new secret, so the old key no longer counts and a new one can be registered.

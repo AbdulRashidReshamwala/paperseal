@@ -1,7 +1,7 @@
 import { createWebAuthnKeys, KeyError, type Keys, type Registration } from '@paperseal/keys';
 import { fromHex, NotImplementedError, requireHardwareAttestation, toHex, type Hex, type Invite } from '@paperseal/protocol';
 import { TeeApiError, type TeeClient } from '@paperseal/tee-client';
-import { Check, KeyTouch, securityKeyProblem, Stage, type KeyTouchState } from '@paperseal/ui';
+import { Check, KeyTouch, Registered, securityKeyProblem, Stage, type KeyTouchState } from '@paperseal/ui';
 import { useState, type ReactNode } from 'react';
 
 import { useCurrentExamId } from './currentExam';
@@ -142,6 +142,17 @@ const lede = 'You are registering as a question setter. Your name is not publish
 const nextStep = 'Then your exam board finishes the list of people for this exam. After that you can write your questions here.';
 const newKey = 'To use a different security key, ask your exam board for a new invitation link.';
 
+/** The setter's registered screen. `next` says what the page is waiting for, and never that the list is sent unless it is. */
+export function SetterRegistered(props: { next?: string }) {
+  return (
+    <Registered
+      message="Your security key is set for this exam."
+      next={props.next ?? 'Your exam board is finishing the list of people for this exam. Then this page opens for writing by itself.'}
+      note={`You can close this page and come back to this link later, in this same browser. ${newKey}`}
+    />
+  );
+}
+
 export interface RegisterProps {
   keys?: Pick<Keys, 'register'>;
   tee?: Pick<TeeClient, 'registerChallenge' | 'register'> | null;
@@ -222,12 +233,7 @@ export function Register(props: RegisterProps) {
   }
 
   if (done) {
-    return (
-      <Stage
-        title="Your security key is registered"
-        next={`${nextStep} ${newKey}`}
-      />
-    );
+    return <SetterRegistered />;
   }
 
   if (!invite) return <Stage title={noLink.title} lede={noLink.lede} next={noLink.next} />;
