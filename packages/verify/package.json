@@ -1,0 +1,35 @@
+{
+  "name": "@paperseal/verify",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./fixtures": "./src/fixtures.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "build:checker": "node scripts/build-checker.mjs"
+  },
+  "dependencies": {
+    "@paperseal/arkiv": "workspace:*",
+    "@paperseal/attestation": "workspace:*",
+    "@paperseal/chain": "workspace:*",
+    "@paperseal/crypto": "workspace:*",
+    "@paperseal/protocol": "workspace:*",
+    "@paperseal/swarm": "workspace:*",
+    "@paperseal/tee-client": "workspace:*",
+    "viem": "2.57.16"
+  },
+  "devDependencies": {
+    "@peculiar/x509": "3.1.0",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "esbuild": "0.28.2",
+    "jose": "6.1.0",
+    "reflect-metadata": "0.2.2",
+    "tlock-js": "0.9.0"
+  }
+}

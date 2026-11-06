@@ -15,24 +15,22 @@ import {
   type Step,
   useLoaded,
 } from '@paperseal/ui';
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { approvedEntries, createBackupCache, createStorage, loadChain, type BackupSource, type ChainData } from '@paperseal/verify';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { http } from 'viem';
 
-import { teeStorageBucket } from './attest';
-import { createBackupCache, type BackupSource } from './backup';
-import { loadChain, type ChainData } from './checks';
+import { AgentCheck } from './agent-check';
 import { clockTime, custody, dayTime, REPOSITORY, type Custody, type CustodyStep, type Failure, type PartyName } from './custody';
 import { Evidence } from './evidence';
+import { teeStorageBucket } from './env';
 import { checkedCopies, copies, people, timeline, type Copies, type People } from './facts';
 import { readBoardName, readExamName, readVersion } from './identity';
-import { useExamLink } from './link';
+import { useExamLink, useShareAddress } from './link';
 import { useLatestRound, useNow } from './live';
 import { loadArkiv, loadLive, loadRecords, releaseRecorded, roundReached, signedKeyPriv, useProof, withinTime, type Records } from './load';
 import { eachLimited } from './history';
 import { usePoll, type Polled } from './poll';
-import { approvedEntries } from './commitments';
-import { createStorage } from './storage';
 import { CopiesSection, Glance, IdentitySection, PeopleSection, TimelineSection } from './sections';
 import { loadSwarm } from './swarm';
 import {
@@ -148,6 +146,7 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
   const connections = useConnections();
   const { drand, settings, examId: savedExam, arkiv } = connections;
   const link = useExamLink();
+  useShareAddress(link);
   const name = useExamName(link.kind === 'name' ? link.name : null, settings.rpcUrl, pollMs.records);
   const resolved = name?.state === 'ready' && name.value.ok ? name.value.value : null;
 
@@ -316,6 +315,8 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
 
   return {
     examId,
+    // What the agent prompt names: the registry and storage this view reads, a name's included.
+    agent: { registry: registryAddress, storageUrl },
     invalidLink: link.kind === 'invalid',
     ...(link.kind === 'name' && name ? { name: { name: link.name, result: name, used: { teeUrl, storageUrl, bucket }, configuredRegistry: settings.registryAddress } } : {}),
     sources: { chain: registry !== null, storage: storage !== null, tee: tee !== null, arkiv: arkivReader !== null },
@@ -354,7 +355,7 @@ function SealMark({ state, empty }: { state: SealState | null; empty: string }) 
  * The same shape as `Stage`, because `Stage` can only show a seal in one of its three states, and
  * before the paper is sealed this page has to show that there is no seal yet.
  */
-function Head({ view, chosen }: { view: Custody; chosen: boolean }) {
+function Head({ view, chosen, agent }: { view: Custody; chosen: boolean; agent: ReactNode }) {
   return (
     <section className="ps-stage" data-sealed={chosen ? 'true' : undefined}>
       <div className="ps-stage-main">
@@ -362,6 +363,7 @@ function Head({ view, chosen }: { view: Custody; chosen: boolean }) {
         <div className="ps-stage-lede">
           <p>{view.verdict}</p>
         </div>
+        {agent}
         <p className="ps-stage-next">
           <span className="ps-stage-next-label">What happens next</span>
           <span>{view.next}</span>
@@ -682,7 +684,11 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
       <main>
         <FailureAlarm failures={result.failures} />
         <Warnings warnings={result.warnings} />
-        <Head view={result} chosen={chosen} />
+        <Head
+          view={result}
+          chosen={chosen}
+          agent={<AgentCheck examId={view.examId} registry={view.agent.registry} storageUrl={view.agent.storageUrl} />}
+        />
         <Glance items={recordedExam ? glanceOf(boardLabel, found, held) : []} />
         {view.records.state === 'error' ? (
           <p className="vf-gap">

@@ -1,5 +1,5 @@
 import type { Hex } from '@paperseal/protocol';
-import { useSyncExternalStore } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { useLocation } from 'react-router';
 
 import { isExamId } from './settings';
@@ -75,4 +75,31 @@ export function useExamLink(): ExamLink {
     search: (globalThis.location as Location | undefined)?.search ?? '',
     ...route,
   });
+}
+
+/**
+ * The share form of an address whose hash names an exam: `<page>?exam=<id>`, with the hash dropped,
+ * because the part after `#` never reaches a server (spec/agent-verification.md, "Share Links").
+ * Null when the hash names no valid exam, so `#/exams`, `#/name/...` and bad links stay as they are.
+ */
+export function shareUrl(href: string): string | null {
+  const url = new URL(href);
+  const route = routeOfHash(url.hash);
+  if (!route || isHistoryRoute(route.routePath)) return null;
+  const link = examLink({ search: url.search, ...route });
+  if (link.kind !== 'exam') return null;
+  url.searchParams.set('exam', link.id);
+  url.hash = '';
+  return url.href;
+}
+
+/** Rewrites the address bar to the share form once the page shows an exam, without a reload. */
+export function useShareAddress(link: ExamLink): void {
+  const id = link.kind === 'exam' ? link.id : null;
+  useEffect(() => {
+    const location = globalThis.location as Location | undefined;
+    if (id === null || !location) return;
+    const next = shareUrl(location.href);
+    if (next !== null && next !== location.href) globalThis.history.replaceState(globalThis.history.state, '', next);
+  }, [id]);
 }

@@ -2,13 +2,25 @@ import type { ExamNameCheck, ExamNameResult } from '@paperseal/chain';
 import { describe, expect, beforeAll, it, vi } from 'vitest';
 import { chain as chainSpec, roundTimeSeconds, sortReleaseFiles, storageNames, toHex, type Hex } from '@paperseal/protocol';
 
-import { checkPublishedToken, checkRecordToken, type Build, type FreshVerdict } from './attest';
-import { approvedEntries, checkManifest, holdersOf } from './commitments';
+import {
+  approvedEntries,
+  checkManifest,
+  checkPublishedToken,
+  checkRecordToken,
+  checkReleaseFiles,
+  checkReleaseLog,
+  holdersOf,
+  parseReleaseLog,
+  releaseProgress,
+  type Build,
+  type FreshVerdict,
+  type ProofChecks,
+  type ProofState,
+} from '@paperseal/verify';
+import { boardAddress, buildWorld, examId, random, registryAddress, registryMatches, storageBucket, type World } from '@paperseal/verify/fixtures';
+
 import { clockTime, custody, inWords, repository, utcTime, type Custody, type CustodyStep, type Item, type NameView, type StepId, type View } from './custody';
-import { boardAddress, buildWorld, examId, random, registryAddress, registryMatches, type World } from './fixtures';
 import type { ArkivReport, LiveReport, ProofRun, Records } from './load';
-import type { ProofChecks, ProofState } from './proof';
-import { checkReleaseFiles, checkReleaseLog, parseReleaseLog, releaseProgress } from './unlock';
 
 // The rounds of a fixture exam, with its times in the past or future as each test needs.
 const LOCK = 100;
@@ -35,6 +47,7 @@ async function checkedLog(w: World, replace: Record<string, Uint8Array | null> =
     exam: w.exam,
     examId,
     registry: registryAddress,
+    bucket: storageBucket,
     trustedRoot: w.pki.root,
     token: text(w.files.get('release-token.jwt')),
     instancePublicKey: parsed.instancePublicKey,
@@ -53,7 +66,7 @@ async function checkedLog(w: World, replace: Record<string, Uint8Array | null> =
 async function checkedRecords(): Promise<Records> {
   const { exam, build, pki } = world;
   const chain = { registryCode: registryMatches, exam, build, list: { listHash: build.approvedListHash }, criteria: world.criteriaHex, entries: world.entriesHex } as Records['chain'];
-  const args = { exam, examId, registry: registryAddress, trustedRoot: pki.root };
+  const args = { exam, examId, registry: registryAddress, bucket: storageBucket, trustedRoot: pki.root };
   const list = approvedEntries(world.entriesHex);
   return {
     chain,

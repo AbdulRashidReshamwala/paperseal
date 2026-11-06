@@ -8,7 +8,7 @@ import { sha256, type Address } from 'viem';
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 
 import { App } from './App';
-import { approvedList, offlineQuicknet, registryAddress } from './fixtures';
+import { approvedList, offlineQuicknet, registryAddress } from '@paperseal/verify/fixtures';
 import type { HistoryReader, HistoryRegistry } from './history';
 import { examLink, isHistoryRoute, routeOfHash } from './link';
 import { SettingsProvider, type Settings } from './settings';

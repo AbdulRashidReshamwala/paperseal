@@ -192,6 +192,31 @@ jobs:
             exit 1
           fi
 
+      # pnpm/action-setup v6.1.1 (version comes from packageManager in package.json)
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115
+
+      # actions/setup-node v7.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 22
+
+      # The agent checker of spec/agent-verification.md, "Checker": one Node
+      # file, built from this commit and the lockfile, so anyone can rebuild
+      # it and compare checkerSha256.
+      - name: Build the checker
+        run: |
+          pnpm install --frozen-lockfile
+          PAPERSEAL_VERSION="$GITHUB_REF_NAME" PAPERSEAL_REPOSITORY="$GITHUB_REPOSITORY" \
+            pnpm --filter @paperseal/verify build:checker
+          cp packages/verify/dist/paperseal-verify.mjs paperseal-verify.mjs
+          sum="$(sha256sum paperseal-verify.mjs | cut -d' ' -f1)"
+          if ! printf '%s' "$sum" | grep -Eq '^[0-9a-f]{64}$'; then
+            echo "::error::could not hash paperseal-verify.mjs"
+            exit 1
+          fi
+          echo "CHECKER_SHA256=0x$sum" >> "$GITHUB_ENV"
+          echo "::notice::paperseal-verify.mjs sha256 $sum"
+
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -207,8 +232,10 @@ jobs:
             echo '```json'
             jq -n --arg version "$GITHUB_REF_NAME" --arg commit "0x$COMMIT" \
               --arg imageDigest "0x$DIGEST" --arg run "$RUN_URL" \
-              '{version: $version, commit: $commit, imageDigest: $imageDigest, run: $run}'
+              --arg checkerSha256 "$CHECKER_SHA256" \
+              '{version: $version, commit: $commit, imageDigest: $imageDigest, run: $run, checkerSha256: $checkerSha256}'
             echo '```'
           } > notes.md
           gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" \
-            --title "TEE $GITHUB_REF_NAME" --notes-file notes.md --verify-tag
+            --title "TEE $GITHUB_REF_NAME" --notes-file notes.md --verify-tag \
+            paperseal-verify.mjs

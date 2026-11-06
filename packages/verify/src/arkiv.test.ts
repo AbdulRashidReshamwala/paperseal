@@ -3,7 +3,7 @@ import type { Hex } from '@paperseal/protocol';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { ChainData } from './checks';
-import { buildWorld, examId, p256, registryAddress, signedReleaseLog, type World } from './fixtures';
+import { buildWorld, examId, p256, registryAddress, signedReleaseLog, storageBucket, type World } from './fixtures';
 import { ARKIV_BLOCK_SECONDS, ARKIV_STALE_AFTER_SECONDS, loadArkiv, type ArkivReport, type ArkivSource } from './load';
 
 /*
@@ -57,7 +57,7 @@ function readerOf(rows: { logs?: ReleaseLogRow[]; tokens?: ReleaseTokenRow[]; he
 }
 
 async function read(w: World, reader: ArkivSource, writers: Hex[] = [writer]): Promise<ArkivReport> {
-  const report = await loadArkiv({ reader, chain: () => chainOf(w), examId, registry: registryAddress, writers, trustedRoot: w.pki.root });
+  const report = await loadArkiv({ reader, chain: () => chainOf(w), examId, registry: registryAddress, bucket: storageBucket, writers, trustedRoot: w.pki.root });
   if ('kind' in report) throw new Error(report.message);
   return report;
 }
@@ -124,13 +124,13 @@ describe('reading the Arkiv mirror', () => {
   it('checks tokens against the exam on the public record, so another exam’s settings fail', async () => {
     const other = { ...chainOf(world), exam: { ...world.exam, imageDigest: `0x${'00'.repeat(32)}` } } as ChainData;
     const reader = readerOf({ tokens: [tokenRow(world, 1)], logs: [logRow(world.releaseLog, 2)] });
-    const report = await loadArkiv({ reader, chain: () => other, examId, registry: registryAddress, writers: [writer], trustedRoot: world.pki.root });
+    const report = await loadArkiv({ reader, chain: () => other, examId, registry: registryAddress, bucket: storageBucket, writers: [writer], trustedRoot: world.pki.root });
     expect(report).toMatchObject({ log: null, ignored: { tokens: 1, unattested: 1 } });
   });
 
   it('reads nothing before the exam is on the public record', async () => {
     const reader = readerOf({});
-    const report = await loadArkiv({ reader, chain: () => null, examId, registry: registryAddress, writers: [writer] });
+    const report = await loadArkiv({ reader, chain: () => null, examId, registry: registryAddress, bucket: storageBucket, writers: [writer] });
     expect(report).toEqual({ kind: 'neutral', message: 'The exam is not on the public record yet.' });
     expect(reader.releaseRows).not.toHaveBeenCalled();
   });

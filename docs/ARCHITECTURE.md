@@ -18,6 +18,7 @@ How the design in the [README](../README.md) maps onto this repository. The READ
 | `packages/chain` | TypeScript | `ExamRegistry` reads and writes through viem, the code pin check (`checkRegistryCode`, `spec/registry.json`), the on-chain ENS name check (`resolveExamName`), and party and directory reads (`readPartyRecords`, `readDirectory`) |
 | `relay/` | TypeScript | CLI that mirrors an exam's signed release log and Unlock token from the TEE or storage to Arkiv, indexes a registry's exams and approved lists from its events, and backs up an exam's files to Swarm |
 | `packages/tee-client` | TypeScript | Typed client for the TEE HTTP API |
+| `packages/verify` | TypeScript | The verifier's checks and loaders, with no browser, React or build-time settings, so the verifier page and a Node script run the same code (`spec/agent-verification.md`). The test world is at `@paperseal/verify/fixtures` |
 | `packages/ui` | React | Shared components, tokens and the Chromium gate |
 | `apps/web` | React | The board-hosted app, with a route area per signed-in role |
 | `apps/verifier` | React | The public verifier, hosted separately from the board |

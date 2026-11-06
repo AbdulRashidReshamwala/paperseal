@@ -7,9 +7,9 @@ import { getAddress } from 'viem';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from './App';
-import { teeStorageBucket } from './attest';
+import { teeStorageBucket } from './env';
 import { VerifierPage } from './page';
-import { buildWorld, examId, offlineQuicknet, registryAddress, registryMatches, signedReleaseLog, type World } from './fixtures';
+import { buildWorld, examId, offlineQuicknet, registryAddress, registryMatches, signedReleaseLog, type World } from '@paperseal/verify/fixtures';
 import type { ArkivSource } from './load';
 import { SettingsProvider, type Settings } from './settings';
 
@@ -18,8 +18,9 @@ let chainData: unknown;
 let chainReads: { registry: string; examId: unknown }[] = [];
 
 // The chain is the one thing these tests stub whole: everything read from it is built with real encodings.
-vi.mock('./checks', async (original) => ({
-  ...(await original<typeof import('./checks')>()),
+// The checks live in @paperseal/verify. Mocking its source files reaches the package's own imports too.
+vi.mock('../../../packages/verify/src/checks', async (original) => ({
+  ...(await original<typeof import('../../../packages/verify/src/checks')>()),
   loadChain: (registry: { address: string } | null, id: unknown) => {
     if (!registry || !id) return null;
     chainReads.push({ registry: registry.address, examId: id });
@@ -75,8 +76,8 @@ let buckets: (string | undefined)[] = [];
 let tokenVerified = false;
 /** What a fresh attestation from the live TEE comes to. */
 let freshTrusted = false;
-vi.mock('./attest', async (original) => {
-  const real = await original<typeof import('./attest')>();
+vi.mock('../../../packages/verify/src/attest', async (original) => {
+  const real = await original<typeof import('../../../packages/verify/src/attest')>();
   return {
     ...real,
     checkFreshToken: (args: { bucket?: string }) => {

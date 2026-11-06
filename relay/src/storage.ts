@@ -2,7 +2,7 @@ import { storageNames } from '@paperseal/protocol';
 import type { Hex } from 'viem';
 
 /*
- * Public storage, read the way apps/verifier/src/storage.ts reads it: `<base>/<examId>/<name>`,
+ * Public storage, read the way packages/verify/src/storage.ts reads it: `<base>/<examId>/<name>`,
  * with a 404 meaning "not there yet". The relay checks nothing about the bytes beyond what the
  * row needs: readers check every body.
  */

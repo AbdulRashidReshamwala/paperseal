@@ -1,6 +1,6 @@
 # Proposal: Verify with Any AI Agent
 
-**Status:** specified in [`spec/agent-verification.md`](../../spec/agent-verification.md), 2026-11-06, which replaces this proposal's formats where they differ. Nothing is implemented.
+**Status:** implemented, 2026-11-06: the checks are in `packages/verify`, with the checker `paperseal-verify.mjs` and the "Check with your own AI" button in `apps/verifier`. The rules are in [`spec/agent-verification.md`](../../spec/agent-verification.md), which replaces this proposal's formats where they differ, and the agent runs are in [Agent Tests](../agent-tests.md).
 
 ## Summary
 

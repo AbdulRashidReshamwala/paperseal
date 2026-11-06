@@ -1,11 +1,10 @@
 import type { ArkivReader } from '@paperseal/arkiv';
 import type { Hex } from '@paperseal/protocol';
 import type { SwarmClient } from '@paperseal/swarm';
+import type { BackupCache, ChainData, StorageReader } from '@paperseal/verify';
 
-import type { BackupCache } from './backup';
-import type { ChainData } from './checks';
+import { teeStorageBucket } from './env';
 import { ARKIV_BLOCK_SECONDS, isValidLog, loadRecords, type LogResult, type ManifestResult, type PublishedResult, type Sourced } from './load';
-import type { StorageReader } from './storage';
 
 /*
  * Each Swarm backup recorded for an exam, read in full. A backup is opened as if it were the bucket and
@@ -67,11 +66,12 @@ export async function loadSwarm(args: {
   writers: readonly Hex[];
   examId: Hex;
   registry: Hex;
+  /** The bucket the TEE must name. Left out, the build-time default. */
   bucket?: string;
   /** A DER root in place of Google's. Tests only. */
   trustedRoot?: Uint8Array;
 }): Promise<SwarmReport> {
-  const { rows, swarm, cache, writers, examId, registry, bucket, trustedRoot } = args;
+  const { rows, swarm, cache, writers, examId, registry, bucket = teeStorageBucket, trustedRoot } = args;
   const api = args.apiUrl.replace(/\/+$/, '');
   const [found, latest] = await Promise.all([rows.backupRows(examId, writers, { registry }), rows.latestBlock()]);
   const chain = args.chain();
@@ -85,7 +85,7 @@ export async function loadSwarm(args: {
         storage: collection(swarm, row.swarmRef, api, cache),
         examId,
         registry,
-        ...(bucket === undefined ? {} : { bucket }),
+        bucket,
         ...(trustedRoot ? { trustedRoot } : {}),
       });
       return { ...base, read: { token, manifest, log } };

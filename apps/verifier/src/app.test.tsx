@@ -8,11 +8,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { arkiv } from '@paperseal/arkiv';
 import { criteriaHash, encodeApprovedList, approvedListHash, encodeCriteria, fromHex, toHex, type Hex } from '@paperseal/protocol';
 import type { ExamRegistry } from '@paperseal/chain';
+import { chainChecks, loadChain } from '@paperseal/verify';
 import { getAddress } from 'viem';
 
 import sampleCode from '../../../spec/fixtures/registry-code.json';
 import { App } from './App';
-import { chainChecks, loadChain } from './checks';
 import { examLink, routeOfHash } from './link';
 import {
   clearSettings,

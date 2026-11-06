@@ -4,7 +4,7 @@ import { encodeApprovedList, roundTimeSeconds, toHex, type ApprovedListEntry, ty
 import { sha256, type Address } from 'viem';
 import { describe, expect, it, vi, type Mock } from 'vitest';
 
-import { approvedList, registryAddress } from './fixtures';
+import { approvedList, registryAddress } from '@paperseal/verify/fixtures';
 import { examStatus, findParticipant, loadExamHistory, roleWords, type HistoryReader, type HistoryRegistry } from './history';
 
 /*
