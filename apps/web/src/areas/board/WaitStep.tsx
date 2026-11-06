@@ -11,16 +11,20 @@ function Questions(props: { snapshot: Snapshot }) {
   const { status, found, teeProblem } = props.snapshot;
   if (!status) {
     return (
-      <p>
+      <div>
+        <p className="ps-eyebrow">Questions received</p>
         <Check status="not-checked">{teeProblem ? plainWords(sayOf(teeProblem)) : 'Paper Seal has not answered yet.'}</Check>
-      </p>
+      </div>
     );
   }
   const needed = found?.criteria ? bankNeeded(found.criteria).questions : null;
   return (
-    <div className="board-section">
+    <div>
       <p className="ps-eyebrow">Questions received</p>
-      <p>{needed === null ? status.questionCount : `${String(status.questionCount)} of at least ${String(needed)}`}</p>
+      <p className="board-figure">
+        <strong>{status.questionCount}</strong>
+        {needed === null ? null : <span> of at least {needed}</span>}
+      </p>
       {needed === null ? null : <progress className="board-progress" aria-label="Questions received" max={needed} value={Math.min(status.questionCount, needed)} />}
     </div>
   );
@@ -43,7 +47,9 @@ export function WaitStep(props: { snapshot: Snapshot }) {
         lede="This can happen when setters did not send enough questions. The exam cannot go ahead until it is fixed."
         next="Contact whoever runs Paper Seal and tell them what you see here. You can close this page."
       >
-        <Questions snapshot={snapshot} />
+        <div className="board-summary">
+          <Questions snapshot={snapshot} />
+        </div>
         <ExamRecord snapshot={snapshot} />
       </Stage>
     );
@@ -64,8 +70,10 @@ export function WaitStep(props: { snapshot: Snapshot }) {
           : `Come back after ${formatTimeOnly(lockSeconds)}. You must then post the paper’s record here, and no one else can do it for you. It is safe to close this page until then.`
       }
     >
-      <Questions snapshot={snapshot} />
-      <Countdown at={lockSeconds * 1000} round={lockRound} label="Questions close" reached="Closed" />
+      <div className="board-summary">
+        <Questions snapshot={snapshot} />
+        <Countdown at={lockSeconds * 1000} round={lockRound} label="Questions close" reached="Closed" />
+      </div>
       <ExamRecord snapshot={snapshot} />
     </Stage>
   );

@@ -106,7 +106,7 @@ function readStored(): StoredDraft[] {
 /** True while nothing has been typed, so an empty form never becomes a draft. */
 export function isBlank(content: Pick<DraftContent, 'plan' | 'publish'>): boolean {
   // Demo mode fills the times in by itself, which alone doesn't make a draft worth keeping.
-  const plan = demoTimes() ? { ...content.plan, examStart: '', lockTime: '', durationMinutes: defaultPlan.durationMinutes, releaseMinutes: defaultPlan.releaseMinutes } : content.plan;
+  const plan = demoTimes() ? { ...content.plan, examStart: '', lockTime: '', durationMinutes: defaultPlan.durationMinutes, releaseMinutes: defaultPlan.releaseMinutes, maxSetterPercent: defaultPlan.maxSetterPercent, minBankMultiple: defaultPlan.minBankMultiple } : content.plan;
   return JSON.stringify(plan) === JSON.stringify(defaultPlan) && content.publish.version === '';
 }
 

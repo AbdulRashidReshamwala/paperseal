@@ -20,6 +20,7 @@ import { ExamNameCard } from './ExamNameCard';
 import { decideStep, readSnapshot, type Snapshot } from './examState';
 import { usePoll } from './hooks';
 import { MachineCheck } from './MachineCheck';
+import { OnboardCheck } from './OnboardCheck';
 import { PeopleStep } from './PeopleStep';
 import { openExamName, type ExamNameRoute } from './nameFlow';
 import { loadParties, type ChosenParty } from './parties';
@@ -269,10 +270,12 @@ function BoardFlow(props: { mode: Mode }) {
     if (named.name !== name) void navigate(`/board/exam/${name}`, { replace: true });
   };
   const onExam = (children: ReactNode) =>
-    withLink(
-      <ExamShell>
-        <MachineCheck examId={examId} snapshot={value} />
-        <ExamNameCard key={examId} examId={examId} routeName={named.name} onVerified={verifiedAs} />
+    page(
+      <ExamShell snapshot={value}>
+        <div className="board-strip">
+          <MachineCheck examId={examId} snapshot={value} />
+          <ExamNameCard key={examId} examId={examId} routeName={named.name} onVerified={verifiedAs} />
+        </div>
         {children}
         {DemoPanel ? (
           <Suspense fallback={null}>
@@ -281,7 +284,14 @@ function BoardFlow(props: { mode: Mode }) {
         ) : null}
       </ExamShell>,
     );
-  if (decided === 'people') return onExam(<PeopleStep examId={examId} snapshot={value} onPosted={reload} />);
+  if (decided === 'people') {
+    return onExam(
+      <>
+        <OnboardCheck examId={examId} snapshot={value} />
+        <PeopleStep examId={examId} snapshot={value} onPosted={reload} />
+      </>,
+    );
+  }
   if (decided === 'wait') return onExam(<WaitStep snapshot={value} />);
   if (decided === 'post-build') return onExam(<BuildStep examId={examId} snapshot={value} onPosted={reload} />);
   return onExam(<StatusStep examId={examId} snapshot={value} />);
