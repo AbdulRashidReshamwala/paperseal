@@ -255,8 +255,10 @@ describe('real exam through the screens', () => {
     // ---------------------------------------------------------------- the board makes invites while the VM boots
     const roster = [
       ...[1, 2].map((n) => ({ who: `setter-${String(n)}`, role: 'setter', label: `setter ${String(n)}` })),
-      ...[1, 2, 3].map((n) => ({ who: `neutral-${String(n)}`, role: 'keyholder', label: `Neutral ${String(n)}` })),
-      ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ who: `centre-${String(n)}`, role: 'centre', label: `Centre ${String(n)}` })),
+      // Key holders and centres are invited by ENS name only, and the board's page reads each name on Sepolia,
+      // so these 11 names must exist there before this runs (see "What the owner creates" in docs/ens-setup.md).
+      ...[1, 2, 3].map((n) => ({ who: `neutral-${String(n)}`, role: 'keyholder', label: `neutral-${String(n)}.paperseal-demo.eth` })),
+      ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({ who: `centre-${String(n)}`, role: 'centre', label: `centre-${String(n)}.paperseal-demo.eth` })),
     ];
     const links: Record<string, string> = {};
     await step('board makes 13 invites and copies each link (UI)', () =>
@@ -323,10 +325,26 @@ describe('real exam through the screens', () => {
         await bp.reload();
         await board.seeHeading(text.peopleHeading, 60_000);
         await board.see('Registered', 60_000);
+        // A key holder's name is confirmed by a record holding the new security key, which cannot exist before
+        // they register. Unless the name already has it, the board goes ahead without it, as the screen offers.
+        for (let n = 1; n <= 3; n++) {
+          const name = `neutral-${String(n)}.paperseal-demo.eth`;
+          const go = bp.getByRole('button', { name: `Go ahead without the name for ${name} (Key holder)` });
+          const row = bp.locator('li', { hasText: name });
+          const deadline = Date.now() + 90_000;
+          while (Date.now() < deadline) {
+            if ((await go.count()) > 0) {
+              await go.click();
+              break;
+            }
+            if ((await row.getByText('Name confirmed').count()) > 0) break;
+            await sleep(1000);
+          }
+        }
         await board.shot('live-11-people-registered');
         // Seven centres hold part of the key and the eighth gets the key at unlock. The screen's default is not relied on.
         for (let n = 1; n <= 8; n++) {
-          const pick = bp.getByLabel(`Role for Centre ${String(n)}`);
+          const pick = bp.getByLabel(`Role for centre-${String(n)}.paperseal-demo.eth`);
           await pick.waitFor({ timeout: 60_000 });
           await pick.selectOption({ label: n === 8 ? 'Centre getting the key at unlock' : 'Centre holding part of the key' });
         }

@@ -12,7 +12,7 @@ import type { Downloaded } from '../../apps/web/src/areas/centre/download';
  * paper reaches this screen only after a live unlock, which `ui/live.ui-live.ts` drives.
  */
 
-const entry = { role: roles.centre, passkeyPublicKey: new Uint8Array(65).fill(0xaa), derivedPublicKey: new Uint8Array(65).fill(0xbb), owner: 'North Centre' };
+const entry = { role: roles.centre, passkeyPublicKey: new Uint8Array(65).fill(0xaa), derivedPublicKey: new Uint8Array(65).fill(0xbb), owner: 'north-centre.paperseal-demo.eth' };
 const paper: Paper = {
   examId: `0x${'11'.repeat(32)}`,
   questions: [
@@ -23,7 +23,7 @@ const paper: Paper = {
 const progress = {
   missing: [],
   examId: paper.examId,
-  credential: { owner: 'North Centre', role: 'centre', credentialId: '0x01', passkeyPublicKey: `0x04${'aa'.repeat(64)}` },
+  credential: { owner: 'north-centre.paperseal-demo.eth', role: 'centre', credentialId: '0x01', passkeyPublicKey: `0x04${'aa'.repeat(64)}` },
   registering: false,
   chain: { value: { unlockRound: 1, endRound: 2, listPosted: true, entry, buildPosted: true }, error: null, settled: true },
   status: { value: { stage: 'released', questionCount: 2, release: { released: [], required: 8 } }, error: null, settled: true },

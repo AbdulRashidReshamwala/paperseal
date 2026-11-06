@@ -1,7 +1,7 @@
 import { encodeInviteLink, fromHex, newInviteSecret, toHex, type Hex, type Invite, type InviteRole } from '@paperseal/protocol';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { inviteTag, listWith, postBuildDirect, postListDirect, publishDirect, timings, type PublishedHere, type Timing } from './chainkit';
+import { demoParent, inviteTag, listWith, postBuildDirect, postListDirect, publishDirect, timings, type PublishedHere, type Timing } from './chainkit';
 import { openActor, type Actor } from './kit';
 import type { Lab } from './lab';
 import { button, text } from './selectors';
@@ -35,7 +35,7 @@ export function holderTests(lab: () => Lab): void {
     let n = 0;
     const exam = (timing: Timing) => publishDirect(lab().chain, `UI holders ${String(++n)} ${String(Date.now())}`, timing);
     const link = (examId: Hex, role: InviteRole, owner?: string) => {
-      const invite: Invite = { examId, role, ...(role === 'setter' ? {} : { owner: owner ?? 'Holder' }), inviteSecret: newInviteSecret() };
+      const invite: Invite = { examId, role, ...(role === 'setter' ? {} : { owner: owner ?? `holder.${demoParent}` }), inviteSecret: newInviteSecret() };
       return { invite, url: encodeInviteLink(`${lab().web.url}/`, invite) };
     };
     const actor = async (name: string, role: string) => (actors[name] ??= await openActor(lab().browser, name, null, { role }));
@@ -62,7 +62,7 @@ export function holderTests(lab: () => Lab): void {
         await a.seeHeading(text.openLinkHeading);
         await a.shot('01-no-link');
         const published = await exam(timings.future);
-        const good = new URL(link(published.examId, 'keyholder', 'X').url).hash;
+        const good = new URL(link(published.examId, 'keyholder', `x.${demoParent}`).url).hash;
         await a.page.goto(`${lab().web.url}/${good.replace(/&secret=0x[0-9a-f]+/, '')}`);
         await a.seeHeading(text.linkProblemHeading);
         await a.shot('02-missing-secret');
@@ -87,7 +87,7 @@ export function holderTests(lab: () => Lab): void {
       ] as const) {
         const a = await actor(name, uiRole);
         await a.flow('register', async () => {
-          const { url } = link(published.examId, role, role === 'setter' ? undefined : `${name} owner`);
+          const { url } = link(published.examId, role, role === 'setter' ? undefined : `${name}-owner.${demoParent}`);
           await a.page.goto(url);
           await a.page.getByRole('button', { name: button.register }).waitFor();
           await a.shot(`10-${role}-register`);
@@ -109,7 +109,7 @@ export function holderTests(lab: () => Lab): void {
       const published = await exam(timings.future);
       lab().tee.state.registerMode = 'refuse';
       await a.flow('refused', async () => {
-        await a.page.goto(link(published.examId, 'keyholder', 'Refused Person').url);
+        await a.page.goto(link(published.examId, 'keyholder', `refused-person.${demoParent}`).url);
         await a.page.getByRole('button', { name: button.register }).click();
         await a.see(/refused|Something went wrong/i);
         await a.shot('12-register-refused');
@@ -127,7 +127,7 @@ export function holderTests(lab: () => Lab): void {
         const who = await a;
         await who.flow('ended', async () => {
           lab().tee.state.stage = 'released';
-          await who.page.goto(link(over.examId, role, 'Late Person').url);
+          await who.page.goto(link(over.examId, role, `late-person.${demoParent}`).url);
           await who.seeHeading(text.endedHeading, 30_000);
           expect(await who.page.getByRole('button', { name: button.register }).count()).toBe(0);
           await who.shot(`13-${area}-ended`);
@@ -144,7 +144,7 @@ export function holderTests(lab: () => Lab): void {
         tee.state.stage = stage;
         tee.state.released = [];
         tee.state.mode = 'ok';
-        const me = await enroll(kh, published, 'keyholder', 'Neutral Kim');
+        const me = await enroll(kh, published, 'keyholder', `neutral-kim.${demoParent}`);
         if (post !== 'none') await postListDirect(chain, published.examId, listWith(post === 'list-with-me' ? { neutral: me } : {}));
         return { published, me };
       };
@@ -218,7 +218,7 @@ export function holderTests(lab: () => Lab): void {
         tee.state.stage = stage;
         tee.state.released = [];
         tee.state.mode = 'ok';
-        const me = await enroll(c, published, 'centre', 'North Centre');
+        const me = await enroll(c, published, 'centre', `north-centre.${demoParent}`);
         await postListDirect(chain, published.examId, listWith(share ? { centreHolder: me } : { centre: me }));
         if (build) await postBuildDirect(chain, published.examId, published.criteriaHash);
         return { published, me };
