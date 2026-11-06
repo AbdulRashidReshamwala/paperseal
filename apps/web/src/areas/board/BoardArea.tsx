@@ -269,10 +269,12 @@ function BoardFlow(props: { mode: Mode }) {
     if (named.name !== name) void navigate(`/board/exam/${name}`, { replace: true });
   };
   const onExam = (children: ReactNode) =>
-    withLink(
-      <ExamShell>
-        <MachineCheck examId={examId} snapshot={value} />
-        <ExamNameCard key={examId} examId={examId} routeName={named.name} onVerified={verifiedAs} />
+    page(
+      <ExamShell snapshot={value}>
+        <div className="board-strip">
+          <MachineCheck examId={examId} snapshot={value} />
+          <ExamNameCard key={examId} examId={examId} routeName={named.name} onVerified={verifiedAs} />
+        </div>
         {children}
         {DemoPanel ? (
           <Suspense fallback={null}>

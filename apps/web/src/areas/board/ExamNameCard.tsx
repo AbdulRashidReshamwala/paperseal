@@ -75,18 +75,17 @@ function NameOf(props: { examId: Hex; label: string; onVerified?: (name: string)
   if (view.state === 'set') {
     const verifier = verifierUrl();
     return (
-      <div className="board-section board-exam-name">
-        <Check status="pass">
-          Exam name: <span className="ps-mono">{view.name}</span>
-        </Check>
-        <span className="board-link">
-          {verifier ? (
-            <a href={verifierNameUrl(verifier, view.name)} target="_blank" rel="noreferrer">
-              Open by name
-            </a>
-          ) : null}
-          <CopyButton text={view.name}>Copy name</CopyButton>
+      <div className="board-exam-name">
+        <span>
+          <span className="board-exam-name-label">Exam name </span>
+          <span className="ps-mono">{view.name}</span>
         </span>
+        <CopyButton text={view.name}>Copy name</CopyButton>
+        {verifier ? (
+          <a href={verifierNameUrl(verifier, view.name)} target="_blank" rel="noreferrer">
+            Open by name
+          </a>
+        ) : null}
       </div>
     );
   }

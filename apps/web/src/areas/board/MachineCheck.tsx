@@ -65,7 +65,7 @@ export function MachineRowStatus(props: { state: MachineState }) {
   );
 }
 
-/** Whether the machine is set up for this exam, at the top of the exam's page. It never holds the page up. */
+/** Whether the machine is set up for this exam, in the strip at the top of the exam's page. It never holds the page up. */
 export function MachineCheck(props: { examId: Hex; snapshot: Snapshot }) {
   const { examId, snapshot } = props;
   const exam = snapshot.found?.exam ?? null;
@@ -80,6 +80,15 @@ export function MachineCheck(props: { examId: Hex; snapshot: Snapshot }) {
 
   const state = retrying ? ({ state: 'checking' } as const) : machineState(verdict, exam, now);
   const words = machineWords(state, { otherExam, listPosted: snapshot.list !== null });
+  // Nothing to tell a finished exam's board. A healthy machine is one quiet line, and only a problem takes the page's attention.
+  if (state.state === 'finished') return null;
+  if (words.tone !== 'problem') {
+    return (
+      <p className="board-machine-line" data-tone={words.tone} role="status" title={words.lede}>
+        {words.short}
+      </p>
+    );
+  }
   return (
     <section className="board-machine" data-tone={words.tone} aria-label="The machine for this exam">
       <div className="board-machine-text" role="status">

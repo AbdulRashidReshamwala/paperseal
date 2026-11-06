@@ -423,7 +423,7 @@
   color: var(--ps-ink);
 }
 
-/* Whether the machine is set up for this exam, at the top of the exam's page. */
+/* A problem with the machine, at the top of the exam's page. See `.board-machine-line` for when it is well. */
 .board-machine {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -985,26 +985,477 @@
   margin: 0;
 }
 
-.board-exam-name {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--ps-space-3);
-  align-items: center;
-  justify-content: space-between;
-  margin: 0 0 var(--ps-space-4);
+/*
+ * A published exam: where it has got to down the side, and the one thing the board faces beside it.
+ * Under 860px the side folds into one line of steps above the page, and the link back goes to the foot.
+ */
+.ps-shell:has(.board-exam) .ps-role {
+  margin-bottom: var(--ps-space-5);
 }
 
-/* A published exam is one column: the board has no steps to choose between here. */
 .board-draft.board-exam {
-  display: block;
-}
-
-.ps-shell:has(.board-exam) {
-  max-width: 760px;
+  grid-template-columns: 208px minmax(0, 1fr);
 }
 
 .board-exam .board-draft-main {
   max-width: none;
+}
+
+.board-exam-side {
+  position: sticky;
+  top: var(--ps-space-5);
+  display: grid;
+  gap: var(--ps-space-5);
+}
+
+.board-exam-home {
+  margin: 0;
+  font-size: 0.8125rem;
+}
+
+.board-journey {
+  display: grid;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.board-journey li {
+  position: relative;
+  display: flex;
+  gap: var(--ps-space-3);
+  min-height: 52px;
+  padding-bottom: var(--ps-space-3);
+  font-size: var(--ps-text-small);
+  line-height: 22px;
+  color: var(--ps-ink-soft);
+}
+
+.board-journey li:last-child {
+  min-height: 0;
+  padding-bottom: 0;
+}
+
+/* The thread between two marks. It is solid up to where the exam has got to. */
+.board-journey li:not(:last-child)::after {
+  position: absolute;
+  top: 26px;
+  bottom: 2px;
+  left: 11px;
+  width: 0;
+  content: "";
+  border-left: 1px dashed var(--ps-rule-strong);
+}
+
+.board-journey li[data-state='done']:not(:last-child)::after {
+  border-left: 1px solid var(--ps-ink);
+}
+
+.board-journey-mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+  border: 1px solid var(--ps-rule-strong);
+  border-radius: 50%;
+}
+
+.board-journey li[data-state='done'] {
+  color: var(--ps-ink);
+}
+
+.board-journey li[data-state='done'] .board-journey-mark {
+  color: var(--ps-paper);
+  background: var(--ps-ink);
+  border-color: var(--ps-ink);
+}
+
+.board-journey li[data-state='here'] {
+  font-weight: 600;
+  color: var(--ps-ink);
+}
+
+/* The current step carries the wax, with a ring like the impression around a seal. */
+.board-journey li[data-state='here'] .board-journey-mark {
+  color: var(--ps-on-wax);
+  background: var(--ps-wax);
+  border-color: var(--ps-wax);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ps-wax) 18%, transparent);
+}
+
+.board-journey-text {
+  display: grid;
+  min-width: 0;
+}
+
+.board-journey small {
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--ps-ink-soft);
+}
+
+/* The quiet line above the page's title: the machine at one end, the name at the other. */
+.board-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-2) var(--ps-space-4);
+  align-items: center;
+  justify-content: space-between;
+  min-height: 32px;
+  margin-bottom: var(--ps-space-4);
+  font-size: 0.8125rem;
+  color: var(--ps-ink-soft);
+}
+
+.board-strip:empty {
+  display: none;
+}
+
+.board-strip > .board-machine,
+.board-strip > .board-draft-card {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: var(--ps-text-body);
+  color: var(--ps-ink);
+}
+
+.board-machine-line {
+  display: inline-flex;
+  gap: var(--ps-space-2);
+  align-items: center;
+  margin: 0;
+}
+
+.board-machine-line::before {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  content: "";
+  background: var(--ps-rule-strong);
+  border-radius: 50%;
+}
+
+.board-machine-line[data-tone='good']::before {
+  background: var(--ps-pass);
+}
+
+.board-exam-name {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-1) var(--ps-space-3);
+  align-items: center;
+  min-width: 0;
+}
+
+.board-exam-name .ps-copy {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-1);
+  align-items: center;
+}
+
+.board-exam-name .ps-mono {
+  font-size: 0.8125rem;
+  color: var(--ps-ink);
+  overflow-wrap: anywhere;
+}
+
+.board-exam-name .ps-button,
+.board-public-links .ps-button {
+  min-height: 28px;
+  padding: 0 var(--ps-space-2);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.board-people-job .ps-button {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* Each person's state and their link stay on one line, so a long list of setters stays short. */
+.board-people-job .ps-rows .board-link {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-1) var(--ps-space-3);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* The figures that matter at this stage, in one surface. */
+.board-summary {
+  display: grid;
+  margin-bottom: var(--ps-space-4);
+  background: var(--ps-field);
+  border: 1px solid var(--ps-rule);
+  border-radius: 8px;
+}
+
+.board-summary > * {
+  min-width: 0;
+  padding: var(--ps-space-4) var(--ps-space-5);
+}
+
+.board-summary > * + * {
+  border-top: 1px solid var(--ps-rule);
+}
+
+.board-summary .ps-eyebrow {
+  margin: 0 0 var(--ps-space-1);
+  font-size: 0.8125rem;
+  letter-spacing: 0.02em;
+}
+
+.board-summary .ps-countdown-clock,
+.board-figure strong {
+  font-family: var(--ps-code);
+  font-size: 2.25rem;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.board-summary .ps-countdown[data-reached='true'] .ps-countdown-clock {
+  font-family: var(--ps-serif);
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.board-figure {
+  margin: 0;
+}
+
+.board-figure span {
+  font-size: var(--ps-text-small);
+  color: var(--ps-ink-soft);
+}
+
+.board-summary .board-progress {
+  max-width: none;
+  height: 6px;
+  margin-top: var(--ps-space-3);
+  overflow: hidden;
+  border-radius: 3px;
+}
+
+@media (min-width: 560px) {
+  .board-summary {
+    grid-auto-columns: minmax(0, 1fr);
+    grid-auto-flow: column;
+  }
+
+  .board-summary > * + * {
+    border-top: 0;
+    border-left: 1px solid var(--ps-rule);
+  }
+}
+
+.board-public-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-2) var(--ps-space-4);
+  align-items: center;
+}
+
+.board-public {
+  margin-bottom: var(--ps-space-4);
+}
+
+.board-summary .board-public {
+  margin-bottom: 0;
+}
+
+.board-public .ps-eyebrow {
+  margin-bottom: var(--ps-space-1);
+  font-size: 0.8125rem;
+  letter-spacing: 0.02em;
+}
+
+/* The demo's helper for everyone else: below the page and set apart from it, like the demo bar. */
+.board-demo {
+  display: grid;
+  gap: var(--ps-space-3);
+  padding-top: var(--ps-space-4);
+  margin-top: var(--ps-space-7);
+  border-top: 1px dashed var(--ps-rule-strong);
+}
+
+.board-demo-head {
+  display: grid;
+  gap: var(--ps-space-2) var(--ps-space-4);
+  align-items: center;
+}
+
+.board-demo h2 {
+  margin: 0;
+  font-family: var(--ps-sans);
+  font-size: var(--ps-text-small);
+  font-weight: 600;
+}
+
+.board-demo-head p,
+.board-demo > p {
+  max-width: 34em;
+  margin: 2px 0 0;
+  font-size: 0.8125rem;
+  color: var(--ps-ink-soft);
+}
+
+.board-demo > p {
+  margin: 0;
+}
+
+.board-people {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--ps-space-1);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.board-person {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--ps-space-1) var(--ps-space-2);
+  font-size: 0.8125rem;
+  background: var(--ps-paper-deep);
+  border-radius: 6px;
+}
+
+.board-person[data-tone='fail'] {
+  grid-column: 1 / -1;
+}
+
+.board-person-state {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 0.75rem;
+  color: var(--ps-ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.board-person-state::before {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  content: "";
+  background: var(--ps-rule-strong);
+  border-radius: 50%;
+}
+
+.board-person[data-tone='pass'] .board-person-state::before {
+  background: var(--ps-pass);
+}
+
+.board-person[data-tone='pending'] .board-person-state::before {
+  background: var(--ps-pending);
+}
+
+.board-person[data-tone='fail'] .board-person-state::before {
+  background: var(--ps-fail);
+}
+
+.board-person .ps-button {
+  justify-self: start;
+  min-height: 28px;
+  padding: 0 var(--ps-space-2);
+  font-size: 0.8125rem;
+}
+
+@media (min-width: 560px) {
+  .board-demo-head {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
+
+/* The title leads on a phone too, so the seal comes after the words. */
+@media (max-width: 719px) {
+  .board-exam .ps-stage-seal {
+    grid-row: auto;
+  }
+}
+
+@media (max-width: 859px) {
+  .ps-shell:has(.board-exam) {
+    padding-inline: var(--ps-space-4);
+  }
+
+  .board-draft.board-exam {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ps-space-5);
+  }
+
+  .board-exam-side {
+    display: contents;
+  }
+
+  .board-exam .board-draft-main {
+    width: 100%;
+  }
+
+  .board-exam-home {
+    order: 1;
+  }
+
+  /* On a phone the header above already says "exam": the machine and the link, then the name and its copy button. */
+  .board-exam-name {
+    display: contents;
+  }
+
+  .board-exam-name-label {
+    display: none;
+  }
+
+  .board-strip:has(.board-machine-line) .board-exam-name a {
+    order: -1;
+  }
+
+  .board-strip > .board-machine-line {
+    order: -2;
+  }
+
+  .board-journey {
+    display: flex;
+    gap: var(--ps-space-2);
+    align-items: center;
+  }
+
+  .board-journey li,
+  .board-journey li:last-child {
+    gap: var(--ps-space-2);
+    min-height: 0;
+    padding: 0;
+    line-height: 1.3;
+  }
+
+  .board-journey li:not(:last-child)::after {
+    content: none;
+  }
+
+  .board-journey li:not([data-state='here']) .board-journey-text,
+  .board-journey small {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .board-journey li[data-state='here'] {
+    flex: 1;
+    align-items: center;
+    min-width: 0;
+  }
 }
 
 .board-demo-fill {
