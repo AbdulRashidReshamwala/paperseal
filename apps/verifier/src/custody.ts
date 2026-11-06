@@ -302,7 +302,7 @@ function settingsItems(exam: Exam, examId: Hex | null): Item[] {
 
 /** The short titles of docs/ens-setup.md, one per check a name can fail. */
 const nameTitles: Record<ExamNameCheck, string> = {
-  name: 'Not a valid exam name',
+  name: 'Not a valid name',
   registry: 'No registry',
   primaryName: 'Primary name differs',
   forward: 'Not verified both ways',
@@ -372,7 +372,7 @@ function nameStep(named: NameView): Draft {
     items: [
       { kind: 'check', label: 'Exam name, a valid ENS label', status: 'pass', detail: value.label },
       { kind: 'hash', label: 'Exam ID, the labelhash of the exam name', value: value.examId },
-      { kind: 'check', label: 'Address record is an ExamRegistry', status: 'pass', hash: value.registry },
+      { kind: 'check', label: 'Address record runs the ExamRegistry code for this board', status: 'pass', hash: value.registry },
       { kind: 'hash', label: 'Board, from the registry', value: value.board },
       { kind: 'check', label: "Board's primary name", status: 'pass', detail: value.parent },
       { kind: 'check', label: `${value.parent} points back to the board, so verified both ways`, status: 'pass' },

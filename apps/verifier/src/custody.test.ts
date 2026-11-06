@@ -560,6 +560,12 @@ describe('step 1 on a name route, the name', () => {
     expect(result.steps.map((s) => s.id)).toEqual(['name', 'published', 'attested', 'people', 'locked', 'sealed', 'unlock', 'open']);
     expect(states(result)).toEqual(Array(8).fill('done'));
     expect(result.seal).toBe('open');
+    expect(checks(step(result, 'name')).map((c) => [c.label, c.status])).toEqual([
+      ['Exam name, a valid ENS label', 'pass'],
+      ['Address record runs the ExamRegistry code for this board', 'pass'],
+      ["Board's primary name", 'pass'],
+      ['board.eth points back to the board, so verified both ways', 'pass'],
+    ]);
     const tags = step(result, 'name').items.filter((item) => item.kind === 'tag');
     expect(tags.map((item) => item.kind === 'tag' && [item.label, item.tag])).toEqual([
       ['TEE URL', 'From Connection'],
@@ -570,7 +576,7 @@ describe('step 1 on a name route, the name', () => {
   });
 
   it.each([
-    ['name', 'Not a valid exam name'],
+    ['name', 'Not a valid name'],
     ['registry', 'No registry'],
     ['primaryName', 'Primary name differs'],
     ['forward', 'Not verified both ways'],

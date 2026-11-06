@@ -239,12 +239,14 @@ A board may give an exam an ENS name `<name>.<parent>`, where `parent` is the bo
 
 A reader checks a name with the viewer's own RPC, on-chain only (`ens.ccipRead` is `false`, so no offchain gateway is asked), and fails unless all of these hold:
 
-1. The first label is a valid exam name, and its `labelhash` is the `examId` used for every other check.
-2. The name's `addr` record is set, and calling `board()` on it returns an address.
+1. The whole name is normalised, its first label is a valid exam name, and that label's `labelhash` is the `examId` used for every other check.
+2. The name's `addr` record is set, and the code at that address is exactly `ExamRegistry`'s deployed bytecode with its `board` immutable filled in by the address `board()` returns. So the record names a real `ExamRegistry`, and only that board can have written to it. Answering `board()` alone isn't enough, because any contract can return the real board's address.
 3. That board address's primary name, read by reverse resolution, is exactly `parent`.
 4. `parent`'s own `addr` record is that board address, so the primary name is verified both ways.
 
-The TEE, storage and bucket records only say where to look. A wrong value makes the later checks fail; it can't make them pass.
+A read that needs an offchain gateway fails at its check, rather than being retried as an RPC outage. Every chain read on a name route, including the later `ExamRegistry` reads, has CCIP-Read off. `ExamRegistry` never asks for an offchain lookup, so this costs nothing.
+
+The TEE, storage and bucket records only say where to look. A wrong value makes the later checks fail; it can't make them pass. This build reads ENS on Sepolia only, the chain in `constants.json`. On Sepolia anyone can register a look-alike parent, so the check means something only once the reader supports a mainnet name.
 
 ## TEE Lifecycle
 

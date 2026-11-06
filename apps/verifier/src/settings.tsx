@@ -96,7 +96,9 @@ export function clearSettings(storage = browserStorage()): void {
 
 /**
  * Clients for these endpoints. Each is null until its values are present. An exam name passes its
- * own registry, exam, TEE and storage here for one view, with the viewer's RPC.
+ * own registry, exam, TEE and storage here for one view, with the viewer's RPC. Registry reads never
+ * follow an offchain lookup to a gateway: `ExamRegistry` never asks for one, and on a name route its
+ * address came from ENS.
  */
 export function endpoints(settings: Settings) {
   const { rpcUrl, teeUrl, storageUrl, registryAddress, examId } = settings;
@@ -106,7 +108,7 @@ export function endpoints(settings: Settings) {
     tee: teeUrl ? createTeeClient({ baseUrl: teeUrl }) : null,
     registry:
       rpcUrl && registryAddress
-        ? createExamRegistry({ rpcUrl, address: registryAddress as Hex })
+        ? createExamRegistry({ rpcUrl, address: registryAddress as Hex, ccipRead: false })
         : null,
     examId: examId ? (examId as Hex) : null,
   };

@@ -179,6 +179,40 @@ describe('runtime settings', () => {
     expect(urls).toContain('https://my-rpc.example/v1');
   });
 
+  it('never follows an offchain lookup from a registry read to a gateway', async () => {
+    // OffchainLookup(address sender, string[] urls, bytes callData, bytes4 callbackFunction, bytes extraData),
+    // sent by the registry address itself, so a reader with CCIP-Read on would ask the gateway.
+    const gateway = 'https://gateway.example/{sender}/{data}.json';
+    const word = (value: number | string) => (typeof value === 'number' ? value.toString(16) : value).padStart(64, '0');
+    const padded = (hex: string) => hex.padEnd(Math.ceil(hex.length / 64) * 64, '0');
+    const urlHex = toHex(new TextEncoder().encode(gateway)).slice(2);
+    const urls = word(1) + word(0x20) + word(gateway.length) + padded(urlHex);
+    const callData = word(0);
+    const revert =
+      '0x556f1830' +
+      word(custom.registryAddress.slice(2)) +
+      word(0xa0) +
+      word(0xa0 + urls.length / 2) +
+      padded('deadbeef') +
+      word(0xa0 + urls.length / 2 + callData.length / 2) +
+      urls +
+      callData +
+      word(0);
+    const fetch = vi.fn((url: string | URL | Request, init?: RequestInit) => {
+      if (String(url) !== custom.rpcUrl) return Promise.resolve(new Response(JSON.stringify({ data: '0x' })));
+      const { id } = JSON.parse(String(init?.body)) as { id: number };
+      return Promise.resolve(
+        new Response(JSON.stringify({ jsonrpc: '2.0', id, error: { code: 3, message: 'execution reverted', data: revert } })),
+      );
+    });
+    vi.stubGlobal('fetch', fetch);
+    const { registry } = connect(custom);
+    await expect(registry?.board()).rejects.toThrow();
+    const urlsCalled = fetch.mock.calls.map(([url]) => String(url));
+    expect(urlsCalled).toContain(custom.rpcUrl);
+    expect(urlsCalled.filter((url) => url.startsWith('https://gateway.example/'))).toEqual([]);
+  });
+
   it('connects to nothing until settings exist', () => {
     const nothing = connect({ rpcUrl: '', teeUrl: '', storageUrl: '', registryAddress: '', examId: '' });
     expect([nothing.tee, nothing.registry, nothing.examId, nothing.storage]).toEqual([null, null, null, null]);

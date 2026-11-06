@@ -590,7 +590,7 @@ describe('verify by name', () => {
   });
 
   it.each([
-    ['name', 'Not a valid exam name'],
+    ['name', 'Not a valid name'],
     ['registry', 'No registry'],
     ['primaryName', 'Primary name differs'],
     ['forward', 'Not verified both ways'],
@@ -618,7 +618,7 @@ describe('verify by name', () => {
     await waitFor(() => {
       expect(stateOf(step)).toBe('failed');
     });
-    expect(noteOf(step)).toMatch(/Not a valid exam name\. .*normalised/);
+    expect(noteOf(step)).toMatch(/Not a valid name\. .*normalised/);
     expect(chainReads).toEqual([]);
   });
 

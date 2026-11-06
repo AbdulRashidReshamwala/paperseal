@@ -1,5 +1,4 @@
 {
-  "parentRecord": "the board's primary name",
   "records": {
     "tee": "paperseal.tee",
     "storage": "paperseal.storage",

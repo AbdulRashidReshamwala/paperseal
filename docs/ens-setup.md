@@ -58,8 +58,8 @@ Open the verifier, type the full name into the exam box, or open `<verifier>/#/n
 
 | Failure | Usual cause |
 | --- | --- |
-| Not a valid exam name | The name has uppercase letters, spaces or a dot in the exam part |
-| No registry | The subname's ETH address is unset, or isn't an `ExamRegistry` |
+| Not a valid name | The name isn't a normalised ENS name, for example it has uppercase letters or spaces, or the exam part isn't a valid exam name |
+| No registry | The exam name's ETH address is unset, or its code isn't `ExamRegistry`'s, or its records need an offchain gateway |
 | Primary name differs | The board wallet's primary name isn't the parent name, or isn't set |
 | Not verified both ways | The parent name's ETH address isn't the board wallet |
 | Can't read ENS | The RPC URL in Connection is down or isn't Sepolia |

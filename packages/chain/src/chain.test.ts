@@ -395,13 +395,41 @@ describe('sync-abi.mjs', () => {
     expect(run.stderr).toContain('no abi array');
   });
 
-  it('writes the artifact ABI', () => {
-    const artifact = join(dir, 'ok.json');
-    writeFileSync(artifact, JSON.stringify({ abi: [{ type: 'event', name: 'X', inputs: [] }] }));
-    const run = spawnSync('node', [script, artifact, output], {
-      encoding: 'utf8',
-    });
+  const abi = [{ type: 'event', name: 'X', inputs: [] }];
+  /** 70 bytes of code with one immutable used at bytes 2 and 38, each one word long. */
+  const deployedBytecode = (immutableReferences: unknown) => ({
+    object: `0x6080${'00'.repeat(32)}aabb${'00'.repeat(32)}CCDD`,
+    immutableReferences,
+  });
+  const runWith = (file: string, contents: unknown) => {
+    const artifact = join(dir, file);
+    writeFileSync(artifact, JSON.stringify(contents));
+    return spawnSync('node', [script, artifact, output], { encoding: 'utf8' });
+  };
+
+  it('fails clearly unless the code has exactly one immutable, each use one word long', () => {
+    expect(runWith('no-code.json', { abi }).stderr).toContain('no deployedBytecode.object');
+    const cases: [unknown, string][] = [
+      [{}, '0 immutables'],
+      [{ 1: [{ start: 2, length: 32 }], 2: [{ start: 38, length: 32 }] }, '2 immutables'],
+      [{ 1: [{ start: 2, length: 20 }] }, '20 bytes long'],
+      [{ 1: [{ start: 60, length: 32 }] }, 'outside the 70-byte code'],
+    ];
+    for (const [references, message] of cases) {
+      const run = runWith('bad-code.json', { abi, deployedBytecode: deployedBytecode(references) });
+      expect(run.status, message).toBe(1);
+      expect(run.stderr).toContain(message);
+    }
+  });
+
+  it('writes the artifact ABI, runtime code and board offsets', () => {
+    const references = { 7: [{ start: 38, length: 32 }, { start: 2, length: 32 }] };
+    const run = runWith('ok.json', { abi, deployedBytecode: deployedBytecode(references) });
     expect(run.status).toBe(0);
-    expect(readFileSync(output, 'utf8')).toContain('export const examRegistryAbi');
+    const source = readFileSync(output, 'utf8');
+    expect(source).toContain('Do not edit by hand');
+    expect(source).toContain('export const examRegistryAbi');
+    expect(source).toContain(`bytecode: '0x6080${'00'.repeat(32)}aabb${'00'.repeat(32)}ccdd'`);
+    expect(source).toContain('boardOffsets: [2, 38]');
   });
 });
