@@ -661,7 +661,20 @@ function listSummary(entries: readonly ApprovedListEntry[]): string {
 }
 
 const ensNote =
-  'A name marked "Name confirmed" has a record, set by whoever controls that name, that names this security key. That shows who holds the key. It is not something the exam depends on, so a name that is not confirmed never fails a check. A centre\'s name is one the board can change, so it shows who the centre is called, not that it is independent.';
+  'A name marked "Name confirmed" has a record, set by whoever controls that name, that names this security key. It is not something the exam depends on, so a name that is not confirmed never fails a check.';
+
+/** The name above `name`, whose controller vouches for it. Null for a name that sits directly under a top-level domain, which its holder controls. */
+function directoryOf(name: string): string | null {
+  const parent = name.slice(name.indexOf('.') + 1);
+  return parent.includes('.') ? parent : null;
+}
+
+/** Says who vouches for the listed names. Whoever controls a parent decides which key each name under it holds. */
+function vouchNote(names: readonly string[]): string {
+  const owners = [...new Set(names.flatMap((name) => directoryOf(name) ?? []))];
+  if (owners.length === 0) return ensNote;
+  return `${ensNote} Whoever controls ${owners.join(' and ')} vouches for the names under it: they decide which key each one holds, and can change it publicly. That says nothing about whether a party is independent of them.`;
+}
 
 /** One party whose `owner` is an ENS name. Rows are labels and proofs, never checks, so none of them can fail the step. */
 function ensRows(entry: ApprovedListEntry, name: string, names: View['partyNames']): Item[] {
@@ -687,14 +700,14 @@ function ensRows(entry: ApprovedListEntry, name: string, names: View['partyNames
         : `${name} has no record for this security key yet.`;
   return [
     { kind: 'tag', label, value: name, tone: holdsKey ? 'warn' : 'neutral', tag: holdsKey ? 'Not confirmed' : 'Label only' },
-    { kind: 'text', text: holdsKey ? why : `${why} ${name} is a name the board chose for this centre. It does not show that the centre is independent.` },
+    { kind: 'text', text: holdsKey ? why : `${why} ${name} is a label${directoryOf(name) ? `, and whoever controls ${directoryOf(name) ?? ''} vouches for it` : ''}. It does not show that the centre is independent.` },
   ];
 }
 
 function entryRows(bytes: Uint8Array, names?: View['partyNames']): { items: Item[]; entries: ApprovedListEntry[] | null } {
   try {
     const entries = decodeApprovedList(bytes);
-    const named = entries.some((entry) => entry.role !== roles.setter && ownerEnsName(entry.owner) !== null);
+    const named = entries.flatMap((entry) => (entry.role === roles.setter ? [] : (ownerEnsName(entry.owner) ?? [])));
     return {
       entries,
       items: [
@@ -705,7 +718,7 @@ function entryRows(bytes: Uint8Array, names?: View['partyNames']): { items: Item
             ? ensRows(entry, ens, names)
             : [{ kind: 'tag', label: roleNames[entry.role] ?? `Unknown role ${String(entry.role)}`, value: entry.owner, tone: 'warn', tag: 'Not an ENS name' }];
         }),
-        ...(named ? [{ kind: 'text', text: `${ensNote} ${sepoliaName}` } as const] : []),
+        ...(named.length > 0 ? [{ kind: 'text', text: `${vouchNote(named)} ${sepoliaName}` } as const] : []),
       ],
     };
   } catch (error) {
