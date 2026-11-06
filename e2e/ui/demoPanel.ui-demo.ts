@@ -103,6 +103,13 @@ describe('demo keys, the board does everyone else', () => {
     const acting = page.getByLabel('Acting as');
     const panel = page.getByRole('region', { name: 'Everyone else' });
 
+    /** Presses a stage's button and waits until everyone has had their turn. */
+    const press = async (name: string, timeout: number) => {
+      await panel.getByRole('button', { name }).click({ timeout: 60_000 });
+      await panel.locator('.ps-primary[data-status="busy"]').waitFor({ state: 'hidden', timeout });
+      await panel.getByRole('button', { name }).waitFor({ state: 'hidden', timeout: 15_000 });
+    };
+
     const become = async (label: string, path: string) => {
       log(`acting as ${label}`);
       await Promise.all([page.waitForEvent('load'), acting.selectOption({ label })]);
@@ -181,11 +188,11 @@ describe('demo keys, the board does everyone else', () => {
     await become('Setter 1', '/setter');
     await page.goto(links[2] ?? '');
     await page.getByRole('button', { name: button.register }).click({ timeout: 60_000 });
-    await actor.see(/security key is registered|Nothing to do yet/, 60_000);
+    await actor.see(/You.re registered|Nothing to do yet/, 60_000);
     await become('Centre 1', '/centre');
     await actor.seeHeading('Register for this exam', 60_000);
     await page.getByRole('button', { name: button.registerByName }).click();
-    await page.getByRole('button', { name: button.registerByName }).waitFor({ state: 'hidden', timeout: 60_000 });
+    await actor.see(/You.re registered|Nothing to do yet/, 60_000);
 
     // ---------------------------------------------------------------- the board registers everyone else
     await backToBoard(name, text.peopleHeading);
@@ -193,13 +200,11 @@ describe('demo keys, the board does everyone else', () => {
     await panel.getByText('Already done').first().waitFor({ timeout: 30_000 });
     const started = Date.now();
     await actor.shot('panel-00-register');
-    await panel.getByRole('button', { name: 'Register everyone else' }).click();
-    await panel.getByRole('button', { name: 'Register everyone else' }).waitFor({ state: 'hidden', timeout: 120_000 });
+    await press('Register everyone else', 120_000);
     log(`registered everyone else in ${String(Math.round((Date.now() - started) / 1000))}s`);
     expect(await panel.getByText('Already done').count()).toBe(2);
     expect(await panel.getByText(/^Done$/).count()).toBe(4 + 10);
     await actor.shot('panel-01-registered');
-    await page.waitForFunction((want) => document.body.innerText.split('Name confirmed').length - 1 >= want, owners.length, { timeout: 90_000 });
     await page.getByRole('button', { name: button.postList }).click({ timeout: 120_000 });
     await actor.seeHeading(/Nothing to do until|The paper is being built/, 240_000);
     log('list posted');
@@ -214,8 +219,7 @@ describe('demo keys, the board does everyone else', () => {
     await page.getByText(composer.sealedSoFar(1)).first().waitFor({ timeout: 90_000 });
 
     await backToBoard(name, /Nothing to do until|Setters are sending/);
-    await panel.getByRole('button', { name: 'Add questions for everyone else' }).click({ timeout: 60_000 });
-    await panel.getByRole('button', { name: 'Add questions for everyone else' }).waitFor({ state: 'hidden', timeout: 180_000 });
+    await press('Add questions for everyone else', 180_000);
     expect(await panel.getByText('Done', { exact: true }).count()).toBe(5);
     await actor.shot('panel-02-questions');
     const held = await page.evaluate(
@@ -247,8 +251,7 @@ describe('demo keys, the board does everyone else', () => {
     await actor.see(/parts of the key released|Waiting for key holders/, 120_000);
 
     await backToBoard(name, /Key holders are releasing/);
-    await panel.getByRole('button', { name: 'Release the rest' }).click({ timeout: 60_000 });
-    await panel.getByRole('button', { name: 'Release the rest' }).waitFor({ state: 'hidden', timeout: 120_000 });
+    await press('Release the rest', 120_000);
     await panel.getByText('Not needed').first().waitFor({ timeout: 30_000 });
     expect(await panel.getByText(/^Done$/).count()).toBe(7);
     expect(await panel.getByText('Already done').count()).toBe(1);
