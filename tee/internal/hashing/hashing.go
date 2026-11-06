@@ -233,11 +233,13 @@ func ShareRelease(examID [32]byte, challenge []byte) (Message, error) {
 		Bytes("challenge", challenge))
 }
 
-// ReleaseLog commits to the signed release log.
-func ReleaseLog(examID, entriesHash [32]byte) Message {
+// ReleaseLog commits to the signed release log: the accepted releases and the
+// hash of each key-priv file.
+func ReleaseLog(examID, entriesHash, filesHash [32]byte) Message {
 	return must(New("releaseLog", spec.C.DomainTags.ReleaseLog,
 		Bytes32("examId", examID),
-		Bytes32("entriesHash", entriesHash)))
+		Bytes32("entriesHash", entriesHash),
+		Bytes32("filesHash", filesHash)))
 }
 
 // must is for messages with only fixed-width fields, which New can't fail to

@@ -59,7 +59,7 @@ func TestKeysSignAndVerify(t *testing.T) {
 	// Many signatures: all low-s, all verify, and a flipped s fails.
 	n := elliptic.P256().Params().N
 	half := new(big.Int).Rsh(n, 1)
-	other := hashing.ReleaseLog(exam, exam)
+	other := hashing.ReleaseLog(exam, exam, exam)
 	for i := 0; i < 200; i++ {
 		sig, err := k.Sign(m)
 		if err != nil {

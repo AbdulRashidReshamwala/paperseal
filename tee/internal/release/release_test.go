@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -223,12 +226,8 @@ func TestEightSharesRebuildAndDeliver(t *testing.T) {
 	if log.EntriesHash != storage.Hex(want[:]) {
 		t.Fatal("entriesHash")
 	}
-	var sig [64]byte
-	raw, _ := hex.DecodeString(log.TEESignature[2:])
-	copy(sig[:], raw)
-	if err := attestation.Verify(e.keys.PublicKey(), hashing.ReleaseLog(e.exam, want), sig); err != nil {
-		t.Fatalf("log signature: %v", err)
-	}
+	e.checkLogSignature(log, e.keys)
+	e.checkLogFiles(e.store, log)
 	// The instance's own token is stored, for the nonce that binds its key.
 	tok, err := e.store.Get(ctx, prefix+"release-token.jwt")
 	nonce, _ := attestation.Nonce(e.keys.PublicKey(), e.exam)
@@ -856,8 +855,268 @@ func TestFreshInstanceFinishesAfterAnInstanceDiedMidDelivery(t *testing.T) {
 	if err := json.Unmarshal(body, &log); err != nil || log.InstancePublicKey != storage.Hex(keys2.PublicKey()) {
 		t.Fatalf("the log does not name the fresh instance: %v", err)
 	}
+	e2.checkLogSignature(log, keys2)
+	e2.checkLogFiles(store, log)
 	nonce, _ := attestation.Nonce(keys2.PublicKey(), e.exam)
 	if tok, _ := store.Get(ctx, prefix+"release-token.jwt"); string(tok) != "a.b."+nonce {
 		t.Fatalf("token %q", tok)
+	}
+}
+
+func hex32(t *testing.T, s string) [32]byte {
+	t.Helper()
+	raw, err := hex.DecodeString(s[2:])
+	if err != nil || len(raw) != 32 {
+		t.Fatalf("not 32 bytes of hex: %q", s)
+	}
+	return [32]byte(raw)
+}
+
+// checkLogSignature checks the signature over the releaseLog message.
+func (e *env) checkLogSignature(log Log, keys *attestation.Keys) {
+	e.t.Helper()
+	raw, err := hex.DecodeString(log.TEESignature[2:])
+	if err != nil || len(raw) != 64 {
+		e.t.Fatalf("signature %q", log.TEESignature)
+	}
+	msg := hashing.ReleaseLog(e.exam, hex32(e.t, log.EntriesHash), hex32(e.t, log.FilesHash))
+	if err := attestation.Verify(keys.PublicKey(), msg, [64]byte(raw)); err != nil {
+		e.t.Fatalf("log signature: %v", err)
+	}
+}
+
+// logFilesProblem requires the log to list exactly key-priv.tlock and one file
+// per centre, sorted, each with the SHA-256 of the stored bytes, and filesHash
+// to cover that list. It's what a reader checks.
+func (e *env) logFilesProblem(store storage.Store, log Log) error {
+	want := []string{"key-priv.tlock"}
+	for _, c := range e.centres {
+		want = append(want, "key-priv/"+storage.Hex(c)+".bin")
+	}
+	slices.Sort(want)
+	var got []string
+	var files []File
+	for _, f := range log.Files {
+		got = append(got, f.Name)
+		data, err := store.Get(context.Background(), storage.Prefix(e.exam)+f.Name)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(data)
+		if f.SHA256 != storage.Hex(sum[:]) {
+			return fmt.Errorf("%s: the log's hash is not the stored file's", f.Name)
+		}
+		files = append(files, File{f.Name, sum})
+	}
+	if !slices.Equal(got, want) {
+		return fmt.Errorf("log files %v, want %v", got, want)
+	}
+	h, err := FilesHash(files)
+	if err != nil {
+		return err
+	}
+	if log.FilesHash != storage.Hex(h[:]) {
+		return errors.New("filesHash does not cover the list")
+	}
+	return nil
+}
+
+func (e *env) checkLogFiles(store storage.Store, log Log) {
+	e.t.Helper()
+	if err := e.logFilesProblem(store, log); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+func checkFieldOrder(t *testing.T, body []byte) {
+	t.Helper()
+	last := -1
+	for _, k := range []string{"examId", "entries", "entriesHash", "files", "filesHash", "teeSignature", "instancePublicKey"} {
+		i := bytes.Index(body, []byte(`"`+k+`":`))
+		if i <= last {
+			t.Fatalf("%s is out of order in %s", k, body)
+		}
+		last = i
+	}
+}
+
+func TestLogListsNoFilesBeforeTheThreshold(t *testing.T) {
+	e := setup(t)
+	check := func() {
+		t.Helper()
+		l, err := e.c.SignedLog()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if l.Files == nil || len(l.Files) != 0 || !bytes.Contains(l.JSON, []byte(`"files":[],`)) {
+			t.Fatalf("files %v in %s", l.Files, l.JSON)
+		}
+		h, err := FilesHash(nil)
+		if err != nil || l.FilesHash != storage.Hex(h[:]) {
+			t.Fatalf("filesHash of no files: %v", err)
+		}
+		e.checkLogSignature(l, e.keys)
+		checkFieldOrder(t, l.JSON)
+	}
+	check()
+	e.releaseN(7)
+	check()
+}
+
+func TestLogAfterDeliveryIsThePublishedLog(t *testing.T) {
+	e := setup(t)
+	e.releaseN(8)
+	body, err := e.store.Get(context.Background(), storage.Prefix(e.exam)+"release-log.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkFieldOrder(t, body)
+	var published Log
+	if err := json.Unmarshal(body, &published); err != nil {
+		t.Fatal(err)
+	}
+	e.checkLogFiles(e.store, published)
+	for range 2 {
+		l, err := e.c.SignedLog()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(l.JSON, body) {
+			t.Fatalf("got %s\npublished %s", l.JSON, body)
+		}
+		// What the API serves is the struct, so it has to match as well.
+		served, err := json.Marshal(l)
+		if err != nil || !bytes.Equal(served, body) {
+			t.Fatalf("served %s\npublished %s: %v", served, body, err)
+		}
+	}
+}
+
+// A bucket writer can't change the set of files or their bytes unnoticed.
+func TestLogDetectsChangedFiles(t *testing.T) {
+	e := setup(t)
+	e.releaseN(8)
+	l, err := e.c.SignedLog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.logFilesProblem(e.store, l); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	prefix := storage.Prefix(e.exam)
+	for _, name := range []string{"key-priv.tlock", "key-priv/" + storage.Hex(e.centres[0]) + ".bin"} {
+		good, err := e.store.Get(ctx, prefix+name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.store.Replace(ctx, prefix+name, []byte("swapped")); err != nil {
+			t.Fatal(err)
+		}
+		if e.logFilesProblem(e.store, l) == nil {
+			t.Fatalf("%s was swapped unnoticed", name)
+		}
+		if err := e.store.Replace(ctx, prefix+name, good); err != nil {
+			t.Fatal(err)
+		}
+	}
+	short := l
+	short.Files = l.Files[1:]
+	if e.logFilesProblem(e.store, short) == nil {
+		t.Fatal("a missing file went unnoticed")
+	}
+	extra := l
+	extra.Files = append(slices.Clone(l.Files), LogFile{"release-log.json", l.Files[0].SHA256})
+	if e.logFilesProblem(e.store, extra) == nil {
+		t.Fatal("an extra file went unnoticed")
+	}
+}
+
+// Every failed upload is followed by the same bytes, including the log, and the
+// log served meanwhile is the one that gets published.
+func TestRetryPublishesTheSameLog(t *testing.T) {
+	cases := map[string]func(*env) int{
+		"a key-priv file": func(*env) int { return 2 },
+		"the timelock":    func(e *env) int { return len(e.centres) + 1 },
+		"the log":         func(e *env) int { return len(e.centres) + 3 },
+	}
+	for name, at := range cases {
+		t.Run(name, func(t *testing.T) {
+			e := setup(t)
+			co := &createOnly{Store: e.store, t: t, failAt: at(e), seen: map[string][]byte{}}
+			e.c.store = co
+			e.releaseN(8)
+			if e.c.Done() {
+				t.Fatal("done after a failed upload")
+			}
+			before, err := e.c.SignedLog()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := e.c.Step(context.Background()); err != nil || !e.c.Done() {
+				t.Fatalf("retry: %v", err)
+			}
+			body, err := e.store.Get(context.Background(), storage.Prefix(e.exam)+"release-log.json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(before.JSON, body) {
+				t.Fatalf("published %s\nserved before the retry %s", body, before.JSON)
+			}
+			after, err := e.c.SignedLog()
+			if err != nil || !bytes.Equal(after.JSON, body) {
+				t.Fatalf("after the retry %s: %v", after.JSON, err)
+			}
+			e.checkLogFiles(e.store, after)
+			e.checkLogSignature(after, e.keys)
+		})
+	}
+}
+
+// With no files made yet, no log is signed with enough entries and no files.
+func TestNoLogBetweenTheThresholdAndThePreparedDelivery(t *testing.T) {
+	e := setupWith(t, func(e *env) { e.tokens = failTokens{} })
+	e.releaseN(7)
+	if _, err := e.c.SignedLog(); err != nil {
+		t.Fatalf("with 7: %v", err)
+	}
+	if err := e.release(e.holders[7], nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.c.SignedLog(); !errors.Is(err, ErrDeliveryPending) {
+		t.Fatalf("with 8 and nothing prepared: %v", err)
+	}
+	e.c.tokens = fakeTokens{}
+	if err := e.c.Step(context.Background()); err != nil || !e.c.Done() {
+		t.Fatalf("retry: %v", err)
+	}
+	l, err := e.c.SignedLog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.checkLogFiles(e.store, l)
+}
+
+func TestFilesAreSortedInByteOrder(t *testing.T) {
+	in := []File{{Name: "a"}, {Name: "Z"}, {Name: "key-priv/0"}, {Name: "key-priv.tlock"}}
+	got := SortFiles(in)
+	var names []string
+	for _, f := range got {
+		names = append(names, f.Name)
+	}
+	if want := []string{"Z", "a", "key-priv.tlock", "key-priv/0"}; !slices.Equal(names, want) {
+		t.Fatalf("got %v, want %v", names, want)
+	}
+	if in[0].Name != "a" {
+		t.Fatal("SortFiles changed its input")
+	}
+	if _, err := FilesHash(in); err == nil {
+		t.Fatal("hashed files out of order")
+	}
+	if _, err := FilesHash(got); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := FilesHash([]File{{Name: "a"}, {Name: "a"}}); err == nil {
+		t.Fatal("hashed a repeated name")
 	}
 }

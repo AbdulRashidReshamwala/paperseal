@@ -13,7 +13,9 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,6 +42,10 @@ var (
 	ErrBadRelease = errors.New("release: the release message is invalid")
 	ErrBadShare   = errors.New("release: the share does not match its published hash")
 	ErrStale      = errors.New("release: the relay's newest round is before the unlock round")
+	// ErrDeliveryPending is SignedLog's answer between the threshold and the
+	// prepared delivery. No log can list the files yet, and a signed one with
+	// enough entries and no files would say something false.
+	ErrDeliveryPending = errors.New("release: the threshold is reached but the delivery is not prepared yet")
 )
 
 // missTTL is how long "this round is not published" is believed. Published
@@ -92,6 +98,7 @@ type Collector struct {
 	kPriv    []byte            // Held only until the delivery is prepared.
 	files    []outFile         // The prepared delivery, kept so a retry uploads the same bytes.
 	uploaded int               // How many of files are stored.
+	log      *Log              // The log prepared for publishing. It outlives files, and is what SignedLog serves from then on.
 
 	pm       sync.RWMutex
 	released [][]byte // Passkeys of accepted releases, in order.
@@ -385,7 +392,8 @@ type outFile struct {
 
 // prepare makes every file of the delivery once: K_priv encrypted to each
 // centre, K_priv timelocked to the end round, this instance's token and the
-// signed log. The log goes last, so it never covers files that aren't there.
+// signed log, which lists the hash of each key-priv file. The log goes last, so
+// it never covers files that aren't there.
 // Storage is create-only, and encryption, timelocks and signatures are random,
 // so a retry must upload these same bytes and not make new ones. Once they are
 // made K_priv is no longer needed and is wiped. mu is held.
@@ -402,25 +410,32 @@ func (c *Collector) prepare(ctx context.Context) error {
 		return err
 	}
 	var files []outFile
+	var listed []File
+	add := func(name string, data []byte) {
+		files = append(files, outFile{prefix + name, data})
+		listed = append(listed, File{name, sha256.Sum256(data)})
+	}
 	for _, derived := range c.facts.Centres {
 		framed, err := encryption.Seal(encryption.PurposeKeyPriv, derived, c.facts.ExamID, c.kPriv)
 		if err != nil {
 			return err
 		}
-		files = append(files, outFile{prefix + "key-priv/" + storage.Hex(derived) + ".bin", framed})
+		add("key-priv/"+storage.Hex(derived)+".bin", framed)
 	}
 	locked, err := c.sealer.Seal(ctx, c.facts.EndRound, c.kPriv)
 	if err != nil {
 		return err
 	}
+	add("key-priv.tlock", locked)
 	// Unlock may run on another instance than Build, so the log names its signer
-	// and this token attests that key.
-	body, err := c.logLocked()
+	// and this token attests that key. These last two aren't listed in the log:
+	// the log can't hash itself, and the token is checked by its own signature.
+	body, err := c.logLocked(SortFiles(listed))
 	if err != nil {
 		return err
 	}
+	c.log = &body
 	c.files = append(files,
-		outFile{prefix + "key-priv.tlock", locked},
 		outFile{prefix + "release-token.jwt", []byte(tok.Raw)},
 		outFile{prefix + "release-log.json", body.JSON},
 	)
@@ -459,12 +474,22 @@ type LogEntry struct {
 	Round            string `json:"round"`
 }
 
+// LogFile is one file of the release log, as JSON.
+type LogFile struct {
+	Name   string `json:"name"`
+	SHA256 string `json:"sha256"`
+}
+
 // Log is the GET /v1/release/log body.
 type Log struct {
-	ExamID       string     `json:"examId"`
-	Entries      []LogEntry `json:"entries"`
-	EntriesHash  string     `json:"entriesHash"`
-	TEESignature string     `json:"teeSignature"`
+	ExamID      string     `json:"examId"`
+	Entries     []LogEntry `json:"entries"`
+	EntriesHash string     `json:"entriesHash"`
+	// Files is empty until the threshold is reached, then lists key-priv.tlock
+	// and one key-priv file per centre, sorted by name.
+	Files        []LogFile `json:"files"`
+	FilesHash    string    `json:"filesHash"`
+	TEESignature string    `json:"teeSignature"`
 	// InstancePublicKey is the signer, which release-token.jwt attests.
 	InstancePublicKey string `json:"instancePublicKey"`
 	// JSON is the body as published, for storage.
@@ -472,18 +497,33 @@ type Log struct {
 }
 
 // SignedLog returns the log of the releases so far, signed by the instance key.
+// Once the delivery is prepared it returns the log made for publishing, with
+// the same bytes and signature as release-log.json. Signatures are random, so
+// signing again would give another log. Between the threshold and that point it
+// returns ErrDeliveryPending.
 func (c *Collector) SignedLog() (Log, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.logLocked()
+	if c.log != nil {
+		return *c.log, nil
+	}
+	if len(c.entries) >= spec.C.Threshold.Required {
+		return Log{}, ErrDeliveryPending
+	}
+	return c.logLocked(nil)
 }
 
-func (c *Collector) logLocked() (Log, error) {
+// logLocked signs a log of the entries so far and files, which must be sorted.
+func (c *Collector) logLocked(files []File) (Log, error) {
 	hash, err := EntriesHash(c.entries)
 	if err != nil {
 		return Log{}, err
 	}
-	sig, err := c.signer.Sign(hashing.ReleaseLog(c.facts.ExamID, hash))
+	filesHash, err := FilesHash(files)
+	if err != nil {
+		return Log{}, err
+	}
+	sig, err := c.signer.Sign(hashing.ReleaseLog(c.facts.ExamID, hash, filesHash))
 	if err != nil {
 		return Log{}, err
 	}
@@ -491,6 +531,8 @@ func (c *Collector) logLocked() (Log, error) {
 		ExamID:            storage.Hex(c.facts.ExamID[:]),
 		Entries:           []LogEntry{},
 		EntriesHash:       storage.Hex(hash[:]),
+		Files:             []LogFile{},
+		FilesHash:         storage.Hex(filesHash[:]),
 		TEESignature:      storage.Hex(sig[:]),
 		InstancePublicKey: storage.Hex(c.signer.PublicKey()),
 	}
@@ -498,6 +540,9 @@ func (c *Collector) logLocked() (Log, error) {
 		l.Entries = append(l.Entries, LogEntry{
 			storage.Hex(e.PasskeyPublicKey), storage.Hex(e.ShareHash[:]), strconv.FormatUint(e.Round, 10),
 		})
+	}
+	for _, f := range files {
+		l.Files = append(l.Files, LogFile{f.Name, storage.Hex(f.SHA256[:])})
 	}
 	if l.JSON, err = marshalLog(l); err != nil {
 		return Log{}, err
@@ -556,6 +601,64 @@ func EntriesPreimage(entries []Entry) ([]byte, error) {
 	enc, err := entriesArgs.Pack(list)
 	if err != nil {
 		return nil, fmt.Errorf("release: encode entries: %w", err)
+	}
+	return enc, nil
+}
+
+var filesArgs = func() abi.Arguments {
+	t, err := abi.NewType("tuple[]", "", []abi.ArgumentMarshaling{
+		{Name: "name", Type: "string"},
+		{Name: "sha256", Type: "bytes32"},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return abi.Arguments{{Type: t}}
+}()
+
+// File is one stored file the release log covers. Name is relative to the exam
+// folder, as in the manifest. SHA256 is the plain SHA-256 of the stored file.
+type File struct {
+	Name   string
+	SHA256 [32]byte
+}
+
+// SortFiles returns a copy of files sorted by name in byte order, the order
+// filesHash covers.
+func SortFiles(files []File) []File {
+	out := slices.Clone(files)
+	slices.SortFunc(out, func(a, b File) int { return strings.Compare(a.Name, b.Name) })
+	return out
+}
+
+// FilesHash is the plain SHA-256 of abi.encode(ReleaseFile[]), with ReleaseFile
+// being (string name, bytes32 sha256). See FilesPreimage for the order.
+func FilesHash(files []File) ([32]byte, error) {
+	enc, err := FilesPreimage(files)
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return sha256.Sum256(enc), nil
+}
+
+// FilesPreimage is abi.encode(ReleaseFile[]), the bytes filesHash covers. It
+// refuses files that aren't sorted by name without repeats, so the order is set
+// in one place, SortFiles, and a repeated name can't reach a signed log.
+func FilesPreimage(files []File) ([]byte, error) {
+	type releaseFile struct {
+		Name   string
+		Sha256 [32]byte
+	}
+	list := make([]releaseFile, len(files))
+	for i, f := range files {
+		if i > 0 && files[i-1].Name >= f.Name {
+			return nil, errors.New("release: files are not sorted by name")
+		}
+		list[i] = releaseFile{f.Name, f.SHA256}
+	}
+	enc, err := filesArgs.Pack(list)
+	if err != nil {
+		return nil, fmt.Errorf("release: encode files: %w", err)
 	}
 	return enc, nil
 }

@@ -126,7 +126,7 @@ Claims are checked in this order, and their IDs match the verifier's steps. The 
 | `attested` | The published token passes every row in [Attestation Token](api.md#attestation-token) against the on-chain settings and image digest | `unlockRound` |
 | `locked` | The Build's criteria hash equals the exam's, the emitted criteria hash to it, and the Build's list hash equals the on-chain one | `unlockRound` |
 | `sealed` | The Build's signature verifies under the attested instance key, and every file matches `manifest.json`, which matches `storageManifestHash` | `unlockRound` |
-| `unlock` | `release-log.json` is signed by the key `release-token.jwt` attests, and at least `threshold.required` approved key holders are in it | `endRound` |
+| `unlock` | `release-log.json` is signed by the key `release-token.jwt` attests, at least `threshold.required` approved key holders are in it, and its `files` match the stored `key-priv` files and the approved centres | `endRound` |
 | `open` | The paper opens, and matches `paperHash`, `saltedPaperHash`, the exam ID and the criteria | `endRound` |
 
 Evidence is checked whenever it exists, even before its claim is due.

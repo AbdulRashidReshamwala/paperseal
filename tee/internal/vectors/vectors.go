@@ -41,6 +41,7 @@ type File struct {
 	Paper            []PaperVector  `json:"paper"`
 	Release          ReleaseVector  `json:"release"`
 	ReleaseEntries   EntriesVector  `json:"releaseEntries"`
+	ReleaseFiles     FilesVector    `json:"releaseFiles"`
 	Manifest         ManifestVector `json:"manifest"`
 	Limits           LimitsVector   `json:"limits"`
 }
@@ -238,6 +239,23 @@ type EntryJSON struct {
 	Round            string `json:"round"`
 }
 
+// FilesVector is filesHash: SHA-256 of abi.encode(ReleaseFile[]), sorted by name
+// in byte order. EmptyPreimage and EmptyFilesHash are for the log before the
+// threshold, when it lists no files.
+type FilesVector struct {
+	Files          []FileJSON `json:"files"`
+	Preimage       string     `json:"preimage"`
+	FilesHash      string     `json:"filesHash"`
+	EmptyPreimage  string     `json:"emptyPreimage"`
+	EmptyFilesHash string     `json:"emptyFilesHash"`
+}
+
+// FileJSON is one ReleaseFile, as in the log's files.
+type FileJSON struct {
+	Name   string `json:"name"`
+	SHA256 string `json:"sha256"`
+}
+
 // ManifestVector is manifest.json, whose plain SHA-256 is storageManifestHash.
 // Manifest is the exact text of the file.
 type ManifestVector struct {
@@ -430,7 +448,7 @@ func Build() (File, error) {
 	add(hashing.SaltedPaper(first, []byte(`{"questions":[]}`)))
 	add(hashing.ShareHash([]byte("share-bytes")))
 	add(hashing.ShareRelease(examID, challenge[:]))
-	add(hashing.ReleaseLog(examID, first), nil)
+	add(hashing.ReleaseLog(examID, first, second), nil)
 	if failed != nil {
 		return File{}, failed
 	}
@@ -441,7 +459,8 @@ func Build() (File, error) {
 			"Each message is SHA-256(abi.encode(string tag, field, ...)). " +
 			"HPKE and AES vectors are sealed in Go with repeatable randomness, to be opened in TypeScript. " +
 			"limits.reject inputs are Prefix then zero bytes up to Length, and every reader must refuse them before decoding. " +
-			"The approvedList sample pins the encoding only: its key-holder counts are wrong, so the TEE rejects it.",
+			"The approvedList sample pins the encoding only: its key-holder counts are wrong, so the TEE rejects it. " +
+			"releaseFiles is sorted in byte order. Its key-priv/Z.bin and key-priv/a.bin aren't real names: they pin that order, in which Z comes before a.",
 		Criteria:     CriteriaVector{sampleCriteria, x(encodedCriteria), x(criteriaHash[:]), selected},
 		Limits:       limitsVector(),
 		ApprovedList: ListVector{ExamID: x(examID[:]), Entries: x(entries), Hash: x(listHash[:])},
@@ -585,6 +604,9 @@ func addRelease(f *File) error {
 		ev.Entries = append(ev.Entries, EntryJSON{x(e.PasskeyPublicKey), x(e.ShareHash[:]), fmt.Sprint(e.Round)})
 	}
 	f.ReleaseEntries = ev
+	if err := addReleaseFiles(f); err != nil {
+		return err
+	}
 
 	examID := fill(0x11)
 	derived := pubKey(4)
@@ -600,6 +622,37 @@ func addRelease(f *File) error {
 	}
 	sum := storage.Hash(b)
 	f.Manifest = ManifestVector{string(b), x(sum[:])}
+	return nil
+}
+
+func addReleaseFiles(f *File) error {
+	files := release.SortFiles([]release.File{
+		{Name: "key-priv/a.bin", SHA256: fill(0x44)},
+		{Name: "key-priv/" + x(pubKey(4)) + ".bin", SHA256: fill(0x42)},
+		{Name: "key-priv/Z.bin", SHA256: fill(0x43)},
+		{Name: "key-priv.tlock", SHA256: fill(0x41)},
+	})
+	h, err := release.FilesHash(files)
+	if err != nil {
+		return err
+	}
+	pre, err := release.FilesPreimage(files)
+	if err != nil {
+		return err
+	}
+	emptyHash, err := release.FilesHash(nil)
+	if err != nil {
+		return err
+	}
+	emptyPre, err := release.FilesPreimage(nil)
+	if err != nil {
+		return err
+	}
+	fv := FilesVector{Preimage: x(pre), FilesHash: x(h[:]), EmptyPreimage: x(emptyPre), EmptyFilesHash: x(emptyHash[:])}
+	for _, file := range files {
+		fv.Files = append(fv.Files, FileJSON{file.Name, x(file.SHA256[:])})
+	}
+	f.ReleaseFiles = fv
 	return nil
 }
 

@@ -203,8 +203,8 @@ func TestSignedMessageLayouts(t *testing.T) {
 			[]value{text("paperseal/v1/share-hash"), dyn([]byte{0xaa})}},
 		{"shareRelease", msg(ShareRelease(fill(1), []byte{0xaa})),
 			[]value{text("paperseal/v1/share-release"), b32(1), dyn([]byte{0xaa})}},
-		{"releaseLog", ReleaseLog(fill(1), fill(2)),
-			[]value{text("paperseal/v1/release-log"), b32(1), b32(2)}},
+		{"releaseLog", ReleaseLog(fill(1), fill(2), fill(3)),
+			[]value{text("paperseal/v1/release-log"), b32(1), b32(2), b32(3)}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

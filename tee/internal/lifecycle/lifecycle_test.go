@@ -286,6 +286,13 @@ func TestFullLifecycle(t *testing.T) {
 	if len(log.Entries) != 8 {
 		t.Fatalf("final log has %d entries", len(log.Entries))
 	}
+	published, err := w.store.Get(ctx, prefix+"release-log.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if served, err := json.Marshal(log); err != nil || !bytes.Equal(served, published) {
+		t.Fatalf("served %s\npublished %s: %v", served, published, err)
+	}
 	if code, why := c.releaseShare(w, w.holders[8], enc); code != http.StatusConflict {
 		t.Errorf("share after release: %d %s", code, why)
 	}

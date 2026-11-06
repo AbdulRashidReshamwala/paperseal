@@ -130,7 +130,7 @@ Every client reads `entries` and `criteria` this way. `getExam` returns `created
 | `questionReceipt` | TEE | `bytes32 examId`, `bytes passkeyPublicKey`, `bytes32 questionHash` |
 | `build` | TEE | `bytes32 examId`, `bytes32 approvedListHash`, `bytes32 paperHash`, `bytes32 storageManifestHash`, `bytes32 saltedPaperHash`, `uint32 selected`, `uint32 bankSize`, `bytes32 criteriaHash` |
 | `shareRelease` | Passkey | `bytes32 examId`, `bytes challenge` |
-| `releaseLog` | TEE | `bytes32 examId`, `bytes32 entriesHash` |
+| `releaseLog` | TEE | `bytes32 examId`, `bytes32 entriesHash`, `bytes32 filesHash` |
 
 - `registration.derivedPublicKey` is empty for setters. `holderId` is the UTF-8 bytes of `owner`.
 - `approvedListHash` is the hash of the `approvedList` message. `ExamRegistry` computes the same hash from the posted bytes, and `postBuild` rejects a Build whose hash differs. The TEE signature on `approvedList` isn't posted. Apps fetch it from the TEE and compare the hash with the chain.
@@ -200,7 +200,7 @@ Written before the Build:
 
 `storageManifestHash` is the plain SHA-256 of `manifest.json`.
 
-Written at unlock, each covered by the signed release log:
+Written at unlock. The signed release log lists the hash of each `key-priv` file, and carries its own signature and token:
 
 | File | Content |
 | --- | --- |
@@ -210,6 +210,8 @@ Written at unlock, each covered by the signed release log:
 | `release-token.jwt` | The PKI attestation token of the instance that ran Unlock |
 
 Unlock may run on a different instance from the Build, so the log names its signer in `instancePublicKey`, and `release-token.jwt` attests that key. `entriesHash` is the plain SHA-256 of `abi.encode(ReleaseEntry[])`, with `ReleaseEntry` being `(bytes passkeyPublicKey, bytes32 shareHash, uint64 round)`, in the order received.
+
+`filesHash` is the plain SHA-256 of `abi.encode(ReleaseFile[])`, with `ReleaseFile` being `(string name, bytes32 sha256)`, sorted by `name` in byte order. `sha256` is the plain SHA-256 of the stored file. `files` is empty until the threshold is reached. After that it lists exactly `key-priv.tlock` and one `key-priv/<derivedPublicKey>.bin` per approved centre (roles 3 and 4), so a reader must treat a missing, extra or changed file as a failure. These files are written after the Build, so the Build can't cover them.
 
 ## Dev Mode
 
@@ -252,9 +254,11 @@ All bodies are JSON. Every route allows any origin, without credentials. Bytes f
 | `GET /v1/outbox` | None | `{messages: [{kind: "build", examId, fields, teeSignature, instancePublicKey}]}` |
 | `POST /v1/release/challenge` | `{}` | `{challenge}` |
 | `POST /v1/release/share` | `{passkeyPublicKey, challenge, sealed}` | `{}` |
-| `GET /v1/release/log` | None | `{examId, entries, entriesHash, teeSignature, instancePublicKey}` |
+| `GET /v1/release/log` | None | `{examId, entries, entriesHash, files: [{name, sha256}], filesHash, teeSignature, instancePublicKey}` |
 
 `release.released` lists the passkey public keys of holders whose shares were accepted. In an outbox message, `examId` sits at the top level, and `fields` holds the other `build` message fields, with `selected` and `bankSize` as decimal strings. `stage` is one of `onboard`, `submit`, `lock`, `build`, `distribute`, `unlock`, `released`, `failed`. `register`'s passkey signature covers the `registration` message.
+
+`GET /v1/release/log` answers `503` with code `delivery_pending` between the threshold and the delivery being prepared, because a log at the threshold must list its files. Once prepared, it answers with the same bytes as `release-log.json`.
 
 ## Unlock Instance
 

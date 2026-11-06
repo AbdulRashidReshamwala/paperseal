@@ -335,6 +335,8 @@ func releaseError(err error) error {
 		return badRequest("invalid_share", "the share does not match its published hash")
 	case errors.Is(err, release.ErrBadRelease):
 		return badRequest("invalid_release", err.Error())
+	case errors.Is(err, release.ErrDeliveryPending):
+		return api.Errorf(http.StatusServiceUnavailable, "delivery_pending", "the threshold is reached and the files are not ready yet, try again")
 	case errors.Is(err, release.ErrStale):
 		return api.Errorf(http.StatusServiceUnavailable, "stale_beacon", "drand's newest round is not current, try again")
 	case errors.Is(err, timelock.ErrUnavailable):
@@ -381,5 +383,6 @@ func (m *Machine) ReleaseLog(context.Context) (release.Log, error) {
 	if c == nil || (stage != StageUnlock && stage != StageReleased) {
 		return release.Log{}, wrongStage(StageUnlock, stage)
 	}
-	return c.SignedLog()
+	log, err := c.SignedLog()
+	return log, releaseError(err)
 }
