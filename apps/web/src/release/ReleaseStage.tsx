@@ -1,7 +1,7 @@
 import { fromHex, requireHardwareAttestation, type Hex } from '@paperseal/protocol';
 import { RELEASE_NOT_OPEN_MESSAGE } from '@paperseal/tee-client';
 import { KeyTouch, PrimaryAction, Stage, type SealState } from '@paperseal/ui';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 
 import { attestationChecker } from '../shared/attest';
 import { storageUrl } from '../shared/config';
@@ -9,7 +9,7 @@ import { browserKeys, describeError, type StoredCredential } from '../shared/Reg
 import { registry } from '../shared/registry';
 import { storageFetcher } from '../shared/storage';
 import { tee } from '../shared/tee';
-import { ReleaseAbortedError, runRelease, type ReleaseContext, type ReleaseStep } from './flow';
+import { finishRelease, prepareRelease, ReleaseAbortedError, type PreparedRelease, type ReleaseContext, type ReleaseStep } from './flow';
 import { TechnicalDetail } from './Gate';
 import './holder.css';
 
@@ -38,6 +38,9 @@ export function releaseContext(examId: Hex | null, credential: StoredCredential 
     fetchFile: storageFetcher(storageUrl, examId),
   };
 }
+
+/** How long the checks that run before the press stay good. After this they run again at the press. */
+export const PREPARED_TTL_MS = 60_000;
 
 type Phase =
   | { name: 'idle' }
@@ -69,24 +72,50 @@ export function ReleaseStage(props: {
   context: ReleaseContext | null;
   onReleased: () => void;
   seal?: SealState;
+  /** Told when the screen shows a failure, so the page can leave the seal off it. */
+  onRefused?: (refused: boolean) => void;
   next: ReactNode;
   children?: ReactNode;
 }) {
   const { context } = props;
   const [phase, setPhase] = useState<Phase>({ name: 'idle' });
+  // The checks that don't need the key run as soon as the page is ready, so the press goes straight
+  // to the touch. A result that failed, or is older than PREPARED_TTL_MS, is never used: the press runs it again.
+  const latest = useRef(context);
+  latest.current = context;
+  const early = useRef<{ promise: Promise<PreparedRelease | null> } | null>(null);
+  const ready = context ? `${context.examId}:${context.passkeyPublicKey}:${context.derivedPublicKey}` : null;
+
+  const prepareQuietly = (from: ReleaseContext): Promise<PreparedRelease | null> =>
+    prepareRelease(from).then(
+      (prepared) => prepared,
+      () => null,
+    );
+  useEffect(() => {
+    if (!ready || !latest.current) return;
+    early.current = { promise: prepareQuietly(latest.current) };
+    return () => {
+      early.current = null;
+    };
+  }, [ready]);
 
   async function start() {
     if (!context) return;
     let current: ReleaseStep | null = null;
     setPhase({ name: 'checking' });
+    const withSteps: ReleaseContext = {
+      ...context,
+      onStep: (step) => {
+        current = step;
+        setPhase(step === 'release' ? { name: 'touch' } : step === 'submit' ? { name: 'sending' } : { name: 'checking' });
+      },
+    };
     try {
-      await runRelease({
-        ...context,
-        onStep: (step) => {
-          current = step;
-          setPhase(step === 'release' ? { name: 'touch' } : step === 'submit' ? { name: 'sending' } : { name: 'checking' });
-        },
-      });
+      const waiting = early.current;
+      early.current = null;
+      const ahead = waiting ? await waiting.promise : null;
+      const fresh = ahead && Date.now() - ahead.preparedAt < PREPARED_TTL_MS ? ahead : null;
+      await finishRelease(withSteps, fresh ?? (await prepareRelease(withSteps)));
       props.onReleased();
     } catch (error) {
       if (current === 'release' && !(error instanceof ReleaseAbortedError)) {
@@ -96,8 +125,18 @@ export function ReleaseStage(props: {
       } else {
         setPhase({ name: 'failed', step: current, detail: describeError(error) });
       }
+      // A later press starts the checks again, since this result is spent.
+      if (latest.current) early.current = { promise: prepareQuietly(latest.current) };
     }
   }
+  const refused = phase.name === 'failed' || phase.name === 'key-failed';
+  const { onRefused } = props;
+  useEffect(() => {
+    onRefused?.(refused);
+    return () => {
+      onRefused?.(false);
+    };
+  }, [refused, onRefused]);
   const go = () => void start();
   const demo = !requireHardwareAttestation;
 

@@ -70,7 +70,9 @@ export function CentreView(props: {
     openFailed: refusal !== null,
     justReleased,
   });
-  const seal = sealFor(stage);
+  // A refused release is a failure, and a seal is good news.
+  const [releaseRefused, setReleaseRefused] = useState(false);
+  const seal = stage === 'release' && releaseRefused ? null : sealFor(stage);
   const status = progress.status.value;
   const round = progress.chain.value?.unlockRound ?? null;
   const holdsShare = progress.chain.value?.entry?.role === roles.centreKeyHolder;
@@ -113,6 +115,7 @@ export function CentreView(props: {
           <ReleaseStage
             context={context}
             onReleased={props.onReleased}
+            onRefused={setReleaseRefused}
             next="Once enough key holders have released, this page lets you open the paper."
           >
             <ReleaseCount status={status} />
