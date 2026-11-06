@@ -1,4 +1,4 @@
-import { ens, type Criteria, type Hex } from '@paperseal/protocol';
+import { ens, roles, threshold, type Criteria, type Hex } from '@paperseal/protocol';
 
 import { evaluateBlueprint, evaluateSchedule, parseLocalTime, type BlueprintInput, type ScheduleInput, type TopicInput } from './form';
 import type { ChosenParty } from './parties';
@@ -220,14 +220,40 @@ export function verifierNameUrl(verifier: string, name: string): string {
 export const draftSteps = ['create', 'topics', 'centres', 'neutrals', 'review'] as const;
 export type DraftStep = (typeof draftSteps)[number];
 
+export interface DraftReady {
+  details: boolean;
+  topics: boolean;
+  centres: boolean;
+  neutrals: boolean;
+}
+
+const countRole = (parties: readonly ChosenParty[], role: number) => parties.filter((party) => party.role === role).length;
+
+/** What each people page still lacks, in words, or null when it is complete. The list needs these exact counts. */
+export function centresProblem(parties: readonly ChosenParty[]): string | null {
+  const have = countRole(parties, roles.centreKeyHolder);
+  if (have > threshold.centres) return `Only ${String(threshold.centres)} centres can hold part of the key.`;
+  const short = threshold.centres - have;
+  if (short === 0) return null;
+  return `Still needed: ${String(short)} more ${short === 1 ? 'centre' : 'centres'} holding part of the key.`;
+}
+
+export function neutralsProblem(parties: readonly ChosenParty[]): string | null {
+  const short = threshold.neutrals - countRole(parties, roles.neutral);
+  if (short <= 0) return null;
+  return `Still needed: ${String(short)} more neutral ${short === 1 ? 'party' : 'parties'}.`;
+}
+
 /** The furthest page the form allows: each page needs the ones before it to be complete. */
-export function furthestStep(ready: { details: boolean; topics: boolean }): DraftStep {
+export function furthestStep(ready: DraftReady): DraftStep {
   if (!ready.details) return 'create';
-  return ready.topics ? 'review' : 'topics';
+  if (!ready.topics) return 'topics';
+  if (!ready.centres) return 'centres';
+  return ready.neutrals ? 'review' : 'neutrals';
 }
 
 /** The page to show, so a value that stops being valid sends the board back to it. */
-export function draftScreen(chosen: DraftStep, ready: { details: boolean; topics: boolean }): DraftStep {
+export function draftScreen(chosen: DraftStep, ready: DraftReady): DraftStep {
   const furthest = furthestStep(ready);
   return draftSteps.indexOf(chosen) > draftSteps.indexOf(furthest) ? furthest : chosen;
 }

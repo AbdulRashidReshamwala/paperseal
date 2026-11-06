@@ -18,7 +18,7 @@ import { usePoll } from './hooks';
 import { PeopleStep } from './PeopleStep';
 import { Fold } from './Parts';
 import { PartyStep } from './PartyStep';
-import { draftScreen, furthestStep, plainWords } from './plan';
+import { centresProblem, draftScreen, furthestStep, neutralsProblem, plainWords } from './plan';
 import type { PublishEnvironment } from './publishFlow';
 import { evaluatePublish } from './form';
 import { ReceiptStep } from './ReceiptStep';
@@ -31,7 +31,7 @@ const step = (n: number) => `Step ${String(n)} of 6`;
 
 /** The pages before there is an exam. They live in the browser until the exam is published. */
 function Draft(props: { review: boolean }) {
-  const { publish, draftStep, setDraftStep } = useBoardForm();
+  const { plan, publish, draftStep, setDraftStep } = useBoardForm();
   const { blueprint, schedule } = useEvaluated();
   const releases = useReleases(publish.version);
   const { review } = props;
@@ -42,7 +42,12 @@ function Draft(props: { review: boolean }) {
   }, [review, setDraftStep]);
 
   const details = Boolean(blueprint.examId && schedule.settings && !evaluatePublish(publish, null).errors.rpcHost);
-  const ready = { details, topics: details && Boolean(blueprint.criteria) };
+  const ready = {
+    details,
+    topics: details && Boolean(blueprint.criteria),
+    centres: centresProblem(plan.parties) === null,
+    neutrals: neutralsProblem(plan.parties) === null,
+  };
   const screen = draftScreen(draftStep, ready);
   const rail = { step: screen, furthest: furthestStep(ready), onStep: setDraftStep };
   if (screen === 'create') {

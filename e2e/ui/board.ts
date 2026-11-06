@@ -6,7 +6,7 @@ import { testWalletScript } from '../src/wallet';
 import { demoParent, inviteTag, listWith, postListDirect, publishDirect, strangerKey, timings, type Timing } from './chainkit';
 import type { Lab } from './lab';
 import { openActor, proxyGithubIfLimited, type Actor } from './kit';
-import { button, field, fold, hashOf, text, unfold } from './selectors';
+import { button, field, fold, hashOf, text, unfold, choosePeople } from './selectors';
 
 /*
  * The board, through the real screens on a local anvil chain. The wallet is the test wallet of
@@ -54,8 +54,13 @@ export function boardTests(lab: () => Lab): void {
         await board.shot('02-create-bad-percent');
         await board.type(page.getByLabel(field.maxPercent).first(), '20');
         await board.shot('03-create-filled');
-        // On past topics, then the centres and neutral parties, which can wait until after publishing.
-        for (let page_ = 0; page_ < 3; page_ += 1) await page.getByRole('button', { name: button.continue }).click();
+        await page.getByRole('button', { name: button.continue }).click();
+        // The list needs 7 centres and 3 neutral parties, so both pages must be complete to move on.
+        await choosePeople(
+          page,
+          [CENTRE, ...[2, 3, 4, 5, 6, 7].map((n) => `centre-${String(n)}.${demoParent}`)],
+          [KEYHOLDER, `neutral-2.${demoParent}`, `neutral-3.${demoParent}`],
+        );
       });
       await board.flow('review, choose the version and publish', async () => {
         await board.seeHeading(text.reviewHeading, 60_000);

@@ -97,6 +97,18 @@ export async function unfold(page: Page, summary: string): Promise<void> {
   if ((await summaryEl.locator('xpath=..').getAttribute('open')) === null) await summaryEl.click();
 }
 
+/** The centres page, then the neutral parties page, typing each name so no directory is needed. */
+export async function choosePeople(page: Page, centres: readonly string[], neutrals: readonly string[]): Promise<void> {
+  const add = async (name: string) => {
+    await page.getByLabel("Add a name that isn't listed").fill(name);
+    await page.getByRole('button', { name: 'Add name' }).click();
+  };
+  for (const name of centres) await add(name);
+  await page.getByRole('button', { name: button.continue }).click();
+  for (const name of neutrals) await add(name);
+  await page.getByRole('button', { name: button.continue }).click();
+}
+
 /** A `Hash` carries its whole value in its title, behind a button named "Copy <label>: ...". */
 export async function hashOf(page: Page, label: string): Promise<string> {
   return (await page.getByRole('button', { name: `Copy ${label}: ` }).first().getAttribute('title')) ?? '';

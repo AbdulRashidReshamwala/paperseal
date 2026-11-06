@@ -105,8 +105,16 @@ describe('exam on a local anvil chain', () => {
         return note;
       });
 
-      // On past topics, then the centres and neutral parties, which can wait until after publishing.
-      for (let step = 0; step < 3; step += 1) await page.getByRole('button', { name: 'Continue' }).click();
+      await page.getByRole('button', { name: 'Continue' }).click();
+      await rec.say('Steps 3 and 4: the 7 centres and 3 neutral parties the list needs');
+      const addName = async (name: string) => {
+        await value(page, "Add a name that isn't listed").fill(name);
+        await page.getByRole('button', { name: 'Add name' }).click();
+      };
+      for (let n = 1; n <= 7; n += 1) await addName(`centre-${String(n)}.paperseal-demo.eth`);
+      await page.getByRole('button', { name: 'Continue' }).click();
+      for (let n = 1; n <= 3; n += 1) await addName(`neutral-${String(n)}.paperseal-demo.eth`);
+      await page.getByRole('button', { name: 'Continue' }).click();
       await rec.say('Step 2: one summary of everything. The Paper Seal version is a row in it, and the version list is fetched live from GitHub releases');
       await page.getByRole('heading', { name: 'Preview and submit' }).waitFor({ timeout: 15_000 });
       const other = page.locator('summary', { hasText: 'Use a different version' });

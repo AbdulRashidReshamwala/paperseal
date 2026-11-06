@@ -6,6 +6,7 @@ import { useBoardForm } from './BoardForm';
 import { DraftPage, type DraftRail } from './DraftFrame';
 import { useDirectoryNames, type ChosenParty } from './parties';
 import { AddName } from './PeopleStep';
+import { centresProblem, neutralsProblem } from './plan';
 import { roleNames } from './registrations';
 
 /** Past this many names, the page offers a search. */
@@ -30,9 +31,9 @@ const isCentre = (party: ChosenParty) => party.role === roles.centreKeyHolder ||
 const isNeutral = (party: ChosenParty) => party.role === roles.neutral;
 
 /**
- * Picks centres or neutral parties from the directory while the exam is still a draft. The names only
- * carry over to the exam's "Choose who takes part" page. Everyone still registers there, and each
- * name is checked by its own records, so nothing is checked or promised here.
+ * Picks centres or neutral parties from the directory while the exam is still a draft. The page is
+ * complete once it has the counts the approved list needs. The names carry over to the exam's "Choose
+ * who takes part" page, where everyone registers and each name is checked by its own records.
  */
 export function PartyStep(props: { kind: 'centres' | 'neutrals'; rail: DraftRail; onBack: () => void; onContinue: () => void }) {
   const { kind } = props;
@@ -45,6 +46,7 @@ export function PartyStep(props: { kind: 'centres' | 'neutrals'; rail: DraftRail
   const others = plan.parties.filter((party) => !mine(party));
   const counted = kind === 'centres' ? chosen.filter((party) => party.role === roles.centreKeyHolder).length : chosen.length;
   const full = kind === 'neutrals' && counted >= words.need;
+  const problem = kind === 'centres' ? centresProblem(plan.parties) : neutralsProblem(plan.parties);
 
   const listed = useMemo(() => (directory.read?.state === 'found' ? directory.read.names : []), [directory.read]);
   const all = [...new Set([...listed, ...chosen.map((party) => party.name)])].filter((name) => !others.some((party) => party.name === name));
@@ -70,7 +72,8 @@ export function PartyStep(props: { kind: 'centres' | 'neutrals'; rail: DraftRail
       rail={props.rail}
       title={words.title}
       lede={words.lede}
-      ready
+      ready={problem === null}
+      blocked={problem}
       onBack={props.onBack}
       onContinue={props.onContinue}
     >

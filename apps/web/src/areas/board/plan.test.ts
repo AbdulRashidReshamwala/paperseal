@@ -86,8 +86,10 @@ describe('configuration', () => {
 
 describe('draftScreen', () => {
   it('sends the board back to the details until they are complete', () => {
-    expect(draftScreen('review', { details: false, topics: false })).toBe('create');
-    expect(draftScreen('review', { details: true, topics: true })).toBe('review');
-    expect(draftScreen('create', { details: true, topics: true })).toBe('create');
+    expect(draftScreen('review', { details: false, topics: false, centres: false, neutrals: false })).toBe('create');
+    expect(draftScreen('review', { details: true, topics: true, centres: true, neutrals: true })).toBe('review');
+    expect(draftScreen('create', { details: true, topics: true, centres: true, neutrals: true })).toBe('create');
+    expect(draftScreen('review', { details: true, topics: true, centres: false, neutrals: false })).toBe('centres');
+    expect(draftScreen('review', { details: true, topics: true, centres: true, neutrals: false })).toBe('neutrals');
   });
 });

@@ -21,7 +21,7 @@ import { testWalletScript } from '../src/wallet';
 import { castWalletScript } from './castWallet';
 import { startStorage } from './lab';
 import { Actor, launchUiChrome, openActor, proxyGithubIfLimited, report, UI_DIR, writeReport } from './kit';
-import { button, centre as centreText, composer, field, fold, hashOf, radio, stepStates, text, unfold } from './selectors';
+import { button, centre as centreText, choosePeople, composer, field, fold, hashOf, radio, stepStates, text, unfold } from './selectors';
 
 /*
  * THE REAL RUN, through the screens. The deployed TEE (tee.abdulrashid.dev, a Confidential Space VM),
@@ -252,8 +252,12 @@ describe('real exam through the screens', () => {
       await board.type(bp.getByLabel(field.bankMultiple).first(), String(liveCriteria.minBankMultiple));
       await board.shot(`${PREFIX}01-create`);
       await board.beat(2500);
-      // On past topics, then the centres and neutral parties, which are chosen after publishing here.
-      for (let step = 0; step < 3; step += 1) await bp.getByRole('button', { name: button.continue }).click();
+      await bp.getByRole('button', { name: button.continue }).click();
+      await choosePeople(
+        bp,
+        parties.filter((p) => p.label.startsWith('centre-') && !p.label.startsWith('centre-8.')).map((p) => p.label),
+        parties.filter((p) => p.label.startsWith('neutral-')).map((p) => p.label),
+      );
       await board.seeHeading(text.reviewHeading, 60_000);
       await board.say('Exam board: review, then publish');
       // The version is a row in the review. The newest checked one is already chosen.

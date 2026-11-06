@@ -15,11 +15,12 @@ import { explainError, publishExam, type PublishRequest } from './publishFlow';
 import type { Releases } from './releases';
 import { versionSummary, VersionEvidence, VersionPicker, VersionProblems } from './VersionChoice';
 
-/** The names chosen for these roles, or a plain line when there are none yet. */
-const partyNames = (parties: readonly ChosenParty[], wanted: readonly number[]): string => {
-  const names = parties.filter((party) => party.role !== null && wanted.includes(party.role)).map((party) => party.name);
-  return names.length > 0 ? names.join(', ') : 'None yet. You can choose them after publishing.';
-};
+/** The names chosen for these roles. */
+const partyNames = (parties: readonly ChosenParty[], wanted: readonly number[]): string =>
+  parties
+    .filter((party) => party.role !== null && wanted.includes(party.role))
+    .map((party) => party.name)
+    .join(', ');
 
 type Progress = { state: 'idle' } | { state: 'running'; stage: WalletStage } | { state: 'failed'; message: string };
 

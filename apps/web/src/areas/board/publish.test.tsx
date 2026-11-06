@@ -245,10 +245,17 @@ function fillTopics() {
   type('Topic 1 questions', '5');
 }
 
-/** From the topics page, past the two people pages. */
+const addName = (party: string) => {
+  type("Add a name that isn't listed", party);
+  fireEvent.click(button('Add name'));
+};
+
+/** From the topics page, choosing everyone the two people pages need. */
 function toPreview() {
   fireEvent.click(button('Continue'));
+  for (let n = 1; n <= 7; n += 1) addName(`centre-${String(n)}.paperseal-demo.eth`);
   fireEvent.click(button('Continue'));
+  for (let n = 1; n <= 3; n += 1) addName(`neutral-${String(n)}.paperseal-demo.eth`);
   fireEvent.click(button('Continue'));
 }
 
@@ -481,6 +488,8 @@ describe('step 2, review and publish', () => {
     // The draft is gone once it has become an exam.
     expect(JSON.parse(localStorage.getItem('paperseal.board.drafts') ?? '[]')).toEqual([]);
     expect(localStorage.getItem('paperseal.board.draft')).toBeNull();
+    // Everyone chosen on the draft's pages carries over to the exam.
+    expect(JSON.parse(localStorage.getItem(`paperseal.parties.${examId}`) ?? '[]')).toHaveLength(10);
     // The exam is kept with its name, so the board can open it again later.
     expect(JSON.parse(localStorage.getItem('paperseal.board.exams') ?? '[]')).toEqual([{ id: examId, name, addedAt: expect.any(Number) as number }]);
   });
@@ -582,30 +591,36 @@ describe('step 2, review and publish', () => {
     expect(button(/Preview and submit/).disabled).toBe(true);
   });
 
-  it('adds centres and neutral parties to the draft, and keeps them apart', () => {
+  it('holds each people page until it has everyone the list needs, and keeps them in the draft', () => {
     const { env } = environment();
     renderBoard(env);
     fillCreate();
     fillTopics();
     fireEvent.click(button('Continue'));
     expect(screen.getByRole('heading', { name: 'Choose the centres' })).toBeTruthy();
-    type("Add a name that isn't listed", 'centre-1.paperseal-demo.eth');
-    fireEvent.click(button('Add name'));
-    expect(screen.getByText('1 of 7')).toBeTruthy();
+    expect(button('Continue').disabled).toBe(true);
+    expect(button(/Neutral parties/).disabled).toBe(true);
+    expect(screen.getByText('Still needed: 7 more centres holding part of the key.')).toBeTruthy();
+    for (let n = 1; n <= 6; n += 1) addName(`centre-${String(n)}.paperseal-demo.eth`);
+    expect(screen.getByText('6 of 7')).toBeTruthy();
+    expect(screen.getByText('Still needed: 1 more centre holding part of the key.')).toBeTruthy();
+    expect(button('Continue').disabled).toBe(true);
+    addName('centre-7.paperseal-demo.eth');
     fireEvent.click(button('Continue'));
     expect(screen.getByRole('heading', { name: 'Choose the neutral parties' })).toBeTruthy();
     expect(screen.queryByText('centre-1.paperseal-demo.eth')).toBeNull();
-    type("Add a name that isn't listed", 'neutral-1.paperseal-demo.eth');
-    fireEvent.click(button('Add name'));
-    expect(screen.getByText('1 of 3')).toBeTruthy();
+    expect(button('Continue').disabled).toBe(true);
+    expect(button(/Preview and submit/).disabled).toBe(true);
+    for (let n = 1; n <= 3; n += 1) addName(`neutral-${String(n)}.paperseal-demo.eth`);
+    expect(screen.getByText('3 of 3')).toBeTruthy();
     fireEvent.click(button('Continue'));
-    expect(screen.getByText('centre-1.paperseal-demo.eth')).toBeTruthy();
-    expect(screen.getByText('neutral-1.paperseal-demo.eth')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Preview and submit' })).toBeTruthy();
+    expect(screen.getByText(/centre-1\.paperseal-demo\.eth, centre-2/)).toBeTruthy();
+    expect(screen.getByText(/neutral-1\.paperseal-demo\.eth, neutral-2/)).toBeTruthy();
     const saved = JSON.parse(localStorage.getItem('paperseal.board.drafts') ?? '[]') as { plan: { parties: unknown[] } }[];
-    expect(saved[0]?.plan.parties).toEqual([
-      { name: 'centre-1.paperseal-demo.eth', role: roles.centreKeyHolder },
-      { name: 'neutral-1.paperseal-demo.eth', role: roles.neutral },
-    ]);
+    expect(saved[0]?.plan.parties).toHaveLength(10);
+    expect(saved[0]?.plan.parties[0]).toEqual({ name: 'centre-1.paperseal-demo.eth', role: roles.centreKeyHolder });
+    expect(saved[0]?.plan.parties[9]).toEqual({ name: 'neutral-3.paperseal-demo.eth', role: roles.neutral });
   });
 
   it('shows rounds and hashes only in the exam record', async () => {
