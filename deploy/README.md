@@ -107,6 +107,7 @@ Set at build time for `apps/web` and `apps/verifier` (viewers can change them in
 | `VITE_TEE_STORAGE_BUCKET` | `<BUCKET>`, the one environment value the token check allows |
 | `VITE_SWARM_API_URL` | a read-only Swarm gateway for backups (`swarm.defaultApiUrl` in `spec/arkiv.json`, the viewer's own Bee node, when unset). The verifier only reads `GET /bzz/...` from it |
 | `VITE_RELEASES_REPO` | your fork as `owner/name`, so the apps read TEE releases from it (upstream's `AbdulRashidReshamwala/paperseal` when unset) |
+| `VITE_RELEASE_TAG` | verifier only: the release tag this build comes from, such as `v1.2.3`. The "Check with your own AI" prompt names it as the checker version. Unset or not `vX.Y.Z`, that button is disabled |
 
 Demo ENS name on Sepolia: `paperseal-demo.eth`, owned by the board wallet, with a placeholder exam name `demo.paperseal-demo.eth` that carries the registry, TEE and storage records.
 

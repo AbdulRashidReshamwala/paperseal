@@ -16,9 +16,10 @@ import {
   useLoaded,
 } from '@paperseal/ui';
 import { approvedEntries, createBackupCache, createStorage, loadChain, type BackupSource, type ChainData } from '@paperseal/verify';
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
 
+import { AgentCheck } from './agent-check';
 import { clockTime, custody, dayTime, REPOSITORY, type Custody, type CustodyStep, type Failure } from './custody';
 import { Evidence } from './evidence';
 import { teeStorageBucket } from './env';
@@ -186,6 +187,8 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
 
   return {
     examId,
+    // What the agent prompt names: the registry and storage this view reads, a name's included.
+    agent: { registry: registryAddress, storageUrl },
     invalidLink: link.kind === 'invalid',
     ...(link.kind === 'name' && name ? { name: { name: link.name, result: name, used: { teeUrl, storageUrl, bucket }, configuredRegistry: settings.registryAddress } } : {}),
     sources: { chain: registry !== null, storage: storage !== null, tee: tee !== null, arkiv: arkivReader !== null },
@@ -216,7 +219,7 @@ function SealMark({ state, empty }: { state: SealState | null; empty: string }) 
  * The same shape as `Stage`, because `Stage` can only show a seal in one of its three states, and
  * before the paper is sealed this page has to show that there is no seal yet.
  */
-function Head({ view, zone }: { view: Custody; zone: string }) {
+function Head({ view, zone, agent }: { view: Custody; zone: string; agent: ReactNode }) {
   return (
     <section className="ps-stage" data-sealed="true">
       <div className="ps-stage-main">
@@ -228,6 +231,7 @@ function Head({ view, zone }: { view: Custody; zone: string }) {
             <p className="vf-demo">This is a demonstration. The security keys are simulated.</p>
           )}
         </div>
+        {agent}
         <p className="ps-stage-next">
           <span className="ps-stage-next-label">What happens next</span>
           <span>{view.next}</span>
@@ -523,7 +527,11 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
       <main>
         <FailureAlarm failures={result.failures} />
         <Warnings warnings={result.warnings} />
-        <Head view={result} zone={zoneName()} />
+        <Head
+          view={result}
+          zone={zoneName()}
+          agent={<AgentCheck examId={view.examId} registry={view.agent.registry} storageUrl={view.agent.storageUrl} />}
+        />
         {view.records.state === 'error' ? (
           <p className="vf-gap">
             <Check status="not-checked">

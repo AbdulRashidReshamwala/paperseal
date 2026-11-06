@@ -197,3 +197,37 @@
   padding-left: 1.25em;
   margin: var(--ps-space-2) 0 0;
 }
+
+/* "Check with your own AI", under the headline. The repository stays in sight beside it. */
+.vf-agent {
+  display: grid;
+  gap: var(--ps-space-2);
+  max-width: 34em;
+}
+
+.vf-agent-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-2) var(--ps-space-3);
+  align-items: center;
+}
+
+.vf-agent-repo,
+.vf-agent-reason {
+  font-size: var(--ps-text-small);
+  color: var(--ps-ink-soft);
+}
+
+.vf-agent-reason {
+  margin: 0;
+}
+
+.vf-agent-text summary {
+  width: fit-content;
+  min-height: 24px;
+  font-size: var(--ps-text-small);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--ps-rule-strong);
+  text-underline-offset: 3px;
+}
