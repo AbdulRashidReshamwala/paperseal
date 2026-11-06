@@ -49,7 +49,8 @@ const pointerScript = `(() => {
  * The big caption, for every video. An init script runs before the page has a document element, so a
  * style sheet added there is lost. This styles the caption element itself as soon as it exists, and does
  * so again if the element is ever rebuilt. The text is kept for the tab, so a full page load shows it
- * again at once. The space added under the page lets anything scroll clear of the caption.
+ * again at once. The space added under the page lets anything scroll clear of the caption, and a new
+ * page heading goes back to the top, so a page never opens at the last page's scroll position.
  */
 const bigCaptionScript = `(() => {
   const ID = '__ps_caption';
@@ -57,17 +58,21 @@ const bigCaptionScript = `(() => {
   const BLOCK = 'position:fixed;left:5%;right:5%;bottom:40px;z-index:2147483647;box-sizing:border-box;padding:22px 36px;background:#0f172a;color:#fff;font:700 44px/1.2 system-ui,sans-serif;text-align:center;border-radius:14px;pointer-events:none';
   const store = (text) => { try { sessionStorage.setItem(KEY, text); } catch (e) {} };
   const stored = () => { try { return sessionStorage.getItem(KEY) || ''; } catch (e) { return ''; } };
+  let shownTitle = null;
   const style = () => {
     const el = document.getElementById(ID);
     if (el && !el.dataset.big) { el.dataset.big = '1'; el.style.cssText = BLOCK; }
-    if (document.body && !document.body.dataset.captionRoom) { document.body.dataset.captionRoom = '1'; document.body.style.paddingBottom = '300px'; }
+    if (document.body && !document.body.dataset.captionRoom) { document.body.dataset.captionRoom = '1'; document.body.style.paddingBottom = '190px'; }
+    const heading = document.querySelector('h1');
+    const title = heading ? heading.textContent : null;
+    if (title !== null && title !== shownTitle) { shownTitle = title; scrollTo(0, 0); }
   };
   const show = window.__caption;
   window.__caption = (text, sub) => { store(text); show(text, sub); style(); };
   new MutationObserver(() => {
     style();
     if (document.body && !window.__captionText && stored()) window.__caption(stored(), '');
-  }).observe(document, { childList: true, subtree: true });
+  }).observe(document, { childList: true, subtree: true, characterData: true });
 })();`;
 
 const stamp = (d = new Date()) => {
@@ -104,22 +109,44 @@ async function startWeb(world: World) {
   return { url, stop: () => stop(server), log: () => recentLog(server) };
 }
 
-function stageFor(board: Actor, world: World, label: string, notes: Record<string, string>, endHere: () => Promise<void>): Stage {
-  const { page } = board;
+interface Run {
+  world: World;
+  label: string;
+  notes: Record<string, string>;
+  memo: Record<string, string>;
+}
+
+function stageFor(actor: Actor, run: Run, endHere: () => Promise<void>, office?: Stage): Stage {
+  const { page } = actor;
+  /** Moves by the least that puts the target between the top bar and the caption. */
   const show = async (target: Locator) => {
-    await target.first().evaluate((el) => {
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const moved = await target.first().evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      const bottomEdge = (document.getElementById('__ps_caption')?.getBoundingClientRect().top ?? innerHeight) - 16;
+      const by = box.bottom > bottomEdge ? box.bottom - bottomEdge : box.top < 48 ? box.top - 48 : 0;
+      if (by !== 0) scrollBy({ top: by, behavior: 'smooth' });
+      return by !== 0;
     });
-    await page.waitForTimeout(200);
+    if (moved) await page.waitForTimeout(250);
   };
-  return {
+  const stage: Stage = {
     page,
-    board,
-    world,
-    label,
-    notes,
+    actor,
+    get office() {
+      return office ?? stage;
+    },
+    world: run.world,
+    label: run.label,
+    notes: run.notes,
+    memo: run.memo,
     show,
     endHere,
+    top: async () => {
+      await page.evaluate(() => {
+        scrollTo({ top: 0, behavior: 'smooth' });
+      });
+      await page.waitForTimeout(250);
+    },
     hold: (ms) => page.waitForTimeout(ms),
     click: async (target) => {
       await target.waitFor({ state: 'visible', timeout: 60_000 });
@@ -130,6 +157,7 @@ function stageFor(board: Actor, world: World, label: string, notes: Record<strin
     },
     type: async (target, text) => {
       await target.waitFor({ state: 'visible', timeout: 60_000 });
+      await show(target);
       await target.hover();
       await page.waitForTimeout(150);
       await target.click();
@@ -137,17 +165,19 @@ function stageFor(board: Actor, world: World, label: string, notes: Record<strin
       await target.pressSequentially(text, { delay: TYPE_DELAY });
     },
   };
+  return stage;
 }
 
 async function play(name: string, video: Video, world: World, dry: boolean): Promise<void> {
-  const label = await freeLabel(video.prefix, world);
-  const notes: Record<string, string> = { label };
+  const run: Run = { world, label: await freeLabel(video.prefix, world), notes: {}, memo: {} };
+  run.notes.label = run.label;
+  const { notes } = run;
   const web = await startWeb(world);
   const browser = await launchUiChrome();
   try {
     // Vite prepares the app on first use, and that must not happen in front of the camera.
     const warm = await browser.newPage();
-    await warm.goto(`${web.url}${video.open}`);
+    await warm.goto(`${web.url}/#/board`);
     await warm.waitForLoadState('load');
     await warm.waitForTimeout(3000);
     await warm.close();
@@ -155,11 +185,17 @@ async function play(name: string, video: Video, world: World, dry: boolean): Pro
     const rawDir = resolve(WORK, name);
     rmSync(rawDir, { recursive: true, force: true });
     mkdirSync(rawDir, { recursive: true });
-    const board = await openActor(browser, 'board', null, { role: 'board', videoDir: rawDir, wallet: world.walletScript, bindings: world.bindings });
-    await board.person.context.addInitScript(pointerScript);
-    await board.person.context.addInitScript(bigCaptionScript);
+    const onCameraOptions = { videoDir: rawDir };
+    const prepare = async (who: Actor) => {
+      await who.person.context.addInitScript(pointerScript);
+      await who.person.context.addInitScript(bigCaptionScript);
+    };
+    const board = await openActor(browser, 'board', null, { role: 'board', wallet: world.walletScript, bindings: world.bindings, ...(video.persona ? {} : onCameraOptions) });
     await proxyGithubIfLimited(board.person.context);
-    const { page } = board;
+    const camera = video.persona ? await openActor(browser, video.persona, null, { role: 'setter', ...onCameraOptions }) : board;
+    await prepare(camera);
+    if (video.persona) await camera.person.context.addInitScript(`try { sessionStorage.setItem('paperseal-demo.persona', ${JSON.stringify(video.persona)}); } catch (e) {}`);
+    const { page } = camera;
     // Only the on-camera part is recorded, so the start and end need no working out from the clock.
     const raw = resolve(rawDir, 'on-camera.webm');
     let recording = false;
@@ -168,16 +204,20 @@ async function play(name: string, video: Video, world: World, dry: boolean): Pro
       recording = false;
       await page.screencast.stop();
     };
-    const stage = stageFor(board, world, label, notes, endHere);
+    const office = video.persona ? stageFor(board, run, () => Promise.resolve()) : undefined;
+    const stage = stageFor(camera, run, endHere, office);
     const waits: [number, number][] = [];
-    let current = 'opening the page';
+    let current = 'setting up';
     try {
-      await page.goto(`${web.url}${video.open}`);
+      run.memo.web = web.url;
+      await video.setup?.(stage);
+      current = 'opening the page';
+      await page.goto(`${web.url}${typeof video.open === 'string' ? video.open : video.open(stage)}`);
       await video.ready(stage);
       // The caption is up before the first kept frame, so no frame is without one.
       const captionOf = (one: Video['steps'][number]) => (typeof one.say === 'string' ? one.say : one.say(stage));
       const opening = video.steps[0];
-      if (opening) await board.say(captionOf(opening));
+      if (opening) await camera.say(captionOf(opening));
       await page.waitForTimeout(400);
       await page.screencast.start({ path: raw, size: { width: 1280, height: 800 } });
       recording = true;
@@ -189,7 +229,7 @@ async function play(name: string, video: Video, world: World, dry: boolean): Pro
         }
         current = captionOf(one);
         console.log(`  ${current}`);
-        await board.say(current);
+        await camera.say(current);
         const started = Date.now();
         if (!one.wait) await page.waitForTimeout(300);
         await one.run(stage);
@@ -197,7 +237,7 @@ async function play(name: string, video: Video, world: World, dry: boolean): Pro
         await page.waitForTimeout(one.hold);
       }
       await endHere();
-      await board.person.context.close();
+      await camera.person.context.close();
       const media = probe(raw);
       const at = (ms: number) => (ms - firstFrame) / 1000;
       const out = resolve(VIDEOS, `${name}${world.kind === 'mock' ? '.mock' : ''}${dry ? '.dry' : ''}.mp4`);

@@ -1,14 +1,19 @@
+import { spawn } from 'node:child_process';
+import { createWriteStream, mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { createEnsLookup, createExamRegistry, type EnsLookup, type ExamRegistry } from '@paperseal/chain';
 import { ens, type Hex } from '@paperseal/protocol';
 import { createPublicClient, http } from 'viem';
 import { sepolia } from 'viem/chains';
 
+import { plantedCards } from '../../demo/cards';
 import { castSend } from '../../live/cast';
 import { deployed } from '../../live/config';
 import { partyParent } from '../../live/roster';
 import { makeMockPki } from '../../mock/pki';
 import { startMockTee } from '../../mock/mockTee';
-import { startChain } from '../../src/chain';
+import { repoRoot, startChain } from '../../src/chain';
 import { startEnsRpc } from '../../src/ens';
 import { testWalletScript } from '../../src/wallet';
 import { castWalletScript } from '../../ui/castWallet';
@@ -32,6 +37,13 @@ export interface World {
   registry: ExamRegistry;
   registryAddress: Hex;
   lookup: EnsLookup;
+  /** The sealed machine's address, to read what it reports. */
+  teeUrl: string;
+  /**
+   * Points the sealed machine at this exam. On the real system that is `pnpm demo:vm`, which adds to the
+   * VM's lockout counter, so call it once per run and never in a loop.
+   */
+  startMachine: (label: string, examId: Hex) => Promise<void>;
   /** How many transactions left the wallet so far. */
   sent: () => number;
   stop: () => Promise<void>;
@@ -51,6 +63,24 @@ export async function retry<T>(what: string, read: () => Promise<T>, tries = 12,
     }
   }
   throw new Error(`${what}: ${last instanceof Error ? last.message : String(last)}`);
+}
+
+/** `pnpm demo:vm`, once. It never tries again. Its output goes to a log, not to the screen. */
+function moveVm(label: string): Promise<void> {
+  const work = resolve(repoRoot, 'e2e/videos/.work');
+  mkdirSync(work, { recursive: true });
+  const logPath = resolve(work, 'demo-vm.log');
+  const log = createWriteStream(logPath);
+  return new Promise((done, fail) => {
+    const child = spawn('pnpm', ['demo:vm', label], { cwd: repoRoot, stdio: ['ignore', 'pipe', 'pipe'] });
+    child.stdout.pipe(log);
+    child.stderr.pipe(log);
+    child.once('error', fail);
+    child.once('close', (code) => {
+      if (code === 0) done();
+      else fail(new Error(`pnpm demo:vm exited ${String(code)}. See ${logPath}. It is not tried again.`));
+    });
+  });
 }
 
 const refusedBeforeSending = /nonce too low|replacement|underpriced|429|too many requests|rate limit|timed? ?out|connection|error sending|503|502/i;
@@ -105,6 +135,8 @@ export async function liveWorld(): Promise<World> {
     registry,
     registryAddress: deployed.registry,
     lookup: createEnsLookup({ rpcUrl: deployed.rpcUrl }),
+    teeUrl: deployed.teeUrl,
+    startMachine: (label) => moveVm(label),
     sent: signer.sent,
     stop: () => Promise.resolve(),
   };
@@ -114,8 +146,12 @@ export async function mockWorld(): Promise<World> {
   const chain = await startChain();
   const names = await startEnsRpc(chain.rpcUrl);
   names.setPrimary(chain.board, partyParent);
-  const people = [...[1, 2, 3].map((n) => `neutral-${String(n)}`), ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => `centre-${String(n)}`)].map((who) => `${who}.${partyParent}`);
-  names.set(partyParent, { texts: { [ens.records.directory]: JSON.stringify(people) } });
+  // The planted keys' records, as `node e2e/demo/cli.mjs names write` puts them on Sepolia.
+  const cards = await plantedCards();
+  for (const { name, card } of cards) {
+    names.set(name, { address: '0x000000000000000000000000000000000000dEaD', texts: { [ens.records.passkey]: card.passkey, [ens.records.credential]: card.credentialId } });
+  }
+  names.set(partyParent, { texts: { [ens.records.directory]: JSON.stringify(cards.map(({ name }) => name)) } });
   const pki = makeMockPki();
   const storage = await startStorage();
   const registry = createExamRegistry({ address: chain.registry, rpcUrl: chain.rpcUrl });
@@ -140,6 +176,8 @@ export async function mockWorld(): Promise<World> {
     registry,
     registryAddress: chain.registry,
     lookup: createEnsLookup({ rpcUrl: names.rpcUrl }),
+    teeUrl: tee.url,
+    startMachine: (_label, examId) => tee.init(examId),
     sent: () => 0,
     stop: async () => {
       await tee.stop();
