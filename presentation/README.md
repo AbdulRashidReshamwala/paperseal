@@ -7,3 +7,5 @@ python3 -m http.server 5180 --directory presentation
 ```
 
 Open http://localhost:5180. Arrow keys or clicks move between slides, and printing to PDF gives a handout. The deck is being rebuilt page by page in the paper style (see `paperkit.html`). Each slide animates when it appears, and pressing `r` replays it. The old 19-slide placeholder deck is in git history.
+
+Keys: arrows, space or click to move. `r` replays the page. `f` toggles full screen. Add `?static` to the address to see every page finished, with no animation.

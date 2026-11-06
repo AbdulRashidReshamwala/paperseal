@@ -1,6 +1,7 @@
 const deck = document.getElementById('deck');
 const slides = [...deck.querySelectorAll('.slide')];
 const count = document.getElementById('count');
+const bar = document.getElementById('bar');
 let i = Math.max(0, Math.min(slides.length - 1, (parseInt(location.hash.slice(1), 10) || 1) - 1));
 
 function fit() {
@@ -15,6 +16,7 @@ function show(n, replay = false) {
   void deck.offsetWidth; // restart the animations
   slides[i].classList.add('on');
   count.textContent = `${i + 1} / ${slides.length}`;
+  bar.style.width = `${((i + 1) / slides.length) * 100}%`;
   history.replaceState(null, '', `#${i + 1}`);
 }
 addEventListener('resize', fit);
@@ -24,6 +26,7 @@ addEventListener('keydown', (e) => {
   if (e.key === 'Home') show(0);
   if (e.key === 'End') show(slides.length - 1);
   if (e.key === 'r') show(i, true); // replay this slide's animation
+  if (e.key === 'f') (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen());
 });
 deck.addEventListener('click', (e) => show(e.clientX < innerWidth / 3 ? i - 1 : i + 1));
 if (location.search.includes('static')) deck.classList.add('static'); // ?static shows every slide finished, no animation
