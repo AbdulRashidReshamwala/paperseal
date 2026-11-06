@@ -17,8 +17,8 @@ import { HolderGate, holderAccess, SetterGate, setterAccess } from './RoleGate';
 const exam = `0x${'ab'.repeat(32)}` as Hex;
 const otherExam = `0x${'cd'.repeat(32)}` as Hex;
 const key = `0x${'11'.repeat(33)}` as Hex;
-const board = '0xC3aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa20';
-const other = '0x12bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb34';
+const board = '0xC3aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa20' as Hex;
+const other = '0x12bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb34' as Hex;
 const secret = <p>Your exams</p>;
 const invite = (examId: Hex) => ({ examId, role: 'setter', inviteSecret: `0x${'22'.repeat(32)}` }) as Invite;
 
