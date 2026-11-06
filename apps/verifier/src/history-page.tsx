@@ -368,10 +368,10 @@ export function HistoryPage() {
   return (
     <div className="ps-shell vf-page">
       <RoleHeader role="Public record" note="Anyone can check this" />
-      <main>
-        <section className="ps-screen">
-          <h1>Exam history</h1>
-          <p className="ps-lede">
+      <main className="vf-single">
+        <section className="vf-start">
+          <h1 className="vf-headline">Exam history</h1>
+          <p className="vf-lede">
             Choose an exam to see where it is now, or find the exams a person is listed for. Every exam here is checked against the
             public record first.
           </p>
@@ -417,7 +417,7 @@ export function HistoryPage() {
         <p className="vf-more">
           <Link to="/">Check one exam by its ID or name</Link>
         </p>
-        <section className="ps-panel vf-self-host">
+        <section className="vf-section vf-closing">
           <h2>Check it yourself</h2>
           <p>
             You don&apos;t have to trust this page, or whoever hosts it. The list only helps you find exams: each one is checked

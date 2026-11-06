@@ -2,36 +2,25 @@ import { createArkivReader } from '@paperseal/arkiv';
 import { checkPasskeyName, createEnsLookup, resolveExamName, type ExamNameResult } from '@paperseal/chain';
 import { createSwarmClient } from '@paperseal/swarm';
 import { ownerEnsName, roles, toHex, type Hex, type Paper } from '@paperseal/protocol';
-import {
-  Button,
-  Check,
-  Field,
-  LoadingSeal,
-  Panel,
-  RoleHeader,
-  Seal,
-  Stepper,
-  type SealState,
-  type Step,
-  useLoaded,
-} from '@paperseal/ui';
+import { Button, Check, CopyButton, Field, Hash, LoadingSeal, PrimaryAction, RoleHeader, Seal, type SealState, useLoaded } from '@paperseal/ui';
 import { approvedEntries, createBackupCache, createStorage, loadChain, type BackupSource, type ChainData } from '@paperseal/verify';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { http } from 'viem';
 
-import { AgentCheck } from './agent-check';
+import { AgentCheck, agentCheckPrompt } from './agent-check';
 import { RecentExams } from './history-page';
-import { clockTime, custody, dayTime, REPOSITORY, type Custody, type CustodyStep, type Failure, type PartyName } from './custody';
+import { clockTime, custody, dayTime, REPOSITORY, type AsideHash, type Custody, type CustodyStep, type Failure, type PartyName, type ReleaseCount } from './custody';
 import { Evidence } from './evidence';
-import { checkedCopies, copies, people, timeline, type Copies, type People } from './facts';
+import { copies, people, timeline, type People } from './facts';
 import { readBoardName, readExamName, readVersion } from './identity';
 import { useExamLink, useShareAddress } from './link';
 import { useLatestRound, useNow } from './live';
 import { loadArkiv, loadLive, loadRecords, releaseRecorded, roundReached, signedKeyPriv, useProof, withinTime, type Records } from './load';
 import { eachLimited } from './history';
 import { READ_TIMEOUT_MS, usePoll, type Polled } from './poll';
-import { CopiesSection, Glance, IdentitySection, PeopleSection, TimelineSection } from './sections';
+import { momentNotes, renumbered, shownFailures, shownNumbers, shownOrder } from './record';
+import { ClockFold, EvidenceSection, MachineRow, PeopleSection, RecordFold, Section } from './sections';
 import { loadSwarm } from './swarm';
 import {
   arkivWriters,
@@ -349,33 +338,6 @@ function SealMark({ state, empty }: { state: SealState | null; empty: string }) 
   );
 }
 
-/**
- * The same shape as `Stage`, because `Stage` can only show a seal in one of its three states, and
- * before the paper is sealed this page has to show that there is no seal yet.
- */
-function Head({ view, chosen, agent }: { view: Custody; chosen: boolean; agent: ReactNode }) {
-  return (
-    <section className="ps-stage" data-sealed={chosen ? 'true' : undefined}>
-      <div className="ps-stage-main">
-        <h1 className="ps-stage-title">{view.headline}</h1>
-        <div className="ps-stage-lede">
-          <p>{view.verdict}</p>
-        </div>
-        {agent}
-        <p className="ps-stage-next">
-          <span className="ps-stage-next-label">What happens next</span>
-          <span>{view.next}</span>
-        </p>
-      </div>
-      {chosen ? (
-        <div className="ps-stage-seal">
-          <SealMark state={view.seal} empty={view.noSeal} />
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
 /** The address to share: the exam's name once it has passed, and otherwise its ID. */
 function shareLinkOf(examId: Hex, name: string | null): string {
   const here = globalThis.location as Location | undefined;
@@ -383,14 +345,130 @@ function shareLinkOf(examId: Hex, name: string | null): string {
   return name ? `${base}#/name/${name}` : `${base}?exam=${examId}`;
 }
 
-function glanceOf(board: string | null, found: People | null, held: Copies | null): { label: string; value: string }[] {
-  const released = found ? [...found.holders, ...found.centres].filter((person) => person.released).length : 0;
-  const places = checkedCopies(held);
+interface Fact {
+  label: string;
+  value: string;
+  /** Set when the value is an address: it shows short and copyable, so it fits the column. */
+  hashLabel?: string;
+}
+
+/** The few facts under the verdict, each only once the page knows it. */
+function factsOf(args: { start: number | null; board: string | null; found: People | null; releases: ReleaseCount | undefined; checked: string | null; zone: string | undefined }): Fact[] {
+  const { start, board, found, releases, checked, zone } = args;
+  const approved = found ? found.holders.length + found.centres.length + found.setters.length : null;
   return [
-    ...(board ? [{ label: 'Run by', value: board }] : []),
-    ...(found ? [{ label: 'People', value: `${String(found.holders.length)} key holders, ${String(found.centres.length)} centres${released > 0 ? `, ${String(released)} released` : ''}` }] : []),
-    ...(held ? [{ label: 'Record of releases', value: places === 0 ? 'No copy checked yet' : `Checked in ${String(places)} ${places === 1 ? 'place' : 'places'}` }] : []),
+    ...(start === null ? [] : [{ label: 'Exam', value: dayTime(start, zone) }]),
+    // A board with no name is shown by its account, which is evidence, so it stays whole one tap away.
+    ...(board ? [{ label: 'Run by', value: board, ...(/^0x[0-9a-fA-F]{40}$/.test(board) ? { hashLabel: 'exam board account' } : {}) }] : []),
+    ...(approved === null ? [] : [{ label: 'People', value: `${String(approved)} approved` }]),
+    // The same count step 6's note gives, so the two can't disagree.
+    ...(releases ? [{ label: 'Key releases', value: `${String(releases.count)} of ${String(releases.required)}` }] : []),
+    ...(checked ? [{ label: 'Last checked', value: checked }] : []),
   ];
+}
+
+function Facts({ facts }: { facts: readonly Fact[] }) {
+  if (facts.length === 0) return null;
+  return (
+    <dl className="vf-facts">
+      {facts.map((fact) => (
+        <div key={fact.label}>
+          <dt>{fact.label}</dt>
+          <dd>{fact.hashLabel ? <Hash value={fact.value} label={fact.hashLabel} /> : fact.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/** Scrolls to a section and moves focus there, so a keyboard or screen reader follows. */
+function goTo(id: string) {
+  const target = document.getElementById(id);
+  if (!target) return;
+  const still = globalThis.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  target.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'start' });
+  target.focus({ preventScroll: true });
+}
+
+/**
+ * The page's contents, which follow the reader so the left column always says where they are. The
+ * links never change the address: its hash is the page's route.
+ */
+function SectionNav({ sections }: { sections: readonly { id: string; title: string }[] }) {
+  const ids = sections.map((section) => section.id).join(' ');
+  const [current, setCurrent] = useState<string | null>(null);
+  useEffect(() => {
+    const targets = ids.split(' ').flatMap((id) => document.getElementById(id) ?? []);
+    if (targets.length === 0 || !('IntersectionObserver' in globalThis)) return;
+    const seen = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) if (entry.isIntersecting) setCurrent(entry.target.id);
+      },
+      { rootMargin: '-30% 0px -60% 0px' },
+    );
+    for (const target of targets) seen.observe(target);
+    return () => {
+      seen.disconnect();
+    };
+  }, [ids]);
+  const shown = current ?? sections[0]?.id;
+  return (
+    <nav className="vf-toc" aria-label="On this page">
+      <ol>
+        {sections.map((section) => (
+          <li key={section.id}>
+            <a
+              href={`#${section.id}`}
+              aria-current={shown === section.id ? 'location' : undefined}
+              onClick={(event) => {
+                event.preventDefault();
+                setCurrent(section.id);
+                goTo(section.id);
+              }}
+            >
+              {section.title}
+            </a>
+          </li>
+        ))}
+      </ol>
+    </nav>
+  );
+}
+
+/**
+ * The verdict, which stays in view while the record scrolls: the seal, the headline, what happens
+ * next, a few facts and the ways on. Before the paper is sealed it shows that there is no seal yet.
+ */
+function Verdict(props: { view: Custody; facts: readonly Fact[]; stale: ReactNode; actions: ReactNode; agent: ReactNode; nav: ReactNode }) {
+  const { view } = props;
+  const box = useRef<HTMLDivElement>(null);
+  // Its height sets where it sticks, so a tall verdict holds by its foot rather than running off the window.
+  useEffect(() => {
+    const node = box.current;
+    if (!node || !('ResizeObserver' in globalThis)) return;
+    const measure = new ResizeObserver(() => {
+      node.style.setProperty('--vf-verdict-height', `${String(node.offsetHeight)}px`);
+    });
+    measure.observe(node);
+    return () => {
+      measure.disconnect();
+    };
+  }, []);
+  return (
+    <div className="vf-verdict" ref={box}>
+      <SealMark state={view.seal} empty={view.noSeal} />
+      <h1 className="vf-headline">{view.headline}</h1>
+      <p className="vf-lede">{view.verdict}</p>
+      <p className="vf-next">
+        <span className="ps-sr">What happens next</span> <span>{view.next}</span>
+      </p>
+      <Facts facts={props.facts} />
+      {props.stale}
+      {props.actions}
+      {props.agent}
+      {props.nav}
+    </div>
+  );
 }
 
 function FailureAlarm({ failures }: { failures: readonly Failure[] }) {
@@ -423,50 +501,101 @@ function Warnings({ warnings }: { warnings: readonly string[] }) {
   );
 }
 
-function When({ step, now }: { step: CustodyStep; now: number }) {
-  if (step.at === null) return null;
+/** An aside, with any address it quotes shortened to a copyable hash so it fits on a phone. */
+function Aside({ text, hash }: { text: string; hash: AsideHash | undefined }) {
+  const at = hash ? text.indexOf(hash.value) : -1;
+  if (!hash || at < 0) return <>{text}</>;
   return (
-    <span className="vf-when">
-      <span>{clockTime(step.at, now)}</span>
-    </span>
+    <>
+      {text.slice(0, at)}
+      <Hash value={hash.value} label={hash.label} />
+      {text.slice(at + hash.value.length)}
+    </>
   );
 }
 
-function toStep(step: CustodyStep, now: number): Step {
-  const when = <When step={step} now={now} />;
-  const note =
-    step.failures.length > 0 ? (
-      <span className="vf-step-failures">
-        {step.failures.map((failure) => (
-          <Check key={failure} status="fail">
-            {failure}
-          </Check>
-        ))}
-      </span>
-    ) : (
-      step.note
-    );
-  return {
-    id: step.id,
-    label: `${String(step.number)}. ${step.label}`,
-    state: step.state,
-    ...(step.at === null ? {} : { when }),
-    note: step.aside ? (
-      <>
-        {note}
-        <span className="vf-aside">{step.aside}</span>
-      </>
-    ) : (
-      note
-    ),
-    evidence: <Evidence items={step.items} />,
-  };
+const STATE_WORDS: Record<CustodyStep['state'], string> = {
+  done: 'Done',
+  current: 'In progress',
+  waiting: 'Waiting',
+  failed: 'Failed',
+  'not-applicable': 'Not applicable',
+};
+
+function Chevron() {
+  return (
+    <svg className="vf-chevron" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true" focusable="false">
+      <path d="M4 6l4 4 4-4" />
+    </svg>
+  );
 }
 
-function PaperView({ paper }: { paper: Paper }) {
+/**
+ * One step: its number on the rail, what happened, when, and its state in words. The whole line opens
+ * the evidence. A step's shape and word say its state, so nothing rests on colour.
+ */
+function StepRow(props: { step: CustodyStep; next: CustodyStep | undefined; now: number; numbers: ReadonlyMap<number, number>; moment: string | undefined; extra: ReactNode }) {
+  const { step, now, numbers, moment } = props;
+  // An aside that quotes an address holds a button, which can't sit inside the line that opens the step.
+  const asideInLine = step.aside && !step.asideHash ? step.aside : null;
+  const asideInProof = step.aside && step.asideHash ? step.aside : null;
+  return (
+    <li className="vf-step" data-state={step.state} data-next={props.next?.state} aria-current={step.state === 'current' ? 'step' : undefined}>
+      <details>
+        <summary>
+          <span className="vf-step-mark" aria-hidden="true">
+            {step.number}
+          </span>
+          <span className="vf-step-body">
+            <span className="vf-step-label">{step.label}</span>
+            {step.failures.length > 0 ? (
+              <span className="vf-step-failures">
+                {step.failures.map((failure) => (
+                  <Check key={failure} status="fail">
+                    {renumbered(failure, numbers)}
+                  </Check>
+                ))}
+              </span>
+            ) : (
+              <span className="vf-step-note">{step.note}</span>
+            )}
+            {moment ? <span className="vf-step-note">{moment}</span> : null}
+            {asideInLine ? <span className="vf-aside">{asideInLine}</span> : null}
+          </span>
+          <span className="vf-step-side">
+            {step.at === null ? null : <span className="vf-step-time">{clockTime(step.at, now)}</span>}
+            <span className={step.state === 'done' ? 'ps-sr' : 'vf-step-word'}>{STATE_WORDS[step.state]}</span>
+          </span>
+          <Chevron />
+        </summary>
+        <div className="vf-proof">
+          {asideInProof ? (
+            <p className="vf-evidence-text">
+              <Aside text={asideInProof} hash={step.asideHash} />
+            </p>
+          ) : null}
+          {props.extra}
+          <Evidence items={step.items} />
+        </div>
+      </details>
+    </li>
+  );
+}
+
+const sheetDate = (seconds: number, timeZone?: string) =>
+  new Intl.DateTimeFormat('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', ...(timeZone ? { timeZone } : {}) })
+    .format(seconds * 1000)
+    .replace(',', '');
+
+/** The opened paper, set as one printed sheet: subjects as headings, questions numbered, options lettered. */
+function PaperSheet({ paper, start, zone }: { paper: Paper; start: number | null; zone: string | undefined }) {
   const topics = [...new Set(paper.questions.map((q) => q.topic))];
   return (
-    <Panel title="The paper">
+    <article className="vf-sheet" aria-label="Question paper">
+      <header>
+        <strong>Question paper</strong>
+        {start === null ? null : <span>{sheetDate(start, zone)}</span>}
+      </header>
       {topics.map((topic) => (
         <section key={topic}>
           <h3>{topic}</h3>
@@ -488,20 +617,18 @@ function PaperView({ paper }: { paper: Paper }) {
           </ol>
         </section>
       ))}
-    </Panel>
+    </article>
   );
 }
 
-function Freshness({ records, zone }: { records: Polled<Records>; zone: string }) {
+/** When the record was last read, or why this shows an older read. */
+function freshness(records: Polled<Records>, zone: string): { time: string; stale: string | null } | null {
   if (records.state !== 'ready') return null;
   const time = new Intl.DateTimeFormat('en-GB', { timeStyle: 'medium' }).format(records.readAt);
-  return (
-    <p className="vf-fresh">
-      {records.stale
-        ? `The public record could not be read again, so this shows what it said at ${time}. This page keeps trying. Times are in ${zone}.`
-        : `Last read at ${time}. Times are in ${zone}.`}
-    </p>
-  );
+  return {
+    time: `${time}, ${zone}`,
+    stale: records.stale ? `The public record could not be read again, so this shows what it said at ${time}. This page keeps trying. Times are in ${zone}.` : null,
+  };
 }
 
 function ExamPicker({ current, invalid }: { current: boolean; invalid: boolean }) {
@@ -654,16 +781,63 @@ const zoneName = () =>
   new Intl.DateTimeFormat('en-GB', { timeZoneName: 'short' }).formatToParts(0).find((part) => part.type === 'timeZoneName')?.value ??
   'local time';
 
+/** Notices that something could not be read. Nothing has failed, and the page keeps trying. */
+function ReadNotices({ view }: { view: ReturnType<typeof useExamView> }) {
+  return (
+    <>
+      {view.records.state === 'error' ? (
+        <p className="vf-gap">
+          <Check status="not-checked">
+            The public record could not be read. This page keeps trying.
+            <details>
+              <summary>Details</summary>
+              {view.records.message}
+            </details>
+          </Check>
+        </p>
+      ) : null}
+      {view.latest.error && view.latest.round === null ? (
+        <p className="vf-gap">
+          <Check status="not-checked">
+            The public clock could not be reached, so times come from this device&apos;s clock. Nothing opens early because of this.
+          </Check>
+        </p>
+      ) : null}
+    </>
+  );
+}
+
+/** The quiet close of every page: how to check without trusting this one. */
+function CheckYourself({ needsConnection, children }: { needsConnection: boolean; children?: ReactNode }) {
+  return (
+    <section className="vf-section vf-closing">
+      <h2>Check it yourself</h2>
+      <p>
+        You don&apos;t have to trust this page, or whoever hosts it. It needs no account, and everything it reads is public, so you
+        can read the same records from a source you choose, or{' '}
+        <a href={`https://github.com/${REPOSITORY}`} target="_blank" rel="noreferrer">
+          host your own copy
+        </a>
+        . Your choices stay in this browser.
+      </p>
+      <OwnConnection open={needsConnection} />
+      {children}
+    </section>
+  );
+}
+
 /** The public verifier: one chain of custody for one exam, and no sign-in. */
 export function VerifierPage(props: { pollMs?: { records: number; live: number; proofRetry?: number; finished?: number } }) {
   const view: ReturnType<typeof useExamView> & { timeZone?: string } = useExamView(props.pollMs ?? { records: RECORDS_POLL_MS, live: LIVE_POLL_MS });
   const result = custody(view);
-  const start = view.records.state === 'ready' ? view.records.value.chain.exam?.settings.examStart : undefined;
-  const on = start === undefined ? undefined : dayTime(Number(start));
+  const startRecorded = view.records.state === 'ready' ? view.records.value.chain.exam?.settings.examStart : undefined;
+  const start = startRecorded === undefined ? null : Number(startRecorded);
+  const on = start === null ? undefined : dayTime(start);
   // The name shows only once it has passed, so the header never vouches for a name that failed.
   const passedName = result.steps.find((step) => step.id === 'name')?.state === 'done' ? view.name?.name : undefined;
   const exam = passedName ? (on ? `${passedName}, on ${on}` : passedName) : on ? `Exam on ${on}` : undefined;
   const chosen = view.examId !== null || view.name !== undefined;
+  const agentReady = chosen ? agentCheckPrompt({ examId: view.examId, registry: view.agent.registry, storageUrl: view.agent.storageUrl }) : null;
   const zone = view.timeZone;
   const recordedExam = view.records.state === 'ready' ? view.records.value.chain.exam : null;
   const found = people(view);
@@ -683,85 +857,119 @@ export function VerifierPage(props: { pollMs?: { records: number; live: number; 
       </div>
     );
   }
+
+  if (!chosen) {
+    return (
+      <div className="ps-shell vf-page">
+        <RoleHeader role="Public record" />
+        <main className="vf-single">
+          <section className="vf-start">
+            <h1 className="vf-headline">{result.headline}</h1>
+            <p className="vf-lede">{result.verdict}</p>
+            <p className="vf-next">
+              <span className="ps-sr">What happens next</span> <span>{result.next}</span>
+            </p>
+            <ReadNotices view={view} />
+            <ExamPicker current={false} invalid={view.invalidLink} />
+          </section>
+          {/* Its own link goes to the full history, so the box above needs none. */}
+          <RecentExams />
+          <CheckYourself needsConnection={needsConnection} />
+        </main>
+      </div>
+    );
+  }
+
+  const shown = shownOrder(result.steps);
+  const numbers = shownNumbers(result.steps, shown);
+  const notes = momentNotes(moments);
+  const zoneWords = zoneName();
+  const fresh = freshness(view.records, zoneWords);
+  const examName = view.openedName ?? (view.identity.examName.state === 'ready' ? view.identity.examName.value.name : null);
+  const shareLink = view.examId ? shareLinkOf(view.examId, examName) : null;
+  const releases = result.steps.find((step) => step.id === 'unlock')?.releases;
+  const sections = [
+    { id: 'vf-steps', title: 'How it ran' },
+    ...(result.paper ? [{ id: 'vf-paper', title: 'The paper' }] : []),
+    ...(found ? [{ id: 'vf-people', title: 'People' }] : []),
+    ...(held ? [{ id: 'vf-evidence', title: 'Evidence' }] : []),
+  ];
+  const record =
+    recordedExam && view.examId && view.registryAddress ? (
+      <RecordFold examId={view.examId} registry={view.registryAddress} commit={recordedExam.commitHash} imageDigest={recordedExam.imageDigest} />
+    ) : null;
+
   return (
     <div className="ps-shell vf-page">
-      <RoleHeader role="Public record" {...(exam ? { exam } : {})} />
-      <main>
-        <FailureAlarm failures={result.failures} />
-        <Warnings warnings={result.warnings} />
-        <Head
+      <RoleHeader role="Public record" {...(exam ? { exam } : {})} note={<Link to="/">Check another exam</Link>} />
+      <main className="vf-columns">
+        <Verdict
           view={result}
-          chosen={chosen}
-          // The AI check needs an exam, so the start page leaves it out rather than showing it disabled.
-          agent={chosen ? <AgentCheck examId={view.examId} registry={view.agent.registry} storageUrl={view.agent.storageUrl} /> : null}
+          facts={factsOf({ start, board: boardLabel, found, releases, checked: fresh?.time ?? null, zone })}
+          stale={fresh?.stale ? <p className="vf-fresh">{fresh.stale}</p> : null}
+          actions={
+            result.paper || shareLink ? (
+              <div className="vf-actions">
+                {result.paper ? (
+                  <PrimaryAction
+                    onClick={() => {
+                      goTo('vf-paper');
+                    }}
+                  >
+                    Read the paper
+                  </PrimaryAction>
+                ) : null}
+                {shareLink ? <CopyButton text={shareLink}>Copy link</CopyButton> : null}
+              </div>
+            ) : null
+          }
+          // The AI check shows only when it can run: not over plain http.
+          agent={agentReady?.ok ? <AgentCheck prompt={agentReady.text} /> : null}
+          nav={<SectionNav sections={sections} />}
         />
-        <Glance items={recordedExam ? glanceOf(boardLabel, found, held) : []} />
-        {view.records.state === 'error' ? (
-          <p className="vf-gap">
-            <Check status="not-checked">
-              The public record could not be read. This page keeps trying.
-              <details>
-                <summary>Details</summary>
-                {view.records.message}
-              </details>
-            </Check>
-          </p>
-        ) : null}
-        {view.latest.error && view.latest.round === null ? (
-          <p className="vf-gap">
-            <Check status="not-checked">
-              The public clock could not be reached, so times come from this device&apos;s clock. Nothing opens early because of this.
-            </Check>
-          </p>
-        ) : null}
-        {chosen ? (
-          <Stepper steps={result.steps.map((step) => toStep(step, view.now))} evidenceLabel="Show the evidence" />
-        ) : (
-          <>
-            <section className="ps-panel vf-choose">
-              <ExamPicker current={false} invalid={view.invalidLink} />
-            </section>
-            {/* Its own link goes to the full history, so the box above needs none. */}
-            <RecentExams />
-          </>
-        )}
-        <Freshness records={view.records} zone={zoneName()} />
-        {recordedExam && view.examId && view.registryAddress ? (
-          <IdentitySection
-            examId={view.examId}
-            board={view.board}
-            registry={view.registryAddress}
-            commit={recordedExam.commitHash}
-            imageDigest={recordedExam.imageDigest}
-            boardName={view.identity.boardName}
-            examName={view.identity.examName}
-            openedName={view.openedName}
-            version={view.identity.version}
-            shareLink={shareLinkOf(view.examId, view.openedName ?? (view.identity.examName.state === 'ready' ? view.identity.examName.value.name : null))}
-          />
-        ) : null}
-        {found ? <PeopleSection found={found} zone={zone} /> : null}
-        {moments.length > 0 ? <TimelineSection moments={moments} zone={zone} /> : null}
-        {held ? <CopiesSection found={held} zone={zone} view={view} onRetry={view.retryCopies} /> : null}
-        {result.paper ? <PaperView paper={result.paper} /> : null}
-        {chosen ? (
-          <Panel title="Check a different exam">
+        <div className="vf-record">
+          <FailureAlarm failures={shownFailures(result.failures, numbers)} />
+          <Warnings warnings={result.warnings} />
+          <ReadNotices view={view} />
+          <Section id="vf-steps" title="How it ran" intro="Each step of this exam, as the public record shows it. Open a step to see its evidence.">
+            <ol className="vf-steps" aria-label="Steps for this exam">
+              {shown.map((step, at) => (
+                <StepRow
+                  key={step.id}
+                  step={step}
+                  next={shown[at + 1]}
+                  now={view.now}
+                  numbers={numbers}
+                  moment={notes.get(step.id)}
+                  extra={step.id === 'published' && recordedExam ? <MachineRow version={view.identity.version} /> : null}
+                />
+              ))}
+            </ol>
+            <p className="vf-foot">Times are in {zoneWords}.</p>
+            {moments.length > 0 ? <ClockFold moments={moments} /> : null}
+          </Section>
+          {result.paper ? (
+            <Section id="vf-paper" title="The paper" intro="The paper as it was opened after the exam. It matches the paper sealed before the exam.">
+              <PaperSheet paper={result.paper} start={start} zone={zone} />
+            </Section>
+          ) : null}
+          {found ? (
+            <PeopleSection
+              found={found}
+              zone={zone}
+              board={view.board}
+              boardName={view.identity.boardName}
+              examName={view.identity.examName}
+              openedName={view.openedName}
+            />
+          ) : null}
+          {held ? <EvidenceSection found={held} zone={zone} view={view} onRetry={view.retryCopies} record={record} /> : record}
+          <CheckYourself needsConnection={needsConnection}>
+            <h3>Check a different exam</h3>
             <ExamPicker current invalid={false} />
             <HistoryLink />
-          </Panel>
-        ) : null}
-        <section className="ps-panel vf-self-host">
-          <h2>Check it yourself</h2>
-          <p>
-            You don&apos;t have to trust this page, or whoever hosts it. It needs no account, and everything it reads is public, so
-            you can read the same records from a source you choose, or{' '}
-            <a href={`https://github.com/${REPOSITORY}`} target="_blank" rel="noreferrer">
-              host your own copy
-            </a>
-            . Your choices stay in this browser.
-          </p>
-          <OwnConnection open={needsConnection} />
-        </section>
+          </CheckYourself>
+        </div>
       </main>
     </div>
   );

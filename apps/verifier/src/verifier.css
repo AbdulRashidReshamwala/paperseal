@@ -1,23 +1,330 @@
-/* What only the public verifier needs. Layout comes from @paperseal/ui, and every value is a token. */
+/* What only the public verifier needs. Every colour, type size and radius is a token; the rest are layout measures. */
+
+/* ---- The page ----
+ * The verifier is read on wide screens as often as on phones. On an exam the verdict holds still on
+ * the left while the record scrolls on the right; below 900px it is one column, the verdict first. */
 
 .vf-page {
+  --vf-tint-bad: color-mix(in srgb, var(--ps-fail) 9%, var(--ps-field));
+  --vf-tint-warn: color-mix(in srgb, var(--ps-pending) 10%, var(--ps-field));
+  /* The seal's art box. The wax sits inside a clear margin, trimmed below so it meets the text edge. */
+  --vf-s: 96px;
+  --vf-headline: 2.75rem;
+  /* Sections sit twelve 8px steps apart, and things inside them three. */
+  --vf-between: calc(2 * var(--ps-space-7));
+  --vf-inside: var(--ps-space-5);
+  /* The step marker, and the point on it the rail runs through. */
+  --vf-mark: 26px;
+  --vf-mid: calc(var(--ps-space-4) + var(--vf-mark) / 2);
+
   overflow-wrap: anywhere;
 }
 
-/* The loudest thing on the page. Not wax: a seal is good news, and this is not. */
+.ps-shell.vf-page {
+  max-width: 1200px;
+  padding: var(--ps-space-5) var(--ps-space-7) 160px;
+}
+
+.vf-columns {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: var(--vf-between);
+  align-items: start;
+  padding-top: var(--ps-space-2);
+}
+
+/* A page with no exam is one column at a reading width, under the same letterhead. */
+.vf-single {
+  max-width: 720px;
+}
+
+@media (max-width: 899px) {
+  .vf-page {
+    --vf-s: 72px;
+    --vf-headline: 2.25rem;
+    --vf-between: calc(var(--ps-space-7) + var(--ps-space-5));
+  }
+
+  .ps-shell.vf-page {
+    padding: var(--ps-space-4) var(--ps-space-4) var(--vf-between);
+  }
+
+  .vf-columns {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--ps-space-7);
+    padding-top: 0;
+  }
+}
+
+/* ---- The verdict ---- */
+
+.vf-verdict {
+  position: sticky;
+  /* A verdict taller than the window scrolls with the page until its foot is in view, then holds
+   * there, so the contents at its foot are never out of reach. The page measures its height. */
+  top: min(var(--ps-space-7), calc(100dvh - var(--vf-verdict-height, 0px) - var(--ps-space-7)));
+}
+
+@media (max-width: 899px) {
+  .vf-verdict {
+    position: static;
+  }
+
+  .vf-verdict .vf-headline {
+    margin-top: var(--ps-space-5);
+  }
+}
+
+/*
+ * The seal and its word sit side by side as one lockup, with the wax's left edge on the column's edge.
+ * seal.svg's wax spans x 77–427 and y 71–479 of its 512 box, and Seal draws that art 136 units wide
+ * from (-8, -15) in a 120 box. So the svg is sized to make the art --vf-s wide, and its margins trim
+ * the clear edge on every side.
+ */
+.vf-verdict .ps-seal,
+.vf-no-seal {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin: 0;
+}
+
+.vf-verdict .ps-seal svg {
+  flex: none;
+  width: calc(var(--vf-s) * 120 / 136);
+  height: calc(var(--vf-s) * 120 / 136);
+  margin: calc(var(--vf-s) * (15 / 136 - 71 / 512)) calc(var(--vf-s) * (8 / 136 - 85 / 512)) calc(var(--vf-s) * (1 / 136 - 33 / 512))
+    calc(var(--vf-s) * (8 / 136 - 77 / 512));
+}
+
+.vf-verdict .ps-seal figcaption,
+.vf-no-seal figcaption {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: normal;
+}
+
+/* The place where the wax will go, the size of the wax it waits for. It has no clear edge to trim. */
+.vf-no-seal {
+  color: var(--ps-ink-soft);
+}
+
+.vf-no-seal-ring {
+  flex: none;
+  width: calc(var(--vf-s) * 0.68);
+  aspect-ratio: 1;
+  border: 2px dashed var(--ps-rule-strong);
+  border-radius: 50%;
+}
+
+/* The header's seal art has the same clear edge, enlarged 1.32 about its centre by the wordmark, so
+ * the logo, the seal and the headline share one left edge. */
+.vf-page .ps-wordmark img.ps-logo {
+  margin-left: calc(32px * (0.16 - 1.32 * 77 / 512));
+}
+
+.vf-headline {
+  margin: var(--ps-space-7) 0 var(--ps-space-4);
+  font-family: var(--ps-display);
+  font-size: var(--vf-headline);
+  line-height: 1.08;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+  overflow-wrap: normal;
+}
+
+.vf-lede {
+  margin: 0;
+  font-size: var(--ps-text-lede);
+  line-height: 1.45;
+}
+
+/* What comes next reads as a second lede. Its label is there for screen readers only. */
+.vf-next {
+  margin: var(--ps-space-3) 0 0;
+  color: var(--ps-ink-soft);
+}
+
+.vf-facts {
+  margin: var(--ps-space-6) 0 0;
+}
+
+.vf-facts > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--ps-space-4);
+  align-items: baseline;
+  justify-content: space-between;
+  padding-block: var(--ps-space-3);
+  border-top: 1px solid var(--ps-rule);
+}
+
+.vf-facts > div:last-child {
+  border-bottom: 1px solid var(--ps-rule);
+}
+
+.vf-facts dt {
+  color: var(--ps-ink-soft);
+}
+
+.vf-facts dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+}
+
+.vf-fresh {
+  margin: var(--ps-space-3) 0 0;
+  font-size: var(--ps-text-meta);
+  color: var(--ps-ink-soft);
+}
+
+.vf-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-2);
+  align-items: flex-start;
+  margin-top: var(--vf-inside);
+}
+
+.vf-actions .ps-primary,
+.vf-actions .ps-button,
+.vf-agent .ps-button {
+  width: auto;
+  min-height: 44px;
+}
+
+/* A copy that failed prints the link to select, on its own line. */
+.vf-actions .ps-copy {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-2);
+}
+
+.vf-actions .ps-copy > :not(.ps-button) {
+  flex-basis: 100%;
+}
+
+/* "Check with your own AI": a quiet tool under the verdict. The repository stays in sight beside it. */
+.vf-agent {
+  display: grid;
+  gap: var(--ps-space-2);
+  margin-top: var(--ps-space-3);
+}
+
+.vf-agent-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-2) var(--ps-space-3);
+  align-items: center;
+}
+
+.vf-agent-repo {
+  font-size: var(--ps-text-meta);
+  color: var(--ps-ink-soft);
+}
+
+.vf-agent-text summary {
+  width: fit-content;
+  min-height: 24px;
+  font-size: var(--ps-text-meta);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--ps-rule-strong);
+  text-underline-offset: 3px;
+}
+
+/* The contents. A longer, darker rule marks the section in view. */
+.vf-toc ol {
+  padding: 0;
+  margin: var(--ps-space-7) 0 0;
+  list-style: none;
+}
+
+.vf-toc li + li {
+  margin-top: var(--ps-space-1);
+}
+
+.vf-toc a {
+  display: inline-flex;
+  gap: var(--ps-space-3);
+  align-items: center;
+  min-height: 28px;
+  color: var(--ps-ink-soft);
+  text-decoration: none;
+}
+
+.vf-toc a::before {
+  width: var(--ps-space-4);
+  height: 1px;
+  content: '';
+  background: var(--ps-rule-strong);
+}
+
+.vf-toc a:hover,
+.vf-toc a[aria-current] {
+  color: var(--ps-ink);
+}
+
+.vf-toc a[aria-current]::before {
+  width: 28px;
+  background: var(--ps-ink);
+}
+
+@media (max-width: 899px) {
+  .vf-toc {
+    display: none;
+  }
+}
+
+/* ---- The record ---- */
+
+.vf-section {
+  scroll-margin-top: var(--ps-space-7);
+}
+
+.vf-section + .vf-section {
+  margin-top: var(--vf-between);
+}
+
+.vf-section h2,
+.vf-single .ps-panel h2 {
+  margin: 0;
+  font-size: var(--ps-text-title);
+  line-height: 1.2;
+}
+
+.vf-intro {
+  max-width: 58ch;
+  margin: var(--ps-space-2) 0 var(--vf-inside);
+  color: var(--ps-ink-soft);
+}
+
+.vf-foot {
+  margin: var(--ps-space-4) 0 0;
+  font-size: var(--ps-text-meta);
+  color: var(--ps-ink-soft);
+}
+
+.vf-gap {
+  margin: 0 0 var(--ps-space-4);
+}
+
+/* The loudest thing on the page. Not wax: a seal is good news, and this is not. A failure is a
+ * tinted block with a heavy left rule, so it can't be mistaken for the certificate even side by side. */
 .vf-alarm {
   padding: var(--ps-space-4) var(--ps-space-5);
-  margin-bottom: var(--ps-space-5);
+  margin-bottom: var(--ps-space-7);
   color: var(--ps-fail);
-  background: var(--ps-field);
+  background: var(--vf-tint-bad);
   border: 1px solid var(--ps-fail);
-  border-radius: 8px;
+  border-inline-start-width: 5px;
+  border-radius: var(--ps-radius);
 }
 
 .vf-alarm h2 {
   margin: 0 0 var(--ps-space-2);
   font-size: var(--ps-text-section);
-  font-weight: 400;
   line-height: 1.3;
 }
 
@@ -34,64 +341,151 @@
   display: grid;
   gap: var(--ps-space-2);
   padding: var(--ps-space-3) var(--ps-space-5);
-  margin: 0 0 var(--ps-space-5);
-  font-size: var(--ps-text-small);
+  margin: 0 0 var(--ps-space-7);
+  font-size: var(--ps-text-meta);
   font-weight: 600;
   color: var(--ps-pending);
   list-style: none;
-  background: var(--ps-field);
+  background: var(--vf-tint-warn);
   border: 1px solid var(--ps-pending);
-  border-radius: 8px;
+  border-inline-start-width: 5px;
+  border-radius: var(--ps-radius);
 }
 
-.vf-fresh {
-  margin: var(--ps-space-3) 0 var(--ps-space-6);
-  font-size: var(--ps-text-small);
-  color: var(--ps-ink-soft);
+.vf-alarm + .vf-warnings {
+  margin-top: calc(-1 * var(--ps-space-5));
 }
 
-.vf-gap {
-  margin: 0 0 var(--ps-space-4);
-}
+/* ---- How it ran ----
+ * One line per step on a rail, the proof folded inside. The rail runs from the first marker to the
+ * last: green between steps that are done, dashed into steps still to come. */
 
-/* The place on the envelope where the wax will go. */
-.vf-no-seal {
-  display: grid;
-  gap: var(--ps-space-2);
-  place-items: center;
-  width: 112px;
+.vf-steps {
+  padding: 0;
   margin: 0;
-  font-size: var(--ps-text-small);
-  color: var(--ps-ink-soft);
-  text-align: center;
+  list-style: none;
+  border-top: 1px solid var(--ps-ink);
 }
 
-.vf-no-seal-ring {
-  width: 84px;
-  height: 84px;
-  margin-block: 14px;
-  border: 2px dashed var(--ps-rule-strong);
+.vf-step {
+  position: relative;
+}
+
+.vf-step + .vf-step {
+  background: linear-gradient(var(--ps-rule), var(--ps-rule)) no-repeat calc(var(--vf-mark) + var(--ps-space-4)) 0 / calc(100% - var(--vf-mark) - var(--ps-space-4)) 1px;
+}
+
+.vf-step::before,
+.vf-step::after {
+  position: absolute;
+  left: calc(var(--vf-mark) / 2 - 1px);
+  content: '';
+  border-left: 2px solid var(--ps-pass);
+}
+
+/* Into this step, then on to the next, each in the colour of the step it reaches. */
+.vf-step::before {
+  top: 0;
+  height: var(--vf-mid);
+}
+
+.vf-step::after {
+  top: var(--vf-mid);
+  bottom: 0;
+}
+
+.vf-step:first-child::before,
+.vf-step:last-child::after {
+  content: none;
+}
+
+.vf-step[data-state='current']::before,
+.vf-step[data-next='current']::after {
+  border-left-color: var(--ps-rule-strong);
+}
+
+.vf-step[data-state='waiting']::before,
+.vf-step[data-next='waiting']::after,
+.vf-step[data-state='not-applicable']::before,
+.vf-step[data-next='not-applicable']::after {
+  border-left-style: dashed;
+  border-left-color: var(--ps-rule-strong);
+}
+
+.vf-step[data-state='failed']::before,
+.vf-step[data-next='failed']::after {
+  border-left-color: var(--ps-fail);
+}
+
+.vf-step summary {
+  display: grid;
+  grid-template-areas: 'mark body side chev';
+  grid-template-columns: var(--vf-mark) minmax(0, 1fr) auto 16px;
+  gap: var(--ps-space-1) var(--ps-space-4);
+  align-items: start;
+  padding-block: var(--ps-space-4);
+  cursor: pointer;
+  list-style: none;
+}
+
+.vf-step summary::-webkit-details-marker {
+  display: none;
+}
+
+.vf-step-mark {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-area: mark;
+  place-items: center;
+  width: var(--vf-mark);
+  height: var(--vf-mark);
+  font: 600 var(--ps-text-meta) / 1 var(--ps-sans);
+  font-variant-numeric: tabular-nums;
+  color: var(--ps-ink-soft);
+  background: var(--ps-paper);
+  border: 2px solid var(--ps-rule-strong);
   border-radius: 50%;
 }
 
-/* On a phone the headline comes first in the eye, so the empty place stays small. */
-@media (max-width: 719px) {
-  .vf-no-seal {
-    grid-template-columns: auto 1fr;
-    width: auto;
-    text-align: start;
-  }
-
-  .vf-no-seal-ring {
-    width: 32px;
-    height: 32px;
-    margin-block: 0;
-  }
+.vf-step[data-state='done'] .vf-step-mark {
+  color: var(--ps-paper);
+  background: var(--ps-pass);
+  border-color: var(--ps-pass);
 }
 
-.vf-when {
+.vf-step[data-state='current'] .vf-step-mark {
+  color: var(--ps-ink);
+  border-color: var(--ps-ink);
+}
+
+.vf-step[data-state='failed'] .vf-step-mark {
+  color: var(--ps-paper);
+  background: var(--ps-fail);
+  border-color: var(--ps-fail);
+  border-radius: var(--ps-radius);
+}
+
+.vf-step[data-state='not-applicable'] .vf-step-mark {
+  border-style: dashed;
+}
+
+.vf-step-body {
   display: grid;
-  gap: 0 var(--ps-space-3);
+  grid-area: body;
+  gap: var(--ps-space-1);
+  min-width: 0;
+}
+
+.vf-step-label {
+  font-family: var(--ps-serif);
+  font-size: var(--ps-text-lede);
+  line-height: 1.35;
+}
+
+.vf-step-note {
+  max-width: 62ch;
+  color: var(--ps-ink-soft);
 }
 
 .vf-step-failures {
@@ -100,12 +494,94 @@
   font-weight: 600;
 }
 
+.vf-step-side {
+  display: grid;
+  grid-area: side;
+  justify-items: end;
+  padding-top: 3px;
+  font-size: var(--ps-text-meta);
+  font-variant-numeric: tabular-nums;
+  color: var(--ps-ink-soft);
+  text-align: end;
+  white-space: nowrap;
+}
+
+/* The state in words. Pending, not wax, for a step in progress: it is not good news yet. */
+.vf-step-word {
+  font-weight: 600;
+}
+
+.vf-step[data-state='current'] .vf-step-word {
+  color: var(--ps-pending);
+}
+
+.vf-step[data-state='failed'] .vf-step-word {
+  padding: 0 var(--ps-space-2);
+  color: var(--ps-fail);
+  background: var(--vf-tint-bad);
+  border-radius: var(--ps-radius);
+}
+
+.vf-chevron {
+  grid-area: chev;
+  margin-top: var(--ps-space-1);
+  color: var(--ps-rule-strong);
+  transition: rotate var(--ps-time-quick);
+}
+
+.vf-step summary:hover .vf-chevron {
+  color: var(--ps-ink);
+}
+
+.vf-step details[open] .vf-chevron {
+  rotate: 180deg;
+}
+
+.vf-proof {
+  padding: var(--ps-space-4) var(--ps-space-5);
+  margin: 0 0 var(--vf-inside) calc(var(--vf-mark) + var(--ps-space-4));
+  background: var(--ps-field);
+  border-radius: var(--ps-radius);
+}
+
+/* On a phone the time and state fold under the label, and the proof takes the full width over the rail. */
+@media (max-width: 899px) {
+  .vf-step summary {
+    grid-template-areas:
+      'mark body chev'
+      'mark side chev';
+    grid-template-columns: var(--vf-mark) minmax(0, 1fr) 16px;
+  }
+
+  .vf-step-side {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 var(--ps-space-3);
+    justify-content: flex-start;
+    padding-top: 0;
+    white-space: normal;
+  }
+
+  .vf-proof {
+    position: relative;
+    z-index: 1;
+    padding: var(--ps-space-3) var(--ps-space-4);
+    margin-left: 0;
+  }
+}
+
 /* A result beside its hash: they sit apart, and wrap apart on a phone. */
 .vf-page .ps-rows li > span:last-child {
   display: inline-flex;
   flex-wrap: wrap;
   gap: var(--ps-space-1) var(--ps-space-3);
   align-items: baseline;
+}
+
+/* A value that fills its row. The row's own flex would otherwise squeeze it on a phone. */
+.vf-page .ps-rows li > span:last-child > .vf-aside {
+  flex-basis: 100%;
+  margin-top: 0;
 }
 
 .vf-evidence-heading {
@@ -123,30 +599,275 @@
   margin: var(--ps-space-2) 0;
 }
 
+.vf-proof > .vf-evidence-text:first-child {
+  margin-top: 0;
+}
+
 .vf-code {
   padding: var(--ps-space-2) var(--ps-space-3);
   margin: var(--ps-space-2) 0;
   font-family: var(--ps-code);
-  font-size: var(--ps-text-code);
+  font-size: var(--ps-text-meta);
   white-space: pre-wrap;
   background: var(--ps-paper-deep);
 }
 
-.vf-picker,
-.vf-connection form {
-  display: grid;
-  gap: var(--ps-space-3);
-  max-width: 34em;
+/* ---- The paper: the one sheet on the page ---- */
+
+.vf-sheet {
+  padding: var(--ps-space-7) 56px 56px;
+  background: var(--ps-field);
+  border: 1px solid var(--ps-rule);
+  border-radius: var(--ps-radius);
 }
 
-.vf-picker .ps-button {
-  justify-self: start;
-}
-
-.vf-actions {
+.vf-sheet header {
   display: flex;
   flex-wrap: wrap;
+  gap: var(--ps-space-1) var(--ps-space-4);
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: var(--ps-space-4);
+  margin-bottom: var(--ps-space-7);
+  font-size: var(--ps-text-meta);
+  color: var(--ps-ink-soft);
+  border-bottom: 3px double var(--ps-ink);
+}
+
+.vf-sheet header strong {
+  font-family: var(--ps-serif);
+  font-size: var(--ps-text-section);
+  font-weight: 400;
+  color: var(--ps-ink);
+}
+
+.vf-sheet section + section {
+  margin-top: var(--ps-space-7);
+}
+
+.vf-sheet h3 {
+  margin: 0 0 var(--ps-space-4);
+  font-size: var(--ps-text-section);
+}
+
+.vf-sheet ol {
+  padding-left: 1.6em;
+  margin: 0;
+}
+
+.vf-sheet li {
+  padding-left: var(--ps-space-1);
+}
+
+.vf-sheet li + li {
+  margin-top: var(--ps-space-3);
+}
+
+/* Options under a question, lettered A, B, C in the order the paper holds them. */
+.vf-sheet .vf-options {
+  margin: var(--ps-space-1) 0 var(--ps-space-2);
+  list-style-type: upper-alpha;
+}
+
+.vf-sheet .vf-options li + li {
+  margin-top: var(--ps-space-1);
+}
+
+@media (max-width: 899px) {
+  .vf-sheet {
+    padding: var(--ps-space-5) var(--ps-space-5) var(--ps-space-7);
+  }
+}
+
+/* ---- People: label on the left, names on the right ---- */
+
+.vf-ledger {
+  margin: 0;
+  border-top: 1px solid var(--ps-ink);
+}
+
+.vf-ledger > div {
+  display: grid;
+  grid-template-columns: 10rem minmax(0, 1fr);
+  gap: var(--ps-space-2) var(--vf-inside);
+  padding-block: var(--ps-space-4);
+  border-bottom: 1px solid var(--ps-rule);
+}
+
+.vf-ledger dt {
+  color: var(--ps-ink-soft);
+}
+
+.vf-ledger dd {
+  display: grid;
+  gap: var(--ps-space-1);
+  min-width: 0;
+  margin: 0;
+}
+
+.vf-ledger dd > .vf-fold {
+  margin-top: 0;
+}
+
+@media (max-width: 899px) {
+  .vf-ledger > div {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.vf-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ps-space-1) var(--ps-space-3);
+  align-items: baseline;
+}
+
+.vf-names {
+  display: grid;
   gap: var(--ps-space-2);
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.vf-names li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0 var(--ps-space-4);
+  align-items: baseline;
+}
+
+.vf-names li > .vf-aside {
+  grid-column: 1 / -1;
+  margin-top: 0;
+}
+
+.vf-when {
+  font-size: var(--ps-text-meta);
+  font-variant-numeric: tabular-nums;
+  color: var(--ps-ink-soft);
+}
+
+/* A state in words, in its tone's colour. */
+.vf-toned {
+  font-size: var(--ps-text-meta);
+  font-weight: 600;
+  color: var(--ps-ink-soft);
+}
+
+.vf-toned[data-tone='ok'] {
+  color: var(--ps-pass);
+}
+
+.vf-toned[data-tone='warn'] {
+  color: var(--ps-pending);
+}
+
+.vf-toned[data-tone='bad'] {
+  color: var(--ps-fail);
+}
+
+/* ---- Evidence: every copy at a glance ---- */
+
+.vf-matrix {
+  width: 100%;
+  border-collapse: collapse;
+  border-top: 1px solid var(--ps-ink);
+  overflow-wrap: normal;
+}
+
+.vf-matrix th,
+.vf-matrix td {
+  padding: var(--ps-space-4) var(--ps-space-3);
+  font-weight: 400;
+  text-align: center;
+  vertical-align: top;
+  border-bottom: 1px solid var(--ps-rule);
+}
+
+.vf-matrix th:first-child,
+.vf-matrix td:first-child {
+  padding-left: 0;
+  text-align: start;
+}
+
+.vf-matrix thead th {
+  font-size: var(--ps-text-meta);
+  font-weight: 600;
+  color: var(--ps-ink-soft);
+  vertical-align: bottom;
+}
+
+.vf-matrix td {
+  color: var(--ps-ink-soft);
+}
+
+.vf-matrix td[data-tone='ok'] {
+  font-weight: 600;
+  color: var(--ps-pass);
+}
+
+/* A copy that could not be read or did not pass is set apart from one that is only not there yet. */
+.vf-matrix td[data-tone='bad'] {
+  font-weight: 600;
+  color: var(--ps-fail);
+}
+
+.vf-matrix .vf-none {
+  color: var(--ps-rule-strong);
+}
+
+.vf-used {
+  display: block;
+  font-size: var(--ps-text-meta);
+  font-weight: 400;
+  color: var(--ps-ink-soft);
+}
+
+.vf-legend {
+  max-width: 62ch;
+  margin: var(--ps-space-4) 0 0;
+  font-size: var(--ps-text-meta);
+  color: var(--ps-ink-soft);
+}
+
+@media (max-width: 899px) {
+  .vf-matrix {
+    font-size: var(--ps-text-meta);
+    hyphens: auto;
+  }
+
+  .vf-matrix th,
+  .vf-matrix td {
+    padding: var(--ps-space-3) var(--ps-space-1);
+  }
+}
+
+.vf-piece {
+  margin-top: var(--ps-space-4);
+}
+
+.vf-piece .vf-aside {
+  margin-bottom: var(--ps-space-2);
+}
+
+/* Every copy starts its result at the same edge, so a short note can't pull one row up beside its label. */
+@media (min-width: 720px) {
+  .vf-piece .ps-rows li {
+    display: grid;
+    grid-template-columns: 10rem minmax(0, 1fr);
+    align-items: baseline;
+  }
+}
+
+/* ---- Folds, notes and forms ---- */
+
+.vf-fold {
+  margin-top: var(--ps-space-3);
+}
+
+.vf-fold-body {
+  margin-top: var(--ps-space-2);
 }
 
 .vf-connection summary {
@@ -162,19 +883,37 @@
   margin-top: var(--ps-space-3);
 }
 
-/* Options under a published question, lettered A, B, C in the order the paper holds them. */
-.vf-options {
-  padding-left: 1.75em;
-  margin: var(--ps-space-1) 0 var(--ps-space-2);
-  list-style-type: upper-alpha;
-}
-
-/* A quiet line under a step's note, such as what a Sepolia name does not prove. */
+/* A quiet line under a note, such as what a Sepolia name does not prove. */
 .vf-aside {
   display: block;
   margin-top: var(--ps-space-1);
-  font-size: var(--ps-text-small);
+  font-size: var(--ps-text-meta);
   color: var(--ps-ink-soft);
+}
+
+/* A hash quoted in a sentence: no gap beside its empty status, so the words around it read on. */
+.vf-evidence-text .ps-hash {
+  column-gap: 0;
+}
+
+.vf-evidence-text .ps-hash-status:not(:empty) {
+  margin-inline-start: var(--ps-space-2);
+}
+
+.vf-picker,
+.vf-connection form {
+  display: grid;
+  gap: var(--ps-space-3);
+  max-width: 34em;
+}
+
+.vf-picker .ps-button {
+  justify-self: start;
+  min-height: 44px;
+}
+
+.vf-connection .vf-actions {
+  margin-top: 0;
 }
 
 /* A quiet way on, under a form. */
@@ -184,7 +923,7 @@
 
 .vf-ignored {
   margin-top: var(--ps-space-2);
-  font-size: var(--ps-text-small);
+  font-size: var(--ps-text-meta);
   color: var(--ps-ink-soft);
 }
 
@@ -193,99 +932,58 @@
   margin: var(--ps-space-2) 0 0;
 }
 
-.vf-choose {
-  margin-top: var(--ps-space-5);
+/* The quiet close of every page, under an ink rule. */
+.vf-closing {
+  padding-top: var(--vf-inside);
+  border-top: 1px solid var(--ps-ink);
 }
 
-/* "Check with your own AI", under the headline. The repository stays in sight beside it. */
-.vf-agent {
-  display: grid;
-  gap: var(--ps-space-2);
-  max-width: 34em;
-}
-
-.vf-agent-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--ps-space-2) var(--ps-space-3);
-  align-items: center;
-}
-
-.vf-agent-repo,
-.vf-agent-reason {
-  font-size: var(--ps-text-small);
+.vf-closing > p {
+  max-width: 58ch;
   color: var(--ps-ink-soft);
 }
 
-.vf-agent-reason {
-  margin: 0;
+.vf-closing h3 {
+  margin: var(--ps-space-6) 0 var(--ps-space-3);
+  font-size: var(--ps-text-section);
 }
 
-.vf-agent-text summary {
-  width: fit-content;
-  min-height: 24px;
-  font-size: var(--ps-text-small);
-  cursor: pointer;
-  text-decoration: underline;
-  text-decoration-color: var(--ps-rule-strong);
-  text-underline-offset: 3px;
-}
+/* ---- Pages with no exam ----
+ * The start page and the history keep their single column, with the exam page's rhythm: a headline,
+ * then quiet ruled sections well apart. */
 
-/* A few plain facts under the headline, as tiles. */
-.vf-glance {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
-  gap: var(--ps-space-3);
-  margin: var(--ps-space-5) 0 0;
-}
-
-.vf-glance > div {
-  padding: var(--ps-space-3) var(--ps-space-4);
-  background: var(--ps-field);
-  border: 1px solid var(--ps-rule);
-  border-radius: 8px;
-}
-
-.vf-glance dt {
-  font-size: var(--ps-text-small);
-  color: var(--ps-ink-soft);
-}
-
-.vf-glance dd {
-  margin: 0;
-  font-weight: 600;
-}
-
-/* The chain of custody is one panel, like every list in the app. */
-.vf-page .ps-stepper {
-  padding: var(--ps-space-2) var(--ps-space-5) var(--ps-space-4);
-  margin-top: var(--ps-space-5);
-  background: var(--ps-field);
-  border: 1px solid var(--ps-rule);
-  border-radius: 8px;
-}
-
-.vf-fold {
-  margin-top: var(--ps-space-3);
-}
-
-.vf-fold-body {
-  margin-top: var(--ps-space-2);
-}
-
-.vf-piece {
-  margin-top: var(--ps-space-4);
-}
-
-.vf-piece .vf-aside {
-  margin-bottom: var(--ps-space-2);
-}
-
-/* A value that fills its row. The row's own flex would otherwise squeeze it on a phone. */
-.vf-page .ps-rows li > span:last-child > .vf-aside,
-.vf-page .ps-rows li > span:last-child > .vf-link {
-  flex-basis: 100%;
+.vf-start .vf-headline {
   margin-top: 0;
+  font-size: var(--ps-text-display);
+}
+
+.vf-start .vf-picker {
+  margin-top: var(--ps-space-6);
+}
+
+.vf-single .ps-panel {
+  gap: 0;
+  padding: 0;
+  margin: var(--vf-between) 0 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
+}
+
+.vf-single .ps-panel > h2 {
+  margin-bottom: var(--vf-inside);
+}
+
+.vf-single .ps-panel > .ps-rows {
+  border-top: 1px solid var(--ps-ink);
+}
+
+.vf-single > .vf-more {
+  margin-top: var(--ps-space-6);
+}
+
+.vf-single > .vf-section {
+  margin-top: var(--vf-between);
 }
 
 /* Search and filter above the exam history. */
@@ -316,144 +1014,4 @@
   background: var(--ps-field);
   border: 1px solid var(--ps-rule);
   border-radius: var(--ps-radius);
-}
-
-/* ---- Layout and hierarchy ----
- * The verifier is read on wide screens as often as on phones, so it gets a wider page than the
- * role screens, with prose kept to a readable measure. Cards lift a little off the paper, so the
- * page reads as layers instead of outlines. */
-
-.vf-page {
-  --vf-lift: 0 1px 2px rgb(60 44 20 / 0.06), 0 8px 24px -14px rgb(60 44 20 / 0.22);
-  --vf-tint-ok: color-mix(in srgb, var(--ps-pass) 11%, var(--ps-field));
-  --vf-tint-bad: color-mix(in srgb, var(--ps-fail) 9%, var(--ps-field));
-  --vf-tint-warn: color-mix(in srgb, var(--ps-pending) 10%, var(--ps-field));
-  --vf-tint-now: color-mix(in srgb, var(--ps-wax) 9%, var(--ps-field));
-}
-
-:root[data-theme='dark'] .vf-page {
-  --vf-lift: none;
-}
-
-.ps-shell.vf-page {
-  max-width: 1040px;
-}
-
-.vf-page .ps-stage-lede,
-.vf-page .ps-stage-next,
-.vf-page .ps-step-note,
-.vf-page .ps-panel > p {
-  max-width: 68ch;
-}
-
-.vf-page .ps-stage-title {
-  font-size: clamp(1.875rem, 1.1rem + 2.2vw, 2.75rem);
-  line-height: 1.12;
-  letter-spacing: -0.015em;
-}
-
-.vf-page .ps-stage-lede {
-  font-size: 1.0625rem;
-}
-
-.vf-page .ps-stage-action,
-.vf-page .ps-panel,
-.vf-page .ps-stepper,
-.vf-glance > div {
-  box-shadow: var(--vf-lift);
-}
-
-.vf-page .ps-panel h2 {
-  font-size: 1.375rem;
-}
-
-/* At a glance: the label is quiet, the value is the thing to read. */
-.vf-glance dt {
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.vf-glance dd {
-  margin-top: var(--ps-space-1);
-  font-family: var(--ps-serif);
-  font-size: 1.125rem;
-  font-weight: 400;
-  line-height: 1.35;
-}
-
-/* ---- The chain of custody ---- */
-
-.vf-page .ps-step-label {
-  font-size: 1.25rem;
-}
-
-@media (min-width: 720px) {
-  .vf-page .ps-step {
-    grid-template-columns: 9.5rem 24px minmax(0, 1fr);
-  }
-}
-
-/* Each step's state is a pill in its own colour, so a scan down the right edge shows the whole exam. */
-.vf-page .ps-step-state {
-  padding: 2px 10px;
-  font-size: 0.8125rem;
-  line-height: 1.5;
-  white-space: nowrap;
-  background: var(--ps-paper-deep);
-  border-radius: 999px;
-}
-
-.vf-page .ps-step[data-state='done'] .ps-step-state {
-  color: var(--ps-pass);
-  background: var(--vf-tint-ok);
-}
-
-.vf-page .ps-step[data-state='current'] .ps-step-state {
-  background: var(--vf-tint-now);
-}
-
-.vf-page .ps-step[data-state='failed'] .ps-step-state {
-  background: var(--vf-tint-bad);
-}
-
-.vf-page .ps-step[data-state='done'] .ps-step-marker {
-  background: var(--ps-pass);
-  border-color: var(--ps-pass);
-}
-
-.vf-page .ps-step[data-state='done'] .ps-step-rail::before {
-  background: var(--ps-pass);
-}
-
-/* ---- Alarms ----
- * A failure must never look like the brand. The wax is a deep red seal; a failure is a tinted
- * block with a heavy left rule, so the two can't be confused even side by side. */
-
-.vf-alarm {
-  background: var(--vf-tint-bad);
-  border-inline-start-width: 5px;
-  box-shadow: var(--vf-lift);
-}
-
-.vf-alarm h2 {
-  font-size: 1.375rem;
-}
-
-.vf-warnings {
-  background: var(--vf-tint-warn);
-  border-inline-start-width: 5px;
-}
-
-/* On a phone the seal is a badge beside the headline's start, not a poster above it. */
-@media (max-width: 719px) {
-  .vf-page .ps-stage-seal .ps-seal {
-    width: 96px;
-  }
-}
-
-/* The AI check card spans the column like the cards below it, so the page has one edge. */
-.vf-page .ps-stage-action.vf-agent {
-  max-width: none;
 }
