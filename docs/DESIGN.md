@@ -295,15 +295,14 @@ Each flow is a list of states. Each state is one `Stage`, and only the first unf
 
 `RoleHeader role="Exam board"`. The most steps, and the one role that handles forms.
 
-Seven steps, each with its number in the `Stage` eyebrow. The wallet is not a step: the action that needs it asks for it.
+Six steps, each with its number in the `Stage` eyebrow. The wallet is not a step: the action that needs it asks for it, and if the wallet is on another network it is asked to switch to Sepolia first. If it declines, the screen says what to do in the wallet. The form is kept in this browser until the exam is published, so a reload or a closed tab loses nothing.
 
 1. **Create the exam:** one form for the name, time, length, topics and release time. Rounds and hashes are worked out, and setter limits, the closing time and the public record provider are folded under Advanced.
-2. **Choose the Paper Seal version:** the newest version whose tag checks out is already selected, so this is one click. Other versions are folded.
-3. **Review and publish:** one summary and one action, "Publish the exam". A `Stamp` receipt follows, with the details folded.
-4. **Invite people:** one invite per person. The board picks a role, types the name for the public list (a setter needs none, only an optional private note) and presses "Add invite", and a "Copy link" button appears on that row. The `Rows` then show each invite in one of four states, each with a word and a `Check` shape, never colour alone: waiting ("Waiting for them to register", with Copy link), registered ("Registered"), two keys on one invite ("Two security keys used this invite, so neither is on the list.", with "Make a new link"), and a registration that fits no invite ("Not invited", with the key's `Hash`). The list composes itself from the registered ones. The only choice left is a centre's place, a select of "Centre holding part of the key" or "Centre getting the key at unlock". Counts sit under "On the list". Primary action: post the approved list. Adding an invite is a plain `Button`, so the screen still has one red thing to press.
-5. **Questions are coming in:** a wait screen with a `Countdown` to the closing time. It says the board must come back after that time to post the paper's record, and that it is safe to close the page until then.
-6. **The paper is ready:** one action, "Post the paper's record". Nothing else competes with it.
-7. **Status:** `seal` follows the unlock and end rounds, with `stampSeal` once the paper's record is posted, and the count of key holders released. It links the public verifier when `VITE_VERIFIER_URL` is set.
+2. **Review and publish:** one summary and one action, "Publish the exam". The Paper Seal version is a row in the summary: the newest version whose tag checks out is already chosen, so there is nothing to click. "Use a different version" is folded under the summary. If the versions can't be loaded, or the tag does not match, the reason and a "Try again" show here and publishing stays shut. A correct read-back goes straight to step 3 with a "Published" `Stamp` banner above the invites, with the details folded. Only a read-back that does not match stops on a receipt, with "Start again".
+3. **Invite people:** one invite per person. The board picks a role, types the name for the public list (a setter needs none, only an optional private note) and presses "Add invite", and a "Copy link" button appears on that row. The `Rows` then show each invite in one of four states, each with a word and a `Check` shape, never colour alone: waiting ("Waiting for them to register", with Copy link), registered ("Registered"), two keys on one invite ("Two security keys used this invite, so neither is on the list.", with "Make a new link"), and a registration that fits no invite ("Not invited", with the key's `Hash`). The list composes itself from the registered ones. The only choice left is a centre's place, a select of "Centre holding part of the key" or "Centre getting the key at unlock". Counts sit under "On the list". Primary action: post the approved list. Adding an invite is a plain `Button`, so the screen still has one red thing to press. Invites live in this browser only, so the panel says so, and "Save a backup" writes them to a file while "Restore from a backup" brings them back. The panel says the backup is private, because it holds the links. The invite secret stays in each link's fragment.
+4. **Questions are coming in:** a wait screen with a `Countdown` to the closing time. It says the board must come back after that time to post the paper's record, and that it is safe to close the page until then.
+5. **The paper is ready:** one action, "Post the paper's record". Nothing else competes with it.
+6. **Status:** `seal` follows the unlock and end rounds, with `stampSeal` once the paper's record is posted, and the count of key holders released. It links the public verifier when `VITE_VERIFIER_URL` is set, and "Copy public link" copies the verifier's share link, `<verifier URL>/?exam=<examId>` (see `spec/agent-verification.md`), so it names the exam.
 
 ### Setter
 
@@ -311,7 +310,7 @@ Seven steps, each with its number in the `Stage` eyebrow. The wallet is not a st
 
 1. **Register:** opens from the invite link. The role is in the link, so nothing is typed, and the only control is `KeyTouch` to register the security key. Next: wait for the board's list. Without a valid link it shows a plain explanation and no form.
 2. **Nothing to do yet:** a wait screen whose wording follows whether the board has posted the list. The page opens for writing by itself.
-3. **Check the machine:** runs by itself, with nothing to press. If it fails, sealing stops and the writing stays on the page.
+3. **Check the machine:** runs by itself, with nothing to press, and runs again at about four minutes while the page is open, so a slow writer never meets the five minute limit. If it fails, sealing stops and the writing stays on the page.
 4. **Add a question:** the form, with a `PrimaryAction` to seal it. Each question needs one touch, and receipts build up on the same page. A choice of Written or Multiple choice sits above the writing area, with Written already picked, so a written question costs no extra click. Multiple choice shows two lettered option fields, with Add an option up to the limit in `spec/constants.json` and Remove once there are more than the minimum. A blank or repeated option is called out beside its field in plain words, and sealing stays shut until it is fixed. There is no field for the correct answer: one short line says the answer key isn’t sent, because the paper becomes public. Options are trimmed and sent in the order shown.
 5. **Closed:** a wait screen. After the Build, the check that the same machine built the paper appears as one `Check`.
 
@@ -321,10 +320,14 @@ Seven steps, each with its number in the `Stage` eyebrow. The wallet is not a st
 
 1. **Register:** opens from the invite link, which holds the centre's name, so there is no form field. It shows the name and `KeyTouch`, and reads left-aligned, because it is the one centre screen that is a form. Once the exam has ended, the page shows "This exam has ended" and offers no registration.
 2. **Ready:** a wait screen, `seal="sealed"`, with a `Countdown` to unlock. The paper downloads and is checked against the Build by itself, and the result shows as one `Check`. A `PrimaryAction` appears only if that check fails.
-3. **Release, for centres holding a part of the key:** `KeyTouch` with `purpose="to release your part of the key"`, `seal="opening"`. Centres without one skip this.
+3. **Release, for centres holding a part of the key:** `KeyTouch` with `purpose="to release your part of the key"`, `seal="opening"`. The checks that need no key run as soon as the page is ready, so the press goes straight to the touch, and any that are older than a minute run again at the press. The touch never starts without a press. If the release is refused, the screen shows no seal. Centres without a part of the key skip this.
 4. **Waiting for key holders:** a wait screen with the release count, for a centre with nothing to release.
-5. **Unlock:** `KeyTouch` with `purpose="to open the paper"`, `seal="opening"`.
+5. **Unlock:** `KeyTouch` with `purpose="to open the paper"`, `seal="opening"`. The time seal and the centre's sealed key are got ahead of the press, and got again at the press if they are older than two minutes.
 6. **Open:** `seal="open"`. The action is to view or print the paper. The unlock log is in `children`. A multiple choice question shows its options under it as a lettered list (A, B, C) in the paper’s order, set for print. A written question has no list. The verifier page shows the published paper the same way.
+
+### Opening a link outside Chrome
+
+A link opened from email, WhatsApp or Safari shows "Open this page in Chrome", with a "Copy link" button that copies the whole address, including its fragment, to paste into Chrome.
 
 ### Neutral key holder
 
@@ -332,7 +335,7 @@ Seven steps, each with its number in the `Stage` eyebrow. The wallet is not a st
 
 1. **Register:** opens from the invite link, which holds the name, so nothing is typed. `KeyTouch` only. Once the exam has ended, the page shows "This exam has ended" and offers no registration.
 2. **Waiting:** "Nothing to do until 09:59", with a `Countdown`.
-3. **Release:** `KeyTouch` with `purpose="to release your part of the key"`, `seal="opening"`.
+3. **Release:** `KeyTouch` with `purpose="to release your part of the key"`, `seal="opening"`. The checks that need no key run before the press, as for a centre.
 4. **Done:** `Stamp` "Released". Next: the paper reaches centres once enough key holders have released. Never say a neutral key holder receives or can see the paper.
 
 ### Public verifier

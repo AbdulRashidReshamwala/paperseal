@@ -137,7 +137,14 @@ export function useOpenPaper(downloaded: Downloaded | null, identity: StoredCred
     void held?.then(wipe);
   };
   // Nothing is held once this page is gone.
-  useEffect(() => forget, []);
+  useEffect(
+    () => () => {
+      const held = early.current;
+      early.current = null;
+      void held?.then(wipe);
+    },
+    [],
+  );
 
   async function gather(): Promise<Early | null> {
     if (!registry || !examId || !storageUrl || !identity || !downloaded) return null;

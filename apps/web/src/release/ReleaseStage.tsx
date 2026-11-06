@@ -82,7 +82,9 @@ export function ReleaseStage(props: {
   // The checks that don't need the key run as soon as the page is ready, so the press goes straight
   // to the touch. A result that failed, or is older than PREPARED_TTL_MS, is never used: the press runs it again.
   const latest = useRef(context);
-  latest.current = context;
+  useEffect(() => {
+    latest.current = context;
+  });
   const early = useRef<{ promise: Promise<PreparedRelease | null> } | null>(null);
   const ready = context ? `${context.examId}:${context.passkeyPublicKey}:${context.derivedPublicKey}` : null;
 
