@@ -214,7 +214,7 @@ export function SetterFlow() {
             title="Nothing to do yet"
             lede={
               stage === 'onboard'
-                ? 'Your security key is registered. Your exam board has sent the list of people for this exam. Questions open soon, usually within about 20 minutes.'
+                ? 'Your security key is registered. Questions open once your exam board has sent the list of people for this exam.'
                 : 'Your security key is registered. Your exam board has not sent the list of people for this exam yet.'
             }
             next="This page opens for writing by itself. You can close it and come back to this link later, in this same browser. To use a different security key, ask your exam board for a new invitation link."

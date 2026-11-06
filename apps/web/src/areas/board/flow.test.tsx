@@ -531,7 +531,7 @@ describe('step 5, wait', () => {
   it('says the list is going final while the machine is still at onboard', async () => {
     const { env } = await seeded('list');
     renderBoard(env, fakeTee());
-    expect(await screen.findByText(/Setters can start sending questions in about 20 minutes/)).toBeTruthy();
+    expect(await screen.findByText(/Setters can start sending questions soon/)).toBeTruthy();
   });
 
   it('says the machine is building once questions close', async () => {
@@ -663,7 +663,7 @@ describe('deep links', () => {
   it.each(['/onboarding', '/list', '/outbox'])('/board%s shows what the last published exam needs now', async (path) => {
     const { env } = await seeded('list');
     renderBoard(env, fakeTee(), `/board${path}`);
-    expect(await screen.findByText(/Setters can start sending questions in about 20 minutes/)).toBeTruthy();
+    expect(await screen.findByText(/Setters can start sending questions soon/)).toBeTruthy();
   });
 
   it('opens the list at /board even when this browser has an exam, and /board/exam/<id> opens the exam', async () => {
@@ -673,14 +673,14 @@ describe('deep links', () => {
     expect(screen.queryByText('Create the exam')).toBeNull();
     cleanup();
     renderBoard(env, fakeTee(), `/board/exam/${examId}`);
-    expect(await screen.findByText(/Setters can start sending questions in about 20 minutes/)).toBeTruthy();
+    expect(await screen.findByText(/Setters can start sending questions soon/)).toBeTruthy();
     expect(screen.queryByText('Create the exam')).toBeNull();
   });
 
   it('opens an exam named by ?exam= on the start page', async () => {
     const { env } = await seeded('list');
     renderBoard(env, fakeTee(), `/board?exam=${examId}`);
-    expect(await screen.findByText(/Setters can start sending questions in about 20 minutes/)).toBeTruthy();
+    expect(await screen.findByText(/Setters can start sending questions soon/)).toBeTruthy();
   });
 
   it('says so when the chain has never heard of the exam in the route, and offers the way back', async () => {
