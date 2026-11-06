@@ -38,7 +38,7 @@ export const defaultSettings: Settings = {
   examId: env.VITE_EXAM_ID ?? '',
   arkivRpcUrl: arkiv.network.rpcUrl,
   arkivWriters: env.VITE_ARKIV_WRITERS ?? '',
-  swarmApiUrl: swarm.defaultApiUrl,
+  swarmApiUrl: env.VITE_SWARM_API_URL ?? swarm.defaultApiUrl,
 };
 
 /** The writer addresses in `arkivWriters`, in the order given. Empty entries are skipped. */
