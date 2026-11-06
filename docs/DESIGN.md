@@ -83,7 +83,7 @@ There are three self-hosted families, each pinned to an exact `@fontsource` vers
 
 | Token | Size | Family | Use |
 | --- | --- | --- | --- |
-| `--ps-text-display` | 32–46px, fluid | Serif, 1.12 line height | `Stage` title |
+| `--ps-text-display` | 32px | Serif, 1.2 line height | `Stage` title |
 | `--ps-text-title` | 28px | Serif | Older `Screen` titles, reached state of `Countdown` |
 | `--ps-text-section` | 20px | Serif | Section headings, `KeyTouch` title |
 | `--ps-text-body` | 16px | Sans, 1.55 line height | Body |
@@ -98,9 +98,9 @@ Spacing sits on a 4px grid: `--ps-space-1` to `--ps-space-8` are 4, 8, 12, 16, 2
 
 ### Shape and rules
 
-- **Corners** are square. `--ps-radius` is 2px, and only buttons use it.
-- **No boxes.** A group of content is marked by a rule above it, never a card. `Panel` is a ruled section, so nesting stays flat.
-- **Ledger rules:** a double ink rule under the header, a 1px ink rule above a section and a 1px `--ps-rule` between rows.
+- **Corners** are soft. `--ps-radius` is 6px for buttons and fields, and panels use 8px.
+- **One surface.** A group of content sits in one rounded panel. `Panel` and a `Stage`'s action are that surface, and anything inside them stays flat.
+- **Rules:** a 1px `--ps-rule` under the header and between rows.
 - **No shadows,** apart from the wax itself.
 
 ### Motion

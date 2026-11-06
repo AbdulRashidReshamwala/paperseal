@@ -180,7 +180,6 @@
   gap: var(--ps-space-3);
   justify-items: start;
   padding-top: var(--ps-space-3);
-  border-top: 3px solid var(--ps-fail);
 }
 
 .ss-receipt {

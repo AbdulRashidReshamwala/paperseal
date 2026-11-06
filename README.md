@@ -86,7 +86,7 @@ Synced passkeys are not accepted, because they copy the secret to a cloud accoun
 
 Keys sit behind one small interface (`generateKey`, `getPublicKey`, `decryptShare`, `sign`) and the same WebAuthn code runs in both modes:
 
-- **Dev and demo mode:** Chrome's virtual authenticator with PRF enabled mocks the security key. It is software, so the hardware attestation check is skipped by an attested setting the verifier page shows, and the demo is simulated. This is the only mode in the hackathon build.
+- **Dev and demo mode:** Chrome's virtual authenticator with PRF enabled mocks the security key. It is software, so the hardware attestation check is skipped by an attested setting the verifier page shows, and the demo is simulated. This is the only mode in the hackathon build. `pnpm demo:keys` does the same in one tab, with a software authenticator in the page holding a planted key per person (see [deploy/README.md](deploy/README.md)). A production build cannot contain it.
 - **Production mode:** a hardware security key through WebAuthn PRF.
 
 ### Approved List

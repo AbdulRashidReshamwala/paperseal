@@ -9,12 +9,12 @@ import { createServer } from 'vite';
 const here = dirname(fileURLToPath(import.meta.url));
 const packages = resolve(here, '../../packages');
 const alias = Object.fromEntries(
-  ['protocol', 'crypto', 'keys', 'chain', 'attestation', 'tee-client'].map((name) => [`@paperseal/${name}`, resolve(packages, name, 'src/index.ts')]),
+  [['keys/demo', 'keys/src/demo.ts'], ...['protocol', 'crypto', 'keys', 'chain', 'attestation', 'tee-client'].map((name) => [name, `${name}/src/index.ts`])].map(([name, file]) => [`@paperseal/${name}`, resolve(packages, file)]),
 );
 
 const entry = process.argv[2];
-if (entry !== 'main' && entry !== 'check') {
-  console.error('usage: cli.mjs main|check [args]');
+if (entry !== 'main' && entry !== 'check' && entry !== 'names') {
+  console.error('usage: cli.mjs main|check|names [args]');
   process.exit(2);
 }
 

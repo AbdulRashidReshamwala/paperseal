@@ -178,10 +178,10 @@ describe('the exam history', () => {
     expect(list.map((link) => link.getAttribute('href'))).toEqual([`/exam/${idOf(3)}`, `/exam/${idOf(2)}`, `/exam/${idOf(1)}`]);
     expect(reader?.examRows).toHaveBeenCalledWith(registryAddress, [writer]);
     const built = list[2]?.closest('li') as HTMLElement;
-    expect(within(built).getByText('Paper built and sealed')).toBeTruthy();
+    expect(within(built).getByText('Sealed')).toBeTruthy();
     expect(within(built).getByText('The Arkiv copy is behind.')).toBeTruthy();
     const listed = list[0]?.closest('li') as HTMLElement;
-    expect(within(listed).getByText('People approved')).toBeTruthy();
+    expect(within(listed).getByText(/Taking questions|Waiting for the paper/)).toBeTruthy();
     expect(within(listed).queryByText('The Arkiv copy is behind.')).toBeNull();
     expect(screen.getByText('This list shows the exams these writers have indexed. An exam missing here may still exist.')).toBeTruthy();
   });
@@ -238,14 +238,14 @@ describe('the exam history', () => {
     expect(screen.queryByRole('alert')).toBeNull();
     expect(document.querySelector('[data-status="fail"]')).toBeNull();
     const built = rows.getByRole('link', { name: `Exam ${idOf(1)}` }).closest('li') as HTMLElement;
-    expect(within(built).getByText('Paper built and sealed')).toBeTruthy();
+    expect(within(built).getByText('Sealed')).toBeTruthy();
     expect(screen.getByText(/1 exam could not be read from the public record yet/)).toBeTruthy();
     // Exam 9 is not on the record: ignored and counted on its own, not as unread.
     expect(screen.getByText('1 row was ignored because the public record does not match')).toBeTruthy();
 
     limited = false;
     fireEvent.click(screen.getByRole('button', { name: 'Read again' }));
-    const read = (await screen.findByText('People approved')).closest('li') as HTMLElement;
+    const read = (await screen.findByText(/Taking questions|Waiting for the paper/, { selector: '.ps-badge' })).closest('li') as HTMLElement;
     expect(within(read).getByRole('link', { name: `Exam ${idOf(2)}` })).toBeTruthy();
     expect(screen.queryByText('Could not be read yet.')).toBeNull();
   });

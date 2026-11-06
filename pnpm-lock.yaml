@@ -245,6 +245,9 @@ importers:
 
   packages/keys:
     dependencies:
+      '@noble/curves':
+        specifier: 1.9.7
+        version: 1.9.7
       '@paperseal/crypto':
         specifier: workspace:*
         version: link:../crypto
@@ -252,9 +255,6 @@ importers:
         specifier: workspace:*
         version: link:../protocol
     devDependencies:
-      '@noble/curves':
-        specifier: 1.9.7
-        version: 1.9.7
       playwright-core:
         specifier: 1.64.1
         version: 1.64.1

@@ -1,11 +1,11 @@
 import type { ExamRow, ParticipantRow } from '@paperseal/arkiv';
 import { OnChainBytesError, type ExamNameResult, type ResolvedExamName } from '@paperseal/chain';
-import { encodeApprovedList, toHex, type ApprovedListEntry, type Hex } from '@paperseal/protocol';
+import { encodeApprovedList, roundTimeSeconds, toHex, type ApprovedListEntry, type Hex } from '@paperseal/protocol';
 import { sha256, type Address } from 'viem';
 import { describe, expect, it, vi, type Mock } from 'vitest';
 
 import { approvedList, registryAddress } from '@paperseal/verify/fixtures';
-import { findParticipant, loadExamHistory, roleWords, type HistoryReader, type HistoryRegistry } from './history';
+import { examStatus, findParticipant, loadExamHistory, roleWords, type HistoryReader, type HistoryRegistry } from './history';
 
 /*
  * The Arkiv reader and the registry are the two things stubbed here. Approved lists are real
@@ -291,5 +291,25 @@ describe('finding exams by participant', () => {
     expect(roleWords('centre-holder')).toBe('Centre holding part of the key');
     expect(roleWords('centre')).toBe('Centre that gets the key when the paper unlocks');
     expect(roleWords('admin')).toBe('Unknown role');
+  });
+});
+
+describe('examStatus', () => {
+  const rounds = { lock: 100n, unlock: 200n, end: 300n };
+  const start = BigInt(roundTimeSeconds(250));
+  const at = (round: number) => roundTimeSeconds(round);
+
+  it('reads an exam with no paper past its start as never ran', () => {
+    expect(examStatus({ examStart: start, stage: 'listed', rounds }, 260, at(260))).toBe('never-ran');
+    expect(examStatus({ examStart: start, stage: 'published', rounds }, 260, at(260))).toBe('never-ran');
+  });
+
+  it('follows an exam from setting up to finished', () => {
+    expect(examStatus({ examStart: start, stage: 'published', rounds }, 50, at(50))).toBe('setup');
+    expect(examStatus({ examStart: start, stage: 'listed', rounds }, 50, at(50))).toBe('questions');
+    expect(examStatus({ examStart: start, stage: 'listed', rounds }, 150, at(150))).toBe('waiting');
+    expect(examStatus({ examStart: start, stage: 'built', rounds }, 150, at(150))).toBe('sealed');
+    expect(examStatus({ examStart: start, stage: 'built', rounds }, 250, at(250))).toBe('under-way');
+    expect(examStatus({ examStart: start, stage: 'built', rounds }, 300, at(300))).toBe('finished');
   });
 });

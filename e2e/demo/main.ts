@@ -5,7 +5,8 @@ import { openPerson, parseArgs, type Person } from './people';
 /*
  * `pnpm demo`: a visible, real Chrome with one window per person. Each person's window has its own
  * virtual security key (PRF included), so a key touch in the app succeeds with no prompt and nobody
- * opens DevTools. Runs until Ctrl-C.
+ * opens DevTools. Runs until Ctrl-C. To present a whole exam, use `pnpm demo:keys` instead: one tab of
+ * your own Chrome, with fixed keys. See "One-machine demo" in deploy/README.md.
  */
 export async function main(argv: string[]): Promise<void> {
   const { url, people } = parseArgs(argv);

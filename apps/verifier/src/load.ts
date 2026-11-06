@@ -6,7 +6,9 @@ import {
   loadRecords as verifyRecords,
   roundReached,
   runProof,
+  PROOF_TIMEOUT_MS,
   withBackup,
+  withinTime,
   type BackupSource,
   type ChainData,
   type ProofRun,
@@ -21,13 +23,17 @@ export {
   ARKIV_BLOCK_SECONDS,
   ARKIV_STALE_AFTER_SECONDS,
   isValidLog,
+  PROOF_TIMEOUT_MS,
+  releaseRecorded,
   roundReached,
   signedKeyPriv,
+  withinTime,
   type ArkivHeartbeat,
   type ArkivIgnored,
   type ArkivLog,
   type ArkivReport,
   type ArkivSource,
+  type ArkivToken,
   type LiveRead,
   type LiveReport,
   type LogResult,
@@ -37,6 +43,7 @@ export {
   type ProofRun,
   type PublishedResult,
   type Records,
+  type Release,
   type Sourced,
   type Unavailable,
 } from '@paperseal/verify';
@@ -66,10 +73,11 @@ export function useProof(args: {
   latest: LatestRound;
   now: number;
   retryMs?: number;
+  timeoutMs?: number;
   /** Where to find a Swarm backup of the files, or null with backups off. */
   backup?: BackupSource | null;
 }): ProofRun | null {
-  const { storage, examId, client, chain, keyPrivSha256, latest, now, retryMs = PROOF_RETRY_MS, backup = null } = args;
+  const { storage, examId, client, chain, keyPrivSha256, latest, now, retryMs = PROOF_RETRY_MS, timeoutMs = PROOF_TIMEOUT_MS, backup = null } = args;
   const endRound = chain?.exam ? Number(chain.exam.settings.endRound) : null;
   const reached = endRound !== null && roundReached(endRound, latest.round, now);
   const key = `${String(reached)}|${String(latest.round !== null)}|${String(chain?.build?.postedAt)}`;
@@ -88,17 +96,21 @@ export function useProof(args: {
     const { chain: data, keyPrivSha256: signed, currentRound } = inputs.current;
     const backed = storage ? withBackup(storage, backup, data?.build ?? null) : null;
     const used = () => (backed && backup ? { backup: backed.use() } : {});
-    runProof({
-      storage: backed,
-      examId,
-      exam: data?.exam ?? null,
-      build: data?.build ?? null,
-      criteria: data?.criteria ?? null,
-      currentRound,
-      keyPrivSha256: signed,
-      now: Math.floor(Date.now() / 1000),
-      client,
-    }).then(
+    withinTime(
+      runProof({
+        storage: backed,
+        examId,
+        exam: data?.exam ?? null,
+        build: data?.build ?? null,
+        criteria: data?.criteria ?? null,
+        currentRound,
+        keyPrivSha256: signed,
+        now: Math.floor(Date.now() / 1000),
+        client,
+      }),
+      timeoutMs,
+      'The files or the public clock took too long to answer.',
+    ).then(
       (result) => {
         if (live) setRun({ key, storage, value: { ok: true, result, ...used() } });
       },
@@ -110,7 +122,7 @@ export function useProof(args: {
     return () => {
       live = false;
     };
-  }, [key, reached, attempts, storage, examId, client, backup]);
+  }, [key, reached, attempts, storage, examId, client, backup, timeoutMs]);
 
   const current = run?.key === key && run.storage === storage ? run.value : null;
   const opened = current?.ok === true && current.result.state === 'opened';

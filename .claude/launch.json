@@ -42,6 +42,14 @@
         "presentation"
       ],
       "port": 5180
+    },
+    {
+      "name": "web-demo",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": [
+        "demo:keys"
+      ],
+      "port": 5171
     }
   ]
 }

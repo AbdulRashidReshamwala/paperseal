@@ -5,7 +5,7 @@ import type { ReleaseLogResponse, StatusResponse, TeeClient } from '@paperseal/t
 
 import { readChecked, withBackup, type BackupSource, type BackupUse, type Judged } from './backup';
 import { checkFreshToken, checkPublishedToken, checkRecordToken, type Build, type FreshVerdict, type PublishedVerdict, type RecordVerdict } from './attest';
-import type { ChainData } from './checks';
+import { sameHex, type ChainData } from './checks';
 import { approvedEntries, checkManifest, holdersOf, type ManifestReport } from './commitments';
 import type { ProofState } from './proof';
 import { releaseTokenName, utf8Text, type StorageReader } from './storage';
@@ -18,6 +18,15 @@ import {
   type ReleaseFilesReport,
   type ReleaseProgress,
 } from './unlock';
+
+/** One entry of a signed release log. */
+export interface Release {
+  passkeyPublicKey: Hex;
+  /** The public clock round the sealed machine took it at. */
+  round: bigint;
+}
+
+const releasesOf = (log: ReleaseLogResponse): Release[] => log.entries.map((entry) => ({ passkeyPublicKey: entry.passkeyPublicKey, round: BigInt(entry.round) }));
 
 /** Nothing to judge yet. Never red, because nothing failed. */
 export interface Neutral {
@@ -48,6 +57,10 @@ export type LogResult =
       progress: ReleaseProgress | null;
       /** The log's files against the list and storage. Null until the log's signature and token pass. */
       files: ReleaseFilesReport | null;
+      /** The key that signed the log, which `token` attests when it is verified. */
+      signer: Hex;
+      /** Who released and at which round, in the order received. Evidence only once the log is valid. */
+      releases?: Release[];
     };
 
 /** One polled read of the public record: the chain, and each public file checked against it. */
@@ -58,6 +71,8 @@ export interface Records {
   log: Sourced<LogResult>;
   /** Which files came from the Swarm backup, and which it could not give. Absent with backups off. */
   backup?: BackupUse;
+  /** When the store says it wrote each file, by name, for display. */
+  stored?: Record<string, number>;
 }
 
 const neutral = (message: string): Neutral => ({ kind: 'neutral', message });
@@ -184,6 +199,8 @@ async function readLog(
         )
       : null,
     files: isValidLog(verdict, token) ? await checkReleaseFiles(log, list, storage) : null,
+    signer: log.instancePublicKey,
+    releases: releasesOf(log),
   };
 }
 
@@ -191,10 +208,23 @@ async function readLog(
 export const isValidLog = (verdict: LogVerdict, token: RecordVerdict | null) =>
   token?.verified === true && verdict.signature === 'pass' && verdict.examId === 'pass' && verdict.filesHash === 'pass';
 
+/** Whether a valid log already records enough releases, so the live machine has nothing left to add. */
+export const releaseRecorded = (log: Records['log']): boolean =>
+  log.kind === 'ready' && isValidLog(log.verdict, log.token) && log.progress !== null && log.progress.count >= log.progress.required;
+
 /** The hash of `key-priv.tlock` in a valid log, for the proof. Null if there is none. */
 export function signedKeyPriv(log: Records['log']): Hex | null {
   if (log.kind !== 'ready' || !log.files) return null;
   return log.files.files.find((file) => file.name === storageNames.keyPriv)?.sha256 ?? null;
+}
+
+function storedTimes(storage: StorageReader): Record<string, number> {
+  const times: [string, number][] = [];
+  for (const name of [storageNames.token, storageNames.manifest, storageNames.releaseLog, releaseTokenName, storageNames.keyPriv]) {
+    const at = storage.modified?.(name) ?? null;
+    if (at !== null) times.push([name, at]);
+  }
+  return Object.fromEntries(times);
 }
 
 export async function loadRecords(args: {
@@ -219,7 +249,8 @@ export async function loadRecords(args: {
     storage ? guarded(() => readManifest(chain, storage, examId)) : off,
     storage ? guarded(() => readLog(chain, storage, examId, registry, bucket, trustedRoot)) : off,
   ]);
-  return { chain, token, manifest, log, ...(storage && args.backup ? { backup: storage.use() } : {}) };
+  const stored = storage ? storedTimes(storage) : {};
+  return { chain, token, manifest, log, stored, ...(storage && args.backup ? { backup: storage.use() } : {}) };
 }
 
 export type LiveRead<T> = { ok: true; value: T } | { ok: false; message: string };
@@ -232,12 +263,16 @@ const attempt = async <T>(read: () => Promise<T>): Promise<LiveRead<T>> => {
   }
 };
 
-/** What the optional live TEE says. Until `fresh` is trusted, all of it is hearsay. */
+/**
+ * What the optional live TEE says. It only ever gives progress for an exam still under way, before
+ * anything is recorded. No check depends on it, and until `fresh` is trusted all of it is hearsay.
+ */
 export interface LiveReport {
   fresh: LiveRead<FreshVerdict>;
   status: LiveRead<StatusResponse>;
   progress: ReleaseProgress | null;
-  log: LogVerdict | null;
+  /** The machine says it is serving another exam, so nothing else it says is read or used. */
+  otherExam?: boolean;
 }
 
 export async function loadLive(args: {
@@ -253,20 +288,14 @@ export async function loadLive(args: {
   const chain = args.chain();
   const exam = chain?.exam;
   if (!exam) return neutral('The exam is not on the public record yet.');
-  const [fresh, status, log] = await Promise.all([
-    attempt(() => checkFreshToken({ tee, exam, examId, registry, bucket, ...rootOf(trustedRoot) })),
-    attempt(() => tee.status()),
-    tee.releaseLog().catch(() => null),
-  ]);
+  const status = await attempt(() => tee.status());
+  // An older image names no exam, and is left to the attestation below.
+  if (status.ok && status.value.examId !== undefined && !sameHex(status.value.examId, examId)) {
+    return { fresh: { ok: false, message: 'The live machine is serving another exam.' }, status, progress: null, otherExam: true };
+  }
+  const fresh = await attempt(() => checkFreshToken({ tee, exam, examId, registry, bucket, ...rootOf(trustedRoot) }));
   const list = approvedEntries(chain.entries);
-  const trusted = fresh.ok && fresh.value.trusted ? fresh.value.instancePublicKey : null;
-  return {
-    fresh,
-    status,
-    progress: list && status.ok ? releaseProgress(holdersOf(list), status.value.release.released) : null,
-    // Only a log signed by the key that just passed attestation is checked under that key.
-    log: log ? await checkReleaseLog(log, examId, trusted && log.instancePublicKey === trusted ? trusted : null) : null,
-  };
+  return { fresh, status, progress: list && status.ok ? releaseProgress(holdersOf(list), status.value.release.released) : null };
 }
 
 /** Rabdi makes a block every 2 seconds, so a row's age is its distance from the latest block. */
@@ -286,6 +315,15 @@ export interface ArkivLog {
   instancePublicKey: Hex;
   verdict: LogVerdict;
   progress: ReleaseProgress | null;
+  /** Who released and when, from this verified log. */
+  releases?: Release[];
+}
+
+/** The newest token row that passed the same check as `release-token.jwt` in storage. */
+export interface ArkivToken {
+  entityKey: Hex;
+  creator: Hex;
+  writtenAt: number;
 }
 
 /** The newest heartbeat from the writers. Only a sign of life: it is never evidence and never counts. */
@@ -315,6 +353,8 @@ export interface ArkivReport {
   read: { logs: number; tokens: number; heartbeats: number };
   /** Null until a log passes every check. */
   log: ArkivLog | null;
+  /** Null until a token attests a key a log names. */
+  token?: ArkivToken | null;
   ignored: ArkivIgnored;
   /** The newest heartbeat, or null with none. */
   heartbeat: ArkivHeartbeat | null;
@@ -374,6 +414,7 @@ export async function loadArkiv(args: {
   // A token binds its instance key only through a hash, so it is checked against each key a log names.
   const keys = [...new Set(parsed.flatMap(({ log }) => (log ? [log.instancePublicKey] : [])))];
   const attested = new Set<Hex>();
+  let passedToken: (typeof tokens)[number] | null = null;
   for (const row of tokens) {
     const token = utf8Text(row.body).trim();
     let passed = false;
@@ -390,6 +431,7 @@ export async function loadArkiv(args: {
       if (verdict?.verified) {
         attested.add(instancePublicKey);
         passed = true;
+        if (!passedToken || row.createdAtBlock > passedToken.createdAtBlock) passedToken = row;
         break;
       }
     }
@@ -430,6 +472,7 @@ export async function loadArkiv(args: {
               log.entries.map((entry) => entry.passkeyPublicKey),
             )
           : null,
+        releases: releasesOf(log),
       };
     }
   }
@@ -446,6 +489,7 @@ export async function loadArkiv(args: {
     writers,
     read: { logs: logs.length, tokens: tokens.length, heartbeats: heartbeats.length },
     log: best,
+    token: passedToken ? { entityKey: passedToken.entityKey, creator: passedToken.creator, writtenAt: writtenAt(passedToken.createdAtBlock) } : null,
     ignored,
     heartbeat: newestBeat
       ? {
@@ -472,3 +516,19 @@ export type ProofRun =
 /** The end round decides, as drand reports it. This device's clock stands in until drand answers. */
 export const roundReached = (round: number, latest: number | null, now: number) =>
   latest !== null ? latest >= round : now >= roundTimeSeconds(round);
+
+/** How long one try at opening the paper may take. A read that never answers must not hold the step for good. */
+export const PROOF_TIMEOUT_MS = 60_000;
+
+/** `read`, or a rejection after `ms`. The read is not cancelled, but nothing waits on it any more. */
+export function withinTime<T>(read: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(message));
+    }, ms);
+  });
+  return Promise.race([read, late]).finally(() => {
+    clearTimeout(timer);
+  });
+}

@@ -59,7 +59,8 @@ export async function startLab(): Promise<Lab> {
   const tee = await startStubTee();
   const storage = await startStorage();
   const common = { VITE_RPC_URL: ens.rpcUrl, VITE_REGISTRY_ADDRESS: chain.registry, VITE_STORAGE_URL: storage.url };
-  const verifier = await startApp('apps/verifier', { ...common }, { host: 'localhost' });
+  // Blanked so a developer's apps/verifier/.env.local can't point this run at a real machine.
+  const verifier = await startApp('apps/verifier', { ...common, VITE_TEE_URL: '', VITE_SWARM_API_URL: '', VITE_ARKIV_WRITERS: '' }, { host: 'localhost' });
   const web = await startApp(
     'apps/web',
     { ...common, VITE_TEE_URL: tee.url, VITE_TEE_STORAGE_BUCKET: 'stub-bucket', VITE_VERIFIER_URL: verifier.url },

@@ -42,6 +42,7 @@ import {
 import { roundStatus, type LatestRound } from './live';
 import {
   ARKIV_STALE_AFTER_SECONDS,
+  isValidLog,
   roundReached,
   type ArkivIgnored,
   type ArkivReport,
@@ -146,6 +147,8 @@ export interface Custody {
   /** Present only when the proof opened the paper and it matches the Build. */
   paper: Paper | null;
   withheld: boolean;
+  /** Where the release count shown came from, or null with none verified. */
+  progressSource: ProgressSource | null;
 }
 
 /** A `#/name/` route: the name as written, what reading it found, and the locators in use. */
@@ -426,7 +429,7 @@ const nameFailures: Record<ExamNameCheck, string> = {
   unreadable: 'The name could not be read.',
 };
 
-const sepoliaName = 'On Sepolia, a test network, anyone can register a similar name, so this check is only a demo.';
+export const sepoliaName = 'On Sepolia, a test network, anyone can register a similar name, so this check is only a demo.';
 
 const otherRegistry =
   'This name leads to a different exam record from the one this page is set up to read. Ask your exam board if this is the right exam before you rely on it.';
@@ -625,38 +628,35 @@ function publishedTokenItems(c: Context): Item[] {
   ];
 }
 
-function liveTokenItems(c: Context): Item[] {
-  const heading: Item = { kind: 'heading', text: 'Live from the machine, optional' };
-  if (!c.view.sources.tee) return [heading, { kind: 'text', text: needsTee }];
-  const { live } = c.view;
-  const unpublished = 'The exam is not on the public record yet.';
-  if (live.state === 'error') return [heading, notChecked('Fresh token', `Could not be read: ${live.message}`)];
-  if (live.state !== 'ready') return [heading, notChecked('Fresh token', c.exam ? 'Not read yet' : unpublished)];
-  if ('kind' in live.value) return [heading, notChecked('Fresh token', live.value.message)];
-  const { fresh } = live.value;
-  if (!fresh.ok) return [heading, notChecked('Fresh token', `Could not be read: ${fresh.message}`)];
-  const result = fresh.value;
+/** Whether the live machine has shown it is running this exam. It decides no check either way. */
+const liveTrusted = (live: LiveReport | null) => live?.fresh.ok === true && live.fresh.value.trusted;
+
+/**
+ * A plain line on what the live machine is doing now. Checks are judged from what was recorded while
+ * the exam ran, so a later machine, a stopped one or one serving another exam changes nothing here.
+ */
+function liveNote(c: Context): Item[] {
+  if (!c.live?.otherExam) return [];
+  return [{ kind: 'text', text: 'The live machine is serving another exam now. That does not affect this exam, which is checked from what was recorded while it ran.' }];
+}
+
+/** How the keys in the records relate. Each key must have its own recorded proof, so a different key is not a failure. */
+function recordedKeyItems(c: Context): Item[] {
+  const { build } = c;
+  const log = c.records?.log;
+  if (!build || log?.kind !== 'ready' || !isValidLog(log.verdict, log.token)) return [];
+  const same = sameHex(build.instancePublicKey, log.signer);
   return [
-    heading,
+    { kind: 'heading', text: 'Keys in the records' },
+    { kind: 'hash', label: 'Key that signed the Build', value: build.instancePublicKey },
+    { kind: 'hash', label: 'Key that signed the release log', value: log.signer },
     {
-      kind: 'check',
-      label: 'Trusted: token signature, every claim and the instance key signature',
-      status: result.trusted ? 'pass' : 'fail',
-      quiet: true,
-      failure: 'The live check of the machine that builds the paper did not pass.',
+      kind: 'fact',
+      label: 'Build and release',
+      value: same
+        ? 'The same key signed both, and a published proof attests it.'
+        : 'Two machines did this work. Each key has its own published proof, and both passed.',
     },
-    result.signature.ok
-      ? { kind: 'check', label: "Token signature, up to Google's root", status: 'pass' }
-      : fail(
-          "Token signature, up to Google's root",
-          'The live proof that Paper Seal runs the published code could not be traced back to Google.',
-          result.signature.error.message,
-        ),
-    ...result.claims.map(claimRow),
-    result.instanceKey.ok
-      ? { kind: 'check', label: 'Instance key signs the encryption key', status: 'pass' }
-      : fail('Instance key signs the encryption key', 'The live machine’s keys do not match each other.', result.instanceKey.error),
-    { kind: 'hash', label: 'Instance key', value: result.instancePublicKey },
   ];
 }
 
@@ -680,10 +680,9 @@ const demoWarning =
   'Demo mode. Paper Seal does not check where security keys come from, so a simulated key could be registered as a key holder, setter or centre.';
 
 function attestedStep(c: Context): Draft {
-  const { exam, build, live } = c;
+  const { exam, build } = c;
   const token = c.records?.token ?? null;
   const published = token?.kind === 'ready' ? token : null;
-  const freshPassed = live?.fresh.ok === true && live.fresh.value.trusted;
   const hardware: Item[] = [
     {
       kind: 'tag',
@@ -707,15 +706,13 @@ function attestedStep(c: Context): Draft {
         : { text: 'In this demo, Paper Seal reads the newest entries, which can still change. A real exam must read only entries that can no longer change.', tone: 'warn' as const }),
     },
   ];
-  const complete = published?.verdict.verified === true || (build === null && freshPassed);
+  const complete = published?.verdict.verified === true;
   const demo = requireHardwareAttestation ? '' : ' This is a demonstration: its security keys are simulated.';
   const note = published?.verdict.verified
     ? `A proof signed by Google says Paper Seal runs the published code.${demo}`
-    : complete
-      ? `Checked just now. The lasting proof is published with the paper.${demo}`
-      : build
-        ? `The lasting proof has not been checked yet.${demo}`
-        : `The proof is published together with the paper.${demo}`;
+    : build
+      ? `The lasting proof has not been checked yet.${demo}`
+      : `Not recorded yet. The proof is published together with the paper.${demo}`;
   const at = published?.issuedAt ?? null;
   return {
     id: 'attested',
@@ -729,7 +726,8 @@ function attestedStep(c: Context): Draft {
       { kind: 'heading', text: 'Published proof' },
       ...publishedTokenItems(c),
       ...backupItems(c.records?.backup, [storageNames.token]),
-      ...liveTokenItems(c),
+      ...recordedKeyItems(c),
+      ...liveNote(c),
       { kind: 'heading', text: 'Security key hardware' },
       ...hardware,
       ...(exam ? rebuildItems(exam) : []),
@@ -757,7 +755,7 @@ function directoryOf(name: string): string | null {
 }
 
 /** Says who vouches for the listed names. Whoever controls a parent decides which key each name under it holds. */
-function vouchNote(names: readonly string[]): string {
+export function vouchNote(names: readonly string[]): string {
   const owners = [...new Set(names.flatMap((name) => directoryOf(name) ?? []))];
   if (owners.length === 0) return ensNote;
   return `${ensNote} Whoever controls ${owners.join(' and ')} vouches for the names under it: they decide which key each one holds, and can change it publicly. That says nothing about whether a party is independent of them.`;
@@ -909,12 +907,12 @@ function criteriaItems(c: Context): { items: Item[]; ok: boolean } {
   };
 }
 
-/** What the attested machine says when it has stopped the exam. Unverified, it is not evidence of anything. */
+/** What the machine says when it has stopped the exam, once it has shown it runs this exam. A note, never a failed check. */
 function machineFailed(c: Context): Item[] {
   const { live } = c;
-  const reported = live?.fresh.ok === true && live.fresh.value.trusted && live.status.ok && live.status.value.stage === 'failed';
+  const reported = liveTrusted(live) && live?.status.ok === true && live.status.value.stage === 'failed';
   return reported
-    ? [fail('Sealed machine status, live', 'The machine that builds the paper, which passed its live check, reports that this exam has failed and cannot go ahead.')]
+    ? [{ kind: 'text', tone: 'warn', text: 'The machine that builds the paper reports that this exam has stopped. Ask your exam board. Nothing about this is on the public record yet.' }]
     : [];
 }
 
@@ -1081,7 +1079,7 @@ function sealedStep(c: Context): Draft {
 }
 
 /** Until `trusted`, every badge is neutral: a count from an unverified source is hearsay, not evidence. */
-function progressItems(progress: ReleaseProgress, trusted: boolean): Item[] {
+function progressItems(progress: ReleaseProgress, trusted: boolean, recorded = true): Item[] {
   return [
     { kind: 'fact', label: 'Key holders released', value: `${String(progress.count)} of ${String(progress.required)} needed${trusted ? '' : ' (not verified)'}` },
     ...progress.rows.map(
@@ -1094,7 +1092,7 @@ function progressItems(progress: ReleaseProgress, trusted: boolean): Item[] {
     ),
     ...progress.unknown.map(
       (key): Item =>
-        trusted
+        trusted && recorded
           ? { ...fail('Released by a key that is not an approved key holder', 'A security key that is not on the approved list released a part of the key.'), hash: key }
           : { kind: 'tag', label: 'Released by a key that is not an approved key holder', tone: 'neutral', tag: 'Unverified', hash: key },
     ),
@@ -1189,7 +1187,12 @@ function publishedLogItems(log: Records['log'] | null): { items: Item[]; verifie
   };
 }
 
-function liveReleaseItems(c: Context): Item[] {
+/**
+ * Progress from the live machine, only while the exam is under way and nothing is recorded yet. It
+ * can show a count and nothing more: no row here can fail, and it never finishes a step.
+ */
+function liveReleaseItems(c: Context, recorded: boolean): Item[] {
+  if (recorded || c.endReached) return [];
   const heading: Item = { kind: 'heading', text: 'Live from the machine, optional' };
   if (!c.view.sources.tee) return [heading, { kind: 'text', text: needsTee }];
   const { live } = c;
@@ -1197,14 +1200,15 @@ function liveReleaseItems(c: Context): Item[] {
     const message = c.view.live.state === 'error' ? `Could not be read: ${c.view.live.message}` : 'Not read yet';
     return [heading, notChecked('Live release', message)];
   }
-  const trusted = live.fresh.ok && live.fresh.value.trusted;
+  if (live.otherExam) return [heading, ...liveNote(c)];
+  const trusted = liveTrusted(live);
   const stage = live.status.ok ? live.status.value : null;
   const stateItems: Item[] = !stage
     ? [notChecked('Stage', live.status.ok ? 'Not read yet' : `Could not be read: ${live.status.message}`)]
     : [
         { kind: 'fact', label: 'Stage', value: `${stage.stage}${trusted ? '' : ' (not verified)'}` },
         ...(live.progress
-          ? progressItems(live.progress, trusted)
+          ? progressItems(live.progress, trusted, false)
           : [
               {
                 kind: 'fact' as const,
@@ -1215,17 +1219,17 @@ function liveReleaseItems(c: Context): Item[] {
       ];
   return [
     heading,
-    ...(trusted
-      ? [{ kind: 'check' as const, label: 'The machine passed its check, so its answers can be trusted', status: 'pass' as const }]
-      : [{ kind: 'text' as const, tone: 'warn' as const, text: `Not verified. The machine has not passed its check, so what it reports here is not evidence. See step ${String(stepNumber(c, 2))}.` }]),
+    {
+      kind: 'text',
+      ...(trusted
+        ? { text: 'This is progress so far. The record of it is published when the exam reaches that point, and only the record counts.' }
+        : { text: 'Not verified. The machine has not shown it is running this exam, so what it reports here is not evidence.', tone: 'warn' as const }),
+    },
     ...stateItems,
-    ...(live.log
-      ? logItems(live.log, "Signed by the live TEE's attested key", 'Not checked, the log is not signed by the attested key')
-      : [notChecked('Release log', 'Not available yet')]),
   ];
 }
 
-type ProgressSource = 'storage' | 'tee' | 'arkiv';
+export type ProgressSource = 'storage' | 'tee' | 'arkiv';
 
 const sourceNames: Record<ProgressSource, string> = {
   storage: 'The public files',
@@ -1248,17 +1252,18 @@ const releasedKeys = (progress: ReleaseProgress) => progress.count + progress.un
  * one here is signed by an attested key, so the larger one is simply the later one.
  */
 function shownProgress(c: Context, published: ReleaseProgress | null): { progress: ReleaseProgress; source: ProgressSource } | null {
-  const trustedLive = c.live?.fresh.ok === true && c.live.fresh.value.trusted ? c.live.progress : null;
   const candidates: { progress: ReleaseProgress | null | undefined; source: ProgressSource }[] = [
     { progress: published, source: 'storage' },
-    { progress: trustedLive, source: 'tee' },
     { progress: c.arkiv?.log?.progress, source: 'arkiv' },
   ];
   let best: { progress: ReleaseProgress; source: ProgressSource } | null = null;
   for (const { progress, source } of candidates) {
     if (progress && (!best || releasedKeys(progress) > releasedKeys(best.progress))) best = { progress, source };
   }
-  return best;
+  if (best) return best;
+  // Nothing recorded yet, so a machine that has shown it runs this exam may give the count so far.
+  const live = liveTrusted(c.live) && !c.endReached ? c.live?.progress : null;
+  return live ? { progress: live, source: 'tee' } : null;
 }
 
 /** Who has released, in the strongest words the evidence allows. */
@@ -1452,7 +1457,7 @@ function unlockStep(c: Context, sealedOff: boolean): Draft {
       { kind: 'heading', text: 'Published release log' },
       ...logs.items,
       ...backupItems(c.records?.backup, [storageNames.releaseLog, releaseTokenName]),
-      ...liveReleaseItems(c),
+      ...liveReleaseItems(c, shown !== null && shown.source !== 'tee'),
       ...arkivItems(c, complete || c.endReached || noPaper || sealedOff),
       ...(build ? machineFailed(c) : []),
     ],
@@ -1760,5 +1765,6 @@ export function custody(given: View): Custody {
     next: failures.length > 0 ? 'Contact your exam board and tell them which check failed. This page keeps checking by itself.' : words.next,
     paper,
     withheld: proof?.state === 'opened' && proof.paper === null,
+    progressSource: shownProgress(c, publishedLogItems(records?.log ?? null).verified)?.source ?? null,
   };
 }

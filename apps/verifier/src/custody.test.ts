@@ -58,6 +58,7 @@ async function checkedLog(w: World, replace: Record<string, Uint8Array | null> =
     token,
     progress: list ? releaseProgress(holdersOf(list), parsed.entries.map((entry) => entry.passkeyPublicKey)) : null,
     files: await checkReleaseFiles(parsed, list, w.storage(replace)),
+    signer: parsed.instancePublicKey,
   };
 }
 
@@ -109,7 +110,6 @@ const liveReport = (trusted: boolean, stage = 'submit'): LiveReport => ({
   fresh: fresh(trusted),
   status: { ok: true, value: { stage, questionCount: 0, release: { released: [], required: 8 } } as never },
   progress: null,
-  log: null,
 });
 
 interface Scene {
@@ -343,10 +343,46 @@ describe('step 2, the sealed machine', () => {
     expect(step(result, 'locked').state).toBe('current');
   });
 
-  it('done from a trusted live check before the Build, but not after it', () => {
-    expect(step(scene({ ...beforeBuild, live: liveReport(true) }), 'attested').state).toBe('done');
+  it('is never done by the live machine: with nothing recorded it says so', () => {
+    const before = step(scene({ ...beforeBuild, live: liveReport(true) }), 'attested');
+    expect(before.state).toBe('waiting');
+    expect(before.note).toMatch(/^Not recorded yet/);
     const missing = scene({ records: { token: { kind: 'neutral', message: 'no token' } }, live: liveReport(true) });
     expect(step(missing, 'attested').state).toBe('current');
+  });
+
+  it('judges a finished exam from its records, whatever the live machine says now', () => {
+    const later: LiveReport = { ...liveReport(false), otherExam: true };
+    const proof = opened();
+    const untrusted = scene({ round: END, proof, live: liveReport(false) });
+    expect(untrusted.failures).toEqual([]);
+    expect(step(untrusted, 'attested').state).toBe('done');
+    expect(step(untrusted, 'open').state).toBe('done');
+    const serving = scene({ round: END, proof, live: later });
+    expect(serving.failures).toEqual([]);
+    expect(step(serving, 'attested').items).toContainEqual(expect.objectContaining({ kind: 'text', text: expect.stringMatching(/serving another exam/) }));
+    const stopped = { ...liveReport(true), fresh: { ok: false as const, message: 'fetch failed' }, status: { ok: false as const, message: 'fetch failed' } };
+    expect(scene({ round: END, proof, live: stopped }).failures).toEqual([]);
+  });
+
+  it('still fails a wrong record, even when the live machine passes', () => {
+    const token = fullRecords.token;
+    if (token.kind !== 'ready') throw new Error('no token');
+    const wrong = { ...token, verdict: { ...token.verdict, verified: false, build: { ok: false, error: 'bad signature' } } };
+    const result = scene({ records: { token: wrong }, live: liveReport(true) });
+    expect(step(result, 'attested').state).toBe('failed');
+    expect(step(result, 'sealed').state).toBe('failed');
+  });
+
+  it('shows the keys in the records, and does not fail a release signed by a second attested machine', () => {
+    const { log: published } = fullRecords;
+    if (published.kind !== 'ready') throw new Error('no log');
+    const signed = { ...published, signer: world.build.instancePublicKey as Hex };
+    const same = step(scene({ round: END, proof: opened(), records: { log: signed } }), 'attested');
+    expect(same.items).toContainEqual({ kind: 'fact', label: 'Build and release', value: expect.stringMatching(/same key/) });
+    const second = scene({ round: END, proof: opened(), records: { log: { ...published, signer: `0x04${'ee'.repeat(64)}` } } });
+    expect(second.failures).toEqual([]);
+    expect(step(second, 'attested').items).toContainEqual({ kind: 'fact', label: 'Build and release', value: expect.stringMatching(/Two machines/) });
   });
 
   it('failed when a claim does not match, naming the claim', () => {
@@ -360,8 +396,8 @@ describe('step 2, the sealed machine', () => {
     expect(step(result, 'attested').items).toContainEqual(expect.objectContaining({ label: { code: 'image_digest' }, status: 'fail', detail: expect.stringContaining('sha256:bb') }));
   });
 
-  it('failed when the live machine fails its check, and neutral when it cannot be reached', () => {
-    expect(step(scene({ ...beforeBuild, live: liveReport(false) }), 'attested').state).toBe('failed');
+  it('never fails on the live machine: not on a bad check, and not when it cannot be reached', () => {
+    expect(step(scene({ ...beforeBuild, live: liveReport(false) }), 'attested').state).toBe('waiting');
     const unreachable: LiveReport = { ...liveReport(true), fresh: { ok: false, message: 'fetch failed' } };
     const result = scene({ ...beforeBuild, live: unreachable });
     expect(step(result, 'attested').state).toBe('waiting');
@@ -442,10 +478,11 @@ describe('step 4, questions locked', () => {
     expect(step(result, 'locked').state).toBe('failed');
   });
 
-  it('failed when a trusted machine reports the exam failed, and not on its unverified word', () => {
+  it('notes that a trusted machine reports the exam stopped, and never fails on it', () => {
     const trusted = scene({ ...beforeBuild, round: LOCK, live: liveReport(true, 'failed') });
-    expect(step(trusted, 'locked').state).toBe('failed');
-    expect(trusted.failures[0]?.message).toMatch(/cannot go ahead/);
+    expect(step(trusted, 'locked').state).toBe('current');
+    expect(trusted.failures).toEqual([]);
+    expect(step(trusted, 'locked').items).toContainEqual(expect.objectContaining({ tone: 'warn', text: expect.stringMatching(/reports that this exam has stopped/) }));
     const unverified = scene({ ...beforeBuild, round: LOCK, live: { ...liveReport(false, 'failed'), fresh: { ok: false, message: 'down' } } });
     expect(step(unverified, 'locked').state).toBe('current');
   });
@@ -666,15 +703,26 @@ describe('step 6, the copy on Arkiv', () => {
     expect(s.note).toBe('8 of the 8 needed key holders have released.');
   });
 
-  it('shows whichever verified source has more releases, and says which', () => {
-    const live = { ...liveReport(true), progress: progressOf(3) };
-    const arkivWins = step(scene({ round: UNLOCK, records: noLog, live, arkiv: report(5) }), 'unlock');
-    expect(arkivWins.note).toBe('Unlocked. 5 of the 8 needed key holders have released.');
-    expect(arkivWins.aside).toMatch(/copy on Arkiv/);
-    const teeWins = step(scene({ round: UNLOCK, records: noLog, live: { ...live, progress: progressOf(6) }, arkiv: report(5) }), 'unlock');
-    expect(teeWins.note).toBe('Unlocked. 6 of the 8 needed key holders have released.');
-    expect(teeWins.aside).toMatch(/live machine/);
-    expect(teeWins.items).toContainEqual({ kind: 'fact', label: 'Progress shown is from', value: 'The live machine' });
+  it('uses the live machine only before anything is recorded, and says which source it shows', () => {
+    const live = { ...liveReport(true), progress: progressOf(6) };
+    const recorded = step(scene({ round: UNLOCK, records: noLog, live, arkiv: report(5) }), 'unlock');
+    expect(recorded.note).toBe('Unlocked. 5 of the 8 needed key holders have released.');
+    expect(recorded.aside).toMatch(/copy on Arkiv/);
+    expect(recorded.items).not.toContainEqual({ kind: 'heading', text: 'Live from the machine, optional' });
+    const nothingYet = step(scene({ round: UNLOCK, records: noLog, live }), 'unlock');
+    expect(nothingYet.note).toBe('Unlocked. 6 of the 8 needed key holders have released.');
+    expect(nothingYet.aside).toMatch(/live machine/);
+    expect(nothingYet.state).not.toBe('done');
+    expect(nothingYet.items).toContainEqual({ kind: 'fact', label: 'Progress shown is from', value: 'The live machine' });
+  });
+
+  it('never fails on a key the live machine reports, and never finishes the step on its word', () => {
+    const list = approvedEntries(world.entriesHex);
+    const stranger = releaseProgress(holdersOf(list ?? []), [`0x04${'cc'.repeat(64)}`]);
+    const s = step(scene({ round: UNLOCK, records: noLog, live: { ...liveReport(true), progress: stranger } }), 'unlock');
+    expect(s.failures).toEqual([]);
+    const enough = step(scene({ round: UNLOCK, records: noLog, live: { ...liveReport(true), progress: progressOf(8) } }), 'unlock');
+    expect(enough.state).not.toBe('done');
   });
 
   it('never counts rows that did not verify, and says how many were ignored', () => {
@@ -1081,14 +1129,15 @@ describe('step 1 on a name route, the name', () => {
   });
 
   it('counts its own step in the references that name a later one', () => {
-    const live = liveReport(false);
-    const text = (result: Custody) =>
-      result.steps.flatMap((s) => s.items).flatMap((item) => (item.kind === 'text' ? [item.text] : []));
-    const plain = custody(sceneView({ live }));
-    const namedView = named({ state: 'ready', value: passed, readAt: 0 }, { live });
-    expect(text(plain).filter((line) => line.includes('See step 2'))).not.toEqual([]);
-    expect(text(namedView).filter((line) => line.includes('See step 3'))).not.toEqual([]);
-    expect(text(namedView).filter((line) => line.includes('See step 2'))).toEqual([]);
+    const token = fullRecords.token;
+    if (token.kind !== 'ready') throw new Error('no token');
+    const wrong = { ...token, verdict: { ...token.verdict, verified: false, build: { ok: false, error: 'bad signature' } } };
+    const view = sceneView({ records: { token: wrong } });
+    const said = (result: Custody) => result.failures.map((failure) => failure.message);
+    expect(said(custody(view)).filter((line) => line.includes('See step 5'))).not.toEqual([]);
+    const namedView = named({ state: 'ready', value: passed, readAt: 0 }, { records: { token: wrong } });
+    expect(said(namedView).filter((line) => line.includes('See step 6'))).not.toEqual([]);
+    expect(said(namedView).filter((line) => line.includes('See step 5'))).toEqual([]);
   });
 
   it.each([

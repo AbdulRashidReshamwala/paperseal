@@ -9,9 +9,11 @@
     "typecheck": "tsc --noEmit",
     "demo": "node demo/cli.mjs main",
     "demo:check": "node demo/cli.mjs check",
+    "demo:names": "node demo/cli.mjs names",
     "ui": "vitest run --config vitest.ui.config.ts",
     "ui:live": "UI_LIVE=1 vitest run --config vitest.ui.config.ts",
-    "ui:mock": "node scripts/ui-mock.mjs"
+    "ui:mock": "node scripts/ui-mock.mjs",
+    "ui:demo": "UI_DEMO=1 vitest run --config vitest.ui.config.ts"
   },
   "dependencies": {
     "@paperseal/crypto": "workspace:*",
