@@ -38,6 +38,35 @@ function repository(env: Record<string, string>): string {
   return given;
 }
 
+/** The `VITE_` setting behind each config.json field, as in src/runtime-config.ts. `repository` is resolved above. */
+const settings = {
+  teeUrl: 'VITE_TEE_URL',
+  rpcUrl: 'VITE_RPC_URL',
+  registry: 'VITE_REGISTRY_ADDRESS',
+  storageUrl: 'VITE_STORAGE_URL',
+  storageBucket: 'VITE_TEE_STORAGE_BUCKET',
+  examId: 'VITE_EXAM_ID',
+  arkivWriters: 'VITE_ARKIV_WRITERS',
+  swarmApiUrl: 'VITE_SWARM_API_URL',
+  releaseTag: 'VITE_RELEASE_TAG',
+} as const;
+
+/**
+ * `config.json` beside the page (spec/deploy.md, "App config.json"): this build's `VITE_` values with
+ * empty ones left out, the chain from constants.json and the repository. An operator overwrites it
+ * to point the same build at their own board.
+ */
+function configJson(env: Record<string, string>, repo: string): string {
+  const constants = JSON.parse(readFileSync(join(spec, 'constants.json'), 'utf8')) as { chain: { chainId: number; name: string } };
+  const config: Record<string, string | number> = { chainId: constants.chain.chainId, chainName: constants.chain.name };
+  for (const [field, setting] of Object.entries(settings)) {
+    const value = env[setting]?.trim();
+    if (value) config[field] = value;
+  }
+  config.repository = repo;
+  return `${JSON.stringify(config, null, 2)}\n`;
+}
+
 /**
  * The files served next to the page (spec/agent-verification.md, "Files Next to the Page"): emitted
  * into dist/ by a build and served by the dev server. `agent.md` is read from the spec each time,
@@ -45,34 +74,21 @@ function repository(env: Record<string, string>): string {
  */
 function siteFiles(env: Record<string, string>): Plugin {
   const repo = repository(env);
-  const files = (): Record<string, string> => {
-    const constants = JSON.parse(readFileSync(join(spec, 'constants.json'), 'utf8')) as { chain: { chainId: number; name: string } };
-    return {
-      'agent.md': readFileSync(join(spec, 'agent-verification.md'), 'utf8'),
-      'llms.txt': [
-        '# Paper Seal Verifier',
-        '',
-        "> Paper Seal's public verifier for leak-proof exams. Anyone can check an exam from public sources.",
-        '',
-        '## Docs',
-        '',
-        '- [How to verify an exam](agent.md): the claims, the sources and how to read the report',
-        `- [Source code](https://github.com/${repo}): the repository this page is built from`,
-        '',
-      ].join('\n'),
-      'config.json': `${JSON.stringify(
-        {
-          registry: env.VITE_REGISTRY_ADDRESS ?? '',
-          chainId: constants.chain.chainId,
-          chainName: constants.chain.name,
-          storageUrl: env.VITE_STORAGE_URL ?? '',
-          repository: repo,
-        },
-        null,
-        2,
-      )}\n`,
-    };
-  };
+  const files = (): Record<string, string> => ({
+    'agent.md': readFileSync(join(spec, 'agent-verification.md'), 'utf8'),
+    'llms.txt': [
+      '# Paper Seal Verifier',
+      '',
+      "> Paper Seal's public verifier for leak-proof exams. Anyone can check an exam from public sources.",
+      '',
+      '## Docs',
+      '',
+      '- [How to verify an exam](agent.md): the claims, the sources and how to read the report',
+      `- [Source code](https://github.com/${repo}): the repository this page is built from`,
+      '',
+    ].join('\n'),
+    'config.json': configJson(env, repo),
+  });
   const types: Record<string, string> = {
     'agent.md': 'text/markdown; charset=utf-8',
     'llms.txt': 'text/plain; charset=utf-8',

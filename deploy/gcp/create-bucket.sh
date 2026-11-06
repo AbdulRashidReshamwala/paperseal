@@ -4,6 +4,7 @@
 # Everything in it is public by design: the files are encrypted and hashed.
 # Usage: PROJECT_ID=... REGION=... ZONE=... [BUCKET=...] [DRY_RUN=1] ./create-bucket.sh
 set -euo pipefail
+echo "deprecated: deploy/tofu now manages the bucket, its public read and CORS from deploy.json. See deploy/tofu/README.md. This script still works." >&2
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 init_common
 

@@ -24,7 +24,6 @@ import { AgentCheck } from './agent-check';
 import { RecentExams } from './history-page';
 import { clockTime, custody, dayTime, REPOSITORY, type Custody, type CustodyStep, type Failure, type PartyName } from './custody';
 import { Evidence } from './evidence';
-import { teeStorageBucket } from './env';
 import { checkedCopies, copies, people, timeline, type Copies, type People } from './facts';
 import { readBoardName, readExamName, readVersion } from './identity';
 import { useExamLink, useShareAddress } from './link';
@@ -162,7 +161,7 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
   const teeUrl = onName ? (resolved ? (resolved.teeUrl ?? settings.teeUrl) : '') : settings.teeUrl;
   const storageUrl = onName ? (resolved ? (resolved.storageUrl ?? settings.storageUrl) : '') : settings.storageUrl;
   const registryAddress = onName ? (resolved?.registry ?? '') : settings.registryAddress;
-  const bucket = resolved?.bucket ?? teeStorageBucket;
+  const bucket = resolved?.bucket ?? settings.storageBucket;
   const named = useMemo(
     () => (onName ? endpoints({ rpcUrl: settings.rpcUrl, teeUrl, storageUrl, registryAddress, examId: examId ?? '' }) : null),
     [onName, settings.rpcUrl, teeUrl, storageUrl, registryAddress, examId],
@@ -598,6 +597,13 @@ export function OwnConnection({ open }: { open: boolean }) {
           value={draft.storageUrl}
           error={errors.storageUrl}
           onChange={edit('storageUrl')}
+        />
+        <Field
+          label="Bucket the live machine must name"
+          hint="The name of the file store bucket the machine that builds the paper was started with (the storage bucket). Its proof must name exactly this bucket, so a machine started for another store fails that check. Leave this empty only if you have no live machine to check."
+          value={draft.storageBucket}
+          error={errors.storageBucket}
+          onChange={edit('storageBucket')}
         />
         <Field
           label="Exam registry location"

@@ -1,5 +1,6 @@
 import { roles, threshold, type Criteria } from '@paperseal/protocol';
 
+import { appEnv } from '../../shared/runtime-config';
 import { evaluateBlueprint, evaluateSchedule, parseLocalTime, type BlueprintInput, type ScheduleInput, type TopicInput } from './form';
 import type { ChosenParty } from './parties';
 
@@ -149,7 +150,7 @@ export function plainWords(message: string): string {
 
 /** The hostname the wallet's reads already use, which is the operator a board would name. */
 export function defaultRpcHost(
-  env: Record<string, string | undefined> = import.meta.env as Record<string, string | undefined>,
+  env: Record<string, string | undefined> = appEnv(),
 ): string {
   try {
     return env.VITE_RPC_URL ? new URL(env.VITE_RPC_URL).hostname : '';
@@ -164,7 +165,7 @@ export function defaultRpcHost(
  * which names the exam in the part of the address a server sees, so it also works for an agent.
  */
 export function verifierUrl(
-  env: Record<string, string | undefined> = import.meta.env as Record<string, string | undefined>,
+  env: Record<string, string | undefined> = appEnv(),
   examId?: string | null,
 ): string | null {
   const given = env.VITE_VERIFIER_URL?.trim();
@@ -182,7 +183,7 @@ export function verifierUrl(
 }
 
 /** What an exam's ENS name holds besides the registry, from "Exam Names" in spec/api.md: the values this app itself uses. */
-export function examNameValues(env: Record<string, string | undefined> = import.meta.env as Record<string, string | undefined>) {
+export function examNameValues(env: Record<string, string | undefined> = appEnv()) {
   const url = (value: string | undefined) => value?.trim().replace(/\/+$/, '') || null;
   return {
     teeUrl: url(env.VITE_TEE_URL),

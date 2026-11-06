@@ -1,9 +1,11 @@
 /*
- * Build-time configuration for the signed-in roles: where public storage is
+ * Configuration for the signed-in roles (VITE_ values, then config.json): where public storage is
  * and which bucket an attestation token must name.
  */
 
-const env = import.meta.env as Record<string, string | undefined>;
+import { appEnv } from './runtime-config';
+
+const env = appEnv();
 
 /** Base URL of public storage. Files are read from `<base>/<examId>/<name>`. Hashes protect the content. */
 export const storageUrl: string | null = env.VITE_STORAGE_URL?.replace(/\/+$/, '') || null;
