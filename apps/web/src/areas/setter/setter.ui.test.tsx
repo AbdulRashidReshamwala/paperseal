@@ -122,7 +122,8 @@ describe('a first visit', () => {
     await screen.findByRole('heading', { name: 'Register your security key' });
     expect(screen.queryByLabelText('Name on the approved list')).toBeNull();
     expect(screen.queryByRole('navigation')).toBeNull();
-    expect(screen.queryByRole('link')).toBeNull();
+    // The logo is the one link, back to the start page.
+    expect(screen.getAllByRole('link').map((link) => link.getAttribute('href'))).toEqual(['#/']);
   });
 });
 

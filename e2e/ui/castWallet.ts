@@ -9,7 +9,7 @@ export const castWalletScript = (rpcUrl: string, boardAddress: string) => `(() =
   const RPC = ${JSON.stringify(rpcUrl)};
   const BOARD = ${JSON.stringify(boardAddress)};
   let id = 0;
-  let connected = false;
+  let connected = sessionStorage.getItem('test-wallet.connected') === '1';
   const rpc = async (method, params) => {
     const response = await fetch(RPC, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: ++id, method, params: params || [] }) });
     const body = await response.json();
@@ -19,7 +19,7 @@ export const castWalletScript = (rpcUrl: string, boardAddress: string) => `(() =
   window.ethereum = {
     isCastBackedTestWallet: true,
     request: async ({ method, params }) => {
-      if (method === 'eth_requestAccounts') connected = true;
+      if (method === 'eth_requestAccounts') { connected = true; sessionStorage.setItem('test-wallet.connected', '1'); }
       if (method === 'eth_accounts' || method === 'eth_requestAccounts') return connected ? [BOARD] : [];
       if (method === 'eth_sendTransaction') {
         const tx = params[0];

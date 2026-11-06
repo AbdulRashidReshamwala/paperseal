@@ -231,6 +231,7 @@ describe('real exam through the screens', () => {
       board.paced = true;
       board.mark('create-start');
       await bp.goto(`${web.url}/#/board/blueprint`);
+      await bp.getByRole('button', { name: button.connectWallet }).click({ timeout: 60_000 });
       await board.seeHeading(text.createHeading);
       await board.say('Exam board: create the exam');
       await board.type(bp.getByLabel(field.examName).first(), name);
@@ -332,6 +333,7 @@ describe('real exam through the screens', () => {
     if (RESUME) {
       await bp.goto(`${web.url}/#/board?exam=${examId}`);
       await bp.reload();
+      await bp.getByRole('button', { name: button.connectWallet }).click({ timeout: 60_000 });
     }
 
     // ---------------------------------------------------------------- the board chooses names while the VM boots

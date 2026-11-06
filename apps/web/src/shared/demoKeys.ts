@@ -1,4 +1,6 @@
-import { lazy, type ComponentType, type LazyExoticComponent } from 'react';
+import { lazy, type ComponentType, type LazyExoticComponent, type ReactNode } from 'react';
+
+import type { GatedRole } from './RolePage';
 
 /*
  * Demo keys (`pnpm demo:keys`): one tab acts as every person in an exam, each with a planted key from
@@ -19,6 +21,12 @@ const on = (import.meta.env.MODE === 'demo-keys' || import.meta.env.MODE === 'mo
 export function demoBar(): LazyExoticComponent<ComponentType> | null {
   if (!on) return null;
   return lazy(() => import('../demo/DemoBar'));
+}
+
+/** Decides a role by the person in the bar. Null outside demo mode. */
+export function demoGate(): LazyExoticComponent<ComponentType<{ role: GatedRole; children: ReactNode }>> | null {
+  if (!on) return null;
+  return lazy(() => import('../demo/PersonaGate'));
 }
 
 /** The `credentials` option for `createWebAuthnKeys`, empty outside demo mode, so the browser's real one applies. */

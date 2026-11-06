@@ -8,10 +8,10 @@ import { TEE_STATUS_POLL_MS } from '../../shared/TeeStatus';
 import { useBoardForm, useReader } from './BoardForm';
 import { editedWords, listDrafts, removeDraft } from './draftStore';
 import { readSnapshot, type Snapshot } from './examState';
-import { listKnownExams } from './examsStore';
+import { forgetExam, listKnownExams } from './examsStore';
 import { useNow } from './hooks';
 import { useListSettled, useRowReads } from './homeReads';
-import { examStatus, homeRows, type HomeRow } from './homeStatus';
+import { examStatus, homeRows, isAbandoned, type HomeRow } from './homeStatus';
 import { examFinished, machineState, type ChainExam } from './machineVerdict';
 import { MachineRowStatus, useMachineRead, useMachineVerdicts } from './MachineCheck';
 import { formatWhen } from './plan';
@@ -161,9 +161,8 @@ export function BoardHome() {
   const current = useCurrentExamId();
   const now = useNow(30_000);
   const [drafts, setDrafts] = useState(listDrafts);
-  const [exams] = useState(listKnownExams);
+  const [exams, setExams] = useState(listKnownExams);
   const [asking, setAsking] = useState<string | null>(null);
-  const rows = homeRows(drafts, exams);
 
   // Paper Seal serves one exam at a time, so only the current exam is asked what it says.
   const load = useCallback(
@@ -173,6 +172,14 @@ export function BoardHome() {
   const examIds = exams.map((exam) => exam.id);
   const reads = useRowReads(examIds, reader ? load : null, TEE_STATUS_POLL_MS);
   const settled = useListSettled(examIds, reads, reader !== null);
+  // An exam is hidden only once its read says it never got a Build. Unread or failed rows stay.
+  const rows = homeRows(
+    drafts,
+    exams.filter((exam) => {
+      const read = reads.get(exam.id);
+      return !(read?.state === 'ready' && isAbandoned(read.snapshot, now));
+    }),
+  );
 
   // The machine is asked once for the whole list, and only while an exam on it can still need it.
   const published = useMemo(() => {
@@ -265,7 +272,7 @@ export function BoardHome() {
     const acts = snapshot ? examStatus(snapshot, now).needsBoard : false;
     const settings = snapshot?.found?.exam.settings;
     return (
-      <li key={row.key} className={acts ? 'board-row board-row-act' : 'board-row'}>
+      <li key={row.key} className={[acts ? 'board-row board-row-act' : 'board-row', asking === exam.id ? 'board-home-asking' : ''].filter(Boolean).join(' ')}>
         <div className="board-home-name">
           <strong>{title}</strong>
           {exam.name ? null : <span>Reference {exam.id.slice(2, 10)}</span>}
@@ -276,14 +283,50 @@ export function BoardHome() {
         </div>
         <div className="board-home-date">{settings ? `Exam on ${formatWhen(Number(settings.examStart))}` : null}</div>
         <div className="board-home-actions">
-          <Button
-            aria-label={`Open ${title}`}
-            onClick={() => {
-              void navigate(`/board/exam/${exam.id}`);
-            }}
-          >
-            Open
-          </Button>
+          {asking === exam.id ? (
+            <>
+              <span>Remove from this browser&apos;s list? It stays on the public record.</span>
+              <Button
+                className="ps-button board-home-confirm"
+                aria-label={`Yes, remove ${title}`}
+                onClick={() => {
+                  forgetExam(exam.id);
+                  setExams((previous) => previous.filter((other) => other.id !== exam.id));
+                  setAsking(null);
+                }}
+              >
+                Yes, remove
+              </Button>
+              <Button
+                className="ps-button board-home-text"
+                onClick={() => {
+                  setAsking(null);
+                }}
+              >
+                Keep it
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                aria-label={`Open ${title}`}
+                onClick={() => {
+                  void navigate(`/board/exam/${exam.id}`);
+                }}
+              >
+                Open
+              </Button>
+              <Button
+                className="ps-button board-home-text"
+                aria-label={`Remove ${title}`}
+                onClick={() => {
+                  setAsking(exam.id);
+                }}
+              >
+                Remove
+              </Button>
+            </>
+          )}
         </div>
       </li>
     );
