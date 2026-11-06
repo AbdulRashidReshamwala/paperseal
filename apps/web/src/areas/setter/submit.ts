@@ -136,6 +136,8 @@ export interface SubmitDeps {
    * is sent, and cleared once the outcome is known.
    */
   pending?: { current: PendingSubmission | null };
+  /** Where a verified receipt is kept. By default, this browser's receipts. */
+  keep?: (examId: Hex, receipt: StoredReceipt) => void;
 }
 
 export const submitNotOpen = (stage: StatusResponse['stage']): string =>
@@ -234,7 +236,7 @@ export async function sealAndSubmit(
       'The receipt signature does not verify under the TEE instance key. It is not shown as sealed and is not kept.',
     );
   }
-  saveReceipt(confirmed.examId, stored);
+  (deps.keep ?? saveReceipt)(confirmed.examId, stored);
   pending.current = null;
   return stored;
 }
