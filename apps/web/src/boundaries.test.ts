@@ -65,8 +65,11 @@ describe('keyholder import boundary', () => {
 
 describe('code splitting', () => {
   it('keeps every area out of the entry bundle', () => {
-    const entry = files(graph(join(src, 'main.tsx'), false));
+    // main.tsx imports App only after config.json is read, so App's own imports load at start too.
+    expect(readFileSync(join(src, 'main.tsx'), 'utf8')).toContain("import('./App')");
+    const entry = files(new Map([...graph(join(src, 'main.tsx'), false), ...graph(join(src, 'App.tsx'), false)]));
     expect(entry).toContain('App.tsx');
+    expect(entry).toContain('shared/runtime-config.ts');
     expect(entry.filter((file) => file.startsWith('areas/') || file.startsWith('release/'))).toEqual([]);
   });
 

@@ -1,6 +1,7 @@
 import { createEnsLookup, readDirectory, readPartyRecords, type Directory, type EnsLookup, type PartyRecords } from '@paperseal/chain';
 import { useMemo } from 'react';
 
+import { appEnv } from './runtime-config';
 import { usePoll } from './usePoll';
 
 /*
@@ -8,7 +9,7 @@ import { usePoll } from './usePoll';
  * app's own RPC, on chain only. The list is a menu: each name counts only by its own records.
  */
 
-const env = import.meta.env as Record<string, string | undefined>;
+const env = appEnv();
 
 export const DIRECTORY_POLL_MS = 30_000;
 

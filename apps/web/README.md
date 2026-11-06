@@ -2,6 +2,9 @@
 
 The board-hosted app, on port 5171. `/board`, `/setter`, `/centre` and `/keyholder` are lazy route areas, so each role downloads only its own code. Each area is one guided page: the exam's state picks the one screen to show, so there are no tabs, and old links such as `/board/outbox` or `/centre/unlock` land on the screen the state calls for. Set `VITE_TEE_URL`, `VITE_RPC_URL`, `VITE_REGISTRY_ADDRESS` and `VITE_EXAM_ID` at build time.
 
+The app also reads `config.json` beside `index.html` once, before it renders (`src/main.tsx`, `src/shared/runtime-config.ts`), so one build serves every board ("App config.json" in `spec/deploy.md`). Its `teeUrl`, `rpcUrl`, `registry`, `storageUrl`, `storageBucket`, `repository` and `examId` stand in for `VITE_TEE_URL`, `VITE_RPC_URL`, `VITE_REGISTRY_ADDRESS`, `VITE_STORAGE_URL`, `VITE_TEE_STORAGE_BUCKET`, `VITE_RELEASES_REPO` and `VITE_EXAM_ID`; a `VITE_` value set at build time wins, an invalid file counts as empty, and a file naming another `chainId` loses its chain fields.
+The build writes `dist/config.json` from its own `VITE_` values, leaving out empty ones, and the dev server serves the same file; an operator overwrites it (`deploy/web-config.sh`). Mock mode and demo keys read nothing from it.
+
 `VITE_RELEASES_REPO` is optional. It is the `owner/name` GitHub repository the board reads sealed machine versions from, `AbdulRashidReshamwala/paperseal` when unset, so a fork can set its own. Any other shape is an error.
 
 `VITE_VERIFIER_URL` is optional. The public verifier is a separate app, hosted on its own, so the board's last screen links to this address. It must be `http` or `https`. If it is unset or invalid, that screen says the link is not set, and nothing else changes.

@@ -12,6 +12,7 @@ import {
 } from 'viem';
 import { sepolia } from 'viem/chains';
 
+import { appEnv } from '../../shared/runtime-config';
 import { currentAccount, injectedProvider, switchToSepolia, walletChainId, walletClientFor, type EIP1193Provider } from '../../shared/wallet';
 import { withDetails } from './details';
 import type { PublishFields, ScheduleSettings } from './form';
@@ -34,7 +35,7 @@ export interface PublishEnvironment {
 }
 
 export function defaultEnvironment(
-  env: Record<string, string | undefined> = import.meta.env as Record<string, string | undefined>,
+  env: Record<string, string | undefined> = appEnv(),
 ): PublishEnvironment {
   const rpcUrl = env.VITE_RPC_URL;
   const address = env.VITE_REGISTRY_ADDRESS as Hex | undefined;
