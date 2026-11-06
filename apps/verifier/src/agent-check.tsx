@@ -1,6 +1,6 @@
-import { Button, CopyButton } from '@paperseal/ui';
+import { CopyButton } from '@paperseal/ui';
 
-import { agentPrompt } from './agent-prompt';
+import { agentPrompt, type PromptResult } from './agent-prompt';
 import { REPOSITORY } from './custody';
 import { releaseTag } from './env';
 import { shareUrl } from './link';
@@ -21,13 +21,10 @@ export function examShareUrl(href: string, examId: string): string | null {
 
 const currentHref = () => (globalThis.location as Location | undefined)?.href ?? '';
 
-/**
- * "Check with your own AI": copies a prompt built here, in the browser, from the settings this page
- * is using. Nothing is sent anywhere. Disabled, with the reason, until every field is valid.
- */
-export function AgentCheck(props: { examId: string | null; registry: string; storageUrl: string; version?: string; href?: string }) {
+/** The prompt for "Check with your own AI", built here, in the browser, from the settings this page is using. */
+export function agentCheckPrompt(props: { examId: string | null; registry: string; storageUrl: string; version?: string; href?: string }): PromptResult {
   const examId = props.examId ?? '';
-  const prompt = agentPrompt({
+  return agentPrompt({
     examId,
     registry: props.registry,
     storageUrl: props.storageUrl,
@@ -35,17 +32,19 @@ export function AgentCheck(props: { examId: string | null; registry: string; sto
     repository: REPOSITORY,
     version: props.version ?? releaseTag,
   });
-  const label = 'Check with your own AI';
+}
+
+/**
+ * "Check with your own AI": copies a prompt that is ready to run. Nothing is sent anywhere. The page
+ * shows it only when every field is valid, because a disabled button in the headline's place helps no one.
+ */
+export function AgentCheck({ prompt }: { prompt: string }) {
   return (
-    <div className="ps-stage-action vf-agent">
+    <div className="vf-agent">
       <div className="vf-agent-row">
-        {prompt.ok ? (
-          <CopyButton key={prompt.text} text={prompt.text} copied="Copied. Paste it into any AI agent.">
-            {label}
-          </CopyButton>
-        ) : (
-          <Button disabled>{label}</Button>
-        )}
+        <CopyButton key={prompt} text={prompt} copied="Copied. Paste it into any AI agent.">
+          Check with your own AI
+        </CopyButton>
         <span className="vf-agent-repo">
           Repository{' '}
           <a href={`https://github.com/${REPOSITORY}`} target="_blank" rel="noreferrer">
@@ -53,14 +52,10 @@ export function AgentCheck(props: { examId: string | null; registry: string; sto
           </a>
         </span>
       </div>
-      {prompt.ok ? (
-        <details className="vf-agent-text">
-          <summary>Show the text</summary>
-          <pre className="vf-code">{prompt.text}</pre>
-        </details>
-      ) : (
-        <p className="vf-agent-reason">{prompt.reason}</p>
-      )}
+      <details className="vf-agent-text">
+        <summary>Show the text</summary>
+        <pre className="vf-code">{prompt}</pre>
+      </details>
     </div>
   );
 }

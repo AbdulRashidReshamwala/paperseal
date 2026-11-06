@@ -124,9 +124,25 @@ export interface CustodyStep {
   note: string;
   /** A quiet line under the note. */
   aside?: string;
+  /** A value inside `aside` to show as a short, copyable hash rather than in full. */
+  asideHash?: AsideHash;
+  /** The verified release count this step's note gives, so a summary elsewhere can't disagree with it. */
+  releases?: ReleaseCount;
   items: Item[];
   /** Every failed check here, as plain sentences. */
   failures: string[];
+}
+
+/** How many of the needed key holders have released, from a verified record. */
+export interface ReleaseCount {
+  count: number;
+  required: number;
+}
+
+/** A hash quoted inside a step's aside, and what it is, for screen readers. */
+export interface AsideHash {
+  value: string;
+  label: string;
 }
 
 export interface Failure {
@@ -375,6 +391,8 @@ interface Draft {
   /** A failure here leaves every later step waiting. */
   stops?: boolean;
   aside?: string;
+  asideHash?: AsideHash;
+  releases?: ReleaseCount;
   at?: number | null;
   round?: number | null;
   note: string;
@@ -616,7 +634,9 @@ function publishedStep(c: Context): Draft {
     stops: wrongAddress,
     at: seconds,
     round: roundOf(seconds),
-    ...(code?.state === 'match' ? { aside: `Only the exam board account ${code.board} can write this record.` } : {}),
+    ...(code?.state === 'match'
+      ? { aside: `Only the exam board account ${code.board} can write this record.`, asideHash: { value: code.board, label: 'exam board account' } }
+      : {}),
     note: wrongAddress
       ? 'This page is not reading a Paper Seal exam record.'
       : exam
@@ -1501,7 +1521,7 @@ function unlockStep(c: Context, sealedOff: boolean): Draft {
     at: unlockAt,
     round: exam ? Number(exam.settings.unlockRound) : null,
     note,
-    ...(counted && shown ? { aside: sourceAsides[shown.source] } : {}),
+    ...(counted && shown ? { aside: sourceAsides[shown.source], releases: { count: shown.progress.count, required: shown.progress.required } } : {}),
     items: [
       ...countdown,
       ...(shown ? [{ kind: 'fact' as const, label: 'Progress shown is from', value: sourceNames[shown.source] }] : []),
@@ -1663,6 +1683,8 @@ function settle(drafts: readonly Draft[]): CustodyStep[] {
       round: draft.round ?? null,
       note: draft.note,
       ...(draft.aside ? { aside: draft.aside } : {}),
+      ...(draft.aside && draft.asideHash ? { asideHash: draft.asideHash } : {}),
+      ...(draft.releases ? { releases: draft.releases } : {}),
       items: draft.items,
       failures,
     };

@@ -70,9 +70,25 @@ describe('tokens.css', () => {
   });
 
   it('keeps the older token names', () => {
-    for (const name of ['bg', 'surface', 'text', 'muted', 'border', 'accent', 'accent-text', 'ok', 'warn', 'bad', 'radius', 'font', 'mono']) {
+    for (const name of ['bg', 'surface', 'text', 'muted', 'border', 'accent', 'accent-text', 'ok', 'warn', 'bad', 'radius', 'font', 'mono', 'text-small', 'text-code']) {
       expect(css).toContain(`--ps-${name}:`);
     }
+  });
+
+  it('keeps wax off the step in progress, since students read red as an error', () => {
+    const current = [...css.matchAll(/\.ps-step\[data-state='current'\][^{]*\{[^}]*\}/g)].map((match) => match[0]).join('');
+    expect(current).not.toBe('');
+    expect(current).not.toMatch(/--ps-(wax|seal-ink|fail)/);
+  });
+
+  it('prints step times as plain numbers, not code', () => {
+    expect(blockAfter('.ps-step-when')).not.toContain('--ps-code');
+    expect(blockAfter('.ps-step-when')).toContain('tabular-nums');
+  });
+
+  // A badge's 1px corner is a printed edge, not a rounded one, so only soft corners must use the token.
+  it('rounds soft corners only with the radius token', () => {
+    expect(css).not.toMatch(/border-radius:\s*([2-9]|\d{2,})px/);
   });
 
   it('turns motion off under reduced motion', () => {
