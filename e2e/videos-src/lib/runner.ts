@@ -192,7 +192,7 @@ async function play(name: string, video: Video, world: World, dry: boolean): Pro
     };
     const board = await openActor(browser, 'board', null, { role: 'board', wallet: world.walletScript, bindings: world.bindings, ...(video.persona ? {} : onCameraOptions) });
     await proxyGithubIfLimited(board.person.context);
-    const camera = video.persona ? await openActor(browser, video.persona, null, { role: 'setter', ...onCameraOptions }) : board;
+    const camera = video.persona ? await openActor(browser, video.persona, null, { role: video.persona, ...onCameraOptions }) : board;
     await prepare(camera);
     if (video.persona) await camera.person.context.addInitScript(`try { sessionStorage.setItem('paperseal-demo.persona', ${JSON.stringify(video.persona)}); } catch (e) {}`);
     const { page } = camera;

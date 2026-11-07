@@ -1,6 +1,6 @@
 
 import { button, composer, field, radio, text } from '../ui/selectors';
-import { inviteSetters, publishForVideo, registerAllAndPostList, waitForMachine } from './lib/board';
+import { inviteSetters, publishAndMoveMachine, registerAllAndPostList } from './lib/board';
 import { defineVideo, step, wait, type Stage } from './lib/script';
 import { retry } from './lib/world';
 
@@ -15,15 +15,8 @@ const SEALED = 2;
 
 /** Off camera: a new exam, the machine on it, and the setter's invite. */
 async function setup(s: Stage) {
-  const { office } = s;
-  await publishForVideo(office, CLOSE_IN_MINUTES);
-  const examId = s.notes.examId;
-  if (!examId) throw new Error('the exam has no ID');
-  console.log(`  published ${s.label}. Moving the machine to it.`);
-  await s.world.startMachine(s.label, examId as `0x${string}`);
-  await waitForMachine(office);
-  console.log('  the machine passed its check.');
-  s.memo.invite = await inviteSetters(office);
+  await publishAndMoveMachine(s.office, CLOSE_IN_MINUTES);
+  s.memo.invite = await inviteSetters(s.office);
 }
 
 const pick = async (s: Stage, name: string | RegExp) => {

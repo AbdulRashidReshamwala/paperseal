@@ -162,6 +162,17 @@ export async function waitForMachine(s: Stage, minutes = 9) {
   throw new Error(`the machine did not pass its check in ${String(minutes)} minutes. It said: ${words.replace(/\s+/g, ' ')}`);
 }
 
+/** Off camera: a new exam, and the sealed machine moved onto it and passing its check. */
+export async function publishAndMoveMachine(s: Stage, closeInMinutes: number) {
+  await publishForVideo(s, closeInMinutes);
+  const examId = s.notes.examId;
+  if (!examId) throw new Error('the exam has no ID');
+  console.log(`  published ${s.label}. Moving the machine to it.`);
+  await s.world.startMachine(s.label, examId as `0x${string}`);
+  await waitForMachine(s);
+  console.log('  the machine passed its check.');
+}
+
 /** Makes the setters' invites, and returns the link for the first one. */
 export async function inviteSetters(s: Stage) {
   await s.page.getByRole('button', { name: 'Add invites for all 5 setters' }).click({ timeout: 60_000 });
