@@ -111,13 +111,13 @@ The script builds for `linux/amd64` with a pinned BuildKit, sets `SOURCE_DATE_EP
 
 | Library | Version | Why |
 | --- | --- | --- |
-| `github.com/ethereum/go-ethereum/accounts/abi` | v1.17.5 | Solidity ABI encoding for every hashed message, the approved list and the `ExamRegistry` reads |
-| `github.com/cloudflare/circl/hpke` | v1.6.4 | HPKE with the DHKEM(P-256) suite, because Go 1.24 has no `crypto/hpke` |
+| `github.com/ethereum/go-ethereum/accounts/abi` | v1.17.10 | Solidity ABI encoding for every hashed message, the approved list and the `ExamRegistry` reads |
+| `github.com/cloudflare/circl/hpke` | v1.6.4 | HPKE with the DHKEM(P-256) suite, because Go 1.25 has no `crypto/hpke` |
 | `github.com/drand/tlock` | v1.2.0 | drand timelock, the same armoured age format `tlock-js` opens |
 | `github.com/drand/drand/v2`, `drand/kyber`, `filippo.io/age` | via tlock | BLS verification of rounds, and the age armour |
 | `github.com/hashicorp/vault/shamir` | vault v1.14.0 | Shamir over GF(256), widely used and reviewed |
 
-- Versions are the newest that build with Go 1.24.6 and `GOTOOLCHAIN=local`. circl v1.6.5 needs Go 1.25, go-ethereum v1.17.6 needs Go 1.25, and go-clients v0.3.0 needs Go 1.26. Newer `google.golang.org/genproto` versions need Go 1.26, so `go.mod` pins the one before.
+- Versions build with Go 1.25.14, the pinned base image, and `GOTOOLCHAIN=local`. Newer `google.golang.org/genproto` versions need Go 1.26, so `go.mod` pins the one before.
 - go-clients is not used: `internal/timelock` reads the drand HTTP API itself and verifies each round with `drand/v2/crypto`.
 - Shamir is pinned to vault v1.14.0 because the whole module is MPL-2.0 at that tag. Later tags put the module under BUSL, with the same `shamir.go` under MPL-2.0. The file is byte-identical through v1.20.4. No smaller library with comparable review turned up, so it stays. `shamir.Combine` has no threshold of its own and returns wrong bytes for too few or tampered shares. `split.CombineShares` enforces the threshold, and `release` checks each share's hash first.
 - Google Cloud Storage is reached through its JSON API over HTTP, not `cloud.google.com/go/storage`, which would pull in gRPC and OpenTelemetry for two calls.

@@ -58,7 +58,7 @@ A working list for the team at ETHGlobal Mumbai, from a read of the whole reposi
 | --- | --- | --- |
 | B1 | The spec says the outbox `selected` and `bankSize` are decimal strings, but the TEE sends JSON numbers. The board app accepts both, so nothing breaks yet. | [api.md](../spec/api.md) TEE API, [types.go](../tee/internal/api/types.go) |
 | B2 | `GET /v1/attestation` returns an `attested` field that the spec doesn't list. | [types.go](../tee/internal/api/types.go) |
-| B3 | `tee/README.md` still names Go 1.24.6 and go-ethereum v1.17.5, but `go.mod` and the Dockerfile use Go 1.25.14 and v1.17.10. | [tee/README.md](../tee/README.md) |
+| B3 | **Fixed.** `tee/README.md` named Go 1.24.6 and go-ethereum v1.17.5, but `go.mod` and the Dockerfile use Go 1.25.14 and v1.17.10. It now names the versions in use. | [tee/README.md](../tee/README.md) |
 | B4 | **Fixed.** The README status line said the code was a scaffold that didn't implement the design. The README rewrite replaced it, and it now says a working prototype on test networks. | [README.md](../README.md) |
 | B5 | Three TEE tests read files outside `tee/` (`spec/constants.json`, `spec/registry.json` and `spec/fixtures`), so `go test` fails in a `tee/`-only checkout. The image build is unaffected. | `tee/internal/spec`, `tee/internal/attestation`, `tee/internal/chainread` |
 | B6 | `e2e/tests/chain-flow.e2e.ts` fetches upstream's real `v0.1.0` GitHub release over the network, so it breaks if that release goes away. | [chain-flow.e2e.ts](../e2e/tests/chain-flow.e2e.ts) |

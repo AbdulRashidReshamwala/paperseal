@@ -10,6 +10,8 @@
   <a href="https://paperseal.abdulrashid.dev">Exam app</a> ·
   <a href="https://paperverify.abdulrashid.dev">Public verifier</a> ·
   <a href="#honest-limits">Honest limits</a> ·
+  <a href="#crops">CROPS</a> ·
+  <a href="#hackathon-prizes">Hackathon prizes</a> ·
   <a href="#running-it-locally">Run it locally</a>
 </p>
 
@@ -154,7 +156,7 @@ A key holder or a centre has one permanent identity: an ENS name that publishes 
 4. **Register:** the person opens the link and touches their key. The record tells the browser which key to ask for, so this works in any browser on this domain.
 5. **Match:** the board app compares each registration's passkey hash with the name's record. A match shows "Name confirmed". A name with no record, or a record for another key, stays off the list.
 
-The verifier page shows, for each listed party with an ENS name, whether the record matched their key when the exam's list was posted, with the evidence folded. It says plainly who vouches for the name: whoever controls its parent. This is a label and a proof of who holds a key, not something the exam depends on. A name that can't be read says so and never fails a check. The TEE and `ExamRegistry` never read ENS. Names are read on Sepolia through the viewer's own RPC with no gateway, so they prove nothing until a mainnet name is used. Resolution may still run through ENSv1, and nothing here depends on ENSv2.
+The verifier page shows, for each listed party with an ENS name, whether the record matched their key when the exam's list was posted, with the evidence folded. It says plainly who vouches for the name: whoever controls its parent. This is a label and a proof of who holds a key, not something the exam depends on. A name that can't be read says so and never fails a check. The TEE and `ExamRegistry` never read ENS. Names are read on Sepolia through the viewer's own RPC with no gateway, so they prove nothing until a mainnet name is used. Every name is a subname on its parent's ENSv2 Permissioned Resolver ([ENSv2 in Paper Seal](docs/ensv2.md)).
 
 If a key is lost, the person enrols a new one and the directory owner replaces both records. A passkey belongs to one domain, so moving the app to another domain means everyone enrols again.
 
@@ -176,7 +178,7 @@ The board runs the TEE and the public storage, so it could stop either one durin
 
 The rules are in [`spec/arkiv.md`](spec/arkiv.md), and the relay is in [`relay/`](relay).
 
-The demo's writer is [`0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b`](https://rabdi.explorer.arkiv.network/address/0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b) on Arkiv's Rabdi testnet. This query lists every release log it has mirrored. Swap the schema for `paperseal.v1.exam` to list the indexed exams:
+The demo's writers are [`0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b`](https://rabdi.explorer.arkiv.network/address/0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b) and the board's wallet [`0xC3808daC38cA53a709F981Fb663814DbaaAB7420`](https://rabdi.explorer.arkiv.network/address/0xC3808daC38cA53a709F981Fb663814DbaaAB7420), on Arkiv's Rabdi testnet. This query lists every release log it has mirrored. Swap the schema for `paperseal.v1.exam` to list the indexed exams:
 
 ```bash
 curl -s https://rpc.rabdi.db-chain.testnet.arkiv.network -H "content-type: application/json" --data '{"jsonrpc":"2.0","id":1,"method":"arkiv_query","params":["arkiv.schema = str('"'"'paperseal.v1.release-log'"'"') AND $creator = addr(0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b)",{"select":{"key":true,"attributes":true,"count":true}}]}'
@@ -328,7 +330,7 @@ The whole exam runs end to end, from publishing to the public proof, against the
 | Sealed machine | A Go workload on Google Confidential Space. Apps and the verifier check Google's attestation token against Google's root. Latest release: [v0.8.2](https://github.com/AbdulRashidReshamwala/paperseal/releases/tag/v0.8.2). |
 | Opening the paper | A drand quicknet timelock on `K_pub`, plus 8-of-10 Shamir shares of `K_priv`. |
 | Public record | `ExamRegistry` on Sepolia at [`0xc25F7e0004f0E9B77581CFf6B4B5Ae8b120658eb`](https://sepolia.etherscan.io/address/0xc25F7e0004f0E9B77581CFf6B4B5Ae8b120658eb). |
-| Names | ENS names for exams and parties under `paperseal-demo.eth` on Sepolia. |
+| Names | ENSv2 subnames for exams and parties under `paperseal-demo.eth` on Sepolia ([ENSv2 in Paper Seal](docs/ensv2.md)). |
 | Arkiv | A mirror of the unlock evidence and an index of exams. The relay runs as systemd services ([`deploy/relay`](deploy/relay)). |
 | Swarm | Backups of each exam's public files, read by the verifier when the bucket fails. |
 | Public verifier | [paperverify.abdulrashid.dev](https://paperverify.abdulrashid.dev), a static site anyone can host. |
@@ -453,6 +455,44 @@ Each of these is needed before a real exam, and none of them is done. The list c
 - World ID for setters
 - Native setter app signed with a developer key
 
+## CROPS
+
+**Lead property: censorship resistance.** The exam board runs the servers, but it can't stop the paper opening or hide who released their key. Try it: point the verifier at a bucket that doesn't exist. It still checks the exam and opens the paper from Swarm and Arkiv ([steps](arkiv/swarm.md#run-it-yourself)).
+
+**C: Censorship resistant.**
+- The board controls the app's domain, the TEE, the storage bucket and the default RPC.
+- Bucket gone: the files come from the [Swarm backup](arkiv/swarm.md). TEE gone quiet: the signed unlock record is still on [Arkiv](#arkiv-copy).
+- The verifier is a static page anyone can host, and viewers can use their own RPC.
+- Limits: if the board doesn't run the TEE at unlock, centres wait until the end round, when drand opens the paper to everyone. Passkeys only work on the app's domain, so key holders can't release while that domain is down.
+
+**O: Open source.**
+- [MIT](LICENSE). Everything builds and runs from this repo ([Running it locally](#running-it-locally)).
+- The TEE image is reproducible: anyone can rebuild a commit and compare it with the digest on-chain ([Proving the TEE code](#proving-the-tee-code)).
+- A real exam also needs a Google Cloud project and a Sepolia wallet.
+
+**P: Private.**
+- Questions go encrypted from the setter's browser to the TEE. They never go on-chain, on Arkiv or on Swarm.
+- Setters appear on the public list only as a hash.
+- The RPC, the bucket, the Swarm gateway, Arkiv's RPC, drand and GitHub see a viewer's IP and which exam or files they read. Viewers can pick their own RPC.
+- No trackers or analytics. Fonts are self-hosted.
+
+**S: Secure.**
+- Each person's keys come from their security key and stay on their device. They're derived when needed through WebAuthn PRF and never stored.
+- Every action needs a key touch.
+- The paper is encrypted with AES-256-GCM. Its key is split between a drand time seal and 8-of-10 Shamir shares, so nobody can open it alone or early.
+- We trust Google's attestation, drand and the board serving honest app code ([Trust assumptions](#trust-assumptions), [Honest limits](#honest-limits)). The demo simulates the security keys.
+
+## Hackathon prizes
+
+Built from scratch at ETHGlobal Mumbai, 5 to 7 November 2026: the first commit is from 5 November, and the Arkiv and Swarm work started on 6 November.
+
+| Prize | Where to look |
+| --- | --- |
+| ENS: Best Use of ENSv2 | [ENSv2 in Paper Seal](docs/ensv2.md) |
+| Arkiv: Build on Arkiv | [Arkiv copy](#arkiv-copy) and [`arkiv/`](arkiv): [schema](arkiv/schema.md), [how we use it](arkiv/how-you-use-arkiv.md), [why Arkiv](arkiv/why-arkiv.md), [reach](arkiv/reach.md), [friction](arkiv/friction.md) |
+| Arkiv + Swarm bonus | [`arkiv/swarm.md`](arkiv/swarm.md) |
+| Ethereum Foundation: Best CROPS App | [CROPS](#crops) |
+
 ## Running it locally
 
 You need Node 22 or later, pnpm 10, [Foundry](https://getfoundry.sh) and Go 1.25.
@@ -529,7 +569,9 @@ Finished videos go in `e2e/videos/`, which isn't committed.
 
 ## How AI was used
 
-Parts of this repository, including the ENS name check and the Arkiv copy, were written with Claude Code, an AI coding agent. It worked from the specs in `spec/`, and people reviewed and ran each change, including the tests and the live runs on Sepolia and Arkiv.
+We used Claude Code to help write the code, tests and docs. We wrote the design and the specs in `spec/` first, then gave it one part of the project at a time. Two rules were fixed: no custom cryptography, and unfinished code says "not implemented" instead of faking a check. We reviewed and tested every change ourselves, including the live runs on Sepolia and Arkiv.
+
+AI is also a feature: the verifier's "Check with your own AI" button copies a prompt, so any AI agent can check an exam from the original sources without trusting our website ([spec/agent-verification.md](spec/agent-verification.md)).
 
 ## Licence
 
