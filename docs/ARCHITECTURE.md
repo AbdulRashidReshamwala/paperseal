@@ -22,6 +22,7 @@ How the design in the [README](../README.md) maps onto this repository. The READ
 | `packages/ui` | React | Shared components, tokens and the Chromium gate |
 | `apps/web` | React | The board-hosted app, with a route area per signed-in role |
 | `apps/verifier` | React | The public verifier, hosted separately from the board |
+| `apps/home` | HTML, CSS, JavaScript | The public homepage, a static site on the Cloudflare Pages project `paperseal-home` |
 
 Each signed-in role has a code-split route area in `apps/web`:
 
@@ -125,9 +126,12 @@ The README leaves these open. They are defaults for the build and can change.
 
 ## Not Set Up Yet
 
-- CI for tests. `.github/workflows/repro.yml` covers the image rebuild only
-- Google Cloud project, Confidential Space deployment and the storage bucket
-- Sepolia deployment and funded board wallet
+- Browser and live runs in CI. `.github/workflows/ci.yml` covers the contracts, the TEE and the web packages, and `e2e/` runs by hand
+- The `gcp-lb` ingress, which the tooling refuses, and the Cloudflare Pages module for OpenTofu ([self-hosting proposal](proposals/self-hosting.md))
+- Exam mode, so every exam reports its mode as `unknown`, along with the chain allow-list and the per-exam threshold (`spec/deploy.md`)
+- Security key attestation: the chain check returns not-implemented and the approved authenticators aren't chosen
+- Anything on a main network. Sepolia, Arkiv's testnet and Swarm's Sepolia testnet are all test networks
+- A relay wallet separate from the board's
 
 ## Mock run (test only)
 
