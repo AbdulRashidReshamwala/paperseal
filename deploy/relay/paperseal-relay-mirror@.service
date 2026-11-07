@@ -1,0 +1,19 @@
+# Copies one exam's final release log and token from public storage to Arkiv.
+# systemctl start paperseal-relay-mirror@<examId>
+[Unit]
+Description=Paper Seal relay: mirror %i
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=relay
+Group=relay
+WorkingDirectory=/opt/paperseal
+EnvironmentFile=/etc/paperseal-relay.env
+Environment=HOME=/var/lib/paperseal-relay
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+ExecStart=/usr/local/bin/node relay/cli.mjs mirror --exam %i --registry ${REGISTRY} --storage ${STORAGE_URL}

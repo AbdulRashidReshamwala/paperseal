@@ -1,0 +1,21 @@
+# Mirrors one exam's unlock to Arkiv while it runs, with a heartbeat every minute.
+# Start it before unlock: systemctl start paperseal-relay-watch@<examId>
+# It stops by itself once the TEE says the exam is released.
+[Unit]
+Description=Paper Seal relay: watch the unlock of %i
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=relay
+Group=relay
+WorkingDirectory=/opt/paperseal
+EnvironmentFile=/etc/paperseal-relay.env
+Environment=HOME=/var/lib/paperseal-relay
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+ExecStart=/usr/local/bin/node relay/cli.mjs watch --exam %i --registry ${REGISTRY} --storage ${STORAGE_URL} --tee ${TEE_URL}
+Restart=on-failure
+RestartSec=15

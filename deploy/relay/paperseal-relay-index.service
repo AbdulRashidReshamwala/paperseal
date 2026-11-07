@@ -1,0 +1,22 @@
+# Keeps the exam index on Arkiv in step with ExamRegistry's events, every 60 s.
+[Unit]
+Description=Paper Seal relay: exam index
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=relay
+Group=relay
+WorkingDirectory=/opt/paperseal
+EnvironmentFile=/etc/paperseal-relay.env
+Environment=HOME=/var/lib/paperseal-relay
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+ExecStart=/usr/local/bin/node relay/cli.mjs index --registry ${REGISTRY} --from-block ${INDEX_FROM_BLOCK} --every 60
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
