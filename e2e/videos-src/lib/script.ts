@@ -43,18 +43,24 @@ export interface Step {
   /** How long the screen stays after the step, in milliseconds. A step that ends on a new page leaves this at 0, so the next caption comes with that page. */
   hold: number;
   wait: boolean;
+  /** For a `wait`: seconds kept at its start and end. [0, 0] removes it from the video altogether. */
+  keep?: readonly [number, number];
   /** Sends a transaction. `--dry` stops before the first such step. */
   spends: boolean;
 }
 
 export interface Video {
   title: string;
+  /** How much faster than real time the finished video plays. */
+  speed?: number;
   /** The start of the unique label. */
   prefix: string;
   /** The demo person the window on camera acts as. Without it the board is on camera. */
   persona?: string;
   /** Runs off camera before anything opens on camera. */
   setup?: (stage: Stage) => Promise<void>;
+  /** With `--resume=<label>`, runs instead of `setup`, to finish an exam a stopped run left behind. */
+  resume?: (stage: Stage) => Promise<void>;
   /** The app's route to open. `ready` runs off camera, and what it leaves on screen is the video's first frame. */
   open: string | ((stage: Stage) => string);
   ready: (stage: Stage) => Promise<void>;
@@ -72,7 +78,8 @@ export const step = (say: Step['say'], run: Step['run'], options: { hold?: numbe
   spends: options.spends ?? false,
 });
 
-export const wait = (say: Step['say'], run: Step['run'], options: { hold?: number; spends?: boolean } = {}): Step => ({
+export const wait = (say: Step['say'], run: Step['run'], options: { hold?: number; spends?: boolean; keep?: readonly [number, number] } = {}): Step => ({
   ...step(say, run, options),
   wait: true,
+  ...(options.keep ? { keep: options.keep } : {}),
 });

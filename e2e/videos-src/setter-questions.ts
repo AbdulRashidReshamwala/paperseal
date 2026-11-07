@@ -15,7 +15,7 @@ const SEALED = 2;
 
 /** Off camera: a new exam, the machine on it, and the setter's invite. */
 async function setup(s: Stage) {
-  await publishAndMoveMachine(s.office, CLOSE_IN_MINUTES);
+  await publishAndMoveMachine(s.office, { closeInMinutes: CLOSE_IN_MINUTES });
   s.memo.invite = await inviteSetters(s.office);
 }
 

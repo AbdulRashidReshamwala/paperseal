@@ -168,8 +168,8 @@ function stageFor(actor: Actor, run: Run, endHere: () => Promise<void>, office?:
   return stage;
 }
 
-async function play(name: string, video: Video, world: World, dry: boolean): Promise<void> {
-  const run: Run = { world, label: await freeLabel(video.prefix, world), notes: {}, memo: {} };
+async function play(name: string, video: Video, world: World, dry: boolean, resume: string | null): Promise<void> {
+  const run: Run = { world, label: resume ?? (await freeLabel(video.prefix, world)), notes: {}, memo: {} };
   run.notes.label = run.label;
   const { notes } = run;
   const web = await startWeb(world);
@@ -206,11 +206,11 @@ async function play(name: string, video: Video, world: World, dry: boolean): Pro
     };
     const office = video.persona ? stageFor(board, run, () => Promise.resolve()) : undefined;
     const stage = stageFor(camera, run, endHere, office);
-    const waits: [number, number][] = [];
+    const waits: { start: number; end: number; keep: Video['steps'][number]['keep'] }[] = [];
     let current = 'setting up';
     try {
       run.memo.web = web.url;
-      await video.setup?.(stage);
+      await (resume ? video.resume?.(stage) : video.setup?.(stage));
       current = 'opening the page';
       await page.goto(`${web.url}${typeof video.open === 'string' ? video.open : video.open(stage)}`);
       await video.ready(stage);
@@ -233,7 +233,7 @@ async function play(name: string, video: Video, world: World, dry: boolean): Pro
         const started = Date.now();
         if (!one.wait) await page.waitForTimeout(300);
         await one.run(stage);
-        if (one.wait) waits.push([started, Date.now()]);
+        if (one.wait) waits.push({ start: started, end: Date.now(), keep: one.keep });
         await page.waitForTimeout(one.hold);
       }
       await endHere();
@@ -242,8 +242,8 @@ async function play(name: string, video: Video, world: World, dry: boolean): Pro
       const at = (ms: number) => (ms - firstFrame) / 1000;
       const out = resolve(VIDEOS, `${name}${world.kind === 'mock' ? '.mock' : ''}${dry ? '.dry' : ''}.mp4`);
       mkdirSync(dirname(out), { recursive: true });
-      const onCamera = waits.map(([a, b]) => [at(a), Math.min(at(b), media.seconds)] as const).filter(([a]) => a < media.seconds);
-      cut(raw, out, keptRanges(0, media.seconds, onCamera));
+      const onCamera = waits.map(({ start, end, keep }) => ({ start: at(start), end: Math.min(at(end), media.seconds), keep })).filter(({ start }) => start < media.seconds);
+      cut(raw, out, keptRanges(0, media.seconds, onCamera), video.speed);
       rmSync(rawDir, { recursive: true, force: true });
       const final = probe(out);
       if (final.width !== 1280 || final.height !== 800) throw new Error(`the video is ${String(final.width)}x${String(final.height)}, not 1280x800`);
@@ -264,7 +264,8 @@ async function play(name: string, video: Video, world: World, dry: boolean): Pro
 }
 
 export async function main(argv: string[], load: (path: string) => Promise<Record<string, unknown>>): Promise<void> {
-  const flags = new Set(argv.filter((arg) => arg.startsWith('--')));
+  const resume = argv.find((arg) => arg.startsWith('--resume='))?.slice('--resume='.length) ?? null;
+  const flags = new Set(argv.filter((arg) => arg.startsWith('--') && !arg.startsWith('--resume=')));
   const [name, ...rest] = argv.filter((arg) => !arg.startsWith('--'));
   const unknown = [...flags].filter((flag) => !['--list', '--dry', '--mock'].includes(flag));
   const names = listVideos();
@@ -280,7 +281,7 @@ export async function main(argv: string[], load: (path: string) => Promise<Recor
   const video = (await load(`/${name}.ts`)).default as Video;
   const world = flags.has('--mock') ? await mockWorld() : await liveWorld();
   try {
-    await play(name, video, world, flags.has('--dry'));
+    await play(name, video, world, flags.has('--dry'), resume);
   } finally {
     await world.stop();
     await stopAll();

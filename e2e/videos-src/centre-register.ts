@@ -35,7 +35,7 @@ export default defineVideo({
   title: 'An exam centre registers',
   prefix: 'class-12-physics',
   persona: 'centre-1',
-  setup: (s) => publishAndMoveMachine(s.office, CLOSE_IN_MINUTES),
+  setup: (s) => publishAndMoveMachine(s.office, { closeInMinutes: CLOSE_IN_MINUTES }),
   open: (s) => `/#/centre/${s.label}.${partyParent}`,
   ready: async (s) => {
     await s.page.getByRole('heading', { name: 'Register for this exam' }).waitFor({ timeout: 90_000 });

@@ -117,18 +117,31 @@ const two = (n: number) => String(n).padStart(2, '0');
 const localInput = (d: Date) => `${String(d.getFullYear())}-${two(d.getMonth() + 1)}-${two(d.getDate())}T${two(d.getHours())}:${two(d.getMinutes())}`;
 const continueButton = (s: Stage) => s.page.getByRole('button', { name: button.continue, exact: true });
 
+export interface ExamPlan {
+  /** Minutes from now until questions close. */
+  closeInMinutes: number;
+  /** Minutes from questions closing to the exam's start. The paper is released a minute before it. */
+  startAfterClose?: number;
+  /** The exam's length in minutes. Left out, the page's own default. */
+  lengthMinutes?: number;
+  /** Refuses to publish if the page offers any other version. Checked on the real system only. */
+  release?: string;
+}
+
 /**
- * Publishes an exam through the board's own pages, for a video that starts later in an exam's life.
- * Questions close `closeInMinutes` from now, so the schedule leaves room to finish.
+ * Publishes an exam through the board's own pages, for a video that starts later in an exam's life,
+ * with a schedule that leaves room to finish.
  */
-export async function publishForVideo(s: Stage, closeInMinutes: number) {
+export async function publishForVideo(s: Stage, plan: ExamPlan) {
+  const { closeInMinutes, startAfterClose = 2 } = plan;
   const { page } = s;
   await page.goto(`${s.memo.web ?? ''}/#/board/new`);
   await page.getByRole('button', { name: button.connectWallet }).click({ timeout: 60_000 });
   await s.actor.seeHeading(text.createHeading);
   const close = new Date(Math.ceil((Date.now() + closeInMinutes * 60_000) / 60_000) * 60_000);
   await page.getByLabel(field.examName).first().fill(s.label);
-  await page.getByLabel(field.examStart).first().fill(localInput(new Date(close.getTime() + 2 * 60_000)));
+  await page.getByLabel(field.examStart).first().fill(localInput(new Date(close.getTime() + startAfterClose * 60_000)));
+  if (plan.lengthMinutes !== undefined) await page.getByLabel(field.length).first().fill(String(plan.lengthMinutes));
   await unfold(page, fold.advanced);
   await page.getByLabel(field.questionsClose).first().fill(localInput(close));
   await continueButton(s).click();
@@ -142,7 +155,11 @@ export async function publishForVideo(s: Stage, closeInMinutes: number) {
   await tick(s, neutrals, 0);
   await continueButton(s).click();
   await s.actor.seeHeading(text.reviewHeading, 60_000);
-  await page.getByText(/the latest verified release|your choice, verified/).first().waitFor({ timeout: 90_000 });
+  const offered = page.getByText(/the latest verified release|your choice, verified/).first();
+  await offered.waitFor({ timeout: 90_000 });
+  const version = await offered.innerText();
+  s.notes.release = version;
+  if (plan.release && s.world.kind === 'live' && !version.startsWith(`${plan.release},`)) throw new Error(`the page offers "${version}", not ${plan.release}. Nothing was published.`);
   await publish(s);
   await waitForName(s);
   await confirmOnChain(s);
@@ -163,14 +180,31 @@ export async function waitForMachine(s: Stage, minutes = 9) {
 }
 
 /** Off camera: a new exam, and the sealed machine moved onto it and passing its check. */
-export async function publishAndMoveMachine(s: Stage, closeInMinutes: number) {
-  await publishForVideo(s, closeInMinutes);
+export async function publishAndMoveMachine(s: Stage, plan: ExamPlan) {
+  await publishForVideo(s, plan);
   const examId = s.notes.examId;
   if (!examId) throw new Error('the exam has no ID');
   console.log(`  published ${s.label}. Moving the machine to it.`);
   await s.world.startMachine(s.label, examId as `0x${string}`);
   await waitForMachine(s);
   console.log('  the machine passed its check.');
+}
+
+/** Becomes someone else in the bar across the top, which reloads the tab. */
+export async function become(s: Stage, label: string) {
+  await Promise.all([s.page.waitForEvent('load'), s.page.getByLabel('Acting as').selectOption({ label })]);
+  await s.page.getByLabel('Acting as').waitFor();
+}
+
+/** Presses one of the demo panel's buttons and waits until everyone has had their turn. */
+export async function pressPanel(s: Stage, name: string, timeout: number) {
+  const panel = s.page.getByRole('region', { name: 'Everyone else' });
+  const action = panel.getByRole('button', { name });
+  await action.click({ timeout: 120_000 });
+  await panel.locator('.ps-primary[data-status="busy"]').waitFor({ state: 'hidden', timeout });
+  await action.waitFor({ state: 'hidden', timeout: 30_000 }).catch(async () => {
+    throw new Error(`"${name}" did not finish for everyone: ${(await panel.innerText()).replace(/\s+/g, ' ').slice(0, 500)}`);
+  });
 }
 
 /** Makes the setters' invites, and returns the link for the first one. */
@@ -182,13 +216,7 @@ export async function inviteSetters(s: Stage) {
 
 /** The board's demo panel registers everyone else, then the board posts the list. Every check is the machine's own. */
 export async function registerAllAndPostList(s: Stage) {
-  const panel = s.page.getByRole('region', { name: 'Everyone else' });
-  const register = panel.getByRole('button', { name: 'Register everyone else' });
-  await register.click({ timeout: 120_000 });
-  await panel.locator('.ps-primary[data-status="busy"]').waitFor({ state: 'hidden', timeout: 240_000 });
-  await register.waitFor({ state: 'hidden', timeout: 30_000 }).catch(async () => {
-    throw new Error(`someone could not register: ${(await panel.innerText()).replace(/\s+/g, ' ').slice(0, 500)}`);
-  });
+  await pressPanel(s, 'Register everyone else', 240_000);
   const post = s.page.getByRole('button', { name: button.postList });
   const posted = s.page.getByRole('heading', { name: /Nothing to do until|Setters are sending|The paper is being built/ });
   const problem = s.page.getByRole('alert').first();
