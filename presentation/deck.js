@@ -12,13 +12,24 @@ function show(n, replay = false) {
   const next = Math.max(0, Math.min(slides.length - 1, n));
   if (next === i && !replay && slides[i].classList.contains('on')) return;
   i = next;
-  slides.forEach((el) => el.classList.remove('on'));
+  slides.forEach((el) => el.classList.remove('on', 'theater'));
   void deck.offsetWidth; // restart the animations
   slides[i].classList.add('on');
+  if (slides[i].querySelector('video')) slides[i].classList.add('theater'); // clips open full screen
   count.textContent = `${i + 1} / ${slides.length}`;
   bar.style.width = `${((i + 1) / slides.length) * 100}%`;
   history.replaceState(null, '', `#${i + 1}`);
   rollDie();
+  playClip();
+}
+function toggleTheater() {
+  if (slides[i].querySelector('video')) slides[i].classList.toggle('theater');
+}
+// demo clips start when their slide appears and stop when it leaves
+function playClip() {
+  deck.querySelectorAll('video').forEach((v) => { v.pause(); v.currentTime = 0; });
+  const v = slides[i].querySelector('video');
+  if (v && !deck.classList.contains('static')) setTimeout(() => v.play().catch(() => {}), 500);
 }
 // the seed dice tumbles through random faces, then lands on 5
 let dieTimer;
@@ -26,11 +37,11 @@ function rollDie() {
   clearInterval(dieTimer);
   const use = slides[i].querySelector('#die use');
   if (!use || deck.classList.contains('static')) return;
-  const start = performance.now() + 1500;
+  const start = performance.now() + 600;
   dieTimer = setInterval(() => {
     const t = performance.now() - start;
     if (t < 0) return;
-    if (t > 1250) { use.setAttribute('href', '#die-5'); clearInterval(dieTimer); return; }
+    if (t > 800) { use.setAttribute('href', '#die-5'); clearInterval(dieTimer); return; }
     use.setAttribute('href', `#die-${1 + Math.floor(Math.random() * 6)}`);
   }, 90);
 }
@@ -41,9 +52,15 @@ addEventListener('keydown', (e) => {
   if (e.key === 'Home') show(0);
   if (e.key === 'End') show(slides.length - 1);
   if (e.key === 'r') show(i, true); // replay this slide's animation
+  if (e.key === 'v') toggleTheater(); // clip fills the whole slide
+  if (e.key === 'Escape') slides[i].classList.remove('theater');
+  if (e.key === 'k') { const v = slides[i].querySelector('video'); if (v) (v.paused ? v.play() : v.pause()); } // pause or play the clip
   if (e.key === 'f') (document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen());
 });
-deck.addEventListener('click', (e) => show(e.clientX < innerWidth / 3 ? i - 1 : i + 1));
+deck.addEventListener('click', (e) => {
+  if (e.target.tagName === 'VIDEO') return toggleTheater(); // click the clip to fill the screen
+  show(e.clientX < innerWidth / 3 ? i - 1 : i + 1);
+});
 if (location.search.includes('static')) deck.classList.add('static'); // ?static shows every slide finished, no animation
 fit();
 show(i, true);
