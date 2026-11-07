@@ -1,5 +1,5 @@
 import { KeyError, type Keys } from '@paperseal/keys';
-import { fromHex, keyCardText, requireHardwareAttestation, toHex, type KeyCard } from '@paperseal/protocol';
+import { fromHex, keyCardText, requireSecurityKeyAttestation, toHex, type KeyCard } from '@paperseal/protocol';
 import { Button, CopyButton, KeyTouch, LoadingSeal, Page, RoleHeader, Row, Rows, Stage, type KeyTouchState, useLoaded } from '@paperseal/ui';
 import { useState } from 'react';
 
@@ -144,7 +144,7 @@ export function EnrolView(props: { keys?: Pick<Keys, 'generateKey'>; known?: rea
             error={keyError}
             actionLabel="Set up your security key"
             purpose="to set it up"
-            demo={!requireHardwareAttestation}
+            demo={!requireSecurityKeyAttestation}
             onUse={() => {
               void use();
             }}

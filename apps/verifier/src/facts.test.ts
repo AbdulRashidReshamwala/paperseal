@@ -132,6 +132,14 @@ describe('the Swarm copy', () => {
     expect(copy.note).toMatch(/does not fail the exam/);
   });
 
+  it('never keeps reading a backup once the Arkiv read it depends on has failed', () => {
+    const found = copies(viewOf({ arkiv: { state: 'error', message: 'Arkiv has reached its rate limit.\nmore detail' } }), none, { state: 'loading' });
+    const copy = copyIn(found, 'log', 'swarm');
+    expect(copy.state).toBe('unread');
+    expect(copy.note).toContain('Backups are found through Arkiv');
+    expect(copyIn(found, 'log', 'arkiv').note).toBe('This does not fail the exam. Arkiv has reached its rate limit. This page keeps trying.');
+  });
+
   it('marks Swarm as used when the file came from there', async () => {
     const backup = { served: [{ name: 'release-log.json' }], missed: [], ignored: { collections: 0, files: 0 }, rejected: [] } as unknown as Records['backup'];
     const view = viewOf({ records: { state: 'ready', value: { ...records, ...(backup ? { backup } : {}) }, readAt: 0 } });

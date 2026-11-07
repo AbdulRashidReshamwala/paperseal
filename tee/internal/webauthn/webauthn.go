@@ -115,13 +115,14 @@ type AttestationResult struct {
 	ChainChecked bool
 }
 
-// CheckAttestation applies webauthn.requireHardwareAttestation. When it is
+// CheckAttestation applies webauthn.requireSecurityKeyAttestation, which is about
+// a security key's maker and not the TEE's attestation token. When it is
 // false nothing is read, and the result says so. When it is true the object must
 // belong to the passkey. The chain check after that isn't implemented, so it
 // refuses: the TEE can't verify an attestation chain yet, and it never claims it
 // did.
 func CheckAttestation(attestationObject, passkeyPublicKey []byte) (AttestationResult, error) {
-	return checkAttestation(spec.C.WebAuthn.RequireHardwareAttestation, attestationObject, passkeyPublicKey)
+	return checkAttestation(spec.C.WebAuthn.RequireSecurityKeyAttestation, attestationObject, passkeyPublicKey)
 }
 
 func checkAttestation(require bool, attestationObject, passkeyPublicKey []byte) (AttestationResult, error) {
@@ -131,7 +132,7 @@ func checkAttestation(require bool, attestationObject, passkeyPublicKey []byte) 
 	if err := checkAttestedKey(attestationObject, passkeyPublicKey); err != nil {
 		return AttestationResult{}, err
 	}
-	return AttestationResult{}, notimpl.New("webauthn.CheckAttestation: hardware attestation chains " +
+	return AttestationResult{}, notimpl.New("webauthn.CheckAttestation: security key attestation chains " +
 		"need the approved authenticator roots (AAGUIDs), which are not chosen yet")
 }
 

@@ -1,4 +1,4 @@
-import { fromHex, requireHardwareAttestation, type Hex } from '@paperseal/protocol';
+import { fromHex, requireSecurityKeyAttestation, type Hex } from '@paperseal/protocol';
 import { RELEASE_NOT_OPEN_MESSAGE } from '@paperseal/tee-client';
 import { KeyTouch, PrimaryAction, Stage, type SealState } from '@paperseal/ui';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
@@ -145,7 +145,7 @@ export function ReleaseStage(props: {
     };
   }, [refused, onRefused]);
   const go = () => void start();
-  const demo = !requireHardwareAttestation;
+  const demo = !requireSecurityKeyAttestation;
 
   const stage = { next: props.next, ...(props.seal ? { seal: props.seal } : {}) };
   if (!context) {

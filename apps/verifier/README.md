@@ -32,6 +32,8 @@ The page can also read the release evidence that a relay copies to Arkiv, as in 
 
 `VITE_ARKIV_WRITERS` holds the writer addresses the board publishes, comma-separated, as the build-time default. The Arkiv RPC URL defaults to `network.rpcUrl` in `spec/arkiv.json`, Rabdi's public RPC, which allows cross-origin reads without a key. Viewers can change both under "Check it yourself". A writer written in mixed case must have a valid checksum.
 
+The public RPC gives each browser a query budget. When it runs out Arkiv answers 429 with a `Retry-After` of minutes. The page sends nothing more until that time has passed: the Arkiv copy and the Swarm backup, which is found through Arkiv, show "Could not be read" with the wait in words, and nothing is shown as checked.
+
 On a `#/name/` route, the writers read are the ones the name's `arkivWriters` record lists now, plus the viewer's own, each once and checksummed. Without a name they are the viewer's own. With no writers at all, the Arkiv copy is off and nothing is read from Arkiv. The evidence tags each writer "From the name", "Your own choice" or "Built into this page", and shows any record entries that are not addresses as a quiet note.
 
 Once an exam ID is known and writers are set, the page reads the exam's `release-token`, `release-log` and `relay-heartbeat` rows from those writers only, for the registry this view reads, as often as the live TEE:

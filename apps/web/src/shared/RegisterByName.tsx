@@ -1,6 +1,6 @@
 import { readPartyRecords, type EnsLookup, type ExamRegistry, type PartyRecords } from '@paperseal/chain';
 import { KeyError, type Keys } from '@paperseal/keys';
-import { fromHex, partyNameProblem, passkeyRecordMatches, passkeyRecordValue, requireHardwareAttestation, toHex, type Hex } from '@paperseal/protocol';
+import { fromHex, partyNameProblem, passkeyRecordMatches, passkeyRecordValue, requireSecurityKeyAttestation, toHex, type Hex } from '@paperseal/protocol';
 import { TeeApiError, type TeeClient } from '@paperseal/tee-client';
 import { Field, KeyTouch, LoadingSeal, Stage, type KeyTouchState, useLoaded } from '@paperseal/ui';
 import { useState } from 'react';
@@ -235,7 +235,7 @@ export function RegisterByName(props: RegisterByNameProps) {
             error={keyError}
             actionLabel="Register with your security key"
             purpose="to register"
-            demo={!requireHardwareAttestation}
+            demo={!requireSecurityKeyAttestation}
             onUse={() => {
               void submit();
             }}

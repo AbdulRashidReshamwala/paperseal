@@ -10,7 +10,7 @@ import {
   chain as chainSpec,
   decodeCriteria,
   fromHex,
-  requireHardwareAttestation,
+  requireSecurityKeyAttestation,
   roundTimeSeconds,
   scheduleBoundsProblem,
   storageNames,
@@ -97,7 +97,7 @@ export const networkName = capitalised(chainSpec.name);
  * page alike. It is built from the constants, so a setting that changes takes its words with it.
  */
 const testExamGaps = [
-  ...(requireHardwareAttestation ? [] : ['the security keys were not checked to come from an approved maker']),
+  ...(requireSecurityKeyAttestation ? [] : ['the security keys were not checked to come from an approved maker']),
   ...(chainSpec.readBlock === 'finalized' ? [] : ['blocks are read before they are final']),
 ];
 export const testExamCaveat = [
@@ -109,10 +109,10 @@ export const testExamCaveat = [
 /** spec/agent-verification.md, "Limits". Stated in every report, whatever its claims say. */
 export const reportLimits = (mode: AgentReport['exam']['mode']): string[] => [
   ...(mode === 'production' ? [] : [testExamCaveat]),
-  ...(requireHardwareAttestation
+  ...(requireSecurityKeyAttestation
     ? []
     : [
-        "Hardware attestation isn't enforced: webauthn.requireHardwareAttestation is false in the constants.json this checker was built with. Nothing shows that a listed key is a hardware security key, so people and unlock show which keys acted, not what kind of device held them.",
+        "The security keys' maker isn't checked: webauthn.requireSecurityKeyAttestation is false in the constants.json this checker was built with. Nothing shows that a listed key came from an approved maker, so people and unlock show which keys acted, not what kind of device held them. The sealed machine is separate: Google proves it through the attestation token.",
       ]),
   "Party names and exam names aren't checked. An owner name in the evidence is what the approved list says, nothing more.",
 ];

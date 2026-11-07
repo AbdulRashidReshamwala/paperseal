@@ -1,0 +1,11 @@
+{
+  "name": "@paperseal/home",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "preview": "node scripts/build.mjs && python3 -m http.server 5190 --directory dist",
+    "ship": "bash scripts/ship.sh"
+  }
+}

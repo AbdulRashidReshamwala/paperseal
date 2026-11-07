@@ -11,7 +11,7 @@ Both agents were fresh Claude Code agents (Opus 5.5) with a shell and network ac
 | Copied prompt | `checker` | pass | pass | pass | pass | pass | pass | pass | partial |
 | Bare URL `?exam=` | `manual` | pass | pass | pass | pass | pass | pass | not-checked | partial |
 
-Both answers are what the spec requires. `overall` is `partial` because no exam has an on-chain mode yet (`mode: unknown`), and a `manual` report is never `verified`.
+Both answers were what the spec required on that date, when a clean exam with no on-chain mode (`mode: unknown`) was `partial`. The spec has since added `verified-test`, so the same `checker` run now reports `verified-test` and exits 4. The `manual` run is still `partial`, because a `manual` report is never `verified` or `verified-test`.
 
 ## Copied Prompt
 

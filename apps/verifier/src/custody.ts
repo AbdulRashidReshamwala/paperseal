@@ -8,7 +8,7 @@ import {
   fromHex,
   ownerEnsName,
   pick,
-  requireHardwareAttestation,
+  requireSecurityKeyAttestation,
   roles,
   roundAtSeconds,
   roundTimeSeconds,
@@ -756,17 +756,17 @@ function attestedStep(c: Context): Draft {
   const { exam, build } = c;
   const token = c.records?.token ?? null;
   const published = token?.kind === 'ready' ? token : null;
-  const hardware: Item[] = [
+  const securityKeys: Item[] = [
     {
       kind: 'tag',
-      label: { code: 'requireHardwareAttestation' },
-      tone: requireHardwareAttestation ? 'ok' : 'warn',
-      tag: String(requireHardwareAttestation),
+      label: { code: 'requireSecurityKeyAttestation' },
+      tone: requireSecurityKeyAttestation ? 'ok' : 'warn',
+      tag: String(requireSecurityKeyAttestation),
     },
     {
       kind: 'text',
-      ...(requireHardwareAttestation
-        ? { text: 'Every registered security key is checked to come from approved hardware.' }
+      ...(requireSecurityKeyAttestation
+        ? { text: 'Every registered security key is checked to come from an approved maker.' }
         : { text: demoWarning, tone: 'warn' as const }),
     },
     { kind: 'text', text: "This is the value in spec/constants.json when this verifier was built. The sealed machine's own value is part of its attested image." },
@@ -800,8 +800,8 @@ function attestedStep(c: Context): Draft {
       ...backupItems(c.records?.backup, [storageNames.token]),
       ...recordedKeyItems(c),
       ...liveNote(c),
-      { kind: 'heading', text: 'Security key hardware' },
-      ...hardware,
+      { kind: 'heading', text: 'Security key maker' },
+      ...securityKeys,
       ...(exam ? rebuildItems(exam) : []),
     ],
   };

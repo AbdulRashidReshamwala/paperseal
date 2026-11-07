@@ -32,7 +32,7 @@ import {
   releaseEntryFromWire,
   releaseFileFromWire,
   sortReleaseFiles,
-  requireHardwareAttestation,
+  requireSecurityKeyAttestation,
   stages,
   storageManifestHash,
   storageNames,
@@ -55,8 +55,8 @@ describe('constants and stages', () => {
     expect(encodeMessage('instanceKey', sample).length).toBeGreaterThan(0);
   });
 
-  it('exports requireHardwareAttestation from constants.json', () => {
-    expect(requireHardwareAttestation).toBe(constants.webauthn.requireHardwareAttestation);
+  it('exports requireSecurityKeyAttestation from constants.json', () => {
+    expect(requireSecurityKeyAttestation).toBe(constants.webauthn.requireSecurityKeyAttestation);
   });
 
   it('includes the TEE API stages', () => {

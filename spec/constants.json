@@ -39,7 +39,7 @@
   "webauthn": {
     "prfSalt": "paperseal/v1/prf-salt",
     "userVerification": "required",
-    "requireHardwareAttestation": false
+    "requireSecurityKeyAttestation": false
   },
   "limits": {
     "entriesBytes": 130000,

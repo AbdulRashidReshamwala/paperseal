@@ -1,4 +1,3 @@
-import { createArkivReader } from '@paperseal/arkiv';
 import { checkPasskeyName, createEnsLookup, resolveExamName, type ExamNameResult } from '@paperseal/chain';
 import { createSwarmClient } from '@paperseal/swarm';
 import { ownerEnsName, roles, toHex, type Hex, type Paper } from '@paperseal/protocol';
@@ -23,6 +22,7 @@ import { readTransport, sourceBusy } from './rpc';
 import { ClockFold, EvidenceSection, MachineRow, PeopleSection, RecordFold, Section } from './sections';
 import { loadSwarm } from './swarm';
 import {
+  arkivReaderFor,
   arkivWriters,
   defaultSettings,
   endpoints,
@@ -175,7 +175,7 @@ function useExamView(pollMs: { records: number; live: number; proofRetry?: numbe
   );
   const wantsArkiv = writers.length > 0 && settings.arkivRpcUrl !== '';
   const arkivReader = useMemo(
-    () => (wantsArkiv ? (arkiv?.reader ?? createArkivReader({ rpcUrl: settings.arkivRpcUrl })) : null),
+    () => (wantsArkiv ? (arkiv?.reader ?? arkivReaderFor(settings.arkivRpcUrl)) : null),
     [wantsArkiv, arkiv, settings.arkivRpcUrl],
   );
 

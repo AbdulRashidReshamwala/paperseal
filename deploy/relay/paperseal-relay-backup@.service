@@ -1,0 +1,20 @@
+# Backs up one exam's checked public files to Swarm through this VM's Bee node
+# and records the reference on Arkiv. Run it after the Build and after unlock.
+# systemctl start paperseal-relay-backup@<examId>
+[Unit]
+Description=Paper Seal relay: Swarm backup of %i
+Wants=network-online.target
+After=network-online.target bee.service
+
+[Service]
+Type=oneshot
+User=relay
+Group=relay
+WorkingDirectory=/opt/paperseal
+EnvironmentFile=/etc/paperseal-relay.env
+Environment=HOME=/var/lib/paperseal-relay
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+ExecStart=/usr/local/bin/node relay/cli.mjs backup --exam %i --registry ${REGISTRY} --storage ${STORAGE_URL} --batch ${SWARM_BATCH} --swarm ${SWARM_API}

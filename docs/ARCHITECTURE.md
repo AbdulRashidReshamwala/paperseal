@@ -22,6 +22,7 @@ How the design in the [README](../README.md) maps onto this repository. The READ
 | `packages/ui` | React | Shared components, tokens and the Chromium gate |
 | `apps/web` | React | The board-hosted app, with a route area per signed-in role |
 | `apps/verifier` | React | The public verifier, hosted separately from the board |
+| `apps/home` | HTML, CSS, JavaScript | The public homepage, a static site on the Cloudflare Pages project `paperseal-home` |
 
 Each signed-in role has a code-split route area in `apps/web`:
 
@@ -123,11 +124,14 @@ The README leaves these open. They are defaults for the build and can change.
 - Where are published artefacts found? The verifier needs a PKI token per instance key, and the TEE keeps no state to serve them later. The default is to list them in a storage manifest.
 - Which RPC operator does the exam use, and how is its API key handled? Attested settings are public, so a key in `rpcHost` or the startup arguments would be exposed.
 
-## Not Built Yet
+## Not Set Up Yet
 
-- The hardware attestation check for real security keys. It returns not-implemented, and the demo turns it off (S2 in [security-review.md](security-review.md))
-- A production image profile. Every image has the demo settings (S1)
-- The `gcp-lb` ingress and the Cloudflare Pages module from the [self-hosting proposal](proposals/self-hosting.md)
+- Browser and live runs in CI. `.github/workflows/ci.yml` covers the contracts, the TEE and the web packages, and `e2e/` runs by hand
+- The `gcp-lb` ingress, which the tooling refuses, and the Cloudflare Pages module for OpenTofu ([self-hosting proposal](proposals/self-hosting.md))
+- Exam mode, so every exam reports its mode as `unknown`, along with the chain allow-list and the per-exam threshold (`spec/deploy.md`)
+- Security key attestation: the chain check returns not-implemented and the approved authenticators aren't chosen
+- Anything on a main network. Sepolia, Arkiv's testnet and Swarm's Sepolia testnet are all test networks
+- A relay wallet separate from the board's
 
 ## Mock run (test only)
 

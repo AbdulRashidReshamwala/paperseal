@@ -147,7 +147,7 @@ Demo ENS name on Sepolia: `paperseal-demo.eth`, owned by the board wallet, with 
 
 Each person has a planted key, fixed and derived from a public seed in `packages/keys/src/demo.ts`, so reloads and restarts lose nothing. The keys are simulated. The WebAuthn answers and signatures are real and the sealed machine checks them as it checks any key, but anyone can derive these keys, so they must never be on a real exam. The mode cannot reach a production build: see `apps/web/src/shared/demoKeys.ts`.
 
-1. Put the planted keys on the names, once. They never change, so this does not need repeating. `node e2e/demo/cli.mjs names` prints the 11 key holder and centre cards and sends nothing. `node e2e/demo/cli.mjs names write` sends the records from the board keystore, as `pnpm live` does, and replaces whatever is on those names.
+1. Put the planted keys on the names, once. They never change, so this does not need repeating. `node e2e/demo/cli.mjs names` prints the 11 key holder and centre cards and sends nothing. `node e2e/demo/cli.mjs names write` sends the records from the board keystore, as `node e2e/live/cli.mjs run` does, and replaces whatever is on those names.
 2. Start the sealed machine for a new exam, as in step 3, and run `pnpm demo:keys`. It needs port 5171 free, so stop any other dev server first.
 3. As **Exam board**, connect MetaMask and publish the exam. Copy the exam's setter links.
 4. Switch to **Setter 1**, paste that setter's link in the address bar and register. Do the same for **Setter 2**.

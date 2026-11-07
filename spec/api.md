@@ -280,7 +280,7 @@ The TEE checks the signature, that `clientDataJSON.challenge` is the base64url m
 
 A challenge is 32 random bytes plus an expiry, authenticated with an in-memory key, so issuing one stores nothing. It is single use and expires after 5 minutes. Release challenges are only issued once `unlockRound` is published.
 
-`webauthn.requireHardwareAttestation` is `false` for the demo, so the TEE doesn't look at `attestationObject`. The value is in the attested image, and the verifier page shows it. When it's `true`, the TEE first checks that the object's attested credential is exactly `passkeyPublicKey`, and refuses with `invalid_attestation` otherwise, including when the object is empty. The chain check that follows isn't implemented, so it rejects the registration.
+`webauthn.requireSecurityKeyAttestation` is `false` for the demo, so the TEE doesn't look at `attestationObject`. The value is in the attested image, and the verifier page shows it. When it's `true`, the TEE first checks that the object's attested credential is exactly `passkeyPublicKey`, and refuses with `invalid_attestation` otherwise, including when the object is empty. The chain check that follows isn't implemented, so it rejects the registration.
 
 ## Storage
 
@@ -315,7 +315,7 @@ Unlock may run on a different instance from the Build, so the log names its sign
 
 ## Dev Mode
 
-`chain.readBlock` is `latest` during development, so a full test exam takes under 5 minutes, and must be `finalized` for any real exam. A block at `latest` can be reorged, so a run may fail, but `ExamRegistry` still rejects a mismatched Build. The value is in the attested image, like `webauthn.requireHardwareAttestation`, and the verifier shows both in its folded evidence, as the values it was built with.
+`chain.readBlock` is `latest` during development, so a full test exam takes under 5 minutes, and must be `finalized` for any real exam. A block at `latest` can be reorged, so a run may fail, but `ExamRegistry` still rejects a mismatched Build. The value is in the attested image, like `webauthn.requireSecurityKeyAttestation`, and the verifier shows both in its folded evidence, as the values it was built with.
 
 ## Size Limits
 

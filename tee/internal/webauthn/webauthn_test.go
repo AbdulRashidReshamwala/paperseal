@@ -104,7 +104,7 @@ func TestChallengeMustBeUnpaddedBase64URL(t *testing.T) {
 func TestAttestationIsNeverClaimed(t *testing.T) {
 	// With the demo setting, the chain check is skipped and says so.
 	res, err := webauthn.CheckAttestation([]byte("anything"), nil)
-	if spec.C.WebAuthn.RequireHardwareAttestation {
+	if spec.C.WebAuthn.RequireSecurityKeyAttestation {
 		if !notimpl.Is(err) {
 			t.Fatalf("required attestation must be not implemented, got %v", err)
 		}

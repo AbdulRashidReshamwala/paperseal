@@ -32,7 +32,7 @@ All reads go through the viewer's own RPC, with offchain lookups (CCIP-Read) tur
 
 | | |
 | --- | --- |
-| Open an exam by name | [`#/name/paperseal-live-20261106t175851z.paperseal-demo.eth`](https://34-93-7-127.sslip.io/#/name/paperseal-live-20261106t175851z.paperseal-demo.eth). Step 1, "Name", passes |
+| Open an exam by name | [`#/name/paperseal-live-20261106t175851z.paperseal-demo.eth`](https://paperverify.abdulrashid.dev/#/name/paperseal-live-20261106t175851z.paperseal-demo.eth). Step 1, "Name", passes |
 | Board's name | `paperseal-demo.eth`, the primary name of the board [`0xC3808daC38cA53a709F981Fb663814DbaaAB7420`](https://sepolia.etherscan.io/address/0xC3808daC38cA53a709F981Fb663814DbaaAB7420) |
 | Its Permissioned Resolver | [`0xeF882e399948Da185884f363167E2a105e502A79`](https://sepolia.etherscan.io/address/0xeF882e399948Da185884f363167E2a105e502A79) |
 | Directory | 11 names in `paperseal.directory` on `paperseal-demo.eth`: `neutral-1` to `neutral-3` and `centre-1` to `centre-8` |

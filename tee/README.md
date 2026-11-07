@@ -2,7 +2,7 @@
 
 The Go workload that runs on Google Confidential Space. See the [root README](../README.md) for what it does and why.
 
-> **Status:** the lifecycle is implemented end to end. The one thing that returns a not-implemented error is the hardware attestation chain check, which only runs if `webauthn.requireHardwareAttestation` is `true` (it is `false` in the demo). Outside Confidential Space the instance is unattested and cannot commit a Build.
+> **Status:** the lifecycle is implemented end to end. The one thing that returns a not-implemented error is the security key attestation chain check, which only runs if `webauthn.requireSecurityKeyAttestation` is `true` (it is `false` in the demo). Outside Confidential Space the instance is unattested and cannot commit a Build.
 
 ## Layout
 

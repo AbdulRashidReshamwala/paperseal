@@ -48,10 +48,11 @@ Readers always check `body` against Sepolia, and never trust the other fields ov
 | Logs, tokens, backups | 180 days, and anyone can extend them (`permissionlessExtension`) | Covers results and appeals. Just under Arkiv's limit of about 182 days |
 | Heartbeats | 24 hours, can't be extended | They only matter while an unlock is running |
 
-## Writer
+## Writers
 
 | Wallet | Role |
 | --- | --- |
-| [`0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b`](https://rabdi.explorer.arkiv.network/address/0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b) | The team's relay wallet for the demo |
+| [`0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b`](https://rabdi.explorer.arkiv.network/address/0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b) | The team's relay wallet. It wrote most demo rows and every Swarm backup row |
+| [`0xC3808daC38cA53a709F981Fb663814DbaaAB7420`](https://rabdi.explorer.arkiv.network/address/0xC3808daC38cA53a709F981Fb663814DbaaAB7420) | The demo board's wallet, which the relay service on our VM writes as ([`deploy/relay`](../deploy/relay)) |
 
 A board publishes its writers in the `paperseal.arkiv-writers` record of the exam's ENS name, and can change them there. Viewers can add their own.

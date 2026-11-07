@@ -1,4 +1,4 @@
-import { roles, roundTimeSeconds, toHex, requireHardwareAttestation } from '@paperseal/protocol';
+import { roles, roundTimeSeconds, toHex, requireSecurityKeyAttestation } from '@paperseal/protocol';
 import { Button, Check, Countdown, KeyTouch, LoadingSeal, Page, PrimaryAction, RoleHeader, Seal, Stage, useLoaded } from '@paperseal/ui';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 
@@ -34,7 +34,7 @@ function FilesLine({ files }: { files: Files }) {
 
 function OpenAction({ open }: { open: OpenPaper }) {
   const { phase, start } = open;
-  const demo = !requireHardwareAttestation;
+  const demo = !requireSecurityKeyAttestation;
   switch (phase.name) {
     case 'idle':
       return <KeyTouch state="idle" purpose="to open the paper" actionLabel="Open the paper" onUse={start} demo={demo} />;

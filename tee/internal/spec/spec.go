@@ -65,9 +65,9 @@ type Constants struct {
 		} `json:"hpke"`
 	} `json:"crypto"`
 	WebAuthn struct {
-		PRFSalt                    string `json:"prfSalt"`
-		UserVerification           string `json:"userVerification"`
-		RequireHardwareAttestation bool   `json:"requireHardwareAttestation"`
+		PRFSalt                       string `json:"prfSalt"`
+		UserVerification              string `json:"userVerification"`
+		RequireSecurityKeyAttestation bool   `json:"requireSecurityKeyAttestation"`
 	} `json:"webauthn"`
 	Limits struct {
 		EntriesBytes   int `json:"entriesBytes"`

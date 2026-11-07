@@ -12,8 +12,8 @@ export { registryCode };
 export type DomainTagName = keyof typeof spec.domainTags;
 
 /**
- * `webauthn.requireHardwareAttestation`. False for the demo, so the TEE doesn't check the
- * attestation chain, and the verifier page shows the value. When true, an attestation check
+ * `webauthn.requireSecurityKeyAttestation`, about the security keys' maker and not the TEE's
+ * attestation token. False for the demo, so the TEE doesn't check a key's attestation chain, and the verifier page shows the value. When true, an attestation check
  * that isn't implemented must reject the registration.
  */
-export const requireHardwareAttestation: boolean = spec.webauthn.requireHardwareAttestation;
+export const requireSecurityKeyAttestation: boolean = spec.webauthn.requireSecurityKeyAttestation;

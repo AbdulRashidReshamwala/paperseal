@@ -23,7 +23,7 @@ The files are already encrypted or signed, so we upload them **unencrypted**. An
 | `swarmRef` | `bae94aa7a550c4d870856306bb0bf68fa366a2e59039de2d48e404b27c527ed6` |
 | Open it | [`manifest.json` on Swarm](https://34-93-7-127.sslip.io/bzz/bae94aa7a550c4d870856306bb0bf68fa366a2e59039de2d48e404b27c527ed6/manifest.json) |
 | Exam | `0x83b30c31827789be7213e71731864d40ea7a89b92844ab09070cd132cccfd4c3` on registry `0xc25F7e0004f0E9B77581CFf6B4B5Ae8b120658eb` (Sepolia) |
-| See it used | [The exam in the verifier](https://34-93-7-127.sslip.io/#/exam/0x83b30c31827789be7213e71731864d40ea7a89b92844ab09070cd132cccfd4c3) |
+| See it used | [The exam in the verifier](https://paperverify.abdulrashid.dev/#/exam/0x83b30c31827789be7213e71731864d40ea7a89b92844ab09070cd132cccfd4c3) |
 
 Swarm's Sepolia testnet has no public gateway, so we run one for the event: our Bee node behind Caddy, which allows only `GET /bzz/...` and `/health`. Nobody can upload or touch the node's wallet through it. It's a temporary VM. After the event, use your own testnet Bee node in place of the host.
 
@@ -61,7 +61,7 @@ node relay/cli.mjs backup --exam 0x83b30c31827789be7213e71731864d40ea7a89b92844a
 
 You should see `uploaded reference …`, `row written` and `read-back manifest.json from Swarm matches`. Running it again with the same files writes nothing new.
 
-**One read, with the bucket gone.** The quickest way: open the [exam in the verifier](https://34-93-7-127.sslip.io/#/exam/0x83b30c31827789be7213e71731864d40ea7a89b92844ab09070cd132cccfd4c3). Under "Check it yourself", set "Where the public files are kept" to `https://storage.googleapis.com/paperseal-demo-bucket-gone`, a bucket that doesn't exist, and save.
+**One read, with the bucket gone.** The quickest way: open the [exam in the verifier](https://paperverify.abdulrashid.dev/#/exam/0x83b30c31827789be7213e71731864d40ea7a89b92844ab09070cd132cccfd4c3). Under "Check it yourself", set "Where the public files are kept" to `https://storage.googleapis.com/paperseal-demo-bucket-gone`, a bucket that doesn't exist, and save.
 
 To run it locally instead, put this in `apps/verifier/.env.local`, run `pnpm --filter @paperseal/verifier dev`, and open `http://localhost:5172/#/exam/0x83b30c31827789be7213e71731864d40ea7a89b92844ab09070cd132cccfd4c3`:
 

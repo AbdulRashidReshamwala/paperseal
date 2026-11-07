@@ -5,7 +5,7 @@ import { plantedCards } from './cards';
  * The directory for `pnpm demo:keys`.
  *
  *   node e2e/demo/cli.mjs names         prints each key holder's and centre's card. It sends nothing.
- *   node e2e/demo/cli.mjs names write   writes them with the board keystore, as `pnpm live` does.
+ *   node e2e/demo/cli.mjs names write   writes them with the board keystore, as `node e2e/live/cli.mjs run` does.
  *
  * `write` replaces the records on those names, so it costs Sepolia gas and any key enrolled on them
  * stops matching. It needs doing once, because planted keys never change. `names` shows what it would send.

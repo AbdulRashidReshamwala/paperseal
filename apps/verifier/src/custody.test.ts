@@ -1,6 +1,6 @@
 import type { ExamNameCheck, ExamNameResult } from '@paperseal/chain';
 import { describe, expect, beforeAll, it, vi } from 'vitest';
-import { chain as chainSpec, requireHardwareAttestation, roundTimeSeconds, sortReleaseFiles, storageNames, toHex, type Hex } from '@paperseal/protocol';
+import { chain as chainSpec, requireSecurityKeyAttestation, roundTimeSeconds, sortReleaseFiles, storageNames, toHex, type Hex } from '@paperseal/protocol';
 
 import {
   approvedEntries,
@@ -271,7 +271,7 @@ describe('the test network note', () => {
   it('names the network from the spec, and the caveat follows the constants', () => {
     expect(chainSpec.name).toBe('sepolia');
     expect(chainSpec.readBlock).toBe('latest');
-    expect(requireHardwareAttestation).toBe(false);
+    expect(requireSecurityKeyAttestation).toBe(false);
     expect(testExamCaveat).toBe(caveat);
   });
 

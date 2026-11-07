@@ -156,7 +156,7 @@ export async function mockWorld(): Promise<World> {
   const storage = await startStorage();
   const registry = createExamRegistry({ address: chain.registry, rpcUrl: chain.rpcUrl });
   const bucket = 'mock-bucket';
-  const tee = await startMockTee({ pki, registry, storage: storage.files, bucket, log: () => undefined });
+  const tee = await startMockTee({ pki, registry, storage: storage.files, bucket, log: (line) => { console.log(`  ${line}`); } });
   return {
     kind: 'mock',
     mode: 'mock',

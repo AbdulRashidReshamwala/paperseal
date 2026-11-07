@@ -19,6 +19,31 @@ describe('sourceBusy', () => {
 });
 
 describe('politeReads', () => {
+  it('leaves a source alone for a long Retry-After: reads fail at once, then it is read again', async () => {
+    const wait = new HttpRequestError({ url: 'https://rpc.example', status: 429, headers: new Headers({ 'Retry-After': '150' }) });
+    const send = vi.fn<() => Promise<unknown>>().mockRejectedValueOnce(wait).mockResolvedValue('rows');
+    const sleep = vi.fn(noWait);
+    let time = 1000;
+    const read = politeReads(send, sleep, { source: 'Arkiv', now: () => time });
+
+    await expect(read(call('0x1'))).rejects.toThrow('Arkiv has reached its rate limit. It can be read again in about 3 minutes.');
+    time += 140_000;
+    await expect(read(call('0x2'))).rejects.toThrow('in about a minute');
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+
+    time += 10_000;
+    await expect(read(call('0x2'))).resolves.toBe('rows');
+    expect(sourceBusy('Arkiv has reached its rate limit. It can be read again in about 3 minutes.')).toBe(true);
+  });
+
+  it('sits out a short Retry-After like any other busy answer', async () => {
+    const wait = new HttpRequestError({ url: 'https://rpc.example', status: 429, headers: new Headers({ 'Retry-After': '2' }) });
+    const send = vi.fn<() => Promise<unknown>>().mockRejectedValueOnce(wait).mockResolvedValue('rows');
+    await expect(politeReads(send, noWait)(call('0x1'))).resolves.toBe('rows');
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
   it('sends a failed read again within the load, single-block logs included', async () => {
     const send = vi.fn<() => Promise<unknown>>().mockRejectedValueOnce(limited()).mockResolvedValue([{ data: '0x' }]);
     await expect(politeReads(send, noWait)(logs('0x10'))).resolves.toEqual([{ data: '0x' }]);
