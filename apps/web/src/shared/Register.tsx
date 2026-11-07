@@ -1,5 +1,5 @@
 import { createWebAuthnKeys, KeyError, type Keys, type Registration } from '@paperseal/keys';
-import { fromHex, NotImplementedError, requireHardwareAttestation, toHex, type Hex, type Invite } from '@paperseal/protocol';
+import { fromHex, NotImplementedError, requireSecurityKeyAttestation, toHex, type Hex, type Invite } from '@paperseal/protocol';
 import { TeeApiError, type TeeClient } from '@paperseal/tee-client';
 import { Check, KeyTouch, Registered, securityKeyProblem, Stage, type KeyTouchState } from '@paperseal/ui';
 import { useState, type ReactNode } from 'react';
@@ -247,7 +247,7 @@ export function Register(props: RegisterProps) {
             error={keyError}
             actionLabel="Register your security key"
             purpose="to register"
-            demo={!requireHardwareAttestation}
+            demo={!requireSecurityKeyAttestation}
             onUse={() => {
               void submit();
             }}

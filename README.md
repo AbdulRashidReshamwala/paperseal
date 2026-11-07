@@ -79,14 +79,14 @@ Each key holder and approved centre has a root secret in a hardware security key
 1. **Enrol:** once, the web app creates a device-bound passkey on the security key and requests its attestation. It shows a key card of public values, and the directory owner puts them on the person's ENS name. This identity is permanent and is used for every exam.
 2. **Derive:** for each exam, the app signs in with that passkey and uses the WebAuthn PRF extension to derive a keypair. The PRF input is a hash of the fixed salt in `spec/constants.json` and the exam ID, so each exam has its own keypair, and a leak of one opens no other exam's material. Every request requires user verification, because a security key can give a different output without it. The private key is never stored.
 3. **Register:** the TEE sends a fresh challenge. The passkey signs a hash of the derived public key, the holder ID and the challenge. This takes two touches: one for the derived key, then one to sign, because the derived key is part of what is signed. The app sends the derived public key, the signature and the attestation from enrolment.
-4. **Check:** the TEE checks the passkey signature and, with hardware attestation on, the attestation chain. Anyone who fails doesn't go on the approved list.
+4. **Check:** the TEE checks the passkey signature and, with security key attestation on, the key's attestation chain. Anyone who fails doesn't go on the approved list.
 5. **Deliver:** after the Split, the TEE encrypts each key holder's share to their derived public key and publishes it with a hash of the share.
 
-Synced passkeys are not accepted, because they copy the secret to a cloud account. The attestation and the passkey's backup flags are checked to enforce this.
+Synced passkeys are not accepted, because they copy the secret to a cloud account. The security key's attestation and the passkey's backup flags are checked to enforce this.
 
 Keys sit behind one small interface (`generateKey`, `getPublicKey`, `decryptShare`, `sign`) and the same WebAuthn code runs in both modes:
 
-- **Dev and demo mode:** Chrome's virtual authenticator with PRF enabled mocks the security key. It is software, so the hardware attestation check is skipped by an attested setting the verifier page shows, and the demo is simulated. This is the only mode in the hackathon build. `pnpm demo:keys` does the same in one tab, with a software authenticator in the page holding a planted key per person (see [deploy/README.md](deploy/README.md)). A production build cannot contain it.
+- **Dev and demo mode:** Chrome's virtual authenticator with PRF enabled mocks the security key. It is software, so the security key attestation check is skipped by an attested setting the verifier page shows, and the demo is simulated. This is the only mode in the hackathon build. `pnpm demo:keys` does the same in one tab, with a software authenticator in the page holding a planted key per person (see [deploy/README.md](deploy/README.md)). A production build cannot contain it.
 - **Production mode:** a hardware security key through WebAuthn PRF.
 
 ### Approved List
@@ -244,9 +244,9 @@ The paper stays with approved centres from `T−Δ` until the end round. At that
 ### Keys and Web App
 
 - A private key briefly sits in browser memory during registration and release, and whoever serves the web app could tamper with its code. A stolen share still can't open the paper early, because that needs 8 shares and the time seal. It can't be submitted in that holder's name without the security key either.
-- Attestation proves a passkey is on approved hardware, but not that the derived keypair came from it. The board serves the web app, so it could swap in its own derived keys at registration for every holder and centre, because staff can't see what a security key signs. It could then read shares and `K_priv` at unlock with no key holder involved, and the release log would still look normal. The time seal still keeps the paper closed until `T−Δ`.
+- Security key attestation proves a passkey is on a key from an approved maker, but not that the derived keypair came from it. The board serves the web app, so it could swap in its own derived keys at registration for every holder and centre, because staff can't see what a security key signs. It could then read shares and `K_priv` at unlock with no key holder involved, and the release log would still look normal. The time seal still keeps the paper closed until `T−Δ`.
 - Security keys protect against theft, not dishonest holders, because they can't enforce time. The timelock on `K_pub` is what stops the paper opening early.
-- Attestation usually identifies a batch of security keys, not one key. The on-chain registration ties each key to a holder.
+- Security key attestation usually identifies a batch of keys, not one key. The on-chain registration ties each key to a holder.
 - The public exam page has no secret, so anyone can register under any name with a key of their own. That never reaches the list, because the key doesn't match the name's record, but the TEE can't refuse it. [Registration Flooding](spec/api.md#registration-flooding) says what limits it.
 
 ### Availability

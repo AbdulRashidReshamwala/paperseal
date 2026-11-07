@@ -61,7 +61,7 @@ It reads the chain, bucket, Google's root and drand itself, and returns a report
 
 Each claim has one of four statuses: `pass`, `fail`, `not yet` or `not checked`.
 
-The overall result is `verified` only if every claim due so far passes, `failed` if any claim fails, and `partial` otherwise. An exam in `dev` [mode](self-hosting.md#6-exam-mode) is never `verified`.
+The overall result is `failed` if any claim fails, `partial` if any claim isn't checked or the checker wasn't run, `verified-test` if every claim due so far passes on an exam that isn't in `production` [mode](self-hosting.md#6-exam-mode), and `verified` otherwise. An exam in `dev` mode is never `verified`, only `verified-test`.
 
 ### 4. Copy Button
 

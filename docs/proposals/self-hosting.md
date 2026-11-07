@@ -1,6 +1,6 @@
 # Proposal: Easy Self-Hosting
 
-**Status:** parts 1 to 3 of the order below are implemented, 2026-11-07: `deploy.json`, OpenTofu in `deploy/tofu/`, `run-tee.sh --from-chain`, the stage guard, `doctor.sh` and the apps' runtime `config.json`. The rules are in [`spec/deploy.md`](../../spec/deploy.md), which replaces this proposal where they differ. The `gcp-lb` ingress and the Cloudflare Pages module are not built. Exam mode, hardware attestation, the chain allow-list and the per-exam threshold are still proposed.
+**Status:** parts 1 to 3 of the order below are implemented, 2026-11-07: `deploy.json`, OpenTofu in `deploy/tofu/`, `run-tee.sh --from-chain`, the stage guard, `doctor.sh` and the apps' runtime `config.json`. The rules are in [`spec/deploy.md`](../../spec/deploy.md), which replaces this proposal where they differ. The `gcp-lb` ingress and the Cloudflare Pages module are not built. Exam mode, security key attestation, the chain allow-list and the per-exam threshold are still proposed.
 
 ## Summary
 
@@ -21,9 +21,9 @@ Not everything can be free-form config. Anything that affects trust stays attest
 | No step hosts the web apps | The guide ends at build-time values |
 | `repro.yml` names `ghcr.io/abdulrashidreshamwala/paperseal-tee` directly | A fork can't publish its own image without an edit |
 | `stop-tee.sh` and `teardown.sh` don't check the exam's stage | Stopping the VM early destroys the in-memory question bank and keys |
-| `chain.readBlock` is `latest` and `requireHardwareAttestation` is `false`, both compiled into the image | **No published image is suitable for a real exam, and no setting can change that** |
-| The verifier shows its own compiled `requireHardwareAttestation` value, and doesn't show `readBlock` at all | A verifier built with `true` would show green for a TEE running in dev mode |
-| The hardware attestation check returns a not-implemented error | With `requireHardwareAttestation: true`, every registration is refused, so a production exam can't run yet |
+| `chain.readBlock` is `latest` and `requireSecurityKeyAttestation` is `false`, both compiled into the image | **No published image is suitable for a real exam, and no setting can change that** |
+| The verifier shows its own compiled `requireSecurityKeyAttestation` value, and doesn't show `readBlock` at all | A verifier built with `true` would show green for a TEE running in dev mode |
+| The security key attestation check returns a not-implemented error | With `requireSecurityKeyAttestation: true`, every registration is refused, so a production exam can't run yet |
 | The TEE rejects any chain but the one in `spec/constants.json` (`settings.go:95`), and the apps use viem's `sepolia` directly | Sepolia is the only possible chain |
 
 ## What Can Be Configured
@@ -102,7 +102,7 @@ A fork gets a different digest and must publish its own reproducible release. Bo
 
 Every exam uses the same image hash. Whether it runs as `dev` or `production` becomes a write-once exam setting, stored on-chain and passed to the TEE as an attested startup argument:
 
-| `mode` | Chain reads | Hardware attestation | Use |
+| `mode` | Chain reads | Security key attestation | Use |
 | --- | --- | --- | --- |
 | `dev` | `latest` | Skipped | Demos and testing |
 | `production` | `finalized` | Required | Real exams |
@@ -116,24 +116,24 @@ The rules that keep this safe:
 - **Linked rules:** the mode sets both behaviours together, so they can't be set separately.
 - **Board app default:** it selects `production`, so choosing `dev` is deliberate.
 
-Hardware attestation must be implemented before `production` can work. It still needs a CBOR parser and a chosen list of approved security keys. Until then, `production` refuses every registration, which is the correct behaviour.
+Security key attestation must be implemented before `production` can work. It still needs a CBOR parser and a chosen list of approved security keys. Until then, `production` refuses every registration, which is the correct behaviour.
 
 ### 7. Verifying the Mode
 
-The verifier must prove the mode from the attestation token, not from its own build. Today it shows the `requireHardwareAttestation` constant it was built with, which says nothing about the running TEE.
+The verifier must prove the mode from the attestation token, not from its own build. Today it shows the `requireSecurityKeyAttestation` constant it was built with, which says nothing about the running TEE.
 
 `expectedClaims` already builds the expected arguments from the on-chain settings, so adding `mode` to `ExamSettings` brings it into that comparison. This applies to the live token, the Build instance's published token and the Unlock instance's `release-token.jwt`, because Unlock can run on a different instance.
 
 | On-chain mode | Token's `--mode` | Token verified? | Verifier shows |
 | --- | --- | --- | --- |
-| `production` | `production` | Yes | **Production, verified.** Lists finalized chain reads and hardware attestation as checked |
+| `production` | `production` | Yes | **Production, verified.** Lists finalized chain reads and security key attestation as checked |
 | `dev` | `dev` | Yes | **Demo, verified.** A clear warning that this exam isn't protected for real use |
 | Any | Different from on-chain | Yes | **Failed.** The TEE wasn't started with the published settings |
 | Any | Any | No, or no token yet | **Not verified.** Never shows the on-chain mode as if it were proven |
 
 Further rules:
 
-- **The compiled constant goes:** `custody.ts` and `page.tsx` stop reading `requireHardwareAttestation`, and every label comes from the verified mode.
+- **The compiled constant goes:** `custody.ts` and `page.tsx` stop reading `requireSecurityKeyAttestation`, and every label comes from the verified mode.
 - **`dev` can't pass overall:** the page's summary never says all checks passed for a `dev` exam, even when every check succeeds.
 - **`readBlock` gets its own row:** the verifier shows which block tag the mode implies.
 - **Other apps use the same result:** the setter, centre and key holder apps take their demo labels from the exam, not a constant.
@@ -155,7 +155,7 @@ Move `8 of 10` into the exam settings. The README's guarantees depend on this ra
 | 2 | `--from-chain`, stage guard, `doctor` | No |
 | 3 | Runtime web config and hosting | No |
 | 4 | Exam mode and verifying it | Yes, with a new contract deployment and image release |
-| 5 | Hardware attestation check | No, but needed before any real exam |
+| 5 | Security key attestation check | No, but needed before any real exam |
 | 6 | Chain allow-list | Yes |
 | 7 | Per-exam threshold | Yes |
 
@@ -173,7 +173,7 @@ Steps 1 to 3 change no image digest, so they can ship without a new TEE release.
 
 - Add `spec/deploy.schema.json`, and the `config.json` shape for the apps.
 - Add `mode` to "Exam Settings" in `spec/api.md`, with `ExamSettings` in `ExamRegistry`, the TEE's startup arguments and the apps following in the same change.
-- Remove `chain.readBlock` and `webauthn.requireHardwareAttestation` from `spec/constants.json`, and define what each mode requires.
+- Remove `chain.readBlock` and `webauthn.requireSecurityKeyAttestation` from `spec/constants.json`, and define what each mode requires.
 - Replace the single chain in `spec/constants.json` with an allow-list.
 
 ## Risks and Open Questions
@@ -183,7 +183,7 @@ Steps 1 to 3 change no image digest, so they can ship without a new TEE release.
 - **The hash alone no longer shows the mode:** anyone checking by hand must read the hash and the on-chain mode together. The verifier does this for them.
 - **A board can still choose `dev`:** it could run a real exam in demo mode. The mode is public and write-once, and the verifier warns about it, but nothing stops the choice.
 - **The verifier trusts the published code for behaviour:** the token proves the TEE started with `--mode=production`, and the open-source code decides what that does. Should the attestation evidence for each key also be published, so anyone can recheck it?
-- **Production testing:** hardware attestation needs testing with a real security key, because the demo only uses Chrome's virtual authenticator.
+- **Production testing:** security key attestation needs testing with a real security key, because the demo only uses Chrome's virtual authenticator.
 - **`gcp-lb` is untested:** we need to confirm a Google load balancer accepts the TEE's self-signed backend certificate on port 8080, and what it costs per month.
 - **Multiple hardware types:** `hwModels` allows SEV, SEV-ES and TDX, but `run-tee.sh` always asks for SEV. Should `machineType` be limited to tested types?
 - **Existing demo resources:** decide whether to import them into OpenTofu state or recreate them.

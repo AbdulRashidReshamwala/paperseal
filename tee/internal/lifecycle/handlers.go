@@ -110,7 +110,7 @@ func (m *Machine) RegisterChallenge(context.Context) (api.ChallengeResponse, err
 // Register implements api.Backend. The passkey signature covers the
 // registration message in a get ceremony, so it proves the key whether it was
 // created just now, as a setter's is, or at enrolment, as a party's is. The
-// attestation check is skipped while webauthn.requireHardwareAttestation is
+// security key attestation check is skipped while webauthn.requireSecurityKeyAttestation is
 // false. inviteTag is only checked for shape. The TEE never sees the invite
 // secret, so the board's app is what matches a tag to an invite or a name's
 // record. A zero tag means a registration by name, which always has a derived

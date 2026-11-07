@@ -134,10 +134,10 @@ describe('the test exam caveat', () => {
     );
     expect(readFileSync(new URL('../../../spec/agent-verification.md', import.meta.url), 'utf8')).toContain(testExamCaveat);
     const constants = JSON.parse(readFileSync(new URL('../../../spec/constants.json', import.meta.url), 'utf8')) as {
-      webauthn: { requireHardwareAttestation: boolean };
+      webauthn: { requireSecurityKeyAttestation: boolean };
       chain: { readBlock: string };
     };
-    expect(constants.webauthn.requireHardwareAttestation).toBe(false);
+    expect(constants.webauthn.requireSecurityKeyAttestation).toBe(false);
     expect(constants.chain.readBlock).toBe('latest');
   });
 });
@@ -156,12 +156,12 @@ describe('checkExam', () => {
     valid(report);
   });
 
-  it('says hardware attestation is not enforced, and that names were not checked, even when every claim passes', async () => {
+  it('says the security keys\' maker is not checked, and that names were not checked, even when every claim passes', async () => {
     const report = await checkExam(input(world));
     expect(report.limits).toEqual(reportLimits('unknown'));
     expect(report.limits[0]).toBe(testExamCaveat);
     expect(reportLimits('production')).not.toContain(testExamCaveat);
-    expect(report.limits.join(' ')).toContain("Hardware attestation isn't enforced");
+    expect(report.limits.join(' ')).toContain("The security keys' maker isn't checked");
     expect(report.limits.join(' ')).toContain("names aren't checked");
     expect(JSON.stringify(report)).not.toMatch(/"source":"tee"/);
   });

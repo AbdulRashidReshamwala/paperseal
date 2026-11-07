@@ -185,7 +185,7 @@ const onUse = () => {
   );
 };
 
-<KeyTouch state={state} error={error} purpose="to release your share" onUse={onUse} demo={!requireHardwareAttestation} />;
+<KeyTouch state={state} error={error} purpose="to release your share" onUse={onUse} demo={!requireSecurityKeyAttestation} />;
 ```
 
 `error` picks the guidance, using `securityKeyProblem(error)`:
@@ -366,7 +366,7 @@ A link opened from email, WhatsApp or Safari shows "Open this page in Chrome", w
    On a `#/name/` link, the `Stepper` starts with a Name step. Until it passes, every later step waits, nothing about the exam is read, and no seal shows. Its exact reasons stay in the evidence.
    In the people step's evidence, each key holder or centre whose name is an ENS name shows a badge: "Name confirmed" when the name's record matches their security key, otherwise "Not confirmed" for a key holder and "Label only" for a centre, with one plain line why ("has no record for this security key yet", "names a different security key", "could not be read just now"). These are labels, never failing checks, so they never reach the failure banner. A note under them says a centre's name is one the board can change, and the Sepolia line says a similar name can be registered by anyone. An owner on the list that is not an ENS name (an older exam, or a board that skipped the app, since the contract does not check it) shows the badge "Not an ENS name" as a warning, and one plain line on the main view says how many people are listed that way and to ask the exam board why. It is a warning and never a failed check, and it is on the main view because it means a key holder's independence cannot be checked by name.
 3. Put the existing evidence (`Attestation`, `Commitments`, `Proof`) inside each step's `evidence`, with `Check` and `Hash`.
-4. A check not yet run is `Not checked`. A step that doesn't apply is `not-applicable`. If demo mode is on, because `requireHardwareAttestation` is false, say so visibly as a `note` in plain words: this is a demonstration and the security keys are simulated.
+4. A check not yet run is `Not checked`. A step that doesn't apply is `not-applicable`. If demo mode is on, because `requireSecurityKeyAttestation` is false, say so visibly as a `note` in plain words: this is a demonstration and the security keys are simulated.
 5. The connection settings stay at the foot of the page, under "Check it yourself".
 6. The first exam step fails if the address does not run the published contract, or the exam's times are outside the allowed limits. Nothing else is read from such an address, and the headline says it is not a Paper Seal exam record. When the code matches, the step's note names the exam board's account.
 7. A warning sits under the failure banner, quieter than it, and never counts as a failed check. There are two: the paper was recorded after its unlock time, and a name leads to a different exam record from the one the page is set up to read. The name warning shows as soon as the name is read, and the Name step keeps its line about Sepolia.

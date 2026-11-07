@@ -1,4 +1,4 @@
-import { limits, requireHardwareAttestation, type Criteria, type Question } from '@paperseal/protocol';
+import { limits, requireSecurityKeyAttestation, type Criteria, type Question } from '@paperseal/protocol';
 import { TeeApiError } from '@paperseal/tee-client';
 import { Check, Hash, KeyTouch, PrimaryAction, Row, Rows, Stage, Stamp } from '@paperseal/ui';
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
@@ -240,7 +240,7 @@ export function Composer(props: {
       return (
         <KeyTouch
           state="waiting"
-          demo={!requireHardwareAttestation}
+          demo={!requireSecurityKeyAttestation}
           onUse={() => {
             // The prompt shows no button while waiting.
           }}
@@ -252,7 +252,7 @@ export function Composer(props: {
         <KeyTouch
           state="failed"
           error={problem.error}
-          demo={!requireHardwareAttestation}
+          demo={!requireSecurityKeyAttestation}
           onUse={() => {
             void seal();
           }}
