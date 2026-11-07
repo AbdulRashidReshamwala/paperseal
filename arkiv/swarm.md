@@ -80,7 +80,7 @@ To use your own Bee node, set `VITE_SWARM_API_URL` to it and allow the verifier'
 
 ## Demo Video
 
-To be added, with the timestamp where the bucket is switched off and the paper opens from Swarm.
+The demo video is on our ETHGlobal submission and the [homepage's demo section](https://paperseal-home.pages.dev/#demo). Swarm is used at **3:50**, when the board's bucket is switched off: the verifier still opens the paper, and each step's evidence shows "Backup on Swarm".
 
 ## What Got in Our Way
 

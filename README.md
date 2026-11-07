@@ -7,6 +7,7 @@
 <p align="center">Keeps exam papers sealed until shortly before the exam, so no single person can leak them.</p>
 
 <p align="center">
+  <a href="https://paperseal-home.pages.dev/">Live demo</a> ·
   <a href="https://paperseal.abdulrashid.dev">Exam app</a> ·
   <a href="https://paperverify.abdulrashid.dev">Public verifier</a> ·
   <a href="#honest-limits">Honest limits</a> ·
@@ -337,6 +338,7 @@ The whole exam runs end to end, from publishing to the public proof, against the
 | Independent checker | `paperseal-verify.mjs`, attached to each release, and the "Check with your own AI" button. |
 | Self-hosting | `deploy.json`, OpenTofu, `run-tee.sh --from-chain` and `doctor.sh`. |
 | Releases | Reproducible images and a published digest for each tag. |
+| Homepage | [paperseal-home.pages.dev](https://paperseal-home.pages.dev/), with a demo clip for each step of an exam. |
 | Demos | The one-machine demo and scriptable videos. See [Running it locally](#running-it-locally). |
 
 ### The public verifier
