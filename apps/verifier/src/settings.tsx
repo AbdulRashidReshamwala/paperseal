@@ -205,6 +205,9 @@ export function endpoints(settings: Pick<Settings, 'rpcUrl' | 'teeUrl' | 'storag
   };
 }
 
+/** Arkiv's public RPC limits reads like any other, so it is read the same polite way. */
+export const arkivReaderFor = (rpcUrl: string) => createArkivReader({ transport: readTransport(rpcUrl, 'Arkiv') });
+
 /**
  * The Arkiv mirror, read with the viewer's own node and writers. Off, with nothing read, until both
  * are set. A name route adds the name's writers to these, and reads them with the same node.
@@ -212,7 +215,7 @@ export function endpoints(settings: Pick<Settings, 'rpcUrl' | 'teeUrl' | 'storag
 export function arkivSource(settings: Pick<Settings, 'arkivRpcUrl' | 'arkivWriters'>) {
   const writers = arkivWriterList(settings.arkivWriters);
   return settings.arkivRpcUrl && writers.length > 0
-    ? { reader: createArkivReader({ rpcUrl: settings.arkivRpcUrl }), writers }
+    ? { reader: arkivReaderFor(settings.arkivRpcUrl), writers }
     : null;
 }
 

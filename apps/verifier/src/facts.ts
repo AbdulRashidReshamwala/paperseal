@@ -236,6 +236,9 @@ const pieceWords: Record<PieceId, { label: string; about: string }> = {
 const servedFromSwarm = (records: Records | null, proof: View['proof'], name: string) =>
   records?.backup?.served.some((file) => file.name === name) === true || proof?.backup?.served.some((file) => file.name === name) === true;
 
+/** A read's failure in one line: a library's message goes on to its request and URL. */
+const firstLine = (message: string) => message.split('\n')[0] ?? '';
+
 /** What a read that gave nothing means here. */
 function gap(kind: 'off' | 'neutral' | 'unavailable', message?: string): Pick<Copy, 'state' | 'note'> {
   if (kind === 'off') return { state: 'off', note: 'Add where the public files are kept under "Check it yourself".' };
@@ -295,7 +298,7 @@ function arkivCopies(view: View): { log: Copy; token: Copy } {
   const same = (state: CopyState, note: string): { log: Copy; token: Copy } => ({ log: { source: 'arkiv', state, note }, token: { source: 'arkiv', state, note } });
   if (!view.sources.arkiv) return same('off', 'Add who may write the copy on Arkiv under "Check it yourself".');
   const polled = view.arkiv;
-  if (polled.state === 'error') return same('unread', 'This does not fail the exam. This page keeps trying.');
+  if (polled.state === 'error') return same('unread', `This does not fail the exam. ${firstLine(polled.message)} This page keeps trying.`);
   if (polled.state !== 'ready') return same('reading', '');
   if ('kind' in polled.value) return same('missing', polled.value.message);
   const report: ArkivReport = polled.value;
@@ -326,10 +329,12 @@ function teeCopy(view: View, over: boolean): Copy {
 
 const rank: Record<CopyState, number> = { checked: 0, held: 1, reading: 2, unread: 3, failed: 4, missing: 5, off: 6 };
 
-function swarmCopy(polled: Polled<SwarmReport> | undefined, judge: (copy: SwarmCopy) => Pick<Copy, 'state' | 'note'>): Copy {
+function swarmCopy(polled: Polled<SwarmReport> | undefined, judge: (copy: SwarmCopy) => Pick<Copy, 'state' | 'note'>, arkivUnread: boolean): Copy {
   if (!polled || polled.state === 'off') return { source: 'swarm', state: 'off', note: 'Backups are found through Arkiv, which is not set up here.' };
+  // Backups are found through Arkiv, so with Arkiv unread there is nothing to wait for yet.
+  if (polled.state === 'loading' && arkivUnread) return { source: 'swarm', state: 'unread', note: 'Backups are found through Arkiv, which could not be read just now. This does not fail the exam. This page keeps trying.' };
   if (polled.state === 'loading') return { source: 'swarm', state: 'reading', note: '' };
-  if (polled.state === 'error') return { source: 'swarm', state: 'unread', note: `No backup could be looked up just now. This does not fail the exam. ${polled.message}` };
+  if (polled.state === 'error') return { source: 'swarm', state: 'unread', note: `No backup could be looked up just now. This does not fail the exam. ${firstLine(polled.message)}` };
   const { copies } = polled.value;
   if (copies.length === 0) return { source: 'swarm', state: 'missing', note: 'No backup is recorded for this exam.' };
   const judged = copies.map((copy) => ({ copy, ...judge(copy) }));
@@ -398,6 +403,7 @@ export function copies(view: View, result: Pick<Custody, 'progressSource'>, swar
   const mirror = arkivCopies(view);
   const tee = teeCopy(view, over);
   const opened = proof?.ok === true && proof.result.state === 'opened';
+  const backup = (id: PieceId) => swarmCopy(swarm, swarmJudges[id], view.arkiv.state === 'error');
 
   const fromSwarm = (name: string) => servedFromSwarm(records, proof, name);
   const logUsed: CopySource | null =
@@ -421,10 +427,10 @@ export function copies(view: View, result: Pick<Custody, 'progressSource'>, swar
   const piece = (id: PieceId, list: Copy[], used: CopySource | null): Piece => ({ id, ...pieceWords[id], copies: mark(list, used) });
   return {
     pieces: [
-      piece('log', [bucketLog(records, stored[storageNames.releaseLog]), mirror.log, swarmCopy(swarm, swarmJudges.log), tee], logUsed),
-      piece('token', [tokenBucket, mirror.token, swarmCopy(swarm, swarmJudges.token)], tokenUsed),
-      piece('paper', [registry, { source: 'bucket', ...manifestCopy(records.manifest, 'bucket'), ...(stored[storageNames.manifest] === undefined ? {} : { at: stored[storageNames.manifest] }) }, swarmCopy(swarm, swarmJudges.paper)], paperUsed),
-      piece('keys', [bucketKeys(records, stored[storageNames.keyPriv]), swarmCopy(swarm, swarmJudges.keys)], keysUsed),
+      piece('log', [bucketLog(records, stored[storageNames.releaseLog]), mirror.log, backup('log'), tee], logUsed),
+      piece('token', [tokenBucket, mirror.token, backup('token')], tokenUsed),
+      piece('paper', [registry, { source: 'bucket', ...manifestCopy(records.manifest, 'bucket'), ...(stored[storageNames.manifest] === undefined ? {} : { at: stored[storageNames.manifest] }) }, backup('paper')], paperUsed),
+      piece('keys', [bucketKeys(records, stored[storageNames.keyPriv]), backup('keys')], keysUsed),
     ],
     feed: feed(view, over),
   };
