@@ -1,71 +1,57 @@
 # Schema
 
-Paper Seal mirrors an exam's unlock evidence to Arkiv's Rabdi testnet. The full rules are in [`spec/arkiv.md`](../spec/arkiv.md), and the values in [`spec/arkiv.json`](../spec/arkiv.json). The code is [`packages/arkiv`](../packages/arkiv) (schemas, reader and writer), [`relay/`](../relay) (the import) and [`apps/verifier`](../apps/verifier) (the reader people use).
+What Paper Seal stores on Arkiv's Rabdi testnet, how we search it, who owns it and when it expires.
+
+The code: [`packages/arkiv`](../packages/arkiv) (schemas, reader, writer), [`relay/`](../relay) (writes the data) and [`apps/verifier`](../apps/verifier) (reads it for users). The full rules are in [`spec/arkiv.md`](../spec/arkiv.md).
 
 ## Entities
 
-| Schema | One entity per | `body` holds |
+| Schema | One per | Holds |
 | --- | --- | --- |
-| `paperseal.v1.release-log` | Signed release log snapshot: which key holders have released, signed by the TEE | The exact bytes of the TEE's `GET /v1/release/log`, or of `release-log.json` in public storage |
-| `paperseal.v1.release-token` | Unlock machine | The Google-signed PKI attestation token that proves which code the Unlock machine runs and which signing key it holds |
-| `paperseal.v1.exam` | Exam in a registry, for the exam index | Stage, start time, hashes and verified ENS name, copied from `ExamRegistry`'s events. Its writer edits it as the exam moves on |
-| `paperseal.v1.participant` | Entry on an exam's approved list | Role, owner (a setter's is already a hash) and key hashes, copied from `ApprovedListPosted` |
-| `paperseal.v1.backup` | Swarm backup of an exam's public files, per phase | Nothing in `body`. The columns say where the backup is: its Swarm reference, the hash of its `manifest.json` and the postage batch ([`swarm.md`](swarm.md)) |
-| `paperseal.v1.relay-heartbeat` | Minute a relay is watching an unlock | Nothing signed: `entriesHash` of the newest log seen and the TEE `stage`. It only tells readers the relay is alive, and never counts as evidence |
+| `paperseal.v1.release-log` | Copy of the release log | Who has released their key share, signed by the TEE. The exact bytes the TEE gave |
+| `paperseal.v1.release-token` | Unlock machine | Google's signed token: which code the machine runs and which key it signs with |
+| `paperseal.v1.exam` | Exam | Stage, start time, hashes and ENS name, copied from `ExamRegistry`. The only kind its writer updates |
+| `paperseal.v1.participant` | Person on an exam's approved list | Role, owner and key hashes. A setter's owner is already a hash |
+| `paperseal.v1.backup` | Swarm backup of an exam's files | Where the backup is: the Swarm reference, the manifest hash and the postage batch ([`swarm.md`](swarm.md)) |
+| `paperseal.v1.relay-heartbeat` | Minute the relay is watching an unlock | That the relay is alive. Never counts as evidence |
 
-## Fields
+## Fields We Search On
 
-| Field | Type | Indexed | In |
+| Field | Type | Used for | On |
 | --- | --- | --- | --- |
-| `examId` | `str` | Yes, every query filters on it | Both |
-| `registry` | `addr` | Yes | Both |
-| `entriesHash` | `str` | Yes, for the writer's duplicate check | Log |
-| `instanceKeyHash` | `str` | Yes, for the writer's duplicate check | Token |
-| `chainId` | `u64` | No | Both |
-| `stage` | `str` | No | Heartbeat |
-| `released` | `i32` | No | Log |
-| `body` | `bytes` | No, it can't be | Both |
+| `examId` | `str` | Every query: "this exam" | All |
+| `registry` | `addr` | Keeps exams from different registries apart, and lists a registry's exams | All |
+| `entriesHash`, `instanceKeyHash` | `str` | The writer checks these first, so it never writes the same thing twice | Logs, tokens |
+| `stage` | `str` | Filter exams by how far they got | Exams |
+| `examStart` | `u64` | Sort and filter exams by date | Exams |
+| `board` | `addr` | Filter exams by board | Exams |
+| `role`, `owner`, `passkeyKeyHash` | `str` | "Which exams is this person on?" | Participants |
+| `phase` | `str` | Unlock files are only read from an `unlock` backup | Backups |
+| `swarmRef` | `str` | The Swarm reference, 64 hex characters, never an encrypted one. Also the duplicate check | Backups |
+| `$creator` | built in | Read only from writers we trust | All |
 
-Index fields:
+Other fields are stored but not searched: `chainId`, `released`, `body` (the signed bytes), `createdBlock`, `criteriaHash`, `approvedListHash`, `paperHash`, `name`, `derivedKeyHash`, `swarmNetwork`, `manifestHash`, `files` and `batchId`.
 
-| Field | Type | Indexed | In |
-| --- | --- | --- | --- |
-| `board` | `addr` | Yes | Exam |
-| `stage` | `str` | Yes, to filter by how far an exam has got | Exam |
-| `examStart` | `u64` | Yes, to sort and filter by date | Exam |
-| `createdBlock`, `criteriaHash`, `approvedListHash`, `paperHash`, `name` | `u64`, `str` | No | Exam |
-| `role`, `owner`, `passkeyKeyHash` | `str` | Yes, to find a person's exams | Participant |
-| `derivedKeyHash` | `str` | No | Participant |
+Readers always check `body` against Sepolia, and never trust the other fields over it.
 
-Backup fields ([`spec/arkiv.md`](../spec/arkiv.md), "Backups"):
+## Who Owns and Edits Them
 
-| Field | Type | Indexed | Holds |
-| --- | --- | --- | --- |
-| `examId`, `registry` | `str`, `addr` | Yes, to find an exam's backups | The exam, as in the evidence rows |
-| `phase` | `str` | Yes, because unlock files are read only from an `unlock` backup | `build` for the files the Build covers, or `unlock`, which adds the unlock files |
-| `swarmRef` | `str` | Yes, for the writer's duplicate check | **The Swarm reference** of the collection: 64 hex characters, never an encrypted 128-character one |
-| `swarmNetwork` | `str` | No | `sepolia` now, `mainnet` once the build moves |
-| `manifestHash` | `str` | No | SHA-256 of the collection's `manifest.json`. Readers check it against the Build's `storageManifestHash` on Sepolia |
-| `files` | `i32` | No | Number of files in the collection |
-| `batchId` | `str` | No | The postage batch the upload was stamped with |
+- The relay's wallet creates and owns every entity.
+- Readers trust a row by its `$creator`, not its owner, because an owner can hand a row over.
+- Evidence, participant, backup and heartbeat rows are `readonly`. Nobody can change them, not even their owner.
+- Exam rows are the one exception. The writer updates the stage as the exam moves on. The verifier still takes the stage from Sepolia.
 
-Readers query by `examId`, `registry`, and `$creator` in the writers they trust. The index is also queried by `registry` alone (every exam), and by `owner` or `passkeyKeyHash` (a person's exams). The reader supports both, and the verifier's search uses `owner`. Backups are queried by `examId` and `registry`. Then they parse `body` and check it, and never trust the other columns over it.
+## When They Expire
 
-## Ownership and Editing
-
-- The relay's wallet creates and owns each entity. Readers only accept rows whose `$creator` is a published writer, because ownership can be handed over.
-- Evidence, participant, backup and heartbeat rows are created `readonly`, so nobody can change them, their owner included.
-- Exam rows are the one exception. Their writer patches them as an exam moves from published to listed to built. Readers never trust a row's stage, and take it from Sepolia instead.
-- Every entity also has `permissionlessExtension`, so anyone can pay to keep the evidence alive after the board loses interest.
-
-## Expiry
-
-Evidence rows (logs and tokens) and backup rows live for 180 days (`lifetimeDays`), just under Arkiv's limit of about 182.5. That covers an exam's results and appeals season, and anyone can extend them after that. Heartbeats live for 24 hours and can't be extended: they matter only while unlock is running, so Arkiv clears them away by itself.
+| Rows | Lifetime | Why |
+| --- | --- | --- |
+| Logs, tokens, backups | 180 days, and anyone can extend them (`permissionlessExtension`) | Covers results and appeals. Just under Arkiv's limit of about 182 days |
+| Heartbeats | 24 hours, can't be extended | They only matter while an unlock is running |
 
 ## Writer
 
 | Wallet | Role |
 | --- | --- |
-| [`0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b`](https://rabdi.explorer.arkiv.network/address/0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b) | Paper Seal relay for the demo. It is also the demo board's wallet. |
+| [`0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b`](https://rabdi.explorer.arkiv.network/address/0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b) | The team's relay wallet for the demo |
 
-A board publishes its writers in the `paperseal.arkiv-writers` text record of the exam's ENS name. It rotates them by editing that record, and viewers can add their own.
+A board publishes its writers in the `paperseal.arkiv-writers` record of the exam's ENS name, and can change them there. Viewers can add their own.

@@ -123,11 +123,11 @@ The README leaves these open. They are defaults for the build and can change.
 - Where are published artefacts found? The verifier needs a PKI token per instance key, and the TEE keeps no state to serve them later. The default is to list them in a storage manifest.
 - Which RPC operator does the exam use, and how is its API key handled? Attested settings are public, so a key in `rpcHost` or the startup arguments would be exposed.
 
-## Not Set Up Yet
+## Not Built Yet
 
-- CI for tests. `.github/workflows/repro.yml` covers the image rebuild only
-- Google Cloud project, Confidential Space deployment and the storage bucket
-- Sepolia deployment and funded board wallet
+- The hardware attestation check for real security keys. It returns not-implemented, and the demo turns it off (S2 in [security-review.md](security-review.md))
+- A production image profile. Every image has the demo settings (S1)
+- The `gcp-lb` ingress and the Cloudflare Pages module from the [self-hosting proposal](proposals/self-hosting.md)
 
 ## Mock run (test only)
 

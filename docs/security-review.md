@@ -25,6 +25,8 @@ A working list for the team at ETHGlobal Mumbai, from a read of the whole reposi
 | F10 | Medium | A name could lead to a different registry from the one the verifier was set up to read, with nothing to say so. | The verifier warns on the main view, in plain words, as soon as the name is read. The Sepolia line stays. |
 | F11 | Low | The TypeScript chain client took the first log for a record even if a reorg had marked it `removed`. | It skips removed logs, as the TEE already did. Both have tests. |
 | F12 | Low | A huge `endRound` or `examStart` on the record is past what a JavaScript date can hold, which threw while the verifier page drew. | Those times now read as too far away to show, and the schedule check fails. |
+| F13 | Low | `tee/README.md` named Go 1.24.6 and go-ethereum v1.17.5, but `go.mod` and the Dockerfile use Go 1.25.14 and v1.17.10. | The README names the versions in use. |
+| F14 | Low | The README status line said the code was a scaffold that didn't implement the design. | It now says what runs and what is simulated. |
 
 ## Open: Security
 
@@ -58,8 +60,6 @@ A working list for the team at ETHGlobal Mumbai, from a read of the whole reposi
 | --- | --- | --- |
 | B1 | The spec says the outbox `selected` and `bankSize` are decimal strings, but the TEE sends JSON numbers. The board app accepts both, so nothing breaks yet. | [api.md](../spec/api.md) TEE API, [types.go](../tee/internal/api/types.go) |
 | B2 | `GET /v1/attestation` returns an `attested` field that the spec doesn't list. | [types.go](../tee/internal/api/types.go) |
-| B3 | `tee/README.md` still names Go 1.24.6 and go-ethereum v1.17.5, but `go.mod` and the Dockerfile use Go 1.25.14 and v1.17.10. | [tee/README.md](../tee/README.md) |
-| B4 | The README status line says the code is a scaffold that doesn't implement the design, but it does, end to end. | [README.md](../README.md) |
 | B5 | Three TEE tests read files outside `tee/` (`spec/constants.json`, `spec/registry.json` and `spec/fixtures`), so `go test` fails in a `tee/`-only checkout. The image build is unaffected. | `tee/internal/spec`, `tee/internal/attestation`, `tee/internal/chainread` |
 | B6 | `e2e/tests/chain-flow.e2e.ts` fetches upstream's real `v0.1.0` GitHub release over the network, so it breaks if that release goes away. | [chain-flow.e2e.ts](../e2e/tests/chain-flow.e2e.ts) |
 
