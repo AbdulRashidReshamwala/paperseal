@@ -76,6 +76,7 @@
     }
   ],
   "limits": [
+    "This is a test exam on Sepolia. The sealed machine is proven by Google. The security keys were not checked to come from an approved maker, and blocks are read before they are final.",
     "Hardware attestation isn't enforced: webauthn.requireHardwareAttestation is false in the constants.json this checker was built with. Nothing shows that a listed key is a hardware security key, so people and unlock show which keys acted, not what kind of device held them.",
     "Party names and exam names aren't checked. An owner name in the evidence is what the approved list says, nothing more."
   ]

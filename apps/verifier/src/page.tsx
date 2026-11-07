@@ -477,7 +477,15 @@ function Verdict(props: { view: Custody; facts: readonly Fact[]; actions: ReactN
       <p className="vf-next">
         <span className="ps-sr">What happens next</span> <span>{view.next}</span>
       </p>
-      <div className="vf-test-slot">{view.testNetwork ? <p className="vf-test-network">{view.testNetwork}</p> : null}</div>
+      <div className="vf-test-slot">
+        {view.testNetwork ? (
+          <p className="vf-test-network">
+            {view.testNetwork.verified ? <strong>{view.testNetwork.verified}</strong> : null}
+            {view.testNetwork.verified ? ' ' : ''}
+            {view.testNetwork.text}
+          </p>
+        ) : null}
+      </div>
       <Facts facts={props.facts} />
       <div className="vf-actions">{props.actions}</div>
       <div className="vf-agent-slot">{props.agent}</div>

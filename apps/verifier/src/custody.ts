@@ -25,7 +25,9 @@ import {
   chainChecks,
   computedListHash,
   releaseTokenName,
+  networkName,
   sameHex,
+  testExamCaveat,
   type BackupFile,
   type BackupUse,
   type BucketGap,
@@ -158,8 +160,8 @@ export interface Custody {
   warnings: string[];
   /** Null until the code has established a seal state. Never a stand-in for a check not run. */
   seal: SealState | null;
-  /** Shown under the headline with the seal: what an independent check reports for a test exam. */
-  testNetwork: string | null;
+  /** Shown under the headline with a whole seal: where this test exam stands. See `testNetworkNote`. */
+  testNetwork: TestNetworkNote | null;
   /** Why the seal is not shown. */
   noSeal: string;
   headline: string;
@@ -469,16 +471,35 @@ const nameFailures: Record<ExamNameCheck, string> = {
 
 export const sepoliaName = 'On Sepolia, a test network, anyone can register a similar name, so this check is only a demo.';
 
+/** Where a test exam stands, from `standingOf`. */
+export type Standing = 'verified' | 'verified-so-far' | 'reading' | 'busy' | 'unfinished';
+
+export interface TestNetworkNote {
+  /** The word to show prominently, set only when every step due has passed. */
+  verified: 'Verified' | 'Verified so far' | null;
+  text: string;
+}
+
 /**
- * The note under the headline while the seal shows, so a whole seal never reads as a full
- * verification: until exams carry a production mode, the independent checker reports `partial`
- * (spec/agent-verification.md, "Report"). A broken seal has no note, because that check reports a
- * failure, and the failure banner already says so.
+ * The note under the headline with a whole seal (spec/agent-verification.md, "Report"). A whole seal
+ * is not enough to say Verified: only `standingOf` can. A broken seal has no note, because the failure
+ * banner already says so.
  */
-export function testNetworkNote(seal: SealState | null): string | null {
+export function testNetworkNote(seal: SealState | null, standing: Standing): TestNetworkNote | null {
   if (seal === null || seal === 'broken') return null;
-  const network = chainSpec.name.charAt(0).toUpperCase() + chainSpec.name.slice(1);
-  return `Test exam on ${network}. An independent check reports it as partial, not verified, until exams carry a production mode.`;
+  const network = `${networkName}, a test network.`;
+  switch (standing) {
+    case 'verified':
+      return { verified: 'Verified', text: `on ${network} ${testExamCaveat}` };
+    case 'verified-so-far':
+      return { verified: 'Verified so far', text: `on ${network} ${testExamCaveat}` };
+    case 'reading':
+      return { verified: null, text: `On ${network} Some steps are still being read.` };
+    case 'busy':
+      return { verified: null, text: `On ${network} ${busyWords}` };
+    case 'unfinished':
+      return { verified: null, text: `On ${network} Not every step has passed.` };
+  }
 }
 
 const otherRegistry =
@@ -1707,6 +1728,35 @@ function sealOf(c: Context, steps: readonly CustodyStep[]): SealState | null {
   return c.unlockReached ? 'opening' : 'sealed';
 }
 
+/** The steps a claim makes due only at the end round (spec/agent-verification.md, "Claims"). The rest are held by the seal. */
+const DUE_AT_END: readonly StepId[] = ['unlock', 'open'];
+
+/**
+ * Whether the steps due have really passed, as the last read shows and as of now. A read that failed
+ * says nothing, even when its last good answer passed, so anything not answered this time is not a pass.
+ */
+function standingOf(c: Context, steps: readonly CustodyStep[]): Standing {
+  const { view, records } = c;
+  const failedReads = [view.records, view.name?.result].flatMap((read) => {
+    if (read?.state === 'error') return [read.message];
+    return read?.state === 'ready' && read.stale ? [read.stale] : [];
+  });
+  if (failedReads.some(sourceBusy)) return 'busy';
+  if (failedReads.length > 0 || !records) return 'reading';
+  // Without the public clock's latest round nothing says which steps are due.
+  if (view.latest.round === null || view.latest.error !== null) return 'reading';
+  const { token, manifest, log } = records;
+  if ([token, manifest, log].some((source) => source.kind === 'unavailable' || source.kind === 'off')) return 'reading';
+  // The checker calls an unreadable key file not checked, even before the step is due.
+  if (log.kind === 'ready' && log.files?.files.some((file) => typeof file.problem === 'object' && file.problem !== null)) return 'reading';
+  const due = steps.filter((step) => c.endReached || !DUE_AT_END.includes(step.id));
+  if (due.some((step) => step.state === 'not-applicable' || step.state === 'failed')) return 'unfinished';
+  if (due.some((step) => step.state !== 'done')) return 'reading';
+  if (!c.endReached) return 'verified-so-far';
+  // A count from the Arkiv copy finishes the step, but the signed log's checks are still to read.
+  return log.kind === 'ready' ? 'verified' : 'reading';
+}
+
 const busyHeadline = 'The source of the public record is busy.';
 
 interface Words {
@@ -1848,7 +1898,7 @@ export function custody(given: View): Custody {
     failures,
     warnings: [...(given.name && differentRegistry(given.name) ? [otherRegistry] : []), ...(buildWarning(c) ? [buildWarning(c) as string] : []), ...(notEnsNameWarning(chain) ? [notEnsNameWarning(chain) as string] : [])],
     seal,
-    testNetwork: testNetworkNote(seal),
+    testNetwork: testNetworkNote(seal, standingOf(c, steps)),
     noSeal: c.gap ? 'Not read yet' : build ? 'Not confirmed yet' : 'Not sealed yet',
     headline: words.headline,
     verdict: verdictLine(c, steps, failures),

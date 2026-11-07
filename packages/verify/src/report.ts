@@ -56,7 +56,7 @@ export interface AgentReport {
   checker: CheckerId | null;
   exam: { examId: Hex; registry: Hex; chainId: number; mode: 'production' | 'dev' | 'unknown' };
   assumed: { repository: string; registry: Hex };
-  overall: 'verified' | 'partial' | 'failed';
+  overall: 'verified' | 'verified-test' | 'partial' | 'failed';
   claims: ReportClaim[];
   /** What the claims don't cover (spec/agent-verification.md, "Limits"). */
   limits: string[];
@@ -87,8 +87,28 @@ export interface CheckExamInput {
 
 type Finding = { status: Exclude<ClaimStatus, 'pass'>; text: string };
 
+const capitalised = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+
+/** The network's name as a sentence shows it: `Sepolia`. */
+export const networkName = capitalised(chainSpec.name);
+
+/**
+ * What differs on a test exam (spec/agent-verification.md, "Limits"), for the report and the verifier
+ * page alike. It is built from the constants, so a setting that changes takes its words with it.
+ */
+const testExamGaps = [
+  ...(requireHardwareAttestation ? [] : ['the security keys were not checked to come from an approved maker']),
+  ...(chainSpec.readBlock === 'finalized' ? [] : ['blocks are read before they are final']),
+];
+export const testExamCaveat = [
+  `This is a test exam on ${networkName}.`,
+  'The sealed machine is proven by Google.',
+  ...(testExamGaps.length > 0 ? [`${capitalised(testExamGaps.join(', and '))}.`] : []),
+].join(' ');
+
 /** spec/agent-verification.md, "Limits". Stated in every report, whatever its claims say. */
-export const reportLimits: readonly string[] = [
+export const reportLimits = (mode: AgentReport['exam']['mode']): string[] => [
+  ...(mode === 'production' ? [] : [testExamCaveat]),
   ...(requireHardwareAttestation
     ? []
     : [
@@ -521,8 +541,8 @@ async function openClaim(c: Context): Promise<ReportClaim> {
 /** `overall` from spec/agent-verification.md "Report", in its order. */
 export function overallOf(claims: readonly ReportClaim[], mode: AgentReport['exam']['mode'], method: AgentReport['method']): AgentReport['overall'] {
   if (claims.some((claim) => claim.status === 'fail')) return 'failed';
-  if (claims.some((claim) => claim.status === 'not-checked') || mode !== 'production' || method === 'manual') return 'partial';
-  return 'verified';
+  if (claims.some((claim) => claim.status === 'not-checked') || method === 'manual') return 'partial';
+  return mode === 'production' ? 'verified' : 'verified-test';
 }
 
 const allNotChecked = (summary: string, except: ReportClaim[] = []): ReportClaim[] =>
@@ -557,7 +577,7 @@ export async function checkExam(input: CheckExamInput): Promise<AgentReport> {
     claims: claims.map((claim, i) =>
       i === 0 ? { ...claim, evidence: [...claim.evidence, ev('chain', 'readFrom', input.rpcUrls.map(hostOf).join(', '))] } : claim,
     ),
-    limits: [...reportLimits],
+    limits: reportLimits(mode),
   });
 
   const failedRead = reads.findIndex((result) => result.status === 'rejected');

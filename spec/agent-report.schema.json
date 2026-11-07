@@ -43,7 +43,7 @@
         "registry": { "$ref": "#/definitions/address" }
       }
     },
-    "overall": { "enum": ["verified", "partial", "failed"] },
+    "overall": { "enum": ["verified", "verified-test", "partial", "failed"] },
     "claims": {
       "type": "array",
       "minItems": 7,
@@ -68,7 +68,16 @@
     },
     {
       "if": { "properties": { "exam": { "properties": { "mode": { "enum": ["dev", "unknown"] } } } } },
-      "then": { "properties": { "overall": { "enum": ["partial", "failed"] } } }
+      "then": { "properties": { "overall": { "enum": ["verified-test", "partial", "failed"] } } },
+      "else": { "properties": { "overall": { "enum": ["verified", "partial", "failed"] } } }
+    },
+    {
+      "if": { "properties": { "overall": { "enum": ["verified", "verified-test"] } } },
+      "then": { "properties": { "claims": { "not": { "contains": { "properties": { "status": { "const": "not-checked" } }, "required": ["status"] } } } } }
+    },
+    {
+      "if": { "properties": { "method": { "const": "checker" }, "overall": { "const": "partial" } } },
+      "then": { "properties": { "claims": { "contains": { "properties": { "status": { "const": "not-checked" } }, "required": ["status"] } } } }
     },
     {
       "if": { "properties": { "overall": { "const": "failed" } } },

@@ -1,6 +1,6 @@
 import type { ExamNameCheck, ExamNameResult } from '@paperseal/chain';
 import { describe, expect, beforeAll, it, vi } from 'vitest';
-import { chain as chainSpec, roundTimeSeconds, sortReleaseFiles, storageNames, toHex, type Hex } from '@paperseal/protocol';
+import { chain as chainSpec, requireHardwareAttestation, roundTimeSeconds, sortReleaseFiles, storageNames, toHex, type Hex } from '@paperseal/protocol';
 
 import {
   approvedEntries,
@@ -12,6 +12,7 @@ import {
   holdersOf,
   parseReleaseLog,
   releaseProgress,
+  testExamCaveat,
   type Build,
   type FreshVerdict,
   type ProofChecks,
@@ -29,6 +30,8 @@ const END = 300;
 
 let world: World;
 let fullRecords: Records;
+
+const caveat = 'This is a test exam on Sepolia. The sealed machine is proven by Google. The security keys were not checked to come from an approved maker, and blocks are read before they are final.';
 
 const text = (bytes: Uint8Array | undefined) => new TextDecoder().decode(bytes);
 const file = (name: string) => {
@@ -170,7 +173,7 @@ describe('the whole chain', () => {
     expect(result.seal).toBe('open');
     expect(result.paper?.questions).toHaveLength(1);
     expect(result.verdict).toBe('Every step has been checked. Nothing failed.');
-    expect(result.testNetwork).toBe('Test exam on Sepolia. An independent check reports it as partial, not verified, until exams carry a production mode.');
+    expect(result.testNetwork).toEqual({ verified: 'Verified', text: `on Sepolia, a test network. ${caveat}` });
   });
 
   it('never has more than one current step', () => {
@@ -258,25 +261,88 @@ describe('a public record that gave no answer', () => {
 });
 
 describe('the test network note', () => {
-  it('names the network from the spec and says partial, not verified', () => {
+  const soFar = { verified: 'Verified so far', text: `on Sepolia, a test network. ${caveat}` };
+  const reading = { verified: null, text: 'On Sepolia, a test network. Some steps are still being read.' };
+  const busy = { verified: null, text: 'On Sepolia, a test network. The source of the public record is busy. This page is retrying.' };
+  const said = (result: Custody) => `${result.testNetwork?.verified ?? ''} ${result.testNetwork?.text ?? ''}`;
+  const ready = (view: View, stale: string): View => ({ ...view, records: { ...(view.records as Extract<View['records'], { state: 'ready' }>), stale } });
+  const unlockWindow = UNLOCK + 1;
+
+  it('names the network from the spec, and the caveat follows the constants', () => {
     expect(chainSpec.name).toBe('sepolia');
-    expect(testNetworkNote('open')).toBe('Test exam on Sepolia. An independent check reports it as partial, not verified, until exams carry a production mode.');
+    expect(chainSpec.readBlock).toBe('latest');
+    expect(requireHardwareAttestation).toBe(false);
+    expect(testExamCaveat).toBe(caveat);
   });
 
-  it('shows with every whole seal', () => {
+  it('says Verified so far while the exam runs, and every step due has passed', () => {
     expect(scene().seal).toBe('sealed');
-    expect(scene().testNetwork).toBe(testNetworkNote('sealed'));
-    const opening = scene({ round: UNLOCK, records: { log: { kind: 'neutral', message: 'no log' } } });
+    expect(scene().testNetwork).toEqual(soFar);
+    const opening = scene({ round: unlockWindow, records: { log: { kind: 'neutral', message: 'no log' } } });
     expect(opening.seal).toBe('opening');
-    expect(opening.testNetwork).toBe(testNetworkNote('opening'));
-    expect(testNetworkNote('sealed')).not.toBeNull();
+    expect(opening.testNetwork).toEqual(soFar);
   });
 
-  it('is absent with no seal, and with a broken one, which an independent check reports as failed', () => {
+  it('never says partial', () => {
+    for (const result of [scene(), scene({ round: END, proof: opened() }), custody(ready(sceneView(), '429'))]) expect(JSON.stringify(result)).not.toMatch(/partial/i);
+  });
+
+  it('is not Verified when a whole seal stands on a step that was not checked', () => {
+    const result = scene({ round: END, proof: opened(), records: { token: { kind: 'unavailable', message: 'timed out' } } });
+    expect(result.seal).toBe('open');
+    expect(result.testNetwork).toEqual(reading);
+  });
+
+  it('is not Verified while the steps due at the end are still being read', () => {
+    const unread = scene({ round: END });
+    expect(unread.seal).toBe('opening');
+    expect(unread.testNetwork).toEqual(reading);
+    expect(scene({ round: END, proof: { ok: false, message: 'HTTP 429' } }).testNetwork).toEqual(reading);
+    expect(scene({ round: END, records: { log: { kind: 'unavailable', message: '429' } }, proof: opened() }).testNetwork).toEqual(reading);
+  });
+
+  it('is not Verified when a source the checker reads fails before its step is due', () => {
+    const result = scene({ round: unlockWindow, records: { log: { kind: 'unavailable', message: 'HTTP 503' } } });
+    expect(result.seal).toBe('opening');
+    expect(result.testNetwork).toEqual(reading);
+  });
+
+  it('is not Verified on the last good read after a read failed, however good that read was', () => {
+    const finished = sceneView({ round: END, proof: opened() });
+    expect(custody(finished).testNetwork?.verified).toBe('Verified');
+    expect(custody(ready(finished, 'HTTP request failed. Status: 429')).testNetwork).toEqual(busy);
+    expect(custody(ready(finished, 'fetch failed')).testNetwork).toEqual(reading);
+    expect(custody(ready(sceneView(), 'exceeds defined limit')).testNetwork).toEqual(busy);
+  });
+
+  it('is not Verified when the record read fails and only an opened paper is left', () => {
+    const view: View = { ...sceneView({ round: END, proof: opened() }), records: { state: 'error', message: 'Status: 429' } };
+    const result = custody(view);
+    expect(result.seal).toBe('opening');
+    expect(result.testNetwork).toEqual(busy);
+  });
+
+  it('is not Verified without the public clock, because nothing says what is due', () => {
+    const view = sceneView();
+    expect(custody({ ...view, latest: { round: null, error: 'drand down' } }).testNetwork).toEqual(reading);
+    expect(custody({ ...view, latest: { round: LOCK - 1, error: 'HTTP 429' } }).testNetwork).toEqual(reading);
+  });
+
+  it('is not Verified when a paper was never unlocked', () => {
+    const result = scene({ round: END, records: { log: { kind: 'neutral', message: 'no log' } }, proof: { ok: true, result: { state: 'sealed' } } });
+    expect(result.seal).toBe('sealed');
+    expect(result.testNetwork).toEqual({ verified: null, text: 'On Sepolia, a test network. Not every step has passed.' });
+  });
+
+  it('holds no Verified words in any note that is not a pass', () => {
+    for (const standing of ['reading', 'busy', 'unfinished'] as const) expect(said({ testNetwork: testNetworkNote('open', standing) } as Custody)).not.toMatch(/verified/i);
+  });
+
+  it('is absent with no seal, and with a broken one', () => {
     const none = scene(beforeBuild);
     expect(none.seal).toBe(null);
     expect(none.testNetwork).toBeNull();
-    expect(testNetworkNote('broken')).toBeNull();
+    expect(testNetworkNote('broken', 'verified')).toBeNull();
   });
 });
 

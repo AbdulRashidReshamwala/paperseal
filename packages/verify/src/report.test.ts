@@ -7,7 +7,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import type { ChainData } from './checks';
 import { buildWorld, examId, offlineQuicknet, random, registryAddress, registryMatches, storageBucket, type World } from './fixtures';
-import { checkExam, type AgentReport, type CheckExamInput, reportLimits } from './report';
+import { checkExam, overallOf, reportLimits, testExamCaveat, type AgentReport, type CheckExamInput, type ClaimStatus, type ReportClaim } from './report';
 
 /*
  * The whole report, from the fixture world: real tokens, signatures and time-locked files, with
@@ -74,14 +74,83 @@ const valid = (report: AgentReport) => {
   expect(validate(report), JSON.stringify(validate.errors)).toBe(true);
 };
 
+const claimsOf = (...statuses: ClaimStatus[]): ReportClaim[] =>
+  (['published', 'people', 'attested', 'locked', 'sealed', 'unlock', 'open'] as const).map((id, i) => ({ id, status: statuses[i] ?? 'pass', summary: 'x', evidence: [] }));
+
+describe('overallOf', () => {
+  const done = claimsOf();
+  const running = claimsOf('pass', 'pass', 'pass', 'pass', 'pass', 'not-yet', 'not-yet');
+  const unchecked = claimsOf('pass', 'not-checked');
+  const failed = claimsOf('pass', 'not-checked', 'fail');
+
+  it.each<[string, ReportClaim[], AgentReport['exam']['mode'], AgentReport['method'], AgentReport['overall']]>([
+    ['a failed claim beats everything', failed, 'production', 'checker', 'failed'],
+    ['a failed claim on a manual report', failed, 'unknown', 'manual', 'failed'],
+    ['a claim not checked', unchecked, 'unknown', 'checker', 'partial'],
+    ['a claim not checked on production', unchecked, 'production', 'checker', 'partial'],
+    ['every claim passed, mode unknown', done, 'unknown', 'checker', 'verified-test'],
+    ['every claim passed, mode dev', done, 'dev', 'checker', 'verified-test'],
+    ['every claim due passed, mode unknown', running, 'unknown', 'checker', 'verified-test'],
+    ['every claim passed, production', done, 'production', 'checker', 'verified'],
+    ['every claim due passed, production', running, 'production', 'checker', 'verified'],
+    ['a manual report on a test exam', done, 'unknown', 'manual', 'partial'],
+    ['a manual report on production', done, 'production', 'manual', 'partial'],
+  ])('%s', (_, claims, mode, method, overall) => {
+    expect(overallOf(claims, mode, method)).toBe(overall);
+  });
+});
+
+describe('the schema', () => {
+  const fixture = JSON.parse(readFileSync(new URL('../../../spec/fixtures/agent-report.json', import.meta.url), 'utf8')) as AgentReport;
+  const unknown = { ...fixture, claims: claimsOf() };
+  const production = { ...unknown, exam: { ...fixture.exam, mode: 'production' as const } };
+  const manual = { ...unknown, method: 'manual' as const, checker: null };
+
+  it('takes the fixture, whose limits match the checker', () => {
+    expect(validate(fixture), JSON.stringify(validate.errors)).toBe(true);
+    expect(fixture.limits).toEqual(reportLimits('unknown'));
+  });
+
+  it.each<[string, object, boolean]>([
+    ['verified-test on a test exam', { ...unknown, overall: 'verified-test' }, true],
+    ['verified on a test exam', { ...unknown, overall: 'verified' }, false],
+    ['verified on production', { ...production, overall: 'verified' }, true],
+    ['verified-test on production', { ...production, overall: 'verified-test' }, false],
+    ['verified-test with a claim not checked', { ...unknown, claims: claimsOf('pass', 'not-checked'), overall: 'verified-test' }, false],
+    ['verified with a claim not checked', { ...production, claims: claimsOf('pass', 'not-checked'), overall: 'verified' }, false],
+    ['verified-test with a failed claim', { ...unknown, claims: claimsOf('fail'), overall: 'verified-test' }, false],
+    ['partial from the checker with nothing unchecked', { ...unknown, overall: 'partial' }, false],
+    ['verified-test on a manual report', { ...manual, overall: 'verified-test' }, false],
+    ['partial on a manual report', { ...manual, overall: 'partial' }, true],
+  ])('%s', (_, report, accepted) => {
+    expect(validate(report)).toBe(accepted);
+  });
+});
+
+describe('the test exam caveat', () => {
+  it('is the sentence in the spec, for the constants in force', () => {
+    expect(testExamCaveat).toBe(
+      'This is a test exam on Sepolia. The sealed machine is proven by Google. The security keys were not checked to come from an approved maker, and blocks are read before they are final.',
+    );
+    expect(readFileSync(new URL('../../../spec/agent-verification.md', import.meta.url), 'utf8')).toContain(testExamCaveat);
+    const constants = JSON.parse(readFileSync(new URL('../../../spec/constants.json', import.meta.url), 'utf8')) as {
+      webauthn: { requireHardwareAttestation: boolean };
+      chain: { readBlock: string };
+    };
+    expect(constants.webauthn.requireHardwareAttestation).toBe(false);
+    expect(constants.chain.readBlock).toBe('latest');
+  });
+});
+
 describe('checkExam', () => {
   it('passes every claim of a finished exam, and the report matches the schema', async () => {
     const report = await checkExam(input(world));
     expect(report.claims.map((c) => [c.id, c.status])).toEqual(
       ['published', 'people', 'attested', 'locked', 'sealed', 'unlock', 'open'].map((id) => [id, 'pass']),
     );
-    // mode is unknown until exam mode ships, so a clean exam is still partial.
-    expect(report.overall).toBe('partial');
+    // mode is unknown until exam mode ships, so a clean exam can only reach verified-test.
+    expect(report.overall).toBe('verified-test');
+    expect(report.claims.filter((c) => c.status !== 'pass')).toEqual([]);
     expect(report.exam).toEqual({ examId, registry: registryAddress, chainId: 11155111, mode: 'unknown' });
     expect(report.assumed).toEqual({ repository: 'Owner/Paperseal', registry: registryAddress });
     valid(report);
@@ -89,7 +158,9 @@ describe('checkExam', () => {
 
   it('says hardware attestation is not enforced, and that names were not checked, even when every claim passes', async () => {
     const report = await checkExam(input(world));
-    expect(report.limits).toEqual(reportLimits);
+    expect(report.limits).toEqual(reportLimits('unknown'));
+    expect(report.limits[0]).toBe(testExamCaveat);
+    expect(reportLimits('production')).not.toContain(testExamCaveat);
     expect(report.limits.join(' ')).toContain("Hardware attestation isn't enforced");
     expect(report.limits.join(' ')).toContain("names aren't checked");
     expect(JSON.stringify(report)).not.toMatch(/"source":"tee"/);

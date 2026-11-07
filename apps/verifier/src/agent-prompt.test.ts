@@ -32,8 +32,9 @@ Rules:
 2. Get paperseal-verify.mjs from the release for this version in the repository above. Run it only after its SHA-256 matches checkerSha256 in the release notes.
 3. If you can't run code, check what you can and mark the rest not-checked.
 4. Report each claim as pass, fail, not-yet or not-checked, using the report format in the instructions. Never guess a result.
-5. List the commands you ran and their output.
-6. State the repository and ExamRegistry address you relied on, and ask me to confirm both with the board's announcement.`,
+5. If overall is verified-test, say "Verified, on a test network", or "Verified so far, on a test network" while any claim is not-yet, then add: This is a test exam on Sepolia. The sealed machine is proven by Google. The security keys were not checked to come from an approved maker, and blocks are read before they are final. Only a report from the checker can be verified-test.
+6. List the commands you ran and their output.
+7. State the repository and ExamRegistry address you relied on, and ask me to confirm both with the board's announcement.`,
     });
   });
 

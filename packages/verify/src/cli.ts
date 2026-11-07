@@ -1,6 +1,7 @@
 /**
  * paperseal-verify: the checker of spec/agent-verification.md, "Checker". It prints the agent
- * report for one exam, and exits 0 for verified, 1 for failed, 2 for partial and 3 when it can't run.
+ * report for one exam, and exits 0 for verified, 1 for failed,
+ * 2 for partial, 3 when it can't run and 4 for verified-test.
  * `npm run build:checker` bundles it into one Node file, dist/paperseal-verify.mjs.
  */
 import { createHash } from 'node:crypto';
@@ -10,7 +11,7 @@ import { parseArgs } from 'node:util';
 
 import { chain as chainSpec, type Hex } from '@paperseal/protocol';
 
-import { checkExam, type AgentReport } from './report';
+import { checkExam, testExamCaveat, type AgentReport } from './report';
 
 /** Set by the bundle at build time. Read at run time only when the source is run directly. */
 const VERSION = process.env.PAPERSEAL_VERSION ?? 'v0.0.0';
@@ -20,7 +21,7 @@ const DEFAULT_RPC = 'https://ethereum-sepolia-rpc.publicnode.com';
 const usage = `Usage: paperseal-verify --exam <examId> --registry <address> --storage <url> [--rpc <url>]... [--bucket <name>] [--json]
 
 Checks a Paper Seal exam from the chain, storage, Google's token and drand.
-Exit codes: 0 verified, 1 failed, 2 partial, 3 could not run.`;
+Exit codes: 0 verified, 1 failed, 2 partial, 3 could not run, 4 verified-test.`;
 
 class UsageError extends Error {}
 
@@ -70,7 +71,7 @@ function ownSha256(): Hex {
   return `0x${createHash('sha256').update(readFileSync(fileURLToPath(import.meta.url))).digest('hex')}`;
 }
 
-const exitCodes: Record<AgentReport['overall'], number> = { verified: 0, failed: 1, partial: 2 };
+const exitCodes: Record<AgentReport['overall'], number> = { verified: 0, failed: 1, partial: 2, 'verified-test': 4 };
 
 function human(report: AgentReport): string {
   const counts = (['pass', 'fail', 'not-yet', 'not-checked'] as const)
@@ -82,15 +83,18 @@ function human(report: AgentReport): string {
       ? 'a claim failed.'
       : report.claims.some((claim) => claim.status === 'not-checked')
         ? 'some claims were not checked.'
-        : report.exam.mode !== 'production'
-          ? `the exam's mode is ${report.exam.mode}, and only a production exam can be verified.`
-          : 'every claim due so far passed.';
+        : report.overall === 'partial'
+          ? 'it was not checked with the released checker.'
+          : report.overall === 'verified-test'
+            ? `every claim due so far passed, and the exam's mode is ${report.exam.mode}, not production.`
+            : 'every claim due so far passed.';
+  const soFar = report.claims.some((claim) => claim.status === 'not-yet') ? ' so far' : '';
   return [
     `Paper Seal exam ${report.exam.examId}`,
     `ExamRegistry ${report.exam.registry} on ${chainSpec.name} (chain ${String(report.exam.chainId)})`,
     `Checker ${report.checker?.version ?? 'none'} ${report.checker?.sha256 ?? ''}`.trimEnd(),
     '',
-    `Overall: ${report.overall}`,
+    report.overall === 'verified-test' ? `Overall: Verified${soFar}, on a test network (verified-test). ${testExamCaveat}` : `Overall: ${report.overall}`,
     ...report.claims.map((claim) => `  ${claim.status.padEnd(11)} ${claim.id.padEnd(9)} ${claim.summary}`),
     '',
     `Summary: ${counts.join(', ')}. Overall is ${report.overall} because ${why}`,

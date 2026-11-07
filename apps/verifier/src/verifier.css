@@ -18,7 +18,7 @@
   --vf-mid: calc(var(--ps-space-4) + var(--vf-mark) / 2);
   /* What the page reserves from first paint, so a read changes the words and moves nothing. */
   --vf-headline-lines: 3;
-  --vf-test-lines: 3;
+  --vf-test-lines: 5;
   --vf-row: 110px;
   --vf-row-first: 134px;
 
@@ -54,7 +54,7 @@
     --vf-headline: 2.25rem;
     --vf-between: calc(var(--ps-space-7) + var(--ps-space-5));
     --vf-headline-lines: 2;
-    --vf-test-lines: 2;
+    --vf-test-lines: 5;
     --vf-row: 134px;
     --vf-row-first: 180px;
   }
@@ -968,6 +968,12 @@
   margin: 0;
   color: var(--ps-ink-soft);
   border-inline-start: 2px solid var(--ps-rule-strong);
+}
+
+.vf-test-network strong {
+  font-size: var(--ps-text-body, 1rem);
+  font-weight: 700;
+  color: var(--ps-ink);
 }
 
 /* A hash quoted in a sentence: no gap beside its empty status, so the words around it read on. */
