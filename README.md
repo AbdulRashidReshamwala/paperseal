@@ -1,14 +1,45 @@
-# Paper Seal
+<p align="center">
+  <img src="packages/ui/src/assets/seal.svg" alt="Paper Seal logo, a red wax seal marked PS" width="160" height="160">
+</p>
 
-Leak-proof exam paper distribution: a system that stops exam papers from leaking before the exam starts.
+<h1 align="center">Paper Seal</h1>
 
-> **Status:** early design for a hackathon build. The code is a scaffold and doesn't implement this design yet.
+<p align="center">Keeps exam papers sealed until shortly before the exam, so no single person can leak them.</p>
 
-## Overview
+<p align="center">
+  <a href="https://paperseal.abdulrashid.dev">Exam app</a> ·
+  <a href="https://paperverify.abdulrashid.dev">Public verifier</a> ·
+  <a href="#honest-limits">Honest limits</a> ·
+  <a href="#running-it-locally">Run it locally</a>
+</p>
 
-Paper Seal removes the need to trust any single person with an exam paper. Open-source paper-setter code assembles the paper inside a trusted execution environment (TEE) on Google Cloud, so no single human sees the final version. The paper stays encrypted until shortly before the exam. Unlocking it takes both a public time seal and a threshold of private key holders, so neither side can open it alone. [Trust Assumptions](#trust-assumptions) lists the limits of this guarantee.
+> **Status:** a working prototype on test networks. The whole exam runs end to end on the live sites, but it is not production ready. See [Honest limits](#honest-limits).
+
+## The problem
+
+Exam papers leak because too many people have to be trusted with them. Whoever writes, prints, stores or sends the final paper can leak it, and once it is out, thousands of students are affected.
+
+## How Paper Seal solves it
+
+No one person sees the final paper or holds the whole key.
+
+Open-source code assembles the paper inside a sealed machine, a trusted execution environment (TEE) on Google Cloud. The paper stays encrypted until shortly before the exam. Opening it takes both a public time seal and 8 of 10 private key holders, so neither side can open it alone. Anyone can check the result on a public page. [Trust assumptions](#trust-assumptions) lists the limits of this guarantee.
 
 Exam boards and centres don't need to understand any of this. The cryptography sits behind a simple interface.
+
+```mermaid
+flowchart TD
+    A["The board publishes the exam on Sepolia"] --> B["Setters send encrypted questions to the sealed machine"]
+    B --> C["The sealed machine picks the questions and builds one encrypted paper"]
+    C --> D["It splits the key: one half time-sealed, one half shared among 10 key holders"]
+    D --> E["The encrypted files go to public storage, and a signed record goes on Sepolia"]
+    E --> F{"Unlock time, shortly before the exam"}
+    F --> G["The time seal opens the public half"]
+    F --> H["8 of 10 key holders release their shares to the sealed machine"]
+    G --> I["Approved centres combine both halves and open the paper"]
+    H --> I
+    I --> J["After the exam, anyone can open the paper and check it"]
+```
 
 ### Goals
 
@@ -20,12 +51,24 @@ Exam boards and centres don't need to understand any of this. The cryptography s
 
 ### Scope
 
-Paper Seal currently covers electronic distribution only. Printed papers, TEE restarts during paper setting, tuning `Δ` and tampered setter apps are out of scope for now.
+Paper Seal covers electronic distribution only. Printed papers, TEE restarts during paper setting, tuning `Δ` and tampered setter apps are out of scope for now.
+
+## Who uses it
+
+| User | What they do |
+| --- | --- |
+| **Board admin** | Connects the board's wallet. Sets the blueprint (topics, questions per topic and setter limits), the schedule and `Δ`. Onboards setters, key holders and centres, posts the approved list, hosts the web apps, runs the TEE and posts its signed Build on-chain. |
+| **Setter** | Registers a security key, uploads questions, then gets a "sealed" receipt. |
+| **Centre** | Enrols a security key once, downloads the encrypted paper, watches the countdown, unlocks with that key and sees an unlock log. |
+| **Neutral party** | Enrols a security key once, holds a share and releases it at unlock, without receiving the paper's key. |
+| **Directory owner** | Controls the parent ENS name and writes which security key belongs to which party's name. |
+| **Public** | Uses the verifier page to see the code hash, attestation, commitments, approved list and live unlock status, then a full proof after the exam. |
 
 ### Terms
 
 | Term | Meaning |
 | --- | --- |
+| TEE | The sealed machine: a Google Confidential Space VM running the published code |
 | `T` | Exam start time |
 | `T−Δ` | Unlock time, shortly before the exam |
 | `K` | The key that encrypts the paper, where `K = K_pub ⊕ K_priv` |
@@ -35,32 +78,22 @@ Paper Seal currently covers electronic distribution only. Printed papers, TEE re
 | `x` of `n` | `x` questions selected from a bank of `n` |
 | Key holder | One of the 7 centres or 3 neutral parties holding a share of `K_priv` |
 | Approved centre | A registered centre that receives `K_priv` at unlock, whether or not it holds a share |
+| Build | The TEE's signed record of the paper, which the board posts on-chain |
 
-## Users
-
-| User | What they do |
-| --- | --- |
-| **Board admin** | Sets the blueprint (topics, questions per topic and setter limits), schedule and `Δ`, onboards setters, key holders and centres, posts the approved list, hosts the web apps, runs the TEE and posts its signed messages on-chain. |
-| **Setter** | Registers a security key, signs in and uploads questions, then gets a "sealed ✓" receipt. |
-| **Centre** | Enrols a security key once, downloads the encrypted paper, watches the countdown, unlocks with that key and sees an unlock log. |
-| **Neutral party** | Enrols a security key once, holds a share and releases it at unlock, without receiving the paper's key. |
-| **Directory owner** | Controls the parent ENS name and writes which security key belongs to which party's name. |
-| **Public** | Uses the verifier page to see the code hash, attestation, commitments, approved list and live unlock status, then a full proof after the exam. |
-
-## How It Works
+## How it works
 
 1. **Onboard:** the TEE starts. The board picks key holders and approved centres from a directory of ENS names and invites setters by private link, and each registers through the TEE. The board posts the final list on-chain, where anyone can see it, and the TEE reads it back over TLS and checks it.
 2. **Submit:** setters on the list send questions directly to the TEE, encrypted to its key. The TEE holds the bank in memory, rejects questions in the wrong format and returns a signed receipt.
 3. **Lock:** at the lock round, the TEE locks the bank by itself if it meets the attested selection criteria: no setter above a set percentage of a topic, and a bank for each topic several times larger than its question count.
 4. **Build:** the attested, open-source TEE builder generates a private seed after Lock and uses it to pick a set number of questions per topic at random, so no setter can influence or work out the selection. It assembles the one identical paper, pads it to a fixed size and encrypts the paper and seed with `K`.
 5. **Split:** the TEE splits `K` into `K_pub` and `K_priv`. It timelocks `K_pub` and cuts `K_priv` into shares.
-6. **Distribute:** the TEE stores the encrypted paper, timelocked `K_pub` and encrypted shares on public storage. Only then does the signed Build go on-chain, listing the approved list hash and the hash of each file, so a crash can't leave a committed paper that nobody can open. `ExamRegistry` accepts only one Build per exam. Centres download the files days ahead and check them against the Build.
+6. **Distribute:** the TEE stores the encrypted paper, timelocked `K_pub` and encrypted shares on public storage. Only then does the signed Build go on-chain, listing the approved list hash and the hash of the storage manifest, so a crash can't leave a committed paper that nobody can open. `ExamRegistry` accepts only one Build per exam. Centres download the files days ahead and check them against the Build.
 7. **Unlock:** at `T−Δ`, the time seal releases `K_pub` and key holders submit their shares to the TEE. The TEE rebuilds `K_priv` and sends it to approved centres, and the centre app combines the two halves and decrypts the paper.
 8. **Verify:** at the end round, drand opens the paper to everyone, and anyone can check the selection proof and that the paper matches the committed hash.
 
-## Security Design
+## Security design
 
-### Key Split
+### Key split
 
 | Half | Held by | Released by |
 | --- | --- | --- |
@@ -72,42 +105,46 @@ Paper Seal currently covers electronic distribution only. Printed papers, TEE re
 - Up to 2 key holders can go offline without stopping the unlock.
 - Each share is encrypted to its holder. Holders could pool shares early, but `K_priv` alone can't open the paper without `K_pub`.
 
-### Hardware Keys
+### Hardware keys
 
 Each key holder and approved centre has a root secret in a hardware security key, and the secret can't be exported.
 
 1. **Enrol:** once, the web app creates a device-bound passkey on the security key and requests its attestation. It shows a key card of public values, and the directory owner puts them on the person's ENS name. This identity is permanent and is used for every exam.
 2. **Derive:** for each exam, the app signs in with that passkey and uses the WebAuthn PRF extension to derive a keypair. The PRF input is a hash of the fixed salt in `spec/constants.json` and the exam ID, so each exam has its own keypair, and a leak of one opens no other exam's material. Every request requires user verification, because a security key can give a different output without it. The private key is never stored.
-3. **Register:** the TEE sends a fresh challenge. The passkey signs a hash of the derived public key, the holder ID and the challenge. This takes two touches: one for the derived key, then one to sign, because the derived key is part of what is signed. The app sends the derived public key, the signature and the attestation from enrolment.
-4. **Check:** the TEE checks the passkey signature and, with security key attestation on, the key's attestation chain. Anyone who fails doesn't go on the approved list.
+3. **Register:** the TEE sends a fresh challenge. The passkey signs a hash of the derived public key, the holder ID, the challenge and an invite tag, which is all zeros for a registration by name. This takes two touches: one for the derived key, then one to sign, because the derived key is part of what is signed. The app sends the derived public key, the signature and the attestation from enrolment.
+4. **Check:** the TEE checks the passkey signature and that the key is device-bound. With security key attestation on, it would also check the key's attestation chain. That setting is off today, and the chain check isn't built. See [Honest limits](#honest-limits). Anyone who fails doesn't go on the approved list.
 5. **Deliver:** after the Split, the TEE encrypts each key holder's share to their derived public key and publishes it with a hash of the share.
 
-Synced passkeys are not accepted, because they copy the secret to a cloud account. The security key's attestation and the passkey's backup flags are checked to enforce this.
+Synced passkeys are not accepted, because they copy the secret to a cloud account. The app and the TEE both refuse a passkey with either backup flag set. The security key's attestation would add a check on who made the key, once that check exists.
 
-Keys sit behind one small interface (`generateKey`, `getPublicKey`, `decryptShare`, `sign`) and the same WebAuthn code runs in both modes:
+Challenges are single use, last 5 minutes and work only on the instance that issued them. The TEE checks that user presence and user verification are set. It doesn't check `origin` or `rpIdHash`, because the passkey public key identifies the holder and the board serves the app anyway.
 
-- **Dev and demo mode:** Chrome's virtual authenticator with PRF enabled mocks the security key. It is software, so the security key attestation check is skipped by an attested setting the verifier page shows, and the demo is simulated. This is the only mode in the hackathon build. `pnpm demo:keys` does the same in one tab, with a software authenticator in the page holding a planted key per person (see [deploy/README.md](deploy/README.md)). A production build cannot contain it.
+Keys sit behind one small interface (`generateKey`, `getPublicKey`, `decryptShare`, `openKeyPriv`, `sign`, and the `register`, `registerByName` and `releaseShare` steps built on them), and the same WebAuthn code runs in both modes:
+
+- **Dev and demo mode:** Chrome's virtual authenticator with PRF enabled mocks the security key in tests. It is software, so the security key attestation check is skipped by an attested setting the verifier page shows, and those keys are simulated. `pnpm demo:keys` does the same in one tab on localhost, with a software authenticator in the page holding a planted key per person (see [deploy/README.md](deploy/README.md)). A production build cannot contain it, so the hosted sites have no planted keys.
 - **Production mode:** a hardware security key through WebAuthn PRF.
 
-### Approved List
+### Approved list
 
 The board posts one final list per exam on-chain, and the TEE reads it back over TLS, so the board's network can't change who is approved. The list is public, so anyone can see every key holder and approved centre, and which key each one holds. Setters appear only as a hash of their public key, and their names are never published, so the list doesn't show who to pressure.
 
-The TEE knows the board through its attested settings: they name `ExamRegistry`, and only that contract's fixed board address can write to it. The TEE and the verifier page check that the code at that address is `ExamRegistry`'s, so a different contract can't stand in for it. The verifier shows the board address that code holds. The board announces the contract address on its official site, which is how everyone else knows it is the real board.
+The TEE knows the board through its attested settings: they name `ExamRegistry`, and only that contract's fixed board address can write to it. The TEE and the verifier page check that the code at that address is `ExamRegistry`'s, against a pin in [`spec/registry.json`](spec/registry.json), so a different contract can't stand in for it. The verifier shows the board address that code holds. The board announces the contract address on its official site, which is how everyone else knows it is the real board.
 
-1. **Register:** the board picks each key holder and centre by ENS name and shares one public exam link. No secret gates it, and none is needed: a registration joins the list only if its passkey hash equals the name's published record, so knowing someone's name isn't enough to take their place. The board sends each setter a private invite link with a secret instead, because a setter has no public identity. Setters register a passkey only, because nothing is ever encrypted to them, and they need no name. Registration works as in [Hardware Keys](#hardware-keys).
+1. **Register:** the board picks each key holder and centre by ENS name and shares one public exam link. No secret gates it, and none is needed: a registration joins the list only if its passkey hash equals the name's published record, so knowing someone's name isn't enough to take their place. The board sends each setter a private invite link with a secret instead, because a setter has no public identity. The secret sits in the part of the link that never reaches a server. Setters register a passkey only, because nothing is ever encrypted to them, and they need no name. Registration works as in [Hardware keys](#hardware-keys).
 2. **Post:** the board's address posts the list to `ExamRegistry`, where it can be written only once. Each entry has the owner, role, passkey public key and derived public key. The contract stores a hash of the list and emits the full list, so reading it doesn't depend on storage the board controls.
-3. **Read:** the TEE reads the list at a finalised block from the RPC operator named in its attested settings. Development builds read the latest block to run faster, and the verifier page shows this. The TLS root certificates are part of the attested image, so the board can block this read but can't change it.
-4. **Check:** the TEE rejects the list if any entry wasn't verified at registration. It signs the list hash into the Build, and `ExamRegistry` rejects a Build whose hash differs from the posted one.
+3. **Read:** the TEE reads the list from the RPC operator named in its attested settings. A real exam must read at a finalised block. Every image published so far reads the latest block, to run faster, and the verifier page shows this. The TLS root certificates are part of the attested image, so the board can block this read but can't change it.
+4. **Check:** the TEE rejects the list if any entry wasn't verified at registration. It signs the list hash, the Build carries that hash, and `ExamRegistry` rejects a Build whose hash differs from the posted one.
 5. **Use:** the TEE accepts questions only from setters on the list, and encrypts shares and `K_priv` only to keys on the list. Each published copy names its recipient. The verifier page compares recipients with the list, and each centre can check its own entry.
 
-### Exam Names
+### Exam names
 
-An exam's name is a plain ENS label such as `jee-main-2026`, and its exam ID is that label's hash. A board can give an exam an ENS name under its own primary name, such as `jee-main-2026.paperseal.eth`, so anyone can check the exam by typing its name instead of a contract address and exam ID.
+An exam's name is a plain ENS label such as `jee-main-2026`, and its exam ID is that label's hash. A board can give an exam an ENS name under its own primary name, such as `jee-main-2026.paperseal-demo.eth`, so anyone can check the exam by typing its name instead of a contract address and exam ID.
 
-The verifier page fails the name unless it points to a contract running exactly `ExamRegistry`'s code, whose board address has that parent as its primary name, verified both ways. Every read is on-chain, through the viewer's own RPC. It then runs every other check as usual. ENS only helps people find the real exam. The TEE and `ExamRegistry` never read it, and a name that points somewhere wrong makes the later checks fail, not pass. On Sepolia anyone can register a look-alike name, so the check only means something with a mainnet name. If a name leads to a different contract from the one the page is set up to read, the page warns about it first. [ENS setup](docs/ens-setup.md) shows how to name an exam.
+The verifier page fails the name unless it points to a contract running exactly `ExamRegistry`'s code, whose board address has that parent as its primary name, verified both ways. Every read is on-chain, through the viewer's own RPC. It then runs every other check as usual.
 
-### Party Names
+ENS only helps people find the real exam. The TEE and `ExamRegistry` never read it, and a name that points somewhere wrong makes the later checks fail, not pass. On Sepolia anyone can register a look-alike name, so the check only means something with a mainnet name. If a name leads to a different contract from the one the page is set up to read, the page warns about it first. [ENS setup](docs/ens-setup.md) shows how to name an exam.
+
+### Party names
 
 A key holder or a centre has one permanent identity: an ENS name that publishes their security key, such as `centre-1.paperseal-demo.eth`. There is no wallet, no invite link and no secret, and there are no plain names. The name goes on the public list. Setters never have a name on the list.
 
@@ -117,13 +154,27 @@ A key holder or a centre has one permanent identity: an ENS name that publishes 
 4. **Register:** the person opens the link and touches their key. The record tells the browser which key to ask for, so this works in any browser on this domain.
 5. **Match:** the board app compares each registration's passkey hash with the name's record. A match shows "Name confirmed". A name with no record, or a record for another key, stays off the list.
 
-The verifier page shows, for each listed party with an ENS name, whether the record matches their key, with the evidence folded. It says plainly who vouches for the name: whoever controls its parent. This is a label and a proof of who holds a key, not something the exam depends on. A name that can't be read shows "not confirmed" and never fails a check. The TEE and `ExamRegistry` never read ENS. Names are read on Sepolia through the viewer's own RPC with no gateway, so they prove nothing until a mainnet name is used. Resolution may still run through ENSv1, and nothing here depends on ENSv2.
+The verifier page shows, for each listed party with an ENS name, whether the record matched their key when the exam's list was posted, with the evidence folded. It says plainly who vouches for the name: whoever controls its parent. This is a label and a proof of who holds a key, not something the exam depends on. A name that can't be read says so and never fails a check. The TEE and `ExamRegistry` never read ENS. Names are read on Sepolia through the viewer's own RPC with no gateway, so they prove nothing until a mainnet name is used. Resolution may still run through ENSv1, and nothing here depends on ENSv2.
 
 If a key is lost, the person enrols a new one and the directory owner replaces both records. A passkey belongs to one domain, so moving the app to another domain means everyone enrols again.
 
-### Arkiv Copy
+### Arkiv copy
 
-The board runs the TEE and the public storage, so it could stop either one during unlock. A relay copies the unlock evidence to [Arkiv](https://docs.arkiv.network) as it appears, so anyone can keep watching. It copies the TEE's signed release log, and Google's token for the machine that signed it. Evidence rows can't be edited, they live for 180 days, and anyone can extend them. The verifier reads the rows from writers the viewer trusts, checks the token against the on-chain exam and the log under the key the token attests, and shows the largest verified progress from storage, the TEE or Arkiv. A row that doesn't verify never counts. While unlock runs, the relay also writes a heartbeat every minute, so a copy that stops updating, or a relay that never started, shows a warning. A board lists its writers in the exam's ENS name. Questions, shares and anything not already public never go on Arkiv. The same writers also keep an index of a registry's exams and their approved lists, copied from `ExamRegistry`'s events, because the registry can't list its own exams. The verifier's `#/exams` page lists and searches that index, and checks every exam against Sepolia. A backup of each exam's public files goes to [Swarm](https://www.ethswarm.org), with its reference on Arkiv. When the board's bucket can't give a file, the verifier takes it from the backup, but only if the backup's manifest matches the Build on Sepolia and the file matches the manifest. Unlock files, which no manifest lists, are checked like the bucket's copies, and one that fails is ignored. The key holder and centre pages don't use the backup yet ([`arkiv/swarm.md`](arkiv/swarm.md)). The rules are in [`spec/arkiv.md`](spec/arkiv.md), and the relay is in [`relay/`](relay).
+The board runs the TEE and the public storage, so it could stop either one during unlock. A relay copies the unlock evidence to [Arkiv](https://docs.arkiv.network) as it appears, so anyone can keep watching.
+
+**What is copied.** The relay copies the TEE's signed release log, and Google's token for the machine that signed it. Questions, shares and anything not already public never go on Arkiv.
+
+**How long it lasts.** Evidence rows can't be edited, they live for 180 days, and anyone can extend them.
+
+**How it is checked.** The verifier reads the rows from writers the viewer trusts, checks the token against the on-chain exam and the log under the key the token attests, and shows the largest verified progress from storage, the TEE or Arkiv. A row that doesn't verify never counts. A board lists its writers in the exam's ENS name.
+
+**Silence shows.** While unlock runs, the relay also writes a heartbeat every minute, so a copy that stops updating, or a relay that never started, shows a warning. A heartbeat is not evidence.
+
+**Exam index.** The same writers keep an index of a registry's exams and their approved lists, copied from `ExamRegistry`'s events, because the registry can't list its own exams. The verifier's [`#/exams`](https://paperverify.abdulrashid.dev/#/exams) page lists and searches that index, and checks every exam against Sepolia.
+
+**Backups.** A backup of each exam's public files goes to [Swarm](https://www.ethswarm.org), with its reference on Arkiv. When the board's bucket can't give a file, the verifier takes it from the backup, but only if the backup's manifest matches the Build on Sepolia and the file matches the manifest. Unlock files, which no manifest lists, are checked like the bucket's copies, and one that fails is ignored. The key holder and centre pages don't use the backup yet ([`arkiv/swarm.md`](arkiv/swarm.md)).
+
+The rules are in [`spec/arkiv.md`](spec/arkiv.md), and the relay is in [`relay/`](relay).
 
 The demo's writer is [`0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b`](https://rabdi.explorer.arkiv.network/address/0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b) on Arkiv's Rabdi testnet. This query lists every release log it has mirrored. Swap the schema for `paperseal.v1.exam` to list the indexed exams:
 
@@ -131,9 +182,9 @@ The demo's writer is [`0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b`](https://rabd
 curl -s https://rpc.rabdi.db-chain.testnet.arkiv.network -H "content-type: application/json" --data '{"jsonrpc":"2.0","id":1,"method":"arkiv_query","params":["arkiv.schema = str('"'"'paperseal.v1.release-log'"'"') AND $creator = addr(0x1E6220497eCc77edeA4E79d73CB194Bb2D1b188b)",{"select":{"key":true,"attributes":true,"count":true}}]}'
 ```
 
-The mirrored evidence comes from Paper Seal's own demo exams, and this repository is [MIT](LICENSE) licensed. The [`arkiv/`](arkiv) folder answers the Arkiv prize's questions.
+The mirrored evidence comes from Paper Seal's own demo exams. The [`arkiv/`](arkiv) folder answers the Arkiv prize's questions.
 
-### Question Submission
+### Question submission
 
 Setters talk to the TEE directly, and the board's infrastructure only ever carries ciphertext.
 
@@ -141,58 +192,60 @@ Setters talk to the TEE directly, and the board's infrastructure only ever carri
 2. **Encrypt:** the app pads each question to a fixed size and encrypts it with HPKE to the TEE's attested key.
 3. **Sign:** the setter touches their security key. The passkey signs the exam ID, a fresh TEE challenge and a hash of the ciphertext.
 4. **Check:** the TEE confirms that the setter is on the list and the signature is valid, then decrypts the question, checks its format and topic, and holds it in memory. A question is written or multiple choice. Correct answers are never sent, because the paper becomes public after the exam.
-5. **Receipt:** the TEE signs a receipt with the question hash, using its instance key, and the app shows "sealed ✓". After the Build, the app checks that the same instance key signed the Build, which shows the question went to the TEE that built the paper.
+5. **Receipt:** the TEE signs a receipt with the question hash, using its instance key, and the app shows it as sealed. After the Build, the app checks that the same instance key signed the Build, which shows the question went to the TEE that built the paper.
 
-### Share Release
+### Share release
 
 Released shares stay private. The TEE collects them and delivers `K_priv` only to approved centres.
 
 1. **Confirm:** at `T−Δ`, the app checks the TEE's attestation and confirms that the list hash the TEE signed matches the on-chain hash.
-2. **Submit:** a key holder touches their security key once, and that touch gives two things. The passkey signs the exam ID and a fresh TEE challenge, which proves this holder is releasing. The PRF output lets the app re-derive the holder's personal private key from [Hardware Keys](#hardware-keys), which is never stored. This key isn't `K` or `K_priv`, and it opens only that holder's encrypted share. The app decrypts the share and discards the key, then sends the share and signature, encrypted to the TEE's attested key.
-3. **Check:** the TEE confirms that the drand round is published, the holder is on the list, and the signature and share hash are valid.
+2. **Submit:** a key holder touches their security key once, and that touch gives two things. The passkey signs the exam ID and a fresh TEE challenge, which proves this holder is releasing. The PRF output lets the app re-derive the holder's personal private key from [Hardware keys](#hardware-keys), which is never stored. This key isn't `K` or `K_priv`, and it opens only that holder's encrypted share. The app decrypts the share and discards the key, then sends the share and signature, encrypted to the TEE's attested key.
+3. **Check:** the TEE confirms that the drand round is published, the holder is on the list, and the signature and share hash are valid. It refuses shares once the end round is published.
 4. **Rebuild:** once it has 8 valid shares, the TEE rebuilds `K_priv`.
 5. **Deliver:** the TEE encrypts `K_priv` to each approved centre's derived public key, then publishes the encrypted copies, a copy of `K_priv` timelocked to the end round and a signed release log that lists the hash of each of those files. Neutral parties don't receive `K_priv` at unlock.
 6. **Decrypt:** a centre staff member touches the security key. The app recovers `K_priv`, combines it with `K_pub` from drand and decrypts the paper. It then recomputes the salted paper hash and refuses to show the paper if that doesn't match the Build.
 
 Unlock runs on one TEE instance, so shares can't split across instances. It keeps no long-term state, so if it stops, the board starts a new one and holders resubmit. That instance doesn't need the one that ran the Build. It verifies the Build's signature against the published attestation token, then trusts the on-chain list that the Build committed to.
 
-The verifier page shows which holders have released and the signed log during `Δ`. Shares themselves are never published.
+The verifier page shows which holders have released and the signed log during `Δ`. The log is partial until 8 holders have released, and nothing that opens the paper is published before then. Shares themselves are never published.
 
 ### Accountability
 
-Every share submitted through the TEE carries a signature from the holder's attested passkey, so that release is tied to a physical key touch by that holder.
+Every share submitted through the TEE carries a signature from the holder's listed passkey, so that release is tied to a physical key touch by that holder.
 
 Holders could pool shares privately, and that wouldn't appear in the log. Before `T−Δ` this opens nothing, because `K_pub` is still sealed.
 
 A leak after a centre decrypts the paper can't be traced to that centre.
 
-### Proving the TEE Code
+### Proving the TEE code
 
 Anyone can check that the TEE runs the exact open-source code, unchanged. The TEE runs on Google Confidential Space, which adds workload attestation on top of Confidential VMs.
 
 1. **Build:** a tagged commit builds into a single-architecture container image reproducibly, with pinned dependencies, base images and toolchain, and fixed timestamps. Rebuilding that commit gives the same image digest.
-2. **Publish:** each tagged version is built twice on a clean GitHub runner and published as a release with its commit hash and image digest, and the board picks a version in the app. The commit hash, image digest and exam settings go on-chain in `ExamRegistry` before Onboard, and can't be changed. The full selection criteria go on-chain with them, so anyone can read them and check `criteriaHash`. `ExamRegistry` stores `T` and `Δ` and rejects an unlock round that doesn't match them under quicknet's timing, and the verifier page shows each round as a clock time. The TEE, the board app and the verifier page also limit `Δ` to 24 hours and the end round to 7 days after `T`, so the paper can't be set to open at a round that never comes.
-3. **Deploy:** the image is deployed by digest, never by tag, on the production Confidential Space image. Its startup arguments carry the exam settings: the exam ID, `T`, `Δ`, lock round, unlock round, end round, selection criteria hash, `ExamRegistry` address, chain ID and RPC operator host. They are passed with `tee-cmd`, so the image sets the `tee.launch_policy.allow_cmd_override=true` label.
+2. **Publish:** each tagged version is built twice from clean builders on a GitHub runner and published as a release with its commit hash and image digest, and the board picks a version in the app. The commit hash, image digest and exam settings go on-chain in `ExamRegistry` before Onboard, and can't be changed. The full selection criteria go on-chain with them, so anyone can read them and check `criteriaHash`. `ExamRegistry` stores `T` and `Δ` and rejects an unlock round that doesn't match them under quicknet's timing, and the verifier page shows each round as a clock time. The TEE, the board app and the verifier page also limit `Δ` to 24 hours and the end round to 7 days after `T`, so the paper can't be set to open at a round that never comes.
+3. **Deploy:** the image is deployed by digest, never by tag, on the production Confidential Space image. Its startup arguments carry the exam settings: the exam ID, `T`, `Δ`, lock round, unlock round, end round, selection criteria hash, `ExamRegistry` address, chain ID and RPC operator host. They are passed with `tee-cmd`, so the image sets the `tee.launch_policy.allow_cmd_override=true` label. The storage bucket is the only environment value the operator may set.
 4. **Attest:** the TEE generates a keypair and requests a Google-signed attestation token, with a hash of its public key and the exam ID as the nonce. Tokens last about an hour, so apps ask for a fresh one when they connect, and anything published uses the PKI token type so it can be checked later.
 5. **Verify:** the setter app, centre app and verifier page each check the token before trusting the TEE. Setter apps encrypt questions to the TEE's key only after this check passes.
 6. **Bind:** each TEE instance generates an attested signing key and signs its outputs with it, so each output traces back to the published code. The signing key also signs the instance's separate encryption key, and apps check that before encrypting anything.
 
 | Token claim | Expected value |
 | --- | --- |
-| Signature | Verifies against Google's published keys or root |
+| Signature | Verifies against Google's published root |
 | `iss` | `https://confidentialcomputing.googleapis.com` |
-| `aud` | Paper Seal's custom audience |
+| `aud` | `paperseal`, Paper Seal's custom audience |
 | `iat`, `exp` | Valid for live checks. Published tokens are a record of when they were issued. |
 | `swname` | `CONFIDENTIAL_SPACE` |
 | `dbgstat` | `disabled-since-boot` |
-| `hwmodel` | An approved Confidential VM type |
+| `hwmodel` | An approved Confidential VM type: `GCP_AMD_SEV`, `GCP_AMD_SEV_ES` or `GCP_INTEL_TDX` |
 | `secboot` | `true` |
 | `submods.confidential_space.support_attributes` | Includes `STABLE` |
 | `submods.container.image_digest` | The digest recorded on-chain |
 | `submods.container.args`, `submods.container.cmd_override`, `submods.container.env_override` | The arguments match the on-chain exam settings, and the operator set only the storage bucket |
 | `eat_nonce` | The hash of the TEE's public key and the exam ID |
 
-A TEE given fake exam settings fails this check, whichever Google Cloud project it runs in. A copy given the real settings can't post anything, because `ExamRegistry` accepts writes only from the board's address. The contract only checks the format of a Build's signature. Apps and any fresh TEE instance verify it against the attestation token, so a Build the TEE didn't sign fails those checks.
+A TEE given fake exam settings fails this check, whichever Google Cloud project it runs in. A copy given the real settings can't post anything, because `ExamRegistry` accepts writes only from the board's address. The contract only checks the format of a Build's signature. Apps and any fresh TEE instance verify it against the attestation token, so a Build the TEE didn't sign fails those checks. An instance with no attestation has no token, so it can't commit a Build, and no token is ever made up.
+
+The TEE serves HTTPS with a self-signed certificate behind Cloudflare. That certificate has no trust role. Apps trust the attestation token and encrypt to the key it binds, so Cloudflare can block the TEE but can't make an app trust a fake one.
 
 The verifier page shows each check, and anyone can rebuild the commit themselves and compare digests. It needs no private key and all its data is public, so anyone can host their own copy instead of trusting a hosted one. The [Reproducible build](.github/workflows/repro.yml) action does this for any commit on a clean GitHub runner:
 
@@ -200,16 +253,16 @@ The verifier page shows each check, and anyone can rebuild the commit themselves
 gh workflow run repro.yml -R AbdulRashidReshamwala/paperseal -f commit=<full commit hash> -f expected_digest=<on-chain digest>
 ```
 
-### Post-Exam Proof
+### Post-exam proof
 
-The question bank is never revealed, so unused questions stay private. The Build the board posts on-chain is signed by the TEE's attested key. It says the TEE selected `x` questions from `n` against the published criteria, and includes a hash of the paper salted with the private seed.
+The question bank is never revealed, so unused questions stay private. The Build the board posts on-chain is signed by the TEE's attested key. It says the TEE selected `x` questions from `n` against the published criteria, and includes a hash of the paper salted with the private seed. It also carries `builtRound`, the drand round when the TEE sealed the paper, so the time of sealing doesn't depend on when the board posted it.
 
 The paper stays with approved centres from `T−Δ` until the end round. At that round, drand opens the timelocked copy of `K_priv` published at unlock. Together with `K_pub`, it lets anyone decrypt the paper and seed, with no further action from key holders. If the unlock never happens, no such copy exists and the paper stays sealed. That allows two checks:
 
 - **Selection:** the signed Build matches the published criteria, and the paper has `x` questions. This is attested by the TEE, not independently proven, because the bank stays hidden.
 - **Same paper:** hashing the paper with the seed gives the committed hash. Anyone with a copy of the exam can compare it with this paper, but cryptography can't prove what a centre showed students.
 
-## Trust Assumptions
+## Trust assumptions
 
 ### TEE and Google Cloud
 
@@ -226,7 +279,7 @@ The paper stays with approved centres from `T−Δ` until the end round. At that
 - The directory owner decides which key belongs to which name, and can swap a record at any time. A swap is public on the chain, and a posted list keeps the key it was posted with. A record says only that the directory owner put it there.
 - In the demo the board owns the directory and issues the neutral parties' records too, so the neutrals aren't independent of the board. A real exam needs each neutral to use a name they own, or a directory the board doesn't control.
 - The exam date is written once to `ExamRegistry` and can't be changed, even by the board.
-- `ExamRegistry` doesn't compare a Build with block time, so the board could post one late. The verifier page flags a Build posted after the unlock time, as a warning that doesn't fail the exam.
+- `ExamRegistry` doesn't compare a Build with block time, so the board could post one late. The verifier page warns, without failing the exam, about a Build posted after the unlock time, and about one whose `builtRound` says it was sealed at or after the unlock time. A Build sealed before the lock round fails.
 - `ExamRegistry` accepts writes only from the board's address. The board could route setters to a different TEE instance, but the receipt check shows this after the Build, and an unusually low question count would show on-chain.
 
 ### Selection
@@ -241,7 +294,7 @@ The paper stays with approved centres from `T−Δ` until the end round. At that
 
 - drand is the only clock. `K_pub` relies on it, so if it is compromised, 8 key holders could open the paper early. The board could do this alone with a tampered web app, because that app could collect holders' keys at registration.
 
-### Keys and Web App
+### Keys and web app
 
 - A private key briefly sits in browser memory during registration and release, and whoever serves the web app could tamper with its code. A stolen share still can't open the paper early, because that needs 8 shares and the time seal. It can't be submitted in that holder's name without the security key either.
 - Security key attestation proves a passkey is on a key from an approved maker, but not that the derived keypair came from it. The board serves the web app, so it could swap in its own derived keys at registration for every holder and centre, because staff can't see what a security key signs. It could then read shares and `K_priv` at unlock with no key holder involved, and the release log would still look normal. The time seal still keeps the paper closed until `T−Δ`.
@@ -266,7 +319,72 @@ The paper stays with approved centres from `T−Δ` until the end round. At that
 
 - The encrypted paper is public, but only approved centres receive `K_priv`. Any centre can still leak the paper once it decrypts it, so `Δ` stays as short as possible.
 
-## Tech Stack
+## What's implemented now
+
+The whole exam runs end to end, from publishing to the public proof, against the deployed TEE, Sepolia and drand. Everything below is on test networks.
+
+| Part | What exists |
+| --- | --- |
+| Sealed machine | A Go workload on Google Confidential Space. Apps and the verifier check Google's attestation token against Google's root. Latest release: [v0.8.2](https://github.com/AbdulRashidReshamwala/paperseal/releases/tag/v0.8.2). |
+| Opening the paper | A drand quicknet timelock on `K_pub`, plus 8-of-10 Shamir shares of `K_priv`. |
+| Public record | `ExamRegistry` on Sepolia at [`0xc25F7e0004f0E9B77581CFf6B4B5Ae8b120658eb`](https://sepolia.etherscan.io/address/0xc25F7e0004f0E9B77581CFf6B4B5Ae8b120658eb). |
+| Names | ENS names for exams and parties under `paperseal-demo.eth` on Sepolia. |
+| Arkiv | A mirror of the unlock evidence and an index of exams. The relay runs as systemd services ([`deploy/relay`](deploy/relay)). |
+| Swarm | Backups of each exam's public files, read by the verifier when the bucket fails. |
+| Public verifier | [paperverify.abdulrashid.dev](https://paperverify.abdulrashid.dev), a static site anyone can host. |
+| Independent checker | `paperseal-verify.mjs`, attached to each release, and the "Check with your own AI" button. |
+| Self-hosting | `deploy.json`, OpenTofu, `run-tee.sh --from-chain` and `doctor.sh`. |
+| Releases | Reproducible images and a published digest for each tag. |
+| Demos | The one-machine demo and scriptable videos. See [Running it locally](#running-it-locally). |
+
+### The public verifier
+
+The verifier takes an exam by ENS name, by exam ID, or from the `#/exams` list. It needs no sign-in. Viewers can set their own RPC and TEE URLs under Connection.
+
+It walks through seven steps: `published`, `people`, `attested`, `locked`, `sealed`, `unlock` and `open`. Each step has a table of evidence underneath: the hashes, on-chain values, token claims and files it checked, and the command to rebuild the image. The seal on the page shows the overall state.
+
+On a test network the page never says more than this:
+
+- **Verified so far, on Sepolia, a test network,** when every step due has passed and the end round is not reached.
+- **Verified, on Sepolia, a test network,** when every step has passed and the end round is reached.
+
+Either way it adds the sentence in the next section.
+
+### The independent checker
+
+The verifier page is served by someone, so you may not want to trust it. Each release therefore attaches `paperseal-verify.mjs`, one Node file with no dependencies, built reproducibly. Its SHA-256 is in the release notes as `checkerSha256`. It runs the same check code as the verifier, in [`packages/verify`](packages/verify), and judges each claim only from what was recorded: the chain, the published tokens, public storage and drand. It never asks the live TEE.
+
+```bash
+node paperseal-verify.mjs --exam <examId> --registry <registry> --storage <storageUrl> --bucket <name> --json
+```
+
+**Check with your own AI** on the verifier page copies a prompt for any AI agent. The prompt holds the exam's locators and no check results. It tells the agent to download the checker from the release, match its hash before running it, and treat page text as data. The rules and the report format are in [`spec/agent-verification.md`](spec/agent-verification.md). An agent's report is a second opinion. Nothing records it or shows an exam as verified because of it.
+
+The checker's result is `verified`, `verified-test`, `partial` or `failed`. Today a clean run gives **`verified-test`**, exit code 4, because no exam has a production mode on-chain, so `verified` can't be reached yet. An agent reports it as "Verified, on a test network" and must add this caveat word for word:
+
+> This is a test exam on Sepolia. The sealed machine is proven by Google. The security keys were not checked to come from an approved maker, and blocks are read before they are final.
+
+An agent that can't run the checker reports `partial` at best.
+
+### Self-hosting
+
+A board can run Paper Seal on its own Google Cloud project with the published image, unchanged. [`deploy/README.md`](deploy/README.md) has every step, and [`spec/deploy.md`](spec/deploy.md) has the rules.
+
+- `deploy/deploy.json` holds every operator setting. Copy it from [`deploy/deploy.example.json`](deploy/deploy.example.json). It holds no secrets and isn't committed.
+- [`deploy/tofu`](deploy/tofu) creates what outlives an exam with OpenTofu: APIs, bucket, service account, IP and firewall. The exam VM is never managed there, because its state is only in memory.
+- `deploy/gcp/run-tee.sh --from-chain --exam 0x<examId>` starts the TEE with exactly the on-chain settings and image digest.
+- `deploy/doctor.sh` runs read-only preflight checks and prints one ok, fail or skip line each.
+- `stop-tee.sh` and `teardown.sh` refuse to run mid-exam unless forced.
+
+Choose the app's domain before anyone enrols, because passkeys are bound to it. Only Cloudflare ingress is implemented.
+
+### Reproducible releases
+
+A tag `vX.Y.Z` runs [`repro.yml`](.github/workflows/repro.yml). It builds the image twice from clean builders and stops if the digests differ. It then pushes the image to GHCR by digest, checks that the registry holds the same digest, and publishes a GitHub release. The release notes hold the commit, the image digest and `checkerSha256`.
+
+Latest release: **v0.8.2**, commit `16fefaa`, image `sha256:217b22fb23b7da6ef2bb1a7aa10faa7e1e859b448f9746014463f44a6f8a5c91`.
+
+### Tech stack
 
 | Layer | Choice |
 | --- | --- |
@@ -280,25 +398,54 @@ The paper stays with approved centres from `T−Δ` until the end round. At that
 | Contracts | Solidity with Foundry |
 | Web apps | React and TypeScript, built with Vite as static files |
 | Browser | Chromium only, for both registration and unlock |
-| Hardware keys | Chrome's virtual authenticator as a mock for the demo, and a security key through WebAuthn PRF in production |
-| Sign-in | Passkeys on security keys for board admins and setters, and permanent ones published on an ENS name for key holders and centres |
+| Hardware keys | A security key through WebAuthn PRF, with Chrome's virtual authenticator as a mock in tests |
+| Sign-in | The board's wallet for board admins, passkeys on security keys for setters, and permanent ones published on an ENS name for key holders and centres |
 | Key split | XOR of `K_pub` and `K_priv`, with Shamir shares of `K_priv` |
 | Crypto | P-256, HPKE and AES-256-GCM, using audited libraries |
 | Paper format | JSON, rendered by the centre app |
-| Encrypted paper storage | Public storage, with its hash on-chain |
+| Encrypted paper storage | A public Google Cloud Storage bucket, with its hash on-chain |
+| Evidence copy and index | Arkiv's Rabdi testnet |
+| File backups | Swarm's Sepolia testnet |
 
-## Build Order
+## Honest limits
 
-### MVP
+Paper Seal is not production ready. Don't run a real exam on it. The [security review](docs/security-review.md) is a working list of open issues, and it isn't an audit.
 
-- TEE builder on Confidential Space, with a reproducible image, an on-chain digest and attestation checks
-- Sepolia contracts (`ExamRegistry` and commitments)
-- `K` split with a drand timelock and an 8-of-10 threshold
-- TEE share release
-- Centre app
-- Verifier page
+**Two different proofs.** Don't confuse these. They prove different things, and the second one is not checked today.
 
-### Stretch
+| Proof | What it shows | Status |
+| --- | --- | --- |
+| Machine proof, Google's attestation token | The sealed machine runs the published code with the on-chain settings | **Checked today.** Google signs it, and apps, the verifier and the checker verify it. |
+| Security key attestation | A security key came from an approved maker | **Not checked.** `requireSecurityKeyAttestation` is `false`. |
+
+**Limits today:**
+
+- **Test networks only.** Sepolia, Arkiv's Rabdi testnet and Swarm's Sepolia testnet are all test networks.
+- **`readBlock` is `latest`.** `chain.readBlock` in `spec/constants.json` is compiled into every published image, so the TEE reads blocks before they are final. A reorg can remove a list the TEE already accepted. A different list then fails at `postBuild`, because the contract checks its hash, but the run is lost.
+- **`requireSecurityKeyAttestation` is `false`.** The maker of a security key isn't checked, so a simulated key could be registered as a key holder, setter or centre. Device-bound passkeys are still required. If the setting were turned on, registration would be refused, because the chain check returns a not-implemented error and the list of approved makers isn't chosen. This does not touch the machine proof above.
+- **One exam per VM.** A TEE instance serves only the exam it was started for. Each exam needs its own machine, or a restart of one.
+- **The question bank is only in memory.** If the TEE stops before the Build, the bank and keys are gone, and restarts during paper setting are out of scope.
+- **No production mode yet.** Every exam reports its mode as `unknown`, and the setting that would separate test and real exams isn't built.
+- **The relay signs with the board wallet in the demo.** The relay VM holds a testnet board key while it runs.
+- **Swarm backups are short-lived.** The demo's postage batch was bought for 3 days, so files can disappear unless it is topped up. Reading a backup needs a testnet Bee node or a gateway.
+- **ENS proves little on Sepolia.** Anyone can register a look-alike name.
+
+### Production checklist
+
+Each of these is needed before a real exam, and none of them is done. The list comes from the open items in the [security review](docs/security-review.md) and the [self-hosting proposal](docs/proposals/self-hosting.md). It is not complete.
+
+- [ ] Read the chain at `finalized`.
+- [ ] Choose the approved security key makers, build the attestation chain check, and turn on `requireSecurityKeyAttestation`.
+- [ ] Decide how a browser that didn't enrol supplies the attestation object.
+- [ ] Add exam mode, so test and real exams are separate and public.
+- [ ] Move off test networks, with mainnet ENS names and a reader that supports them.
+- [ ] Run Swarm backups on mainnet, with a postage batch that lasts the exam season.
+- [ ] Give the relay its own wallet, separate from the board's.
+- [ ] Give each neutral party a name they own, or a directory the board doesn't control.
+- [ ] Have someone other than the board host a verifier.
+- [ ] Use real security keys only. Planted demo keys must never be on a real exam.
+
+### Ideas not built
 
 - Distributed key generation (DKG) with a threshold public key, so the TEE never holds `K_priv`
 - A second timelock network with separate operators, so opening `K_pub` needs both clocks
@@ -306,10 +453,84 @@ The paper stays with approved centres from `T−Δ` until the end round. At that
 - World ID for setters
 - Native setter app signed with a developer key
 
-## How AI Was Used
+## Running it locally
+
+You need Node 22 or later, pnpm 10, [Foundry](https://getfoundry.sh) and Go 1.25.
+
+```bash
+pnpm install
+make build    # contracts, TEE and web packages
+make test     # all of their tests
+pnpm lint
+pnpm typecheck
+make abi      # regenerates the ExamRegistry ABI for packages/chain
+```
+
+Run one web app:
+
+```bash
+pnpm --filter @paperseal/web dev        # http://localhost:5171
+pnpm --filter @paperseal/verifier dev   # http://localhost:5172
+pnpm --filter @paperseal/ui preview     # the design system, http://localhost:5179
+```
+
+### A whole exam with no cloud
+
+This runs the real screens in about ten minutes, with no VM, Sepolia or bucket. It swaps the TEE for a mock, so it is a test, not a real run. See [Mock run](docs/ARCHITECTURE.md#mock-run-test-only).
+
+```bash
+pnpm --filter @paperseal/e2e ui:mock
+```
+
+### The one-machine demo
+
+`pnpm demo:keys` shows a whole exam in one tab of normal Chrome on <http://localhost:5171>, with MetaMask for the board. A bar across the top picks who you are. It talks to a deployed sealed machine and Sepolia, and the machine checks every request as usual.
+
+Each person has a planted key from a public seed, so anyone can derive these keys. They exist only in this localhost mode. The build refuses this mode, and the hosted sites never use these keys.
+
+```bash
+pnpm demo:keys
+pnpm demo:vm <exam name>   # starts the sealed machine on an exam already published
+```
+
+`pnpm demo:vm` needs `gcloud` signed in to the `paperseal-demo` project. On your own project, use `deploy/gcp/run-tee.sh --from-chain`. The steps are under [One-machine demo](deploy/README.md#one-machine-demo). `pnpm demo` is the older way, with one Chrome window per person.
+
+### Scriptable videos
+
+Each video is a script of real browser steps.
+
+```bash
+pnpm video --list
+pnpm video create-exam          # the real thing, on Sepolia
+pnpm video create-exam --dry    # the real system, stopping before anything is sent
+pnpm video create-exam --mock   # a local chain and a mock machine
+```
+
+Finished videos go in `e2e/videos/`, which isn't committed.
+
+### Repository layout
+
+| Path | What it is |
+| --- | --- |
+| [`spec/`](spec) | Values and wire formats shared by every language. Change this first for anything that crosses a language boundary |
+| [`contracts/`](contracts) | `ExamRegistry`, in Solidity with Foundry |
+| [`tee/`](tee) | The Go workload and its reproducible image |
+| [`apps/web`](apps/web) | The app the board hosts, with a route area per role |
+| [`apps/verifier`](apps/verifier) | The public verifier, hosted separately from the board |
+| [`packages/`](packages) | Shared TypeScript: `protocol`, `crypto`, `keys`, `attestation`, `chain`, `tee-client`, `arkiv`, `swarm`, `verify` and `ui` |
+| [`relay/`](relay) | The CLI that mirrors evidence to Arkiv, indexes exams and backs up files to Swarm |
+| [`deploy/`](deploy) | Self-hosting: `deploy.json`, OpenTofu, Google Cloud scripts, ENS records and the relay's systemd units |
+| [`e2e/`](e2e) | End-to-end runs, the mock world, the demos and the videos |
+| [`arkiv/`](arkiv) | Notes on how Paper Seal uses Arkiv and Swarm |
+| [`docs/`](docs) | [Architecture](docs/ARCHITECTURE.md), [design](docs/DESIGN.md), [ENS setup](docs/ens-setup.md), [security review](docs/security-review.md) and proposals |
+| [`presentation/`](presentation) | The slide deck |
+
+`README.md` is the source of truth for behaviour. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) maps it onto this repository.
+
+## How AI was used
 
 Parts of this repository, including the ENS name check and the Arkiv copy, were written with Claude Code, an AI coding agent. It worked from the specs in `spec/`, and people reviewed and ran each change, including the tests and the live runs on Sepolia and Arkiv.
 
-## License
+## Licence
 
 [MIT](LICENSE)
