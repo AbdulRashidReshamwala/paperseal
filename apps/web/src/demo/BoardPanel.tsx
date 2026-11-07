@@ -165,9 +165,10 @@ function Everyone(props: PanelProps & { stage: PanelStage }) {
 
   useEffect(() => {
     if (busy) return;
-    void look();
+    const first = setTimeout(() => void look(), 0);
     const id = setInterval(() => void look(), LOOK_AGAIN_MS);
     return () => {
+      clearTimeout(first);
       clearInterval(id);
     };
   }, [busy, look]);
